@@ -47,6 +47,7 @@ import {
   setAuthCookie, JWT_TTL_SEC, requireAuth,
   _internalConsumePendingMfaLogin,
   _internalCheckRateLimit,
+  _internalVerifyAccountPassword,
 } from "./auth.js";
 
 // ─── Lazy-loaded SimpleWebAuthn server module ─────────────────────────────────
@@ -519,13 +520,10 @@ router.delete("/credentials/:id", requireAuth, async (req, res) => {
     const user = userRepo.getById(req.authUser.sub);
     if (!user) return res.status(404).json({ error: "User not found." });
 
-    // Lazy import to avoid pulling more of auth.js into the import graph
-    // at module init. verifyAccountPassword skips OAuth-only users.
-    const { _internalVerifyAccountPassword } = await import("./auth.js");
-    if (typeof _internalVerifyAccountPassword === "function") {
-      const valid = await _internalVerifyAccountPassword(user, req.body?.password);
-      if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
-    }
+    // verifyAccountPassword skips OAuth-only users (no passwordHash) — the
+    // OAuth session itself proves identity for those accounts.
+    const valid = await _internalVerifyAccountPassword(user, req.body?.password);
+    if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
 
     // Self-lockout guard: if this is the user's only factor and a workspace
     // they belong to requires MFA past grace, refuse the delete.
@@ -567,14 +565,3 @@ router.delete("/credentials/:id", requireAuth, async (req, res) => {
 });
 
 export default router;
-
-/**
- * Test-only helper: count registered credentials for a user. Used by the
- * integration test suite (backend-tests lane) to assert the create / delete
- * paths persisted correctly without importing the repo directly.
- * @param {string} userId
- * @returns {number}
- */
-export function _internalCountCredentials(userId) {
-  return webauthnRepo.countByUser(userId);
-}

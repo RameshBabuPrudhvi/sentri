@@ -547,6 +547,51 @@ export async function _internalVerifyAccountPassword(user, password) {
 export function _internalCheckRateLimit(bucket, ip) {
   return checkRateLimit(bucket, ip);
 }
+
+/**
+ * SEC-004: apply workspace MFA enforcement at the end of an auth flow.
+ *
+ * Centralises the three-way `evaluateMfaEnforcement(user)` outcome handling
+ * that was previously duplicated across `/login`, `/github/callback`, and
+ * `/google/callback`:
+ *   - `block` → emit `auth.mfa.enrollment_required` activity, respond 403
+ *     with `code: "MFA_ENROLLMENT_REQUIRED"`, return `true` (caller must stop)
+ *   - `grace` → set `X-MFA-Grace-Period-Days-Remaining` + `X-MFA-Grace-Ends-At`
+ *     headers, return `false` (caller proceeds with cookie issue)
+ *   - `allow` → no-op, return `false`
+ *
+ * @param {Object} res
+ * @param {Object} user
+ * @param {Object} auditMeta - Forwarded into the activity `meta` field
+ *   (e.g. `{ method: "password" }`, `{ method: "oauth", provider: "github" }`).
+ * @param {string} auditDetail - Human-readable detail for the activity row.
+ * @returns {boolean} `true` when the request was already terminated with 403.
+ * @private
+ */
+function applyMfaEnforcement(res, user, auditMeta, auditDetail) {
+  const enforcement = evaluateMfaEnforcement(user);
+  if (enforcement.state === "block") {
+    logActivity({
+      type: "auth.mfa.enrollment_required",
+      detail: auditDetail,
+      userId: user.id, userName: user.name || user.email,
+      workspaceId: enforcement.workspaceId,
+      meta: auditMeta,
+    });
+    res.status(403).json({
+      error: "Your workspace requires multi-factor authentication. Enroll before signing in.",
+      code: "MFA_ENROLLMENT_REQUIRED",
+      workspaceId: enforcement.workspaceId,
+      workspaceName: enforcement.workspaceName,
+    });
+    return true;
+  }
+  if (enforcement.state === "grace") {
+    res.setHeader("X-MFA-Grace-Period-Days-Remaining", String(enforcement.gracePeriodDaysRemaining));
+    res.setHeader("X-MFA-Grace-Ends-At", enforcement.graceEndsAt);
+  }
+  return false;
+}
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 /**
@@ -691,31 +736,8 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // SEC-004: per-workspace MFA enforcement. If any workspace this user
-    // belongs to has mfaRequired=1 and the user is past the grace window,
-    // block login outright with an enrollment-required code. Within the
-    // grace window, allow login but surface the remaining days as a header
-    // so the frontend can render a banner.
-    const enforcement = evaluateMfaEnforcement(user);
-    if (enforcement.state === "block") {
-      logActivity({
-        type: "auth.mfa.enrollment_required",
-        detail: "Login blocked: workspace requires MFA.",
-        userId: user.id, userName: user.name || user.email,
-        workspaceId: enforcement.workspaceId,
-        meta: { method: "password" },
-      });
-      return res.status(403).json({
-        error: "Your workspace requires multi-factor authentication. Enroll before signing in.",
-        code: "MFA_ENROLLMENT_REQUIRED",
-        workspaceId: enforcement.workspaceId,
-        workspaceName: enforcement.workspaceName,
-      });
-    }
-    if (enforcement.state === "grace") {
-      res.setHeader("X-MFA-Grace-Period-Days-Remaining", String(enforcement.gracePeriodDaysRemaining));
-      res.setHeader("X-MFA-Grace-Ends-At", enforcement.graceEndsAt);
-    }
+    // SEC-004: per-workspace MFA enforcement (block past grace, banner within).
+    if (applyMfaEnforcement(res, user, { method: "password" }, "Login blocked: workspace requires MFA.")) return;
 
     // SEC-004 §5c: tag password-only sessions with amr=["pwd"] so future
     // step-up auth checks can require MFA-asserted sessions explicitly.
@@ -1203,26 +1225,7 @@ router.get("/github/callback", async (req, res) => {
 
     // SEC-004: enforcement applies to OAuth too. OAuth-only users have no
     // password but still need MFA when the workspace policy demands it.
-    const enforcement = evaluateMfaEnforcement(user);
-    if (enforcement.state === "block") {
-      logActivity({
-        type: "auth.mfa.enrollment_required",
-        detail: "OAuth login blocked: workspace requires MFA.",
-        userId: user.id, userName: user.name || user.email,
-        workspaceId: enforcement.workspaceId,
-        meta: { method: "oauth", provider: "github" },
-      });
-      return res.status(403).json({
-        error: "Your workspace requires multi-factor authentication. Enroll before signing in.",
-        code: "MFA_ENROLLMENT_REQUIRED",
-        workspaceId: enforcement.workspaceId,
-        workspaceName: enforcement.workspaceName,
-      });
-    }
-    if (enforcement.state === "grace") {
-      res.setHeader("X-MFA-Grace-Period-Days-Remaining", String(enforcement.gracePeriodDaysRemaining));
-      res.setHeader("X-MFA-Grace-Ends-At", enforcement.graceEndsAt);
-    }
+    if (applyMfaEnforcement(res, user, { method: "oauth", provider: "github" }, "OAuth login blocked: workspace requires MFA.")) return;
 
     // SEC-004 §5c: OAuth sessions are tagged amr=["oauth"]. They are NOT
     // MFA-asserted — workspace MFA enforcement applies above.
@@ -1295,26 +1298,7 @@ router.get("/google/callback", async (req, res) => {
 
     // SEC-004: enforcement applies to OAuth too. OAuth-only users have no
     // password but still need MFA when the workspace policy demands it.
-    const enforcement = evaluateMfaEnforcement(user);
-    if (enforcement.state === "block") {
-      logActivity({
-        type: "auth.mfa.enrollment_required",
-        detail: "OAuth login blocked: workspace requires MFA.",
-        userId: user.id, userName: user.name || user.email,
-        workspaceId: enforcement.workspaceId,
-        meta: { method: "oauth", provider: "google" },
-      });
-      return res.status(403).json({
-        error: "Your workspace requires multi-factor authentication. Enroll before signing in.",
-        code: "MFA_ENROLLMENT_REQUIRED",
-        workspaceId: enforcement.workspaceId,
-        workspaceName: enforcement.workspaceName,
-      });
-    }
-    if (enforcement.state === "grace") {
-      res.setHeader("X-MFA-Grace-Period-Days-Remaining", String(enforcement.gracePeriodDaysRemaining));
-      res.setHeader("X-MFA-Grace-Ends-At", enforcement.graceEndsAt);
-    }
+    if (applyMfaEnforcement(res, user, { method: "oauth", provider: "google" }, "OAuth login blocked: workspace requires MFA.")) return;
 
     // SEC-004 §5c: OAuth sessions are tagged amr=["oauth"]. They are NOT
     // MFA-asserted — workspace MFA enforcement applies above.
