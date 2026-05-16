@@ -325,10 +325,36 @@ router.post("/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay", requireRole(
       });
     }
 
+    // `dispatchSiemEvent` is fire-and-forget: it NEVER throws and returns
+    // `{ ok, attempts?, lastError? }` instead. The catch is kept as a
+    // defence-in-depth guard for unexpected synchronous errors (e.g. the
+    // dynamic import resolving to a broken module).
+    let result;
     try {
-      await dispatchSiemEvent(row.workspaceId, row.rowSnapshot);
+      result = await dispatchSiemEvent(row.workspaceId, row.rowSnapshot);
     } catch (dispatchErr) {
       const attempts = auditDlqRepo.incrementAttempts(row.id, dispatchErr.message || String(dispatchErr));
+      return res.status(502).json({
+        error: "Replay failed at the SIEM target.",
+        code: "SIEM_DISPATCH_FAILED",
+        attempts,
+      });
+    }
+
+    // Branch on the documented return contract.
+    if (!result || result.ok !== true) {
+      // No SIEM config / disabled → surface as 503 SIEM_NOT_CONFIGURED so
+      // the UI distinguishes a config gap from a transport failure.
+      if (result?.lastError === "siem-not-configured") {
+        return res.status(503).json({
+          error: "SIEM forwarder is not configured for this workspace.",
+          code: "SIEM_NOT_CONFIGURED",
+        });
+      }
+      // Real dispatch failure — record the attempt and surface a 502.
+      // The forwarder itself already enqueued a fresh DLQ row; bump the
+      // *original* row's attempts so the inspector reflects the retry.
+      const attempts = auditDlqRepo.incrementAttempts(row.id, result?.lastError || "unknown");
       return res.status(502).json({
         error: "Replay failed at the SIEM target.",
         code: "SIEM_DISPATCH_FAILED",
