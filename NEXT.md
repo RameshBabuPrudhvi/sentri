@@ -62,7 +62,7 @@ Flag adjacent items as bundling candidates in your PR description rather than ex
 - [ ] ROADMAP.md `### INF-007` section flipped to `**Status:** ✅ Complete (PR #N)`
 
 ---
-## ⏭ Queue (next 4 PRs after current)
+## ⏭ Queue (next 3 PRs after current)
 ### 1 · INF-008 — Postgres-default + dual-DB CI matrix
 **Effort:** M | **Priority:** 🔴 Blocker | **Dependencies:** INF-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (INF-008)
 Rename colliding migration prefixes (`007_*` × 2, `015_*` × 2); fix `migrationRunner.js` sort; default `.env.example` + `docker-compose.yml` to Postgres; CI matrix `db: [sqlite, postgres]` runs full `npm test` under both; new `lint-migrations.mjs` fails on duplicate prefixes.
