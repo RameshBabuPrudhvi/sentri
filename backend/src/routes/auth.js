@@ -776,6 +776,24 @@ router.post("/login", async (req, res) => {
       // workspace-scoped `GET /workspaces/:id/audit-log` endpoint that admins
       // use for security monitoring. For unknown emails (`user == null`) the
       // workspace is genuinely unresolvable and `null` is correct.
+      //
+      // KNOWN GAP — credential-stuffing probes against UNKNOWN emails produce
+      // `workspaceId: null` rows that are invisible to:
+      //   - `/api/v1/activities`           (system.js:80, workspace-scoped)
+      //   - `/api/v1/workspaces/:id/audit-log` (system.js:141, workspace-scoped)
+      //   - The SIEM forwarder            (activityLogger.js:83 short-circuits
+      //                                    when `activity.workspaceId` is null)
+      // The rows are persisted in SQLite but currently have no surfacing path.
+      // Direct DB query or a server-side log scrape is the only way to see
+      // them today.
+      //
+      // The fix needs a dedicated "system events" pseudo-workspace (or a new
+      // admin-only `/system/security-events` route that intentionally
+      // bypasses the workspace filter for auth events with `userId IS NULL`).
+      // Tracked as a follow-up — the tenancy implications (which admins see
+      // cross-tenant probe data? does the SIEM forwarder broadcast to every
+      // configured target, or pick a "system" one?) deserve their own design
+      // pass rather than a one-line scoping change here.
       const failedWorkspaceId = user ? workspaceRepo.getByUserId(user.id)?.[0]?.id || null : null;
       logActivity({ type: "auth.login.failed", req, userId: user?.id || null, userName: user?.name || email || null, workspaceId: failedWorkspaceId });
       return res.status(401).json({ error: "Invalid email or password." });

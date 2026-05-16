@@ -55,6 +55,13 @@ const auditExportLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => `${req.workspaceId || "no-ws"}::${req.authUser?.sub || req.ip || "anon"}`,
   // Only count *export* calls toward the budget — JSON browsing is exempt.
+  // `skip` is evaluated BEFORE `keyGenerator` in express-rate-limit, so a
+  // skipped JSON read never touches the rate-limit store at all. Anti-
+  // exfiltration coverage for JSON paginated reads is provided by the
+  // server-side `audit.read` meta-audit row emitted on every call (PCI-DSS
+  // 10.2.6) — a scripted full-table walk leaves a one-for-one trail in
+  // the same compliance log it's trying to exfiltrate, which is the
+  // documented & accepted residual risk.
   skip: (req) => req.query.format !== "csv" && req.query.format !== "ndjson",
   message: {
     error: "Too many audit-log exports. Try again later.",
