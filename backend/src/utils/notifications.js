@@ -382,9 +382,17 @@ function _isRetryableStatus(status) {
  *
  * @param {string} workspaceId - The workspace whose SIEM config to load.
  * @param {Object} row         - The activity row that was just persisted.
+ * @param {Object} [opts]
+ * @param {boolean} [opts.skipDlqOnFailure=false] - When true, a failed
+ *   dispatch will NOT enqueue a fresh DLQ row. Used by the admin DLQ
+ *   replay path so that retrying an existing DLQ row doesn't create a
+ *   duplicate row each time it fails — the route handler manages the
+ *   original row's `attempts` counter via `auditDlqRepo.incrementAttempts`
+ *   instead. Default `false` preserves the original fire-and-forget
+ *   contract for the `logActivity` dispatch path.
  * @returns {Promise<Object>} `{ ok: boolean, attempts?: number, lastError?: string }`
  */
-export async function dispatchSiemEvent(workspaceId, row) {
+export async function dispatchSiemEvent(workspaceId, row, opts = {}) {
   if (!workspaceId || !row) return { ok: false, lastError: "missing workspaceId or row" };
 
   let cfg;
@@ -463,20 +471,26 @@ export async function dispatchSiemEvent(workspaceId, row) {
     }
   }
 
-  // All retries exhausted (or 4xx short-circuit). Enqueue for admin replay.
-  try {
-    auditDlqRepo.enqueue({
-      workspaceId,
-      rowSnapshot: row,
-      lastError,
-    });
-    console.warn(formatLogLine("warn", null,
-      `[siem] Dispatch failed after ${attempts} attempt(s) for ws=${workspaceId} row=${row.id || "?"} — enqueued to DLQ: ${lastError}`));
-  } catch (dlqErr) {
-    // DLQ failure is a P1 — the audit row is safely persisted but its
-    // dispatch trace is now lost. Log loudly so operators can investigate.
-    console.error(formatLogLine("error", null,
-      `[siem] DLQ enqueue failed for ws=${workspaceId} row=${row.id || "?"}: ${dlqErr.message} (original dispatch error: ${lastError})`));
+  // All retries exhausted (or 4xx short-circuit). Enqueue for admin replay
+  // — unless the caller is itself the admin replay path (`skipDlqOnFailure`),
+  // in which case re-enqueuing here would create a duplicate of the very
+  // DLQ row the caller is retrying. The replay route handles bookkeeping
+  // by calling `auditDlqRepo.incrementAttempts` on the original row.
+  if (!opts.skipDlqOnFailure) {
+    try {
+      auditDlqRepo.enqueue({
+        workspaceId,
+        rowSnapshot: row,
+        lastError,
+      });
+      console.warn(formatLogLine("warn", null,
+        `[siem] Dispatch failed after ${attempts} attempt(s) for ws=${workspaceId} row=${row.id || "?"} — enqueued to DLQ: ${lastError}`));
+    } catch (dlqErr) {
+      // DLQ failure is a P1 — the audit row is safely persisted but its
+      // dispatch trace is now lost. Log loudly so operators can investigate.
+      console.error(formatLogLine("error", null,
+        `[siem] DLQ enqueue failed for ws=${workspaceId} row=${row.id || "?"}: ${dlqErr.message} (original dispatch error: ${lastError})`));
+    }
   }
 
   return { ok: false, attempts, lastError };

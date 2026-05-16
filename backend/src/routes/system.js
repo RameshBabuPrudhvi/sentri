@@ -393,9 +393,15 @@ router.post("/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay", requireRole(
     // `{ ok, attempts?, lastError? }` instead. The catch is kept as a
     // defence-in-depth guard for unexpected synchronous errors (e.g. the
     // dynamic import resolving to a broken module).
+    //
+    // `skipDlqOnFailure: true` — the row we're replaying ALREADY lives in
+    // the DLQ. Without this flag, a failed re-dispatch would enqueue a
+    // *second* DLQ row for the same event, accumulating duplicates on
+    // every retry attempt. We bump the original row's `attempts` counter
+    // below instead.
     let result;
     try {
-      result = await dispatchSiemEvent(row.workspaceId, row.rowSnapshot);
+      result = await dispatchSiemEvent(row.workspaceId, row.rowSnapshot, { skipDlqOnFailure: true });
     } catch (dispatchErr) {
       const attempts = auditDlqRepo.incrementAttempts(row.id, dispatchErr.message || String(dispatchErr));
       return res.status(502).json({
@@ -773,25 +779,28 @@ router.delete("/data/activities", requireRole("admin"), (req, res) => {
   if (process.env.DANGER_ALLOW_AUDIT_PURGE !== "true") {
     return res.status(403).json({ error: "Audit purge is disabled.", code: "AUDIT_PURGE_DISABLED" });
   }
-  // SEC-007: emit the meta-audit row BEFORE the truncate so the act of purging
-  // the audit log is itself recorded — and survives the very purge it audits.
-  // Without this, the single most security-sensitive admin action in the
-  // system (wiping the compliance trail) would leave zero in-DB evidence,
-  // making PCI-DSS 10.2.6 / SOC 2 CC7.2 untenable. The env-var flip
-  // (`DANGER_ALLOW_AUDIT_PURGE=true`) lives outside the DB and is the only
-  // other deployment-level signal; this row gives reviewers a workspace-
-  // scoped trail in addition. It is also pushed to the SIEM forwarder via
-  // the standard `logActivity` path so external evidence survives even if
-  // the operator then changes the truncate to clear the entire table.
+  const count = activityRepo.clearByWorkspaceId(req.workspaceId);
+  // SEC-007: emit the meta-audit row AFTER the truncate so the act of
+  // purging the audit log is itself recorded — and survives in the DB
+  // instead of being deleted by the very `clearByWorkspaceId` that
+  // wiped the workspace's rows. The previous ordering (log → clear)
+  // dropped the row immediately, leaving zero in-DB evidence of the
+  // most security-sensitive admin action in the system, undermining
+  // the PCI-DSS 10.2.6 / SOC 2 CC7.2 trail this row exists for.
+  //
+  // `meta.cleared` captures the number of rows the truncate removed
+  // so reviewers can see the blast radius. The row is also pushed to
+  // the SIEM forwarder via the standard `logActivity` setImmediate
+  // dispatch, so external evidence survives even if a future bug or
+  // operator action wipes this surviving row too.
   logActivity({
     ...actor(req),
     type: "audit.purge",
     req,
     workspaceId: req.workspaceId,
-    detail: "Audit log truncated via DELETE /data/activities (DANGER_ALLOW_AUDIT_PURGE=true).",
-    meta: { surface: "data-management", envFlag: "DANGER_ALLOW_AUDIT_PURGE" },
+    detail: `Audit log truncated via DELETE /data/activities (DANGER_ALLOW_AUDIT_PURGE=true). Cleared ${count} row(s).`,
+    meta: { surface: "data-management", envFlag: "DANGER_ALLOW_AUDIT_PURGE", cleared: count },
   });
-  const count = activityRepo.clearByWorkspaceId(req.workspaceId);
   res.json({ ok: true, cleared: count });
 });
 
