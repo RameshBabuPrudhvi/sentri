@@ -1619,7 +1619,15 @@ router.post("/mfa/verify", async (req, res) => {
       // Recovery-code path: constant-time scan to avoid leaking which slot
       // matched via the difference between Array.indexOf early-exit and full
       // scan timings.
-      const hashed = hashRecoveryCode(token);
+      //
+      // Normalise the candidate to lowercase before hashing. `mintRecoveryCodes`
+      // emits lowercase hex (`crypto.randomBytes(4).toString("hex")`) but mobile
+      // keyboards frequently auto-capitalize the first character and users
+      // retyping from memory often use uppercase. Without this, "ABC123EF" and
+      // "abc123ef" hash to different values and the user gets a generic 400
+      // error with no clue why. SHA-256 is one-way so we cannot recover from
+      // case at the storage end — normalise at compare time.
+      const hashed = hashRecoveryCode(token.toLowerCase());
       const codes = JSON.parse(user.mfaRecoveryCodes || "[]");
       const idx = findRecoveryCodeIndex(codes, hashed);
       if (idx >= 0) {

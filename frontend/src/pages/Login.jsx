@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/layout/AppLogo.jsx";
@@ -143,6 +143,38 @@ export default function Login() {
   const [testiPaused, setTestiPaused] = useState(false);
   useEffect(() => { if (user) navigate(from, { replace: true }); }, [user]);
   useEffect(() => { if (testiPaused) return; const t = setInterval(() => setTIdx(i => (i+1) % TESTIMONIALS.length), 4000); return () => clearInterval(t); }, [testiPaused]);
+
+  // SEC-004 a11y: dismiss MFA modals on Escape and capture the previously
+  // focused element so we can restore focus on close. Mirrors the pattern in
+  // Settings.jsx PasswordConfirmModal (line 1042). Without this, keyboard
+  // users have no way to abort an MFA challenge except by submitting / cancel
+  // button click, and the dialog role + aria-modal=true would otherwise lie.
+  const modalOpen = !!mfaPendingToken || !!mfaEnrollmentRequired;
+  const lastFocusedRef = useRef(null);
+  useEffect(() => {
+    if (!modalOpen) return;
+    lastFocusedRef.current = document.activeElement;
+    function onKey(e) {
+      if (e.key !== "Escape") return;
+      // Don't allow Escape mid-passkey-verification — the browser's WebAuthn
+      // prompt has its own cancel UI and aborting the React modal would
+      // leave the passkey API in a confused state.
+      if (webauthnBusy) return;
+      if (mfaPendingToken) handleMfaCancel();
+      else if (mfaEnrollmentRequired) setMfaEnrollmentRequired(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      // Restore focus to whatever the user was on before the modal opened,
+      // matching WAI-ARIA APG dialog guidance. Wrapped in try/catch since the
+      // node may no longer be in the DOM.
+      try { lastFocusedRef.current?.focus?.(); } catch { /* node gone */ }
+    };
+    // handleMfaCancel is stable enough — included in deps for lint cleanliness
+    // but the modalOpen toggle is the actual trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen, webauthnBusy]);
 
   async function handleOAuthCallback(provider, code) {
     setOauthLoading(provider); setError("");
@@ -488,9 +520,18 @@ export default function Login() {
                       className="input mfa-recovery-input"
                       type="text"
                       autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
                       maxLength={16}
                       value={mfaCode}
-                      onChange={e => setMfaCode(e.target.value.trim())}
+                      // SEC-004: lowercase as the user types. Recovery codes
+                      // are minted as lowercase hex; mobile auto-capitalize
+                      // would silently produce a wrong-case input. Backend
+                      // also normalises, but doing it here gives immediate
+                      // visual feedback that the input matches the format
+                      // the user was originally shown.
+                      onChange={e => setMfaCode(e.target.value.trim().toLowerCase())}
                       placeholder="abcd1234"
                       autoFocus
                     />
@@ -554,7 +595,10 @@ export default function Login() {
         )}
 
         {/* LEFT */}
-        <div className="lp-left">
+        {/* SEC-004 a11y (F7): `inert` removes the background panels from the
+            tab order + screen reader tree while a modal is open, so keyboard /
+            AT users cannot reach hidden form fields behind the overlay. */}
+        <div className="lp-left" {...(modalOpen ? { inert: "" } : {})}>
           <div className="lp-grid"/>
           <div className="lp-orb lp-orb-1"/><div className="lp-orb lp-orb-2"/><div className="lp-orb lp-orb-3"/>
           <div className="lp-brand flex-between">
@@ -599,7 +643,7 @@ export default function Login() {
         </div>
 
         {/* RIGHT */}
-        <div className="lp-right">
+        <div className="lp-right" {...(modalOpen ? { inert: "" } : {})}>
           <div className="lp-fw">
             <div className="lp-fh">
               <h2 className="lp-ftit">{mode==="login"?"Welcome back":"Create account"}</h2>
