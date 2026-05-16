@@ -355,6 +355,11 @@ router.post("/authenticate/options", async (req, res) => {
     const challengeToken = storeChallenge({
       kind: "authenticate",
       userId: peek.userId,
+      // SEC-004: snapshot workspaceId from the pending-MFA entry so failed-
+      // assertion audit logs (unknown credential / verify error / clone
+      // detected) can attribute to a workspace. Mirrors the workspace plumb-
+      // ing on the success path at line 481.
+      workspaceId: peek.workspaceId,
       pendingToken,
       challenge: options.challenge,
     });
@@ -404,6 +409,7 @@ router.post("/authenticate/verify", async (req, res) => {
         type: "auth.mfa.verify_failed",
         detail: "WebAuthn assertion for unknown credential.",
         userId: entry.userId,
+        workspaceId: entry.workspaceId,
         meta: { method: "webauthn", reason: "unknown_credential" },
       });
       return res.status(400).json({ error: "Unknown credential." });
@@ -432,6 +438,7 @@ router.post("/authenticate/verify", async (req, res) => {
         type: "auth.mfa.verify_failed",
         detail: "WebAuthn assertion failed verification.",
         userId: entry.userId,
+        workspaceId: entry.workspaceId,
         meta: { method: "webauthn", reason: verifyErr.message },
       });
       return res.status(400).json({ error: `Assertion failed: ${verifyErr.message}` });
@@ -452,6 +459,7 @@ router.post("/authenticate/verify", async (req, res) => {
         type: "auth.mfa.verify_failed",
         detail: "WebAuthn clone detected — counter rollback.",
         userId: entry.userId,
+        workspaceId: entry.workspaceId,
         meta: { method: "webauthn", reason: "clone_detected", oldCounter: stored.counter, newCounter },
       });
       return res.status(401).json({
@@ -473,6 +481,10 @@ router.post("/authenticate/verify", async (req, res) => {
       type: "auth.mfa.webauthn_verified",
       detail: "WebAuthn login verified.",
       userId: user.id, userName: user.name || user.email,
+      // SEC-004: attribute to the workspace snapshotted at /login time so the
+      // event appears in the workspace-scoped admin activity view. Mirrors
+      // the TOTP/recovery path at backend/src/routes/auth.js (auth.mfa.login_verified).
+      workspaceId: pending.workspaceId,
       meta: { credentialId: stored.id },
     });
 

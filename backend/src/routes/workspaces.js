@@ -18,6 +18,7 @@
 import { Router } from "express";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as userRepo from "../database/repositories/userRepo.js";
+import * as webauthnRepo from "../database/repositories/webauthnRepo.js";
 import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
 import { signJwt, getJwtSecret, revokedTokens } from "../middleware/authenticate.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
@@ -206,12 +207,22 @@ router.get("/current/mfa-compliance", requireRole("admin"), (req, res) => {
   const members = workspaceRepo.getMembers(req.workspaceId);
   const detailed = members.map((m) => {
     const u = userRepo.getById(m.userId);
+    // SEC-004: a registered passkey is just as strong a second factor as TOTP
+    // (see `evaluateMfaEnforcement` at backend/src/utils/mfaEnforcement.js).
+    // Count passkey-only users as enrolled so the admin preview matches what
+    // the enforcement engine will actually allow — otherwise OAuth-only users
+    // who registered a passkey but no TOTP are misreported as "not enrolled".
+    const passkeyCount = webauthnRepo.countByUser(m.userId);
+    const totp = u?.mfaEnabled === 1;
+    const webauthn = passkeyCount > 0;
     return {
       userId: m.userId,
       name: m.name,
       email: m.email,
       role: m.role,
-      mfaEnabled: u?.mfaEnabled === 1,
+      mfaEnabled: totp || webauthn,
+      totp,
+      webauthn,
     };
   });
   const enrolled = detailed.filter((d) => d.mfaEnabled).length;
