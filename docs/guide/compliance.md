@@ -266,7 +266,7 @@ X-Sentri-Audit-Signature: sha256=<hex(hmac(secret, body))>
 
 ### Retry semantics
 
-- 3 attempts at 1s / 2s / 4s exponential backoff
+- 3 attempts: immediate, then 1s, then 2s backoff
 - 5xx, network errors, and connect timeouts are retried
 - 4xx (except 408 / 429) are not retried — they indicate a config issue at the SIEM target
 - Persistent failure after 3 attempts → row lands in `audit_dlq` with
