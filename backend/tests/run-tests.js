@@ -50,6 +50,8 @@ const files = [
   "tests/auth-mfa-totp.test.js",
   "tests/auth-mfa-enforcement.test.js",
   "tests/auth-webauthn.test.js",
+  // SEC-007 — Compliance audit log (hash chain, retention, DLQ, routes).
+  "tests/audit-log-routes.test.js",
   "tests/postgres-adapter.test.js",
   "tests/device-emulation.test.js",
   "tests/ai-fallback.test.js",
