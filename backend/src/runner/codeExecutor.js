@@ -219,6 +219,12 @@ function injectStepCaptures(code) {
   // Strategy: after each block of code belonging to a step (i.e. just before
   // the NEXT "// Step N:" comment or end-of-code), insert a capture call.
   // We split on step boundaries and reassemble with capture calls.
+  //
+  // INF-007/UX: also insert `__beginStep(N)` at the *start* of each step
+  // block so the sandbox can record an authoritative per-step status. When
+  // the test throws, the last begun-but-not-captured step is the one that
+  // failed — no more brittle keyword matching against the error message in
+  // the frontend's inferStepStatuses() heuristic.
   const lines = code.split("\n");
   const result = [];
   let currentStep = null;
@@ -232,6 +238,12 @@ function injectStepCaptures(code) {
         hasSteps = true;
       }
       currentStep = parseInt(match[1], 10);
+      // Push the step-N comment first, then the begin marker so the marker
+      // sits *inside* the step block (line-number ordering is preserved for
+      // stack traces).
+      result.push(line);
+      result.push(`      __beginStep(${currentStep});`);
+      continue;
     }
     result.push(line);
   }
@@ -334,7 +346,18 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   // populated by the onStepCapture callback provided by executeTest.
   const stepCaptures = [];
   const stepTimings = [];
+  // INF-007/UX: authoritative per-step status. `__beginStep(N)` marks a step
+  // as in-flight; `__captureStep(N)` flips it to "passed". If the test throws
+  // before the matching capture, the still-running entry is the failing step
+  // — no heuristics needed in the UI.
+  const stepStatuses = [];
+  let currentStepNumber = null;
   let lastStepTime = Date.now();
+
+  const __beginStep = (stepNumber) => {
+    currentStepNumber = stepNumber;
+    stepStatuses.push({ step: stepNumber, status: "running", startedAt: Date.now() });
+  };
 
   // The __captureStep function is injected into the sandbox context.
   // It records timing and calls the external onStepCapture callback.
@@ -342,6 +365,17 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
     const now = Date.now();
     const durationMs = now - lastStepTime;
     stepTimings.push({ step: stepNumber, durationMs, completedAt: now });
+
+    // Flip the matching status entry to "passed". Reverse-search in case of
+    // out-of-order numbering (defensive — the injector always emits in order).
+    for (let i = stepStatuses.length - 1; i >= 0; i--) {
+      if (stepStatuses[i].step === stepNumber && stepStatuses[i].status === "running") {
+        stepStatuses[i].status = "passed";
+        stepStatuses[i].durationMs = durationMs;
+        break;
+      }
+    }
+    if (currentStepNumber === stepNumber) currentStepNumber = null;
 
     if (opts.onStepCapture) {
       try {
@@ -387,14 +421,24 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   try {
     const result = await runInSandbox(
       code,
-      { page, context, expect, __captureStep, __requestShim },
+      { page, context, expect, __captureStep, __beginStep, __requestShim },
       "browser-test.js",
     );
-    return { passed: true, healingEvents: result?.__healingEvents || [], stepCaptures, stepTimings };
+    return { passed: true, healingEvents: result?.__healingEvents || [], stepCaptures, stepTimings, stepStatuses };
   } catch (err) {
     err.__healingEvents = err.__healingEvents || [];
     err.__stepCaptures = stepCaptures;
     err.__stepTimings = stepTimings;
+    // Mark the in-flight step (if any) as failed and stamp its duration so
+    // the UI can render the authoritative failure point without guessing.
+    for (let i = stepStatuses.length - 1; i >= 0; i--) {
+      if (stepStatuses[i].status === "running") {
+        stepStatuses[i].status = "failed";
+        stepStatuses[i].durationMs = Date.now() - lastStepTime;
+        break;
+      }
+    }
+    err.__stepStatuses = stepStatuses;
     throw err;
   } finally {
     await __disposeRequestContexts();

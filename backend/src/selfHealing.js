@@ -321,8 +321,42 @@ export function getSelfHealingHelperCode(healingHints) {
         }
       }
 
+      // Build an actionable, user-facing error message. The hintKey is in the
+      // form "<action>::<label>" (e.g. "click::Sign in to Sentri") — parse it
+      // so the operator sees exactly which element on which action failed,
+      // plus a likely-cause hint based on the underlying Playwright error.
+      // Falls back gracefully when hintKey is unset (callers without healing).
+      let action = 'locate';
+      let label = '(unknown)';
+      if (hintKey && typeof hintKey === 'string' && hintKey.includes('::')) {
+        const sep = hintKey.indexOf('::');
+        action = hintKey.slice(0, sep) || 'locate';
+        label = hintKey.slice(sep + 2) || '(unknown)';
+      }
+
+      // Classify the underlying failure into a likely-cause hint so the
+      // operator gets a next step instead of just a stack-trace fragment.
+      const lower = String(errMsg).toLowerCase();
+      let hint;
+      if (lower.includes('no elements matched')) {
+        hint = 'No element on the page matched the label "' + label + '". '
+             + 'The text/role may have changed, the page may not have finished loading, or the element may live inside an iframe or shadow DOM.';
+      } else if (lower.includes('timeout') || lower.includes('waiting for')) {
+        hint = 'The element exists in the DOM but never became visible within the timeout. '
+             + 'It may be hidden behind a modal/overlay, off-screen, or rendered after a delay.';
+      } else if (lower.includes('is not an <input>') || lower.includes('not editable')) {
+        hint = 'Found an element matching "' + label + '" but it is not a fillable input. '
+             + 'The locator may be pointing at a wrapper element instead of the underlying <input>.';
+      } else if (lower.includes('strict mode violation')) {
+        hint = 'Multiple elements matched "' + label + '". Use a more specific label or a CSS selector to disambiguate.';
+      } else {
+        hint = 'The element may have been renamed, removed, or hidden behind a modal/iframe.';
+      }
+
       throw new Error(
-        'Element not found using any strategy. Last error: ' + errMsg
+        'Could not ' + action + ' element "' + label + '". '
+        + hint + ' '
+        + '(Tried ' + strategies.length + ' locator strategies. Internal: ' + errMsg + ')'
       );
     }
 
