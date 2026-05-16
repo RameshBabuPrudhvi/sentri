@@ -183,14 +183,22 @@ export default function NotificationBell() {
                       color: "var(--text)", marginBottom: 2,
                       whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                     }}>
-                      {notif.title}
+                      {/* Defensive String() — older callsites occasionally
+                          stuffed structured objects (e.g. `{ type, message }`
+                          error envelopes) into the notification. React throws
+                          "Objects are not valid as a React child" the moment
+                          one of those persisted entries lands here from
+                          localStorage, breaking the entire dropdown. Coercing
+                          to a string at the leaf keeps the surface working
+                          even when bad legacy data is in storage. */}
+                      {typeof notif.title === "string" ? notif.title : String(notif.title ?? "")}
                     </div>
                     <div style={{
                       fontSize: "0.75rem", color: "var(--text2)", lineHeight: 1.4,
                       display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
                       overflow: "hidden",
                     }}>
-                      {notif.body}
+                      {typeof notif.body === "string" ? notif.body : String(notif.body ?? "")}
                     </div>
                   </div>
                   <div style={{

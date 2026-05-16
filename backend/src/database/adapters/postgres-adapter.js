@@ -318,8 +318,15 @@ const _COL_MAP = buildColumnMap([
   "environmentId", "shardCount", "shardsCompleted", "tracePaths",
   // metric_samples (migration 016, MET-001)
   "metricKey",
-  // activities
+  // activities (base columns + SEC-007 compliance columns from migrations
+  // 031 + 034). PostgreSQL folds unquoted identifiers to lowercase, so
+  // without these entries `activity.ipAddress` / `userAgent` / `prevHash`
+  // would all be `undefined` on Postgres — silently breaking the SOC 2
+  // session-reconstruction columns rendered by the AuditLog feed, the
+  // hash-chain verifier walk, and the dedup `lastAt` timestamp the UI
+  // uses to render the "first seen / last seen" tooltip on collapsed rows.
   "projectName", "testId", "testName", "userName",
+  "ipAddress", "userAgent", "prevHash", "lastAt",
   // healing_history
   "strategyIndex", "succeededAt", "failCount", "strategyVersion",
   // password_reset_tokens & verification_tokens
