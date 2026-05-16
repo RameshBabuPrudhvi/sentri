@@ -487,7 +487,8 @@ function createPendingMfaLogin(userId) {
  * token intact for the subsequent `/authenticate/verify` call.
  *
  * @param {string} token
- * @param {{ peek?: boolean }} [opts]
+ * @param {Object} [opts]
+ * @param {boolean} [opts.peek]
  * @returns {{ userId: string, expiresAt: number } | null}
  * @private
  */
@@ -508,7 +509,8 @@ function consumePendingMfaLogin(token, opts) {
  * the in-memory store. Underscore prefix marks it as not part of the
  * public API contract.
  * @param {string} token
- * @param {{ peek?: boolean }} [opts]
+ * @param {Object} [opts]
+ * @param {boolean} [opts.peek]
  * @returns {{ userId: string, expiresAt: number } | null}
  */
 export function _internalConsumePendingMfaLogin(token, opts) {
@@ -533,7 +535,7 @@ export async function _internalVerifyAccountPassword(user, password) {
  * duplicating the limiter state.
  * @param {string} bucket
  * @param {string} ip
- * @returns {{ allowed: boolean, retryAfterSec?: number }}
+ * @returns {{ allowed: boolean, retryAfterSec: number }}
  */
 export function _internalCheckRateLimit(bucket, ip) {
   return checkRateLimit(bucket, ip);
