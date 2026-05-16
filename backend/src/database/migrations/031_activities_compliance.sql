@@ -11,3 +11,10 @@ CREATE TABLE IF NOT EXISTS audit_dlq (
   attempts INTEGER NOT NULL DEFAULT 0,
   createdAt TEXT NOT NULL
 );
+
+-- SEC-007: seed the DLQ-<n> counter so auditDlqRepo.enqueue() can mint IDs.
+-- `counterRepo.next()` requires the row to exist (it does UPDATE…RETURNING,
+-- which is a no-op when the row is absent and throws "Unknown counter").
+-- Other counters that follow the same convention (webhook, schedule, …)
+-- seed via their own feature migrations — this is the audit_dlq parallel.
+INSERT OR IGNORE INTO counters(name, value) VALUES ('audit_dlq', 0);
