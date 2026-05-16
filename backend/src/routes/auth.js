@@ -43,6 +43,7 @@ import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as accountRepo from "../database/repositories/accountRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { logActivity } from "../utils/activityLogger.js";
 import { encryptString, decryptString } from "../utils/credentialEncryption.js";
 import { stopSchedule } from "../scheduler.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
@@ -163,6 +164,10 @@ const rateBuckets = {
   login:         { map: new Map(), max: 10 },  // 10 login attempts per IP per 15 min
   forgotPassword:{ map: new Map(), max: 5 },   // 5 reset requests per IP per 15 min
   resetPassword: { map: new Map(), max: 5 },   // 5 reset attempts per IP per 15 min
+  // SEC-004: MFA-specific buckets — verify is the brute-force surface (only
+  // 6 digits of entropy per attempt), enroll prevents secret-flooding abuse.
+  mfaVerify:     { map: new Map(), max: 5 },   // 5 verify attempts per IP per 15 min
+  mfaEnroll:     { map: new Map(), max: 3 },   // 3 enroll cycles per IP per 15 min
 };
 
 /**
@@ -284,10 +289,34 @@ function ensureUserWorkspace(user) {
 }
 
 
+// ─── SEC-004: TOTP / MFA helpers ─────────────────────────────────────────────
+//
+// In-memory pending-login store. Keyed by an opaque base64url token returned
+// to the client when password verification succeeds but MFA is still required.
+// Consumed by POST /mfa/verify in exchange for the auth cookie.
+//
+// Tokens are single-use and expire after MFA_LOGIN_TTL_MS. A periodic sweep
+// removes expired entries so an abandoned MFA flow cannot accumulate memory
+// indefinitely. For multi-replica deployments this Map should move to Redis;
+// tracked under SEC-004c as a follow-up.
 const mfaPendingLogins = new Map();
-const MFA_LOGIN_TTL_MS = 5 * 60 * 1000;
+const MFA_LOGIN_TTL_MS = parseInt(process.env.MFA_PENDING_TTL_MS ?? "", 10) || 5 * 60 * 1000;
 
+const _mfaPurgeInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of mfaPendingLogins) {
+    if (v.expiresAt < now) mfaPendingLogins.delete(k);
+  }
+}, 5 * 60 * 1000);
+_mfaPurgeInterval.unref();
 
+/**
+ * Decode a base32-encoded TOTP secret to its raw byte buffer (RFC 4648).
+ * Tolerant of whitespace, lowercase, and trailing `=` padding.
+ * @param {string} input
+ * @returns {Buffer}
+ * @private
+ */
 function base32Decode(input) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   const clean = String(input || "").toUpperCase().replace(/=+$/g, "").replace(/[^A-Z2-7]/g, "");
@@ -301,6 +330,12 @@ function base32Decode(input) {
   for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2));
   return Buffer.from(out);
 }
+/**
+ * Generate a fresh 160-bit (32-char base32) TOTP secret. Matches RFC 6238 /
+ * Google Authenticator defaults so any standard authenticator app interops.
+ * @returns {string}
+ * @private
+ */
 function generateTotpSecret() {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   const bytes = crypto.randomBytes(20);
@@ -314,38 +349,116 @@ function generateTotpSecret() {
   if (bits > 0) out += alphabet[(value << (5 - bits)) & 31];
   return out;
 }
-function verifyTotp(token, secret, window = 1) {
+
+/**
+ * Verify a 6-digit TOTP code against a base32 secret. Allows ±`window` steps
+ * (default 30s each) of clock skew either side of `now`. Configurable via the
+ * `MFA_TOTP_WINDOW` env var (default 1 = ±30s tolerance).
+ *
+ * Constant-time: iterates every candidate window even after a match and uses
+ * `crypto.timingSafeEqual` for the digit comparison so total runtime does not
+ * leak which window (or whether any) matched.
+ *
+ * @param {string} token  - User-supplied 6-digit code.
+ * @param {string} secret - Base32 TOTP secret.
+ * @param {number} [window]
+ * @returns {boolean}
+ * @private
+ */
+function verifyTotp(token, secret, window) {
+  const w = Number.isFinite(window) ? window : (parseInt(process.env.MFA_TOTP_WINDOW ?? "1", 10) || 1);
   const t = String(token || "").replace(/\s+/g, "");
   if (!/^\d{6}$/.test(t)) return false;
   const key = base32Decode(secret);
   const step = 30;
   const now = Math.floor(Date.now() / 1000 / step);
-  for (let w = -window; w <= window; w++) {
+  const tBuf = Buffer.from(t);
+  let matched = false;
+  for (let i = -w; i <= w; i++) {
     const counter = Buffer.alloc(8);
-    counter.writeBigUInt64BE(BigInt(now + w));
+    counter.writeBigUInt64BE(BigInt(now + i));
     const hmac = crypto.createHmac("sha1", key).update(counter).digest();
     const off = hmac[hmac.length - 1] & 0xf;
     const code = ((hmac[off] & 0x7f) << 24) | ((hmac[off + 1] & 0xff) << 16) | ((hmac[off + 2] & 0xff) << 8) | (hmac[off + 3] & 0xff);
-    if (String(code % 1_000_000).padStart(6, "0") === t) return true;
+    const computed = String(code % 1_000_000).padStart(6, "0");
+    try {
+      if (crypto.timingSafeEqual(Buffer.from(computed), tBuf)) matched = true;
+    } catch { /* length mismatch — t validated as /^\d{6}$/ above so unreachable */ }
   }
-  return false;
+  return matched;
 }
 
+/**
+ * SHA-256 hash a recovery code for storage. Recovery codes are user-facing
+ * secrets — never persist the raw form.
+ * @param {string} code
+ * @returns {string} 64-char hex digest.
+ * @private
+ */
 function hashRecoveryCode(code) {
   return crypto.createHash("sha256").update(String(code)).digest("hex");
 }
 
+/**
+ * Constant-time scan for a hashed recovery code in a list (SEC-004 §5b).
+ * `indexOf` short-circuits on first match and leaks via timing which slot
+ * matched. This iterates every entry regardless of outcome and only records
+ * the first match.
+ *
+ * @param {string[]} codes  - Pre-hashed recovery codes (hex strings).
+ * @param {string}   target - Pre-hashed candidate (hex string).
+ * @returns {number} Index of the match, or -1.
+ * @private
+ */
+function findRecoveryCodeIndex(codes, target) {
+  let matchIdx = -1;
+  const targetBuf = Buffer.from(target);
+  for (let i = 0; i < codes.length; i++) {
+    const code = codes[i];
+    if (typeof code !== "string" || code.length !== target.length) continue;
+    try {
+      if (crypto.timingSafeEqual(Buffer.from(code), targetBuf) && matchIdx < 0) {
+        matchIdx = i;
+      }
+    } catch { /* length mismatch filtered above — unreachable */ }
+  }
+  return matchIdx;
+}
+
+/**
+ * Mint a fresh set of MFA recovery codes. Returns both the raw codes (shown
+ * to the user once) and their SHA-256 hashes (persisted to the DB).
+ * Count is configurable via `MFA_RECOVERY_CODES_COUNT` (default 8).
+ * @returns {{ raw: string[], hashed: string[] }}
+ * @private
+ */
 function mintRecoveryCodes() {
-  const raw = Array.from({ length: 8 }, () => crypto.randomBytes(4).toString("hex"));
+  const count = Math.max(1, parseInt(process.env.MFA_RECOVERY_CODES_COUNT ?? "8", 10) || 8);
+  const raw = Array.from({ length: count }, () => crypto.randomBytes(4).toString("hex"));
   return { raw, hashed: raw.map(hashRecoveryCode) };
 }
 
-function createPendingMfaLogin(userId, workspaceId) {
+/**
+ * Issue a single-use pending-MFA token after password verification succeeds.
+ * Exchanged at `POST /mfa/verify` for the auth cookie.
+ * @param {string} userId
+ * @returns {string} Opaque base64url token (24 bytes of entropy).
+ * @private
+ */
+function createPendingMfaLogin(userId) {
   const token = crypto.randomBytes(24).toString("base64url");
-  mfaPendingLogins.set(token, { userId, workspaceId, expiresAt: Date.now() + MFA_LOGIN_TTL_MS });
+  mfaPendingLogins.set(token, { userId, expiresAt: Date.now() + MFA_LOGIN_TTL_MS });
   return token;
 }
 
+/**
+ * Atomically consume a pending-MFA token. Returns the entry on success and
+ * deletes it (single-use). Returns null when missing, already consumed, or
+ * expired.
+ * @param {string} token
+ * @returns {{ userId: string, expiresAt: number } | null}
+ * @private
+ */
 function consumePendingMfaLogin(token) {
   const entry = mfaPendingLogins.get(token);
   if (!entry) return null;
@@ -483,7 +596,9 @@ router.post("/login", async (req, res) => {
       return res.status(200).json({ mfaRequired: true, pendingToken });
     }
 
-    const payload = buildJwtPayload(user);
+    // SEC-004 §5c: tag password-only sessions with amr=["pwd"] so future
+    // step-up auth checks can require MFA-asserted sessions explicitly.
+    const payload = buildJwtPayload(user, undefined, { amr: ["pwd"] });
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
@@ -960,7 +1075,10 @@ router.get("/github/callback", async (req, res) => {
 
     ensureUserWorkspace(user);
 
-    const payload = buildJwtPayload(user);
+    // SEC-004 §5c: OAuth sessions are tagged amr=["oauth"]. They are NOT
+    // MFA-asserted — workspace MFA enforcement still applies (handled in the
+    // backend-enforcement lane).
+    const payload = buildJwtPayload(user, undefined, { amr: ["oauth"] });
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
@@ -1027,7 +1145,10 @@ router.get("/google/callback", async (req, res) => {
 
     ensureUserWorkspace(user);
 
-    const payload = buildJwtPayload(user);
+    // SEC-004 §5c: OAuth sessions are tagged amr=["oauth"]. They are NOT
+    // MFA-asserted — workspace MFA enforcement still applies (handled in the
+    // backend-enforcement lane).
+    const payload = buildJwtPayload(user, undefined, { amr: ["oauth"] });
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
@@ -1099,69 +1220,251 @@ async function findOrCreateOAuthUser({ provider, providerId, email, name, avatar
 }
 
 
+// ─── SEC-004: MFA management endpoints ───────────────────────────────────────
+
+/**
+ * Report whether the authenticated user has TOTP MFA enabled.
+ * @route GET /api/v1/auth/mfa/status
+ */
 router.get("/mfa/status", requireAuth, (req, res) => {
-  const user = userRepo.getById(req.authUser.sub);
-  if (!user) return res.status(404).json({ error: "User not found." });
-  return res.json({ enabled: user.mfaEnabled === 1 });
-});
-
-router.post("/mfa/enroll", requireAuth, (req, res) => {
-  const user = userRepo.getById(req.authUser.sub);
-  if (!user) return res.status(404).json({ error: "User not found." });
-  const secret = generateTotpSecret();
-  const otpauth = `otpauth://totp/Sentri:${encodeURIComponent(user.email)}?secret=${secret}&issuer=Sentri&algorithm=SHA1&digits=6&period=30`;
-  userRepo.update(user.id, { mfaSecret: encryptString(secret), mfaEnabled: 0, updatedAt: new Date().toISOString() });
-  return res.json({ secret, otpauth });
-});
-
-router.post("/mfa/enable", requireAuth, (req, res) => {
-  const user = userRepo.getById(req.authUser.sub);
-  if (!user) return res.status(404).json({ error: "User not found." });
-  const secret = decryptString(user.mfaSecret);
-  if (!secret) return res.status(400).json({ error: "MFA enrollment is not initialized." });
-  const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
-  if (!verifyTotp(token, secret)) return res.status(400).json({ error: "Invalid code." });
-  const recovery = mintRecoveryCodes();
-  userRepo.update(user.id, { mfaEnabled: 1, mfaRecoveryCodes: JSON.stringify(recovery.hashed), updatedAt: new Date().toISOString() });
-  return res.json({ ok: true, recoveryCodes: recovery.raw });
-});
-
-router.post("/mfa/verify", async (req, res) => {
-  const pending = consumePendingMfaLogin(sanitiseString(req.body?.pendingToken, 200));
-  if (!pending) return res.status(401).json({ error: "MFA session expired. Sign in again." });
-  const user = userRepo.getById(pending.userId);
-  if (!user) return res.status(404).json({ error: "User not found." });
-  const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
-  const secret = decryptString(user.mfaSecret);
-  if (!secret) return res.status(400).json({ error: "MFA is not configured." });
-  let ok = verifyTotp(token, secret);
-  let updatedRecovery = null;
-  if (!ok && token) {
-    const hashed = hashRecoveryCode(token);
-    const codes = JSON.parse(user.mfaRecoveryCodes || "[]");
-    const idx = codes.indexOf(hashed);
-    if (idx >= 0) {
-      codes.splice(idx, 1);
-      updatedRecovery = JSON.stringify(codes);
-      ok = true;
-    }
+  try {
+    const user = userRepo.getById(req.authUser.sub);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    return res.json({ enabled: user.mfaEnabled === 1 });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[auth/mfa/status] ${err.message}`));
+    return res.status(500).json({ error: "Failed to fetch MFA status." });
   }
-  if (!ok) return res.status(400).json({ error: "Invalid authentication code." });
-  if (updatedRecovery !== null) userRepo.update(user.id, { mfaRecoveryCodes: updatedRecovery, updatedAt: new Date().toISOString() });
-  const payload = buildJwtPayload(user);
-  const jwt = signJwt(payload, getJwtSecret());
-  const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
-  setAuthCookie(res, jwt, exp);
-  return res.json({ user: buildUserResponse(user) });
 });
 
+/**
+ * Begin TOTP enrollment — generate a fresh secret + otpauth URL for the
+ * user's authenticator app. The secret is encrypted at rest (AES-GCM via
+ * `credentialEncryption.js`) and the user is NOT marked enabled until they
+ * confirm a valid code via `/mfa/enable`.
+ *
+ * Refuses re-enrollment when MFA is already active (SEC-004 §2a) so a
+ * stolen-cookie attacker cannot silently replace the legitimate user's
+ * secret. Rate-limited (3 per IP per 15 min) to prevent secret-flooding.
+ *
+ * @route POST /api/v1/auth/mfa/enroll
+ * @returns {200} `{ secret, otpauth }`
+ * @returns {409} MFA already enabled.
+ * @returns {429} Rate limit exceeded.
+ */
+router.post("/mfa/enroll", requireAuth, (req, res) => {
+  const ip = req.ip || "unknown";
+  const rate = checkRateLimit("mfaEnroll", ip);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", rate.retryAfterSec);
+    return res.status(429).json({ error: `Too many enrollment attempts. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
+  }
+
+  try {
+    const user = userRepo.getById(req.authUser.sub);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    if (user.mfaEnabled === 1) {
+      return res.status(409).json({ error: "MFA is already enabled. Disable it first to re-enroll." });
+    }
+
+    const secret = generateTotpSecret();
+    const otpauth = `otpauth://totp/Sentri:${encodeURIComponent(user.email)}?secret=${secret}&issuer=Sentri&algorithm=SHA1&digits=6&period=30`;
+    userRepo.update(user.id, { mfaSecret: encryptString(secret), mfaEnabled: 0, updatedAt: new Date().toISOString() });
+
+    logActivity({
+      type: "auth.mfa.enroll_started",
+      detail: "Started TOTP enrollment.",
+      userId: user.id, userName: user.name || user.email,
+      workspaceId: req.authUser.workspaceId,
+      meta: { method: "totp" },
+    });
+
+    return res.json({ secret, otpauth });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[auth/mfa/enroll] ${err.message}`));
+    return res.status(500).json({ error: "Failed to start MFA enrollment." });
+  }
+});
+
+/**
+ * Finalize TOTP enrollment by verifying the user's first code. On success
+ * marks MFA enabled and returns single-use recovery codes (shown once).
+ *
+ * @route POST /api/v1/auth/mfa/enable
+ * @param {Object} req.body
+ * @param {string} req.body.token - 6-digit code from authenticator app.
+ * @returns {200} `{ ok: true, recoveryCodes }`
+ * @returns {400} Enrollment not initialized or wrong code.
+ */
+router.post("/mfa/enable", requireAuth, (req, res) => {
+  try {
+    const user = userRepo.getById(req.authUser.sub);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    const secret = decryptString(user.mfaSecret);
+    if (!secret) return res.status(400).json({ error: "MFA enrollment is not initialized." });
+    const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
+    if (!verifyTotp(token, secret)) {
+      logActivity({
+        type: "auth.mfa.verify_failed",
+        detail: "Invalid TOTP code during enable.",
+        userId: user.id, userName: user.name || user.email,
+        workspaceId: req.authUser.workspaceId,
+        meta: { method: "totp", phase: "enable" },
+      });
+      return res.status(400).json({ error: "Invalid code." });
+    }
+    const recovery = mintRecoveryCodes();
+    userRepo.update(user.id, { mfaEnabled: 1, mfaRecoveryCodes: JSON.stringify(recovery.hashed), updatedAt: new Date().toISOString() });
+
+    logActivity({
+      type: "auth.mfa.enabled",
+      detail: "Enabled TOTP MFA.",
+      userId: user.id, userName: user.name || user.email,
+      workspaceId: req.authUser.workspaceId,
+      meta: { method: "totp", recoveryCodesIssued: recovery.raw.length },
+    });
+
+    return res.json({ ok: true, recoveryCodes: recovery.raw });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[auth/mfa/enable] ${err.message}`));
+    return res.status(500).json({ error: "Failed to enable MFA." });
+  }
+});
+
+/**
+ * Verify the second factor during login. Accepts either a 6-digit TOTP code
+ * or a single-use recovery code. On success, issues the auth cookie with an
+ * MFA-asserted JWT (`amr: ["pwd","mfa"]`).
+ *
+ * Public route — authenticated by the `pendingToken` issued by `/login`.
+ * Rate-limited per IP (5 attempts / 15 min) to bound brute force on the
+ * 6-digit TOTP / recovery-code spaces. Recovery-code lookup uses a
+ * constant-time scan (SEC-004 §5b) so timing does not leak which slot
+ * matched.
+ *
+ * @route POST /api/v1/auth/mfa/verify
+ * @param {Object} req.body
+ * @param {string} req.body.pendingToken
+ * @param {string} req.body.token
+ * @returns {200} `{ user }`
+ * @returns {400} Invalid code.
+ * @returns {401} Pending token missing / expired.
+ * @returns {429} Rate limit exceeded.
+ */
+router.post("/mfa/verify", async (req, res) => {
+  const ip = req.ip || "unknown";
+  const rate = checkRateLimit("mfaVerify", ip);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", rate.retryAfterSec);
+    return res.status(429).json({ error: `Too many verification attempts. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
+  }
+
+  try {
+    const pending = consumePendingMfaLogin(sanitiseString(req.body?.pendingToken, 200));
+    if (!pending) return res.status(401).json({ error: "MFA session expired. Sign in again." });
+    const user = userRepo.getById(pending.userId);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
+    const secret = decryptString(user.mfaSecret);
+    if (!secret) return res.status(400).json({ error: "MFA is not configured." });
+
+    let ok = verifyTotp(token, secret);
+    let method = ok ? "totp" : null;
+    let updatedRecovery = null;
+    let remaining = null;
+
+    if (!ok && token) {
+      // Recovery-code path: constant-time scan to avoid leaking which slot
+      // matched via the difference between Array.indexOf early-exit and full
+      // scan timings.
+      const hashed = hashRecoveryCode(token);
+      const codes = JSON.parse(user.mfaRecoveryCodes || "[]");
+      const idx = findRecoveryCodeIndex(codes, hashed);
+      if (idx >= 0) {
+        codes.splice(idx, 1);
+        updatedRecovery = JSON.stringify(codes);
+        remaining = codes.length;
+        ok = true;
+        method = "recovery";
+      }
+    }
+
+    if (!ok) {
+      logActivity({
+        type: "auth.mfa.verify_failed",
+        detail: "Invalid MFA code during login.",
+        userId: user.id, userName: user.name || user.email,
+        workspaceId: pending.workspaceId,
+        meta: { method: token ? "unknown" : "missing", phase: "login" },
+      });
+      return res.status(400).json({ error: "Invalid authentication code." });
+    }
+
+    if (updatedRecovery !== null) {
+      userRepo.update(user.id, { mfaRecoveryCodes: updatedRecovery, updatedAt: new Date().toISOString() });
+      logActivity({
+        type: "auth.mfa.recovery_code_consumed",
+        detail: "Consumed a recovery code during MFA login.",
+        userId: user.id, userName: user.name || user.email,
+        workspaceId: pending.workspaceId,
+        meta: { remaining },
+      });
+    } else {
+      logActivity({
+        type: "auth.mfa.login_verified",
+        detail: "MFA login verified.",
+        userId: user.id, userName: user.name || user.email,
+        workspaceId: pending.workspaceId,
+        meta: { method },
+      });
+    }
+
+    // SEC-004 §5c: MFA-asserted session — tag with both pwd (login flow
+    // already proved the password) and mfa (second factor verified).
+    const payload = buildJwtPayload(user, undefined, { amr: ["pwd", "mfa"] });
+    const jwt = signJwt(payload, getJwtSecret());
+    const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
+    setAuthCookie(res, jwt, exp);
+
+    return res.json({ user: buildUserResponse(user) });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[auth/mfa/verify] ${err.message}`));
+    return res.status(500).json({ error: "Failed to verify MFA." });
+  }
+});
+
+/**
+ * Disable MFA. Clears the encrypted secret and recovery codes. Requires
+ * password confirmation (OAuth-only users authenticate by session — see
+ * {@link verifyAccountPassword}).
+ *
+ * @route POST /api/v1/auth/mfa/disable
+ * @param {Object} req.body
+ * @param {string} req.body.password
+ * @returns {200} `{ ok: true }`
+ * @returns {403} Password confirmation failed.
+ */
 router.post("/mfa/disable", requireAuth, async (req, res) => {
-  const user = userRepo.getById(req.authUser.sub);
-  if (!user) return res.status(404).json({ error: "User not found." });
-  const valid = await verifyAccountPassword(user, req.body?.password);
-  if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
-  userRepo.update(user.id, { mfaEnabled: 0, mfaSecret: null, mfaRecoveryCodes: null, updatedAt: new Date().toISOString() });
-  return res.json({ ok: true });
+  try {
+    const user = userRepo.getById(req.authUser.sub);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    const valid = await verifyAccountPassword(user, req.body?.password);
+    if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
+    userRepo.update(user.id, { mfaEnabled: 0, mfaSecret: null, mfaRecoveryCodes: null, updatedAt: new Date().toISOString() });
+
+    logActivity({
+      type: "auth.mfa.disabled",
+      detail: "Disabled MFA.",
+      userId: user.id, userName: user.name || user.email,
+      workspaceId: req.authUser.workspaceId,
+      meta: {},
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[auth/mfa/disable] ${err.message}`));
+    return res.status(500).json({ error: "Failed to disable MFA." });
+  }
 });
 
 export default router;
