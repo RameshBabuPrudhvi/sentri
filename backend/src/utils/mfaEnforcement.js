@@ -42,15 +42,26 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * TOTP would be falsely blocked at OAuth callback time.
  *
  * @param {Object} user - User row (must include `id`, `mfaEnabled`, `createdAt`).
+ * @param {Object} [opts]
+ * @param {boolean} [opts.skipWebauthnCheck=false] — If `true`, do NOT count
+ *   the user's registered passkeys as a satisfying factor. Used by the
+ *   self-lockout guard in `DELETE /webauthn/credentials/:id`, which needs to
+ *   ask "would this user be blocked if the passkey they're trying to remove
+ *   were their only factor?". The caller has already verified TOTP is off
+ *   and that this is their last passkey, so the live `webauthnRepo.countByUser`
+ *   read (which still sees the passkey since it hasn't been deleted yet)
+ *   would falsely return `"allow"` and let the user lock themselves out.
  * @returns {MfaEnforcementDecision}
  */
-export function evaluateMfaEnforcement(user) {
+export function evaluateMfaEnforcement(user, opts = {}) {
   if (!user) return { state: "allow" };
   if (user.mfaEnabled === 1) return { state: "allow" };
   // SEC-004 — a registered passkey is just as strong a second factor as TOTP,
   // so it satisfies workspace enforcement on its own. Checked second because
   // it requires a DB round-trip; TOTP enabled is the cheap fast-path above.
-  if (webauthnRepo.countByUser(user.id) > 0) return { state: "allow" };
+  // The self-lockout guard opts out via `skipWebauthnCheck` so it can ask
+  // the hypothetical "no second factor" question.
+  if (!opts.skipWebauthnCheck && webauthnRepo.countByUser(user.id) > 0) return { state: "allow" };
 
   const memberships = workspaceRepo.getByUserId(user.id);
   if (!memberships || memberships.length === 0) return { state: "allow" };

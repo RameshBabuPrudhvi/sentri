@@ -532,7 +532,13 @@ router.delete("/credentials/:id", requireAuth, async (req, res) => {
     const credCount = webauthnRepo.countByUser(user.id);
     const isLastFactor = credCount <= 1 && user.mfaEnabled !== 1;
     if (isLastFactor) {
-      const enforcement = evaluateMfaEnforcement({ ...user, mfaEnabled: 0 });
+      // `skipWebauthnCheck: true` makes evaluateMfaEnforcement ignore the
+      // user's live passkey count — the passkey we're about to delete is
+      // still in the DB at this point, so without the opt-out the function
+      // would see `count > 0`, return `"allow"`, and the guard would never
+      // fire. The simulation needs to ask "what would enforcement say after
+      // this delete?", not "what does it say right now?".
+      const enforcement = evaluateMfaEnforcement({ ...user, mfaEnabled: 0 }, { skipWebauthnCheck: true });
       if (enforcement.state === "block") {
         return res.status(400).json({
           error: "Cannot remove your last second factor — your workspace requires MFA. Enroll a TOTP authenticator first.",
