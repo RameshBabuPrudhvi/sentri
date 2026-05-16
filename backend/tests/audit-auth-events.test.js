@@ -231,7 +231,10 @@ async function main() {
           Cookie: admin.cookieHeader,
           "X-CSRF-Token": admin.csrf,
         },
-        body: JSON.stringify({ provider: "anthropic", apiKey: "sk-test-1234567890abcdef" }),
+        // Low-entropy filler string — passes the route's >= 10 char check
+        // but doesn't trigger Gitleaks' generic-api-key entropy rule. The
+        // raw value is reused below to assert it never appears in the audit.
+        body: JSON.stringify({ provider: "anthropic", apiKey: "aaaaaaaaaaaaaaaa" }),
       });
       assert.equal(res.status, 200, `expected 200, got ${res.status}: ${await res.text()}`);
 
@@ -242,7 +245,7 @@ async function main() {
       const meta = JSON.parse(row.meta || "{}");
       assert.equal(meta.provider, "anthropic");
       const rowJson = JSON.stringify(row);
-      assert.ok(!rowJson.includes("sk-test-1234567890abcdef"),
+      assert.ok(!rowJson.includes("aaaaaaaaaaaaaaaa"),
         "raw API key must NEVER appear in the audit row");
     });
 
@@ -258,7 +261,8 @@ async function main() {
           Cookie: admin.cookieHeader,
           "X-CSRF-Token": admin.csrf,
         },
-        body: JSON.stringify({ provider: "openai", apiKey: "sk-revoke-test-key" }),
+        // Low-entropy filler — same rationale as the create test above.
+        body: JSON.stringify({ provider: "openai", apiKey: "bbbbbbbbbbbbbbbb" }),
       });
 
       const res = await fetch(`${baseUrl}/api/v1/settings/openai`, {
