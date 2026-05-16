@@ -8,9 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added initial MFA (TOTP) enrollment and login verification flow with recovery-code fallback endpoints and UI login challenge support.
-
-### Added
+- **SEC-004 — Multi-factor authentication.** Adds TOTP-based enrollment (QR code from Settings, otpauth URL, base32 secret, encrypted at rest via existing `credentialEncryption.js`), login-time verification with single-use 8-character recovery codes (SHA-256 hashed in storage, downloadable + copyable on issue, regeneratable with password confirmation), and WebAuthn / passkey support for hardware security keys and platform authenticators (Touch ID / Windows Hello / YubiKey, etc.). Adds per-workspace MFA enforcement (`mfaRequired` admin toggle with configurable 0–90 day grace period), workspace MFA-compliance preview endpoint for admins, JWT `amr` claim distinguishing password-only (`["pwd"]`), MFA-asserted (`["pwd","mfa"]`), and OAuth (`["oauth"]`) sessions per RFC 8176, frontend factor picker (Passkey / Authenticator / Recovery code) on login, dedicated `MFA_ENROLLMENT_REQUIRED` panel for past-grace users, and a workspace MFA grace-period banner persisted via `sessionStorage`. WebAuthn signature-counter clone detection rejects assertions with rolled-back counters; self-lockout guard prevents removing the last factor when workspace enforcement is active. Pre-auth verify endpoints (`/auth/mfa/verify`, `/auth/webauthn/authenticate/*`) are CSRF-exempt + per-IP rate-limited (5/15min for verify, 3/15min for enroll). All `auth.mfa.*` state changes audit-logged. `@simplewebauthn/server` is an optional backend dependency — passkey routes return 503 when omitted so self-hosters can disable WebAuthn without breaking the rest of MFA.
 - Scalable worker pool with dashboard metrics (queue depth, active/idle workers, job counts) when Redis/BullMQ is available; falls back to single-process mode automatically. (#9)
 - Recorder stealth mode: `stealth: true` option on recording sessions patches common headless-browser detection signals so sites that block automation render normally. No new dependencies. (#DIF-015c)
 - Recorder device profiles: select a device (iPhone 14, Pixel 7, iPad Pro, etc.) at session launch or mid-session; captured steps are preserved across device switches. (#DIF-015c)
@@ -20,11 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Worker concurrency respects `WORKER_CONCURRENCY` env var (with `MAX_WORKERS` as fallback) for per-container parallelism. (#9)
+- `POST /api/v1/auth/login` response shape extended: when MFA is enabled or a passkey is registered, returns `{ mfaRequired: true, pendingToken, methods: { totp, webauthn } }` instead of the user object and an auth cookie. The cookie is only issued after a successful `/auth/mfa/verify` or `/auth/webauthn/authenticate/verify` exchange. Existing password-only logins still return `{ user }` plus the cookie unchanged. (SEC-004)
+- `PATCH /api/v1/workspaces/current` accepts new `mfaRequired` (boolean or 0/1) and `mfaGracePeriodDays` (0–90) fields for admin-controlled MFA enforcement. The `mfaPolicyUpdatedAt` timestamp anchors the grace clock and is stamped only on `mfaRequired` transitions, not on unrelated edits. (SEC-004)
 
 ### Fixed
 - `render.yaml` Dockerfile path corrected so Render deployments no longer fail at build time. (#INF-006)
 
 ### Security
+- **SEC-004** — TOTP secrets stored AES-256-GCM encrypted at rest via the existing `credentialEncryption` helper. Recovery codes hashed with SHA-256 (never persisted raw) and compared in constant time via `crypto.timingSafeEqual` to avoid leaking which slot matched. TOTP verification iterates every clock-skew window and uses `timingSafeEqual` so total runtime does not leak which window matched (or whether any did). Pending-MFA login tokens are 24-byte base64url, single-use, 5-minute TTL, with a periodic purge sweep. WebAuthn credentials are user-scoped on delete (cross-user delete returns 404). Per-IP rate limits on `/auth/mfa/enroll`, `/auth/mfa/verify`, and `/auth/webauthn/authenticate/verify` cap brute-force on the 6-digit TOTP / recovery code spaces.
 - **SEC-007** — Recorder credential redaction: password fields, OTP codes, payment card numbers, and `data-sentri-secret` fields are now redacted before storage. Sensitive values never reach the database, AI pipeline, or generated test code. Generated tests reference `process.env.SENTRI_SECRET_N` so credentials can be stored in a secret vault and injected at run time.
 
 ---
