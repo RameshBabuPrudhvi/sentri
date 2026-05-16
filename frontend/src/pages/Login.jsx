@@ -319,13 +319,20 @@ export default function Login() {
         // is past the grace window. Render a dedicated panel instead of the
         // generic error — they need a workspace admin to either disable
         // enforcement, extend grace, or enroll them out-of-band.
+        //
+        // Tag the rethrown error with `_mfaHandled = true` so the outer catch
+        // (line below) knows the dedicated panel covers the failure and
+        // skips the generic error banner. The previous approach threw a
+        // blank-message Error which relied on `setError("")` rendering as a
+        // no-op — fragile because any future "fallback to a non-empty
+        // message" change in the outer catch would silently start showing a
+        // spurious banner underneath the dedicated panel.
         if (fetchErr.body?.code === "MFA_ENROLLMENT_REQUIRED") {
           setMfaEnrollmentRequired({
             workspaceId: fetchErr.body.workspaceId,
             workspaceName: fetchErr.body.workspaceName,
           });
-          // Suppress the generic error banner — the dedicated panel covers it.
-          throw new Error("");
+          fetchErr._mfaHandled = true;
         }
         throw fetchErr;
       }
@@ -366,7 +373,12 @@ export default function Login() {
         }
         login(data.user);
       }
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      // SEC-004: skip the generic banner when the MFA_ENROLLMENT_REQUIRED
+      // handler above already surfaced the dedicated panel. See `_mfaHandled`
+      // comment in the inner catch for rationale.
+      if (!e._mfaHandled) setError(e.message);
+    }
     finally { setLoading(false); }
   }
 
