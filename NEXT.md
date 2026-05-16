@@ -12,10 +12,12 @@ Flag adjacent items as bundling candidates in your PR description rather than ex
 
 ---
 
-## ▶ Current PR — SEC-007 — Compliance audit log surface (full scope: immutability + auth events + admin export + retention + SIEM)
-**Effort:** L | **Priority:** 🟡 High | **Dependencies:** SEC-004 ✅ (MFA emits `auth.mfa.*` rows), ACL-001 ✅ (workspace scoping), ACL-002 ✅ (admin role gate), ENH-007 ✅ (signed-URL pattern for >5MB exports), ENH-010 ✅ (pagination primitives), FEA-001 ✅ (webhook dispatcher reused for SIEM forwarding) | **Source:** `ROADMAP.md` Phase 5 (SEC-007) — **full scope**: all three audit-driven parts ship in one PR. Agents own the feature end-to-end; the phased split in `ROADMAP.md` is collapsed into a single deliverable.
-**Problem:** Sentri's `activities` table is the de-facto audit log but fails SOC 2 / ISO 27001 on six counts: (1) admins can truncate it via `DELETE /api/v1/data/activities` in `backend/src/routes/system.js`; (2) password-path auth events (`auth.login`, `auth.login.failed`, `auth.logout`, `auth.password.reset`, `auth.role.change`, `auth.api_key.{create,revoke}`, `auth.session.revoke`) are not emitted — only the MFA subset is; (3) rows lack `ipAddress` / `userAgent` so an auditor cannot reconstruct session context; (4) no admin compliance surface (the per-project Activity feed is a developer view); (5) no CSV / NDJSON export for evidence requests; (6) no retention policy or SIEM streaming.
-**Fix — three logical parts, all shipped in this PR:**
+## ▶ Current PR — INF-007 — OTel / Sentry observability
+**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** none — bundles naturally with MNT-013 (request-ID propagation) | **Source:** `ROADMAP.md` Phase 5 (INF-007)
+`@opentelemetry/sdk-node` auto-instrumentation for Express/pg/Redis/HTTP; `requestId` via `AsyncLocalStorage` plumbed through `formatLogLine()`; Prometheus `/metrics` endpoint via `prom-client` (scrape-key protected); `@sentry/node` + `@sentry/react` behind `SENTRY_DSN` (no-op when unset).
+
+**Problem:** Sentri has zero observability infrastructure. Backend errors surface only in `console.error`; there are no distributed traces, no structured metrics, no crash-reporting pipeline, and no Prometheus scrape endpoint. Operators deploying to production have no way to answer "what's slow?", "what's failing?", or "how many requests per second?" without grepping logs. Every competitor (Mabl, Testim, BrowserStack) ships with built-in APM.
+**Fix:**
 ### Part A — Immutability + auth events
 1. Env-gate `DELETE /api/v1/data/activities` behind `DANGER_ALLOW_AUDIT_PURGE=true` (default off). Returns `403 AUDIT_PURGE_DISABLED` otherwise.
 2. Additive migration `031_activities_compliance.sql` adds `ipAddress TEXT NULL`, `userAgent TEXT NULL`, and optional `prevHash TEXT NULL` columns to `activities`. Null-tolerant for historical rows.
@@ -84,10 +86,7 @@ Flag adjacent items as bundling candidates in your PR description rather than ex
 - [ ] ROADMAP.md `### SEC-007` section flipped from queue-text to `**Status:** ✅ Complete (PR #N)` stub with full implementation prose moved to the Completed Work Summary table
 ---
 ## ⏭ Queue (next 4 PRs after current)
-### 1 · INF-007 — OTel / Sentry observability
-**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** none — bundles naturally with MNT-013 (request-ID propagation) | **Source:** `ROADMAP.md` Phase 5 (INF-007)
-`@opentelemetry/sdk-node` auto-instrumentation for Express/pg/Redis/HTTP; `requestId` via `AsyncLocalStorage` plumbed through `formatLogLine()`; Prometheus `/metrics` endpoint via `prom-client` (scrape-key protected); `@sentry/node` + `@sentry/react` behind `SENTRY_DSN` (no-op when unset).
-### 2 · INF-008 — Postgres-default + dual-DB CI matrix
+### 1 · INF-008 — Postgres-default + dual-DB CI matrix
 **Effort:** M | **Priority:** 🔴 Blocker | **Dependencies:** INF-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (INF-008)
 Rename colliding migration prefixes (`007_*` × 2, `015_*` × 2); fix `migrationRunner.js` sort; default `.env.example` + `docker-compose.yml` to Postgres; CI matrix `db: [sqlite, postgres]` runs full `npm test` under both; new `lint-migrations.mjs` fails on duplicate prefixes.
 ### 3 · AUTO-022 — AI eval harness with golden-set regression
@@ -119,6 +118,7 @@ Items that do not overlap SEC-007 Phase 1's changed files and can land in a sepa
 
 | ID | Title | PR |
 |----|-------|----|
+| SEC-007 | Compliance audit log — immutability gate (`DANGER_ALLOW_AUDIT_PURGE`), 8 password-path `auth.*` events with IP+UA, SHA-256 hash chain (`AUDIT_HASH_CHAIN`), cursor-paginated admin surface with CSV/NDJSON export + anti-exfiltration rate-limiter, meta-audit (`audit.read`/`audit.export` per PCI-DSS 10.2.6), daily retention sweep (`AUDIT_RETENTION_DAYS`), SIEM forwarder (`dispatchSiemEvent` with HMAC-SHA256 + 3-retry + DLQ), per-workspace SIEM config (AES-256-GCM encrypted secret), DLQ inspector + replay, `docs/guide/compliance.md`, 44-step QA.md manual test plan, 3 backend test suites (audit-log-routes + audit-auth-events + audit-siem-forwarder) | #12 |
 | SEC-006 | PII firewall — `domSanitizer` pipeline stage redacting emails / phones / SSNs / Luhn-checked cards / JWTs / Bearer & Basic auth headers / `?token=` / `?code=` / `?access_token=` query params before crawler snapshots reach `aiProvider.js`; deterministic placeholders, per-project `strictPiiFirewall` toggle + `piiAllowlist`, migration `030_projects_pii_firewall.sql`, `pipeline.pii_redacted` structured audit log | #11 |
 | SEC-004 | MFA — TOTP enrollment + recovery codes + WebAuthn passkeys, per-workspace enforcement with grace period, JWT `amr` claim, login factor picker, audit logging | #10 |
 | AUTO-008 | Distributed runner — standalone `worker` Compose service, `WORKER_CONCURRENCY` env var, dashboard worker-pool panel (Runner Mode / Queue Depth / Active Workers / Completed Jobs) | #9 |

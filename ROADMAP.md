@@ -15,11 +15,11 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `SEC-007 Phase 1` (compliance audit log surface — env-gate `DELETE /api/v1/data/activities` behind `DANGER_ALLOW_AUDIT_PURGE`, capture `ipAddress` + `userAgent` on `activities` rows, emit the 7 password-path `auth.*` events) — promoted after `SEC-006` (PII firewall — `domSanitizer` redacting emails / phones / cards / JWTs / Bearer tokens / auth query params with deterministic placeholders + per-project `strictPiiFirewall` / `piiAllowlist`) shipped in PR #11. SEC-007 Phase 2 (admin surface + CSV/NDJSON export + retention sweep) holds queue slot 1. INF-007 (OTel) slot 2, INF-008 (Postgres-default + dual-DB CI matrix) slot 3, AUTO-022 (AI eval harness) slot 4.
+> **Current sprint:** `INF-007` (OTel / Sentry observability) — promoted after `SEC-007` (compliance audit log — full scope: immutability + auth events + admin export + retention + SIEM forwarder) shipped in PR #12. INF-008 (Postgres-default + dual-DB CI matrix) holds queue slot 1, AUTO-022 (AI eval harness) slot 2, INF-009 (Helm chart + K8s + DR) slot 3.
 >
 > **Blockers:** none remaining · **Remaining:** ~15 planned items across Phases 2–5 + Maintenance (see Summary table at the bottom for the authoritative breakdown).
 >
-> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
+> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): SEC-007 PR #12 · SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
 
 ---
 
@@ -148,7 +148,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | ✅ Mostly complete — SEC-001/002/003/004, INF-001/002/003/004/005/006, ACL-001/002, FEA-001/002/003, ENH-036 + ENH-036b all ✅ (SEC-004 MFA shipped in PR #10 with TOTP + WebAuthn + per-workspace enforcement); SEC-005 (SSO) tracked as 🟢 Strategic under Phase 5 per AUDIT.md severity reconciliation | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/005/006/007/011/012/013/014/015/016 ✅ — DIF-005 embedded trace viewer shipped in PR #9; **INT-002** GitHub PR check comments shipped in PR #15; **DIF-012** multi-environment support shipped in PR #2); remaining: DIF-008–010, DIF-015b/c sub-items | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-001/002/002b/003/003b/004/005/006/007/008/010/012/013/015/015b/016/016b/017/017.3/019 ✅ (AUTO-008 shipped in PR #9, AUTO-010 in PR #6, AUTO-004 in PR #18, AUTO-001 in PR #15); remaining: AUTO-009, AUTO-011, AUTO-014, AUTO-018, AUTO-021 (AUTO-020 superseded by AUTO-015) · Capabilities row: CAP-001 (data-driven) ✅ PR #1, CAP-002 (sharding) ✅ PR #3; CAP-002b (SaaS-readiness follow-ups) tracked separately in Summary | 14–18 weeks |
-| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11); SEC-007 Phase 1 audit-log immutability + auth events — current sprint; remaining 3× 🔴 Blocker (INF-007 OTel, INF-008 Postgres-default, AUTO-022 eval harness). Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
+| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11), SEC-007 compliance audit log ✅ (PR #12); INF-007 OTel — current sprint; remaining 2× 🔴 Blocker (INF-008 Postgres-default, AUTO-022 eval harness). Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
@@ -622,7 +622,9 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ---
 
-### SEC-007 — Compliance audit log surface + export + SIEM integration 🟡 High
+### SEC-007 — Compliance audit log surface + export + SIEM integration
+
+**Status:** ✅ Complete (PR #12) — full scope shipped: Part A (immutability gate + 8 auth events with IP/UA + hash chain), Part B (admin compliance surface + cursor pagination + CSV/NDJSON export + meta-audit + anti-exfiltration rate-limiter + retention sweep), Part C (SIEM forwarder with HMAC-SHA256 + 3-retry + DLQ + per-workspace encrypted config). See Completed Work Summary table for implementation details.
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** AUDIT.md Enterprise Readiness §9 (formerly `ENT-002` in AUDIT_IMPL.md)
 
