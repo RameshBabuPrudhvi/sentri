@@ -73,6 +73,7 @@ export default defineConfig({
           text: 'Advanced',
           items: [
             { text: 'Authentication', link: '/guide/authentication' },
+            { text: 'Compliance Audit Log', link: '/guide/compliance' },
             { text: 'Rebranding', link: '/guide/rebranding' },
             { text: 'Production Checklist', link: '/guide/production' },
           ],

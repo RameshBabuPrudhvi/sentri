@@ -1588,6 +1588,114 @@ For each surface: open → fill → submit → close behavior.
 
 ---
 
+### 🛡️ Compliance Audit Log (SEC-007)
+
+**Preconditions:** Workspace exists with User A (admin), User B (qa_lead), User C (viewer), and User D (outsider). Backend env starts with defaults (no overrides): `AUDIT_HASH_CHAIN` unset, `DANGER_ALLOW_AUDIT_PURGE=false`, `AUDIT_RETENTION_DAYS=365`, `AUDIT_EXPORT_RATE_LIMIT` unset (defaults to 10). Full operator reference: `docs/guide/compliance.md`.
+
+**Surfaces covered:** `/audit-log` admin page; `GET /api/v1/workspaces/:workspaceId/audit-log` (JSON / CSV / NDJSON); `GET /api/v1/audit/verify`; `GET /api/v1/workspaces/:workspaceId/audit-log/dlq`; `POST .../dlq/:dlqId/replay`; `DELETE /api/v1/data/activities`.
+
+#### A. Admin gate (defense-in-depth)
+
+1. As User C (`viewer`), navigate to `/audit-log` → `<ProtectedRoute requiredRole="admin">` renders a `403 Access Denied` panel; AuditLog never mounts.
+2. As User B (`qa_lead`), `/audit-log` → same 403 panel.
+3. As User A (`admin`), `/audit-log` → page mounts; stats strip, type chips, and feed render.
+4. As User C via DevTools, call `GET /api/v1/workspaces/<your-ws-id>/audit-log` directly → server `requireRole("admin")` returns **403** (not silent empty data).
+
+#### B. Workspace scope (cross-tenant isolation)
+
+5. As User A (admin of WS-1), call `GET /api/v1/workspaces/WS-OTHER/audit-log` via DevTools → **403 `AUDIT_WORKSPACE_MISMATCH`**. The URL param is NOT used for the query; `req.workspaceId` from the JWT is the trust boundary.
+6. Same with `GET /api/v1/workspaces/WS-OTHER/audit-log/dlq` → **403** with same code.
+7. As User D (outsider, no membership row), `GET /api/v1/workspaces/<any-id>/audit-log` → **403** from `workspaceScope` middleware (no workspace context).
+
+#### C. Auth events captured with IP + UA (SOC 2 CC6.1)
+
+8. In Chrome DevTools → Sensors, set a custom User-Agent like `qa-test-ua/1.0`. Sign in fresh as User B.
+9. As User A on `/audit-log`, filter chip **Auth** → the most recent `auth.login` row for User B is visible.
+10. Hover the actor name → tooltip surfaces `<client-IP> · qa-test-ua/1.0` (both fields populated).
+11. Trigger each event via the UI and verify the row appears with IP + UA in the actor tooltip:
+    - **`auth.login.failed`** — sign out, sign in with wrong password
+    - **`auth.logout`** — sign out via `/logout`
+    - **`auth.password.reset`** — request reset, complete via token
+    - **`auth.role.change`** — as User A, demote User B → meta has `{from, to, changedBy}`
+    - **`auth.api_key.create`** — Settings → save an AI provider key. **Verify the raw key value NEVER appears** in the activity row meta or detail (grep its content).
+    - **`auth.api_key.revoke`** — Settings → delete the provider key
+    - **`auth.session.revoke`** — Settings → MFA → Disable MFA → emits row with `meta.reason: "mfa.disabled"`
+12. Automated regression coverage: `backend/tests/audit-auth-events.test.js`.
+
+#### D. Meta-audit (PCI-DSS 10.2.6, SOC 2 CC7.2)
+
+13. As User A on `/audit-log`, find a recent `audit.read` row → its meta panel shows the filter shape of an earlier admin view (`format`, `filters`, `rowCount`).
+14. Click **Export CSV** → file downloads → reload `/audit-log` → a new `audit.export` row appears with `meta.format: "csv"` and the row count.
+15. Click **Export NDJSON** → file downloads with `Content-Type: application/x-ndjson` and `Content-Disposition: attachment; filename="sentri-audit-log-YYYY-MM-DD.ndjson"` → corresponding `audit.export` row with `meta.format: "ndjson"`.
+16. **Bulk exfil scenario** — script 12 CSV downloads via DevTools `fetch` → after the 10th, requests return **429 `AUDIT_EXPORT_RATE_LIMITED`**. The first 10 each fire one `audit.export` row (fully traceable).
+17. JSON browsing (no `?format=`) does NOT count toward the limit — verify by loading `/audit-log` 11 times → no 429.
+
+#### E. Cursor pagination
+
+18. Trigger ≥ 200 activity events. Open `/audit-log` → first page loads up to `PAGE_SIZE=50` rows.
+19. Click **Load more** → next 50 rows append; no duplicates, no skipped rows. Verify every `createdAt` is strictly less than the prior page's tail timestamp.
+20. While "Load more" is visible, push a new activity row from another tab (e.g. approve a test as User B) → click Load more → the new row does NOT shift the page window. The cursor anchors stably under concurrent writes.
+21. Filter chip changes (Auth / Approvals / Other / project dropdown) reset the cursor and refetch atomically — rows replace, not append.
+
+#### F. Hash chain (opt-in tamper evidence)
+
+22. **Chain disabled (default)** — click **Verify chain** → banner: "Hash chain is disabled on this server (set `AUDIT_HASH_CHAIN=true` to enable tamper-evidence)."
+23. Restart backend with `AUDIT_HASH_CHAIN=true`. Trigger 5 fresh activities.
+24. Click **Verify chain** → banner: `✓ Chain verified · N rows`.
+25. **Tamper test** — stop backend, `UPDATE activities SET detail = 'tampered' WHERE id = '<recent ACT-N>'` via SQLite CLI, restart.
+26. Click **Verify chain** → banner flips to `✗ Chain broken at row ACT-<tampered-id> (N rows scanned)` in red.
+27. **Concurrency** — fire 10 parallel test approvals with chain mode on → all rows persist with valid `prevHash` (Verify Chain → still green). Transactional INSERT prevents siblings chaining off the same predecessor.
+
+#### G. Retention sweep + boot validation (SOC 2 CC7.2)
+
+28. Set `AUDIT_RETENTION_DAYS=50` → restart → boot fails with error including `below the SOC 2 / ISO 27001 minimum of 90 days`.
+29. Set `AUDIT_RETENTION_DAYS=abc` → boot fails with "must be a non-negative integer".
+30. Set `AUDIT_RETENTION_DAYS=-1` → boot fails (same message).
+31. Set `AUDIT_RETENTION_DAYS=0` → boot succeeds; backend log: `audit retention armed`. The sweep is armed but never deletes.
+32. Set `AUDIT_RETENTION_DAYS=90`. Seed an old row via CLI: `INSERT INTO activities(id, type, createdAt, workspaceId) VALUES ('ACT-OLD', 'test.create', datetime('now', '-100 days'), '<WS>')`.
+33. Wait for 03:30 UTC cron tick, or call `purgeOlderThan(90)` via Node REPL → log: `[scheduler] Audit retention sweep deleted 1 row(s) older than 90 days`.
+34. Fresh rows (< 90 days) survive.
+
+#### H. Immutability gate (`DANGER_ALLOW_AUDIT_PURGE`)
+
+35. **Default** — as User A, System page → **Clear activity log** → `DELETE /api/v1/data/activities` returns **403 `AUDIT_PURGE_DISABLED`**.
+36. Activity log unchanged; no rows deleted.
+37. **Incident-response path** — set `DANGER_ALLOW_AUDIT_PURGE=true` → restart → repeat the delete → succeeds with `200 { ok: true, cleared: N }`. Workspace's `activities` rows emptied.
+38. **Always revert the env to `false` immediately after the incident**.
+
+#### I. SIEM dead-letter queue (pre-Part-C state)
+
+39. Click **DLQ (0)** in `/audit-log` header → empty inspector with "No failed dispatches."
+40. Simulate a stuck DLQ row via SQLite CLI: `INSERT INTO audit_dlq(id, workspaceId, rowSnapshot, lastError, attempts, createdAt) VALUES ('DLQ-1', '<WS-id>', '{"id":"ACT-1","type":"test.create"}', 'siem upstream 500', 1, datetime('now'))`.
+41. Reload `/audit-log` → header reads **DLQ (1)** → click → row listed with columns `id`, `createdAt`, `attempts`, `lastError`, **Replay** button.
+42. Click **Replay** → `POST .../dlq/DLQ-1/replay` returns **503 `SIEM_NOT_CONFIGURED`**. UI surfaces this as an info notification: "SIEM forwarding isn't configured on this server yet (Part C)." Row stays in the DLQ.
+43. **Permissions** — as User C (`viewer`), call the DLQ list endpoint → 403. Replay endpoint → 403.
+44. **Cross-workspace replay** — manually POST to `.../workspaces/<OTHER-WS>/audit-log/dlq/<some-dlq-id>/replay` → 403 `AUDIT_WORKSPACE_MISMATCH`.
+
+#### J. Negative / edge cases
+
+- Empty audit log: `/audit-log` shows empty state (no crash).
+- Unknown DLQ id: `POST .../dlq/DLQ-NOT-FOUND/replay` → 404 `AUDIT_DLQ_NOT_FOUND`.
+- `?limit=99999` → clamped to 1000 server-side (defense-in-depth against memory exhaustion).
+- Chain-mode + retention: rows older than the window are deleted; remaining rows still verify cleanly among themselves, but the chain head moves forward (documented in `docs/guide/compliance.md`).
+- API key value in `auth.api_key.create` row: grep `activities.meta` after key creation — only `provider` is logged, never the raw key.
+- Invalid `cursor` in URL (`?cursor=garbage`) → server treats it as missing and returns the first page.
+
+#### K. Standards mapping reference
+
+| Control verified | SOC 2 | ISO 27001 | PCI-DSS |
+|---|---|---|---|
+| Auth events with IP+UA (§C) | CC6.1 | A.8.16 | 10.2 |
+| Workspace-scope assertion (§B) | CC6.6 | A.5.18 | 7.2 |
+| Anti-exfil export limiter (§D #16) | CC6.7 | A.8.12 | — |
+| Hash chain + verification (§F) | CC7.1 | A.5.36 | 10.5.2 |
+| Retention floor + sweep (§G) | CC7.2 | A.8.15 | 10.5.1 |
+| Immutability gate (§H) | CC7.2 | A.8.15 | 10.5.2 |
+| Meta-audit `audit.read/.export` (§D) | CC7.2 | A.8.15 | **10.2.6** |
+| DLQ + SIEM (§I, Part C) | CC7.2 | A.8.16 | 10.5.4 |
+
+---
+
 ## 📱 Cross-Cutting Checks
 
 Run these against the full browser matrix (Chrome, Firefox, Safari, Edge):
