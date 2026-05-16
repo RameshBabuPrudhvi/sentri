@@ -781,6 +781,23 @@ export default function AuditLog() {
     const url = `${API_PATH}/workspaces/${workspaceId}/audit-log?${params.toString()}`;
     try {
       const res = await fetch(url, { credentials: "include" });
+      // SEC-007: raw fetch bypasses api.js's req() wrapper (because the
+      // response is binary CSV/NDJSON, not JSON). Streaming endpoints that
+      // bypass req() must still handle 401 — matching the pattern at
+      // api.js exportAccountData (line ~1024). Without this, a stale
+      // session silently falls through to the !res.ok branch and shows a
+      // generic "Export failed" notification instead of redirecting to login.
+      if (res.status === 401) {
+        try { localStorage.removeItem("app_auth_user"); } catch { /* localStorage unavailable */ }
+        const path = window.location.pathname;
+        if (!path.endsWith("/login") && !path.endsWith("/forgot-password")) {
+          const base = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL)
+            ? import.meta.env.BASE_URL.replace(/\/$/, "")
+            : "";
+          window.location.href = `${base}/login`;
+        }
+        return;
+      }
       if (res.status === 429) {
         const errBody = await res.json().catch(() => ({}));
         addNotification({
