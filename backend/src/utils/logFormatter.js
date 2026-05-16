@@ -1,4 +1,3 @@
-import { getRequestId } from "./observability.js";
 /**
  * @module utils/logFormatter
  * @description Centralised log formatting with `.env`-driven configuration.
@@ -17,6 +16,8 @@ import { getRequestId } from "./observability.js";
  * - {@link shouldLog} — Check if a level should be printed.
  * - {@link LOG_LEVEL} — Configured minimum log level (numeric).
  */
+
+import { getRequestId } from "./observability.js";
 
 // ─── Log levels ───────────────────────────────────────────────────────────────
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };

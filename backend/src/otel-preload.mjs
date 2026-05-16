@@ -65,9 +65,35 @@ if (process.env.SENTRY_DSN) {
       dsn: process.env.SENTRY_DSN,
       tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0),
       beforeSend(event) {
-        // Strip request headers — they routinely contain Authorization,
-        // Cookie, and X-CSRF-Token values we never want leaving the host.
-        if (event.request) delete event.request.headers;
+        // INF-007: Aggressive PII scrub on the backend Sentry payload. The
+        // `event.request` block populated by `Sentry.setupExpressErrorHandler`
+        // captures the entire request shape by default — headers, cookies,
+        // query string, AND parsed body. For a QA platform that handles
+        // credentials (`/auth/login`, `/auth/mfa/verify`, `/auth/oauth/*`),
+        // OAuth tokens, and customer-supplied project secrets, ANY of those
+        // fields can carry payloads we must not ship to a third-party crash
+        // reporter (GDPR / SOC 2 minimum bar).
+        //
+        // We strip everything except the route template — that's enough to
+        // group errors meaningfully without leaking payload contents. Pair
+        // this with the `workspace_id` / `user_role` Sentry tags set in
+        // `middleware/workspaceScope.js#attachSentryContext` to get tenant
+        // attribution without PII.
+        if (event.request) {
+          delete event.request.headers;        // Authorization, Cookie, X-CSRF-Token
+          delete event.request.cookies;        // session, refresh, token_exp
+          delete event.request.data;           // POST/PUT body — passwords, TOTP, OAuth codes
+          delete event.request.query_string;   // OAuth `code`, magic-link `token`, reset `t`
+          delete event.request.env;            // REMOTE_ADDR / IP
+        }
+        // Defence in depth: the SDK can also populate top-level user-pii
+        // fields from auto-instrumentation. Drop them — the only user
+        // context we keep is the anonymous `id` set in `workspaceScope.js`.
+        if (event.user) {
+          delete event.user.email;
+          delete event.user.username;
+          delete event.user.ip_address;
+        }
         return event;
       },
     });

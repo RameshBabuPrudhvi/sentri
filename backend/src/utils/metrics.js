@@ -31,7 +31,28 @@
 import client from "prom-client";
 
 export const register = new client.Registry();
-client.collectDefaultMetrics({ register });
+
+// INF-007: `collectDefaultMetrics` starts an internal `setInterval` to sample
+// process / heap / GC / event-loop stats. The returned handle is the timer
+// reference — we `.unref()` it so an idle metrics tick can NEVER keep the
+// Node event loop alive on its own.
+//
+// Without the `.unref()`:
+//   - `npm test` would hang for up to 10s per test file after assertions
+//     pass because `runner.summary()` only `process.exit()`s on failure
+//     (see `tests/helpers/test-base.js:355`); on success the process must
+//     idle out, and an active interval blocks that.
+//   - CLI tooling that imports anything which transitively pulls in this
+//     module (run-once scripts, migration runners, the `lint-migrations.mjs`
+//     INF-008 helper) would have the same hang at exit.
+//
+// In production this is a no-op: the HTTP server, BullMQ worker, and SSE
+// listeners all hold the event loop open on their own — the unref'd
+// interval still fires every 10s for as long as the process is alive.
+const _defaultMetricsTimer = client.collectDefaultMetrics({ register });
+if (_defaultMetricsTimer && typeof _defaultMetricsTimer.unref === "function") {
+  _defaultMetricsTimer.unref();
+}
 
 // ─── Histogram bucket presets ────────────────────────────────────────────────
 // Bucket choice is the most important histogram tuning decision. Different
