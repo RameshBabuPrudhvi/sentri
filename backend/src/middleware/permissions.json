@@ -334,6 +334,10 @@
     "DELETE /api/v1/projects/:id/environments/:environmentId": {
       "role": "admin",
       "source": "backend/src/routes/projects.js"
+    },
+    "GET /metrics": {
+      "role": "admin",
+      "source": "backend/src/middleware/appSetup.js"
     }
   },
   "anyAuthenticatedMember": [

@@ -21,7 +21,16 @@
  * compatibility during the transition window (INF-005).
  */
 
+// INF-007: OpenTelemetry + Sentry are initialised in `src/otel-preload.mjs`,
+// which Node loads via `--import` BEFORE any module in this graph (NEXT.md
+// INF-007 acceptance criterion). Importing them here would be too late —
+// `@opentelemetry/auto-instrumentations-node` monkey-patches `express`, `pg`,
+// and `ioredis` at import time, and those modules are already on the import
+// chain via `appSetup.js` below. See `src/otel-preload.mjs` for the full
+// rationale. Run scripts (`npm start`, `npm run dev`, Dockerfile CMD, and
+// the worker compose command) all pass `--import ./src/otel-preload.mjs`.
 import dotenv from "dotenv";
+import * as Sentry from "@sentry/node";
 import { getDatabase, closeDatabase } from "./database/sqlite.js";
 import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
@@ -409,6 +418,15 @@ app.get("*", (req, res, next) => {
   if (req.path.startsWith("/health") || req.path === "/api/docs") return next();
   serveIndexWithNonce(req, res);
 });
+
+// ─── INF-007: Sentry Express error handler ───────────────────────────────────
+// Registered AFTER all route + SPA-fallback handlers so it catches unhandled
+// errors bubbling out of any route. `setupExpressErrorHandler` is a no-op
+// when `Sentry.init()` was not called (i.e. `SENTRY_DSN` unset), so this is
+// safe to register unconditionally.
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;

@@ -12,6 +12,7 @@
  */
 
 import React from "react";
+import * as Sentry from "@sentry/react";
 import { getCsrfToken } from "../../utils/csrf.js";
 import { API_PATH } from "../../utils/apiBase.js";
 
@@ -54,6 +55,7 @@ export default class ErrorBoundary extends React.Component {
    */
   componentDidCatch(error, errorInfo) {
     this.setState({ info: errorInfo?.componentStack ?? null });
+    if (import.meta.env.VITE_SENTRY_DSN) Sentry.captureException(error);
 
     // Log to the server so crashes surface in backend logs even when
     // the user doesn't report them. Failures are silently swallowed so

@@ -1,0 +1,225 @@
+# INF-007 — Prometheus alerting rules for the Sentri SaaS backend.
+#
+# This is the canonical alert spec. Mount it in your Prometheus config:
+#
+#   rule_files:
+#     - /etc/prometheus/sentri/alerts.yml
+#
+# Every alert has a `runbook_url` annotation pointing at
+# `docs/guide/observability.md` — the on-call engineer should be able to
+# resolve any alert by following the matching runbook section, with no
+# tribal-knowledge dependency.
+#
+# Severity conventions:
+#   - critical → page on-call immediately (customer-visible outage / data loss risk)
+#   - warning  → notify channel; investigate within 1 business day
+#
+# Window / `for:` discipline:
+#   - 5m for fast-moving SaaS SLIs (error rate, p99 latency) so we don't
+#     wake operators on a 90-second blip.
+#   - 15m for resource-saturation alerts (queue depth, memory) so we
+#     don't flap on legitimate burst traffic.
+
+groups:
+  - name: sentri-saas-availability
+    rules:
+      # ── HTTP error-rate SLO ────────────────────────────────────────────────
+      # 5xx ratio over a 5-minute window. Page on-call when > 1% sustained.
+      # Excludes 4xx (client errors are expected and out of our control).
+      - alert: HighHttpErrorRate
+        expr: |
+          (
+            sum(rate(app_http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(app_http_requests_total[5m]))
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Backend 5xx error rate above 1% for 5 minutes"
+          description: "{{ $value | humanizePercentage }} of HTTP requests are returning 5xx. Customer-visible outage signal. Check Sentry for the top errors and the deploy-history dashboard."
+          runbook_url: "https://docs.sentri.dev/guide/observability#highhttperrorrate"
+
+      # ── HTTP latency SLO ───────────────────────────────────────────────────
+      - alert: HighApiLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(app_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API p99 latency above 2s"
+          description: "p99 API latency is {{ $value }}s over 5 min. Drill into per-route latency in Grafana."
+          runbook_url: "https://docs.sentri.dev/guide/observability#highapilatencyp99"
+
+  - name: sentri-saas-runs
+    rules:
+      # ── Run failure-rate SLI ───────────────────────────────────────────────
+      # Excludes `aborted` (user cancellation) and `completed_empty`
+      # (legitimate no-change crawls).
+      - alert: HighRunFailureRate
+        expr: |
+          (
+            sum(rate(app_run_outcome_total{status="failed"}[15m]))
+            /
+            sum(rate(app_run_outcome_total[15m]))
+          ) > 0.05
+        for: 15m
+        labels:
+          severity: warning
+          component: pipeline
+        annotations:
+          summary: "More than 5% of runs failed in the last 15 minutes"
+          description: "Failure ratio is {{ $value | humanizePercentage }}. Likely causes: AI provider outage, Playwright launch failure, or a customer site that started rejecting our crawler."
+          runbook_url: "https://docs.sentri.dev/guide/observability#highrunfailurerate"
+
+      # ── Run latency regression ─────────────────────────────────────────────
+      - alert: TestRunP99LatencyRegression
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(app_run_duration_seconds_bucket{type="test_run"}[5m]))
+          ) > 600
+        for: 10m
+        labels:
+          severity: warning
+          component: pipeline
+        annotations:
+          summary: "test_run p99 duration above 10 minutes"
+          description: "p99 test_run duration is {{ $value }}s. SaaS customers expect runs to finish in under a few minutes."
+          runbook_url: "https://docs.sentri.dev/guide/observability#testrunp99latencyregression"
+
+  - name: sentri-saas-queue
+    rules:
+      # ── Queue depth saturation ─────────────────────────────────────────────
+      - alert: QueueDepthSaturated
+        expr: app_queue_depth{state="waiting"} > 50
+        for: 15m
+        labels:
+          severity: critical
+          component: queue
+        annotations:
+          summary: "BullMQ waiting queue above 50 jobs for 15 minutes"
+          description: "Customers' runs are not making progress. Scale WORKER_CONCURRENCY or add more worker replicas."
+          runbook_url: "https://docs.sentri.dev/guide/observability#queuedepthsaturated"
+
+      # ── Failed-job accumulation ────────────────────────────────────────────
+      - alert: QueueFailedJobsGrowing
+        expr: increase(app_queue_depth{state="failed"}[1h]) > 10
+        for: 0m
+        labels:
+          severity: warning
+          component: queue
+        annotations:
+          summary: "More than 10 BullMQ jobs failed in the last hour"
+          description: "Poison-pill payload, downstream outage, or code regression. Inspect failed jobs via the Bull Board dashboard."
+          runbook_url: "https://docs.sentri.dev/guide/observability#queuefailedjobsgrowing"
+
+  - name: sentri-saas-ai-providers
+    rules:
+      # ── AI provider error rate ─────────────────────────────────────────────
+      # FEA-003 fallback chain should mask most transient failures — high
+      # threshold (15%) keeps the alert signal-rich.
+      - alert: AiProviderHighErrorRate
+        expr: |
+          (
+            sum by (provider) (rate(app_ai_provider_errors_total[5m]))
+            /
+            sum by (provider) (rate(app_ai_provider_latency_seconds_count[5m]))
+          ) > 0.15
+        for: 5m
+        labels:
+          severity: warning
+          component: ai
+        annotations:
+          summary: "AI provider {{ $labels.provider }} error rate above 15%"
+          description: "{{ $labels.provider }} is failing {{ $value | humanizePercentage }} of LLM calls. Check app_ai_provider_errors_total by reason to identify the failure mode (rate_limit / server_error / timeout / auth)."
+          runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderhigherrorrate"
+
+      # ── AI provider auth failures (security signal) ────────────────────────
+      # ANY auth failure is critical — keys shouldn't be invalid in production.
+      - alert: AiProviderAuthFailures
+        expr: increase(app_ai_provider_errors_total{reason="auth"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: ai
+        annotations:
+          summary: "AI provider {{ $labels.provider }} returned auth errors"
+          description: "Provider {{ $labels.provider }} is rejecting our credentials. Likely a rotated / revoked API key. Customer-visible: every workspace using this provider as their primary is broken."
+          runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderauthfailures"
+
+      # ── AI provider latency regression ─────────────────────────────────────
+      - alert: AiProviderHighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            sum by (provider, le) (rate(app_ai_provider_latency_seconds_bucket{outcome="success"}[5m]))
+          ) > 30
+        for: 10m
+        labels:
+          severity: warning
+          component: ai
+        annotations:
+          summary: "AI provider {{ $labels.provider }} p99 latency above 30s"
+          description: "p99 latency for successful calls to {{ $labels.provider }} is {{ $value }}s. Check vendor status page."
+          runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderhighlatencyp99"
+
+  - name: sentri-saas-runtime
+    rules:
+      # ── Event loop lag ─────────────────────────────────────────────────────
+      - alert: EventLoopLagHigh
+        expr: nodejs_eventloop_lag_seconds > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: runtime
+        annotations:
+          summary: "Node.js event-loop lag above 100ms for 10 minutes"
+          description: "Process is CPU-saturated or running sync work on the main thread. Likely a hot AI prompt loop, runaway crawl, or large sync DB migration."
+          runbook_url: "https://docs.sentri.dev/guide/observability#eventlooplaghigh"
+
+      # ── Heap pressure ──────────────────────────────────────────────────────
+      # IMPORTANT: `nodejs_heap_size_total_bytes` is V8's `heapTotal` — the
+      # *currently allocated* heap, which V8 dynamically resizes (shrinks
+      # after GC). Dividing used/total against it produces false positives:
+      # after a GC cycle shrinks `heapTotal`, the ratio spikes toward 1.0 even
+      # though heap usage is healthy relative to V8's actual `heap_size_limit`.
+      # The same pitfall is documented at `backend/src/index.js:373-377` where
+      # the `/health/ready` probe deliberately uses `v8.getHeapStatistics()`'s
+      # `heap_size_limit` instead.
+      #
+      # `prom-client.collectDefaultMetrics` does not expose `heap_size_limit`,
+      # so we alert on absolute resident-memory pressure instead — a value
+      # close to (and trending past) the container memory limit is the real
+      # OOM-kill predictor. The threshold here assumes a 2 GiB container; tune
+      # `HEAP_RSS_BYTES_HIGH` per deployment via a recording rule if your
+      # container memory request differs.
+      - alert: HeapUsageHigh
+        expr: process_resident_memory_bytes > 1.8e9
+        for: 15m
+        labels:
+          severity: warning
+          component: runtime
+        annotations:
+          summary: "Node.js RSS above 1.8 GiB for 15 minutes"
+          description: "Resident memory is {{ $value | humanize1024 }}B (approaching a 2 GiB container limit). Imminent OOM-kill risk. Bump container memory or hunt the leak (unbounded cache, runaway run.logs buffer)."
+          runbook_url: "https://docs.sentri.dev/guide/observability#heapusagehigh"
+
+      # ── Observability liveness (the meta-alert) ────────────────────────────
+      # If we stop receiving samples for our own metrics for 3 minutes, the
+      # scrape pipeline is broken — every other alert above is silently dark.
+      # `up` is emitted by Prometheus itself per scrape target.
+      - alert: BackendScrapeDown
+        expr: up{job=~"sentri.*"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          component: observability
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.instance }}"
+          description: "/metrics endpoint is unreachable for 3 minutes. Either the backend is down, the scrape key changed, or the network path is broken. Without this signal, every other alert is silently dark."
+          runbook_url: "https://docs.sentri.dev/guide/observability#backendscrapedown"

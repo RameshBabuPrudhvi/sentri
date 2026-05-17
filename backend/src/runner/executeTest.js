@@ -309,6 +309,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     boundingBoxes: [],
     stepCaptures: [],   // DIF-016: per-step screenshots
     stepTimings: [],    // DIF-016: per-step timing data
+    stepStatuses: [],   // INF-007/UX: authoritative per-step status (passed/failed/running) emitted by the sandbox via __beginStep/__captureStep — replaces the frontend's brittle keyword-matching heuristic.
     visualDiff: null,   // DIF-001: final-screenshot visual-regression result
     browser: opts.browser || "chromium", // DIF-002: browser engine this test ran under
     webVitals: null,
@@ -378,6 +379,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         // Collect per-step captures and timings from the instrumented run
         result.stepCaptures = codeResult.stepCaptures || [];
         result.stepTimings = codeResult.stepTimings || [];
+        result.stepStatuses = codeResult.stepStatuses || [];
 
       } else {
         // ── FALLBACK: No parseable code — run a basic smoke test ───────────
@@ -468,6 +470,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     // Collect any per-step captures/timings gathered before the failure
     result.stepCaptures = err.__stepCaptures || [];
     result.stepTimings = err.__stepTimings || [];
+    result.stepStatuses = err.__stepStatuses || [];
 
     // Screenshot the failure state
     try {

@@ -3,8 +3,9 @@
   "version": "1.7.3",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch-path=src src/index.js",
+    "start": "node --import ./src/otel-preload.mjs src/index.js",
+    "dev": "node --import ./src/otel-preload.mjs --watch-path=src src/index.js",
+    "worker": "node --import ./src/otel-preload.mjs src/worker.js",
     "test": "node tests/run-tests.js",
     "docs": "jsdoc -c jsdoc.json",
     "docs:watch": "nodemon --watch src -e js --exec 'npm run docs'",
@@ -28,7 +29,13 @@
     "pngjs": "^7.0.0",
     "uuid": "^11.0.5",
     "@axe-core/playwright": "^4.10.2",
-    "web-vitals": "^4.2.4"
+    "web-vitals": "^4.2.4",
+    "@opentelemetry/auto-instrumentations-node": "^0.53.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.53.0",
+    "@opentelemetry/sdk-node": "^0.53.0",
+    "prom-client": "^15.1.3",
+    "@sentry/node": "^8.33.1",
+    "@opentelemetry/api": "^1.9.0"
   },
   "optionalDependencies": {
     "@simplewebauthn/server": "^11.0.0",

@@ -84,7 +84,7 @@ services:
       dockerfile: backend/Dockerfile
     profiles:
       - redis
-    command: ["node", "src/worker.js"]
+    command: ["node", "--import", "./src/otel-preload.mjs", "src/worker.js"]
     environment:
       - AI_PROVIDER=${AI_PROVIDER}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
