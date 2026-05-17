@@ -57,6 +57,12 @@ function cachePath(cacheDir, golden) {
 /**
  * Build the replay adapter. Reads pre-recorded responses from `cacheDir`.
  * Throws on cache miss — CI must never silently score against a stub.
+ *
+ * Note: `run-eval.mjs` short-circuits BEFORE invoking the replay adapter
+ * when the harness is in cold-start state (empty cache + placeholder
+ * baseline). This adapter's strict throw-on-miss contract is preserved so
+ * that once any recordings exist, an accidentally-missing one fails loudly
+ * rather than silently scoring 0. See `isBootstrapState` in run-eval.mjs.
  */
 export function createReplayAdapter({ cacheDir }) {
   return async function generate(golden) {

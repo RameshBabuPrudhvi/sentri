@@ -227,7 +227,8 @@ uploads `eval-report.json` as an artifact for reviewers.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `eval cache miss for case-NNN (key …)` | New golden added or `PROMPT_VERSION` bumped without re-recording | Run `EVAL_RECORD=1 node backend/scripts/run-eval.mjs` and commit `.cache/<id>.<hash>.txt` |
+| `⚠️ AUTO-022 cold start — no cache entries recorded yet…` | First-run state: harness ships before any cache entries are recorded against the live LLM. CI exits 0 to unblock the merge. | Run `EVAL_RECORD=1 node backend/scripts/run-eval.mjs --write-baseline` on a maintainer machine with an LLM API key, commit the resulting `.cache/*.txt` + new `eval-baseline.json`. The cold-start guard turns off automatically when the baseline gains `perCase` / `byDimension` keys. |
+| `eval cache miss for case-NNN (key …)` | New golden added or `PROMPT_VERSION` / `EVAL_MODEL` changed without re-recording (cold-start guard already disabled because real recordings exist) | Run `EVAL_RECORD=1 node backend/scripts/run-eval.mjs` and commit `.cache/<id>.<hash>.txt` |
 | Aggregate score is suspiciously 1.0 on every case | Adapter is the identity stub, not the real pipeline | Confirm `pipelineAdapter.js#createDefaultPipeline` is wired and `EVAL_RECORD=1` was set when recording |
 | Regression message blames every case | Broad regression — likely a prompt-template change or model swap, not a localised bug | Compare prompt diff; consider rebaseline if intentional |
 | Replay works locally but CI fails | Stale cache committed; CI fetches fresh `node_modules` and may resolve a different model client | Re-record from a clean checkout |
