@@ -107,7 +107,16 @@ export function persistEvalRun({ cases, runId, ts } = {}) {
  */
 export function getEvalTrend({ windowDays = 30, limit = 500 } = {}) {
   const since = Date.now() - windowDays * 24 * 60 * 60 * 1000;
-  const aggregateRows = getSeries(EVAL_HARNESS_PROJECT_ID, METRIC_KEYS.aggregate, { since, limit });
+  // `order: "desc"` is the load-bearing flag here — `getSeries`'s default
+  // is ASC + LIMIT, which would silently drop the MOST RECENT runs once
+  // the eval harness accumulates more rows than `limit` allows. The trend
+  // chart cares about recent runs, not historical ones, so we sort
+  // newest-first in SQL and re-sort to ASC on the JS side at the bottom
+  // of this function. Without this, runs after roughly the first 10 fell
+  // off the window (50 cases × 1 aggregate row each = 50 rows per run, so
+  // limit=500 → only 10 runs surface even within a 30-day window).
+  const seriesOpts = { since, limit, order: "desc" };
+  const aggregateRows = getSeries(EVAL_HARNESS_PROJECT_ID, METRIC_KEYS.aggregate, seriesOpts);
   if (aggregateRows.length === 0) return [];
 
   // Group by runId. Same uuid → same run; aggregate the per-case scores
@@ -127,11 +136,12 @@ export function getEvalTrend({ windowDays = 30, limit = 500 } = {}) {
   // exactly once each. Skipping dimensions when zero rows exist for that
   // runId keeps the response stable across mid-migration data (a partial
   // run that crashed after writing only the aggregate row still surfaces).
+  // Same `order: "desc"` rationale as the aggregate query above.
   const dimensions = { selectors: METRIC_KEYS.selectors, actions: METRIC_KEYS.actions, assertions: METRIC_KEYS.assertions };
   const dimByRun = {};
   for (const [name, key] of Object.entries(dimensions)) {
     dimByRun[name] = new Map();
-    for (const row of getSeries(EVAL_HARNESS_PROJECT_ID, key, { since, limit })) {
+    for (const row of getSeries(EVAL_HARNESS_PROJECT_ID, key, seriesOpts)) {
       const runId = row.tags?.runId;
       if (!runId) continue;
       if (!dimByRun[name].has(runId)) dimByRun[name].set(runId, []);
