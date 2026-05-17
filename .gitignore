@@ -25,6 +25,11 @@ backend/artifacts/
 tests/e2e/artifacts/
 tests/e2e/EXECUTION_REPORT.md
 
+# AUTO-022 eval harness — local LLM response cache. CI runs in replay
+# mode against committed responses only when a recording exists, so this
+# directory must stay developer-local.
+backend/tests/fixtures/eval-goldens/.cache/
+
 # OS files
 .DS_Store
 Thumbs.db
