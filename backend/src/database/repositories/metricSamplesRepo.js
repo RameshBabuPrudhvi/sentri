@@ -34,12 +34,21 @@ export function insertSample({ projectId, metricKey, ts = Date.now(), value, tag
 }
 
 /**
+ * @typedef {Object} MetricSampleInput
+ * @property {string} projectId
+ * @property {string} metricKey
+ * @property {number} [ts] - Optional epoch ms; defaults to `Date.now()` at insert time.
+ * @property {number} value
+ * @property {(Object|null)} [tags] - Optional structured context; JSON-serialised on write.
+ */
+
+/**
  * Insert many samples in a single transaction. Used by AUTO-022 to persist
  * 4 rows per golden case (selectors / actions / assertions / aggregate) on
  * every eval run — one round-trip is meaningfully cheaper than 200 when the
  * golden set is filled out (50 cases × 4 dims).
  *
- * @param {Array<{projectId: string, metricKey: string, ts?: number, value: number, tags?: (Object|null)}>} samples
+ * @param {Array<MetricSampleInput>} samples
  */
 export function insertSamples(samples) {
   if (!Array.isArray(samples) || samples.length === 0) return;
