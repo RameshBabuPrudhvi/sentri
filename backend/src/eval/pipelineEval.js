@@ -1,5 +1,6 @@
 /**
- * pipelineEval.js — AUTO-022 deterministic scorer
+ * @module eval/pipelineEval
+ * @description AUTO-022 deterministic scorer.
  *
  * Pure functions: given an `actual` and `expected` Playwright code string,
  * extract selectors / actions / assertions tuples and score each dimension
@@ -13,11 +14,29 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-// Per-dimension input cap. 8 KB is well above any realistic generated
-// selector / action / assertion block but small enough that the DP table
-// stays bounded. Inputs are truncated, not rejected, so a runaway
-// generation degrades the score gracefully instead of crashing the eval.
+
+/**
+ * Per-dimension input cap. 8 KB is well above any realistic generated
+ * selector / action / assertion block but small enough that the DP table
+ * stays bounded. Inputs are truncated, not rejected, so a runaway
+ * generation degrades the score gracefully instead of crashing the eval.
+ * @type {number}
+ */
 export const MAX_DIMENSION_BYTES = 8 * 1024;
+
+/**
+ * Compute the Levenshtein edit distance between two strings.
+ *
+ * Uses a two-row rolling buffer so the working set stays O(n) where
+ * `n = bStr.length` rather than O(m·n). Inputs are silently truncated to
+ * {@link MAX_DIMENSION_BYTES} characters so the harness can't be OOM-killed
+ * by an oversized generation.
+ *
+ * @param {string} [a] - First string.
+ * @param {string} [b] - Second string.
+ * @returns {number} Minimum number of single-character insertions, deletions,
+ *   or substitutions required to transform `a` into `b`.
+ */
 export function levenshtein(a = "", b = "") {
   const aStr = String(a).slice(0, MAX_DIMENSION_BYTES);
   const bStr = String(b).slice(0, MAX_DIMENSION_BYTES);
@@ -39,6 +58,19 @@ export function levenshtein(a = "", b = "") {
   }
   return prev[n];
 }
+
+/**
+ * Length-normalised similarity score between two strings.
+ *
+ * Returns `1 - levenshtein(a, b) / max(len(a), len(b))`, clamped to [0, 1].
+ * Two empty inputs score 1.0 (vacuously equal) by convention — the score
+ * is meant for ranking, not for distinguishing "both absent" from "both
+ * identical non-empty".
+ *
+ * @param {string|null|undefined} actual
+ * @param {string|null|undefined} expected
+ * @returns {number} Similarity in [0, 1]; 1 = identical, 0 = no overlap.
+ */
 export function scoreText(actual, expected) {
   const a = String(actual ?? "").slice(0, MAX_DIMENSION_BYTES);
   const b = String(expected ?? "").slice(0, MAX_DIMENSION_BYTES);
@@ -109,6 +141,10 @@ function matchesAny(line, patterns) {
  * Action and assertion order is preserved (clicking "Submit" before
  * filling the form is semantically different from the reverse). Selectors
  * are sorted for stability since a declaration-order swap is irrelevant.
+ *
+ * @param {string} [code] - Raw Playwright source.
+ * @returns {{ selectors: string, actions: string, assertions: string }}
+ *   Newline-joined lines per bucket; empty string when a bucket has no matches.
  */
 export function parseTuples(code = "") {
   const lines = String(code ?? "")
@@ -134,7 +170,29 @@ export function parseTuples(code = "") {
     assertions: assertions.join("\n"),
   };
 }
+/**
+ * Default per-dimension weights summing to 1.0. Selectors carry the most
+ * weight because brittle selectors are the most common source of generated-
+ * test failure in the field; actions and assertions split the remainder.
+ * Override via the third arg to {@link scoreCase} when a sub-pipeline cares
+ * about a different mix.
+ * @type {Readonly<{ selectors: number, actions: number, assertions: number }>}
+ */
 export const DEFAULT_WEIGHTS = Object.freeze({ selectors: 0.4, actions: 0.3, assertions: 0.3 });
+
+/**
+ * Score one (actual, expected) pair across all three dimensions.
+ *
+ * Computes a per-dimension similarity via {@link scoreText} then collapses
+ * to a single `aggregate` using the supplied (or {@link DEFAULT_WEIGHTS})
+ * mix. Returns the per-dimension scores too so the harness can name which
+ * dimension regressed in CI output.
+ *
+ * @param {string} actualCode
+ * @param {string} expectedCode
+ * @param {{ selectors: number, actions: number, assertions: number }} [weights=DEFAULT_WEIGHTS]
+ * @returns {{ selectors: number, actions: number, assertions: number, aggregate: number }}
+ */
 export function scoreCase(actualCode, expectedCode, weights = DEFAULT_WEIGHTS) {
   const actual = parseTuples(actualCode);
   const expected = parseTuples(expectedCode);
@@ -159,6 +217,21 @@ function resolveSnapshot(snapshot, goldenDir) {
   const abs = path.join(goldenDir, rel);
   return fs.readFileSync(abs, "utf8");
 }
+/**
+ * Load and parse every `*.json` golden case from `goldenDir`.
+ *
+ * Filenames are sorted lexicographically so the resulting order matches
+ * what an operator sees in `ls`. Each JSON file may set `id`, `category`,
+ * `description`, and `url`; missing fields fall back to sensible defaults
+ * (filename-derived id, `"uncategorised"` category, empty strings). The
+ * `snapshot` field may be a literal HTML string or `@file:relative/path`,
+ * in which case the referenced file is inlined transparently.
+ *
+ * @param {string} goldenDir - Directory containing `case-*.json`.
+ * @returns {Array<{ name: string, id: string, category: string, description: string, url: string, snapshot: string, expected: string }>}
+ * @throws {Error} When the directory is unreadable or a referenced
+ *   `@file:` snapshot is missing on disk.
+ */
 export function loadGoldens(goldenDir) {
   return fs.readdirSync(goldenDir)
     .filter((name) => name.endsWith(".json"))

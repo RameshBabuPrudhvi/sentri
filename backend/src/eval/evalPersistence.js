@@ -31,7 +31,7 @@
  */
 
 import crypto from "node:crypto";
-import { insertSamples, getSeries } from "../database/repositories/metricSamplesRepo.js";
+import { insertSamples, getSeries, getSeriesByRunId } from "../database/repositories/metricSamplesRepo.js";
 
 // Per-row `actual` cap. 4 KB keeps the tags blob bounded — a 50-case run
 // thus contributes at most 200 KB of `actual` payload across its aggregate
@@ -168,13 +168,17 @@ export function getEvalTrend({ windowDays = 30, limit = 500 } = {}) {
  */
 export function getEvalRunCases(runId) {
   if (!runId) return null;
-  // No `since` filter — drill-down on older runs is valid. limit=2000 caps
-  // the result at 500 cases (4 rows each) which is well above the 50-case
-  // golden-set target.
+  // Filter by runId at the SQL layer via `getSeriesByRunId` so drill-down
+  // stays correct regardless of how many historical runs exist. The earlier
+  // `getSeries({ limit: 2000 })` approach loaded the OLDEST 2000 rows per
+  // dimension and filtered in JS — once the harness accumulated >~40 runs
+  // (200 rows each at 50 cases), recent runs fell off the window and the
+  // Dashboard's "Drill down" button started returning 404 for the very runs
+  // the trend panel highlighted.
   const allRows = [];
   for (const key of Object.values(METRIC_KEYS)) {
-    for (const row of getSeries(EVAL_HARNESS_PROJECT_ID, key, { limit: 2000 })) {
-      if (row.tags?.runId === runId) allRows.push({ ...row, metricKey: key });
+    for (const row of getSeriesByRunId(EVAL_HARNESS_PROJECT_ID, key, runId)) {
+      allRows.push({ ...row, metricKey: key });
     }
   }
   if (allRows.length === 0) return null;

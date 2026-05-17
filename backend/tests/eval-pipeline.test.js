@@ -93,9 +93,27 @@ test("scoreCase — DEFAULT_WEIGHTS sum to 1.0", () => {
   assert.ok(Math.abs(sum - 1) < 1e-9, `weights sum to ${sum}, expected 1`);
 });
 
-test("scoreCase — selector-only degradation only drops the selector dimension", () => {
+test("scoreCase — selector-bearing action lines drop the action dimension, not selectors", () => {
+  // Both lines contain selectors (`.getByRole(` / `.locator(`) AND an action
+  // (`.click(`). Per parseTuples' priority cascade (assertion > action >
+  // selector at pipelineEval.js:121-128), they land in the `actions` bucket,
+  // so changing the selector portion changes the actions string. The pure
+  // selector bucket stays empty in both expected and actual → scoreText("","")
+  // is 1.0 (vacuously equal). This pins the documented bucketing behaviour.
   const expected = "await page.getByRole('button').click();\nawait expect(page.getByText('Done')).toBeVisible();";
   const actual = "await page.locator('css=button#xyz123abcdef').click();\nawait expect(page.getByText('Done')).toBeVisible();";
+  const score = scoreCase(actual, expected);
+  assert.equal(score.selectors, 1, "no pure-selector lines → selectors stay 1.0");
+  assert.ok(score.actions < 0.9, `actions should drop (selector embedded in action line), got ${score.actions}`);
+  assert.equal(score.assertions, 1);
+});
+
+test("scoreCase — pure-selector declaration changes drop the selector dimension", () => {
+  // A bare `const x = page.getBy...()` line has no action or assertion verb,
+  // so parseTuples files it under selectors. Changing the selector across
+  // the two inputs should drop only the selector score.
+  const expected = "const btn = page.getByRole('button', { name: 'Save' });\nawait btn.click();";
+  const actual = "const btn = page.locator('css=button#xyz123abcdef');\nawait btn.click();";
   const score = scoreCase(actual, expected);
   assert.ok(score.selectors < 0.9, `selectors should drop, got ${score.selectors}`);
   assert.equal(score.actions, 1);

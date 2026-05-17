@@ -75,3 +75,25 @@ export function getSeries(projectId, metricKey, { since = 0, limit = 200 } = {})
     .all(projectId, metricKey, since, limit);
   return rows.map(r => ({ ...r, tags: r.tags ? JSON.parse(r.tags) : null }));
 }
+
+/**
+ * Read all rows for a single (projectId, metricKey) whose `tags->>runId`
+ * equals the given runId. Pushes the runId filter into SQL via
+ * `json_extract` so the caller doesn't have to load the whole series and
+ * filter in JS — that pattern fell off the oldest-N edge of `getSeries`
+ * once the eval-harness accumulated more than ~40 runs (AUTO-022 drill-down).
+ *
+ * Returns rows in `ts ASC` order so per-case detail reconstruction is
+ * deterministic across calls.
+ *
+ * @param {string} projectId
+ * @param {string} metricKey
+ * @param {string} runId - The tag value to match against `tags->>runId`.
+ * @returns {Array<{ts: number, value: number, tags: (Object|null)}>}
+ */
+export function getSeriesByRunId(projectId, metricKey, runId) {
+  const db = getDatabase();
+  const rows = db.prepare(`SELECT ts, value, tags FROM metric_samples WHERE projectId = ? AND metricKey = ? AND json_extract(tags, '$.runId') = ? ORDER BY ts ASC`)
+    .all(projectId, metricKey, runId);
+  return rows.map(r => ({ ...r, tags: r.tags ? JSON.parse(r.tags) : null }));
+}
