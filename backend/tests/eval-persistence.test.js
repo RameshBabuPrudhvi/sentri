@@ -170,8 +170,14 @@ test("actual is truncated above the 4 KB cap", () => {
 test("getEvalTrend buckets per-run, returns mean per dimension, sorts ascending", () => {
   resetEvalRows();
   // Two distinct runs separated by 1 second so the sort order is stable.
-  persistEvalRun({ cases: buildCases(), ts: 1_700_000_000_000 });
-  persistEvalRun({ cases: buildCases(), ts: 1_700_000_001_000 });
+  // Timestamps must fall inside the windowDays filter (Date.now() - N days)
+  // — using a fixed historical ts (e.g. 1_700_000_000_000) silently breaks
+  // this test as the clock rolls past the window, since getEvalTrend filters
+  // by `since = Date.now() - windowDays * 86_400_000`. Anchor relative to
+  // `now` so the test stays evergreen.
+  const now = Date.now();
+  persistEvalRun({ cases: buildCases(), ts: now - 2_000 });
+  persistEvalRun({ cases: buildCases(), ts: now - 1_000 });
   const trend = getEvalTrend({ windowDays: 365 });
   assert.equal(trend.length, 2);
   // Sorted ascending by createdAt.

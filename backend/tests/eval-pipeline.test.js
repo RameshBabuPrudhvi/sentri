@@ -180,9 +180,18 @@ test("runEval — aggregates per-case scores and groups by category", async () =
   assert.equal(perfect.byCategory["modal"].count, 1);
   assert.equal(perfect.byCategory["form-fill"].aggregate, 1);
 
-  // Constant-empty generator → every case scores 0.
+  // Constant-empty generator → only the populated dimension drops to 0 in
+  // each case (per parseTuples bucketing + scoreText's documented vacuous-
+  // equal behaviour at pipelineEval.js:74-79). For these 3 fixtures each
+  // case populates exactly one dimension, so the per-case aggregate is the
+  // weight of that one dimension (0.3 for actions/assertions, 0.4 for
+  // selectors). With none of the cases having pure-selector lines, every
+  // case here drops to 0.3 — mean aggregate ≈ 0.3, not 0.
   const empty = await runEval({ goldenDir: dir, generate: async () => "" });
-  assert.equal(empty.aggregate, 0);
+  // Sanity: aggregate must drop substantially below the identity baseline
+  // (1.0) but stay above 0 thanks to the vacuous-equal contract on the
+  // two unpopulated dimensions per case.
+  assert.ok(empty.aggregate > 0 && empty.aggregate < 0.8, `expected drop into (0, 0.8), got ${empty.aggregate}`);
 });
 
 test("runEval — deterministic across repeated invocations", async () => {
