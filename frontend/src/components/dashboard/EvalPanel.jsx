@@ -21,6 +21,7 @@ import React, { useEffect, useState } from "react";
 import { Activity, X } from "lucide-react";
 import TrendChart from "../shared/TrendChart.jsx";
 import { api } from "../../api.js";
+import { formatScore, getScoreClass } from "../../utils/evalScoreFormat.js";
 
 const DIMENSIONS = [
   { key: "aggregate",  label: "Aggregate" },
@@ -29,17 +30,8 @@ const DIMENSIONS = [
   { key: "assertions", label: "Assertions" },
 ];
 
-function formatScore(value) {
-  if (value == null || Number.isNaN(value)) return "—";
-  return `${(value * 100).toFixed(1)}%`;
-}
-
 function ScoreBadge({ value }) {
-  const cls = value == null ? "dash-eval-score--none"
-    : value >= 0.8 ? "dash-eval-score--good"
-    : value >= 0.5 ? "dash-eval-score--warn"
-    : "dash-eval-score--bad";
-  return <span className={`dash-eval-score ${cls}`}>{formatScore(value)}</span>;
+  return <span className={`dash-eval-score ${getScoreClass(value)}`}>{formatScore(value)}</span>;
 }
 
 export default function EvalPanel({ evalTrend }) {

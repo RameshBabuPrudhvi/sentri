@@ -232,6 +232,7 @@ uploads `eval-report.json` as an artifact for reviewers.
 | Aggregate score is suspiciously 1.0 on every case | Adapter is the identity stub, not the real pipeline | Confirm `pipelineAdapter.js#createDefaultPipeline` is wired and `EVAL_RECORD=1` was set when recording |
 | Regression message blames every case | Broad regression — likely a prompt-template change or model swap, not a localised bug | Compare prompt diff; consider rebaseline if intentional |
 | Replay works locally but CI fails | Stale cache committed; CI fetches fresh `node_modules` and may resolve a different model client | Re-record from a clean checkout |
+| Dashboard shows `0.0%` in red instead of `—` in grey | This is correct behaviour — a `0` score means the generator emitted no matching selector / action / assertion tuples and was scored against an empty bucket. Treating it as "missing data" would hide the worst-case signal. | Open the drill-down and inspect `actual` for the affected case — if `actual` is empty, the pipeline failed silently; if it's non-empty, the scorer's pattern catalogue (`backend/src/eval/pipelineEval.js`) didn't match it. |
 
 ## See also
 
