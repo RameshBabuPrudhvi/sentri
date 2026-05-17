@@ -1,0 +1,8 @@
+{
+  "id": "case-045",
+  "category": "assertion-heavy",
+  "description": "Skeleton golden — table row count + headers. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/reports",
+  "snapshot": "<table><thead><tr><th>Name</th><th>Status</th><th>Updated</th></tr></thead><tbody><tr><td>Q1</td><td>Draft</td><td>Today</td></tr><tr><td>Q2</td><td>Final</td><td>Yesterday</td></tr></tbody></table>",
+  "expected": "await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();\nawait expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();\nawait expect(page.getByRole('columnheader', { name: 'Updated' })).toBeVisible();\nawait expect(page.getByRole('row')).toHaveCount(3);"
+}

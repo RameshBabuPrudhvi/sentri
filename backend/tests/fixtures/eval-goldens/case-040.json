@@ -1,0 +1,8 @@
+{
+  "id": "case-040",
+  "category": "multi-page-nav",
+  "description": "Skeleton golden — protected route redirects to login then back. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/settings/billing",
+  "snapshot": "<form><label>Email<input type='email' name='email'/></label><label>Password<input type='password' name='password'/></label><button>Sign in</button></form>",
+  "expected": "await expect(page).toHaveURL(/\\/login\\?next=/);\nawait page.getByLabel('Email').fill('user@example.com');\nawait page.getByLabel('Password').fill('hunter2');\nawait page.getByRole('button', { name: 'Sign in' }).click();\nawait expect(page).toHaveURL(/\\/settings\\/billing$/);"
+}

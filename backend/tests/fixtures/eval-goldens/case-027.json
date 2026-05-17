@@ -1,0 +1,8 @@
+{
+  "id": "case-027",
+  "category": "modal",
+  "description": "Skeleton golden — escape key dismisses modal. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/share",
+  "snapshot": "<button>Share</button><div role='dialog' aria-label='Share link' hidden><input value='https://eval.local/share/abc'/><button>Copy</button></div>",
+  "expected": "await page.getByRole('button', { name: 'Share' }).click();\nawait expect(page.getByRole('dialog', { name: 'Share link' })).toBeVisible();\nawait page.keyboard.press('Escape');\nawait expect(page.getByRole('dialog', { name: 'Share link' })).toBeHidden();"
+}
