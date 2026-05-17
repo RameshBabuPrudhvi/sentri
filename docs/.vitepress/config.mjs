@@ -74,6 +74,7 @@ export default defineConfig({
           items: [
             { text: 'Authentication', link: '/guide/authentication' },
             { text: 'Compliance Audit Log', link: '/guide/compliance' },
+            { text: 'AI Eval Harness', link: '/guide/eval-harness' },
             { text: 'Rebranding', link: '/guide/rebranding' },
             { text: 'Production Checklist', link: '/guide/production' },
           ],
