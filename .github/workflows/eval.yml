@@ -1,20 +1,57 @@
-name: eval
+name: Eval (AUTO-022)
+
 on:
   pull_request:
+    branches: [main, develop]
     paths:
       - 'backend/src/pipeline/**'
       - 'backend/src/aiProvider.js'
-      - 'backend/src/pipeline/prompts/**'
       - 'backend/src/eval/**'
       - 'backend/scripts/run-eval.mjs'
       - 'backend/tests/fixtures/eval-goldens/**'
       - 'eval-baseline.json'
+      - '.github/workflows/eval.yml'
+
+# Cancel outdated runs for the same PR when new commits are pushed.
+concurrency:
+  group: eval-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   eval:
+    name: Eval — Golden-set regression check
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
-      - run: node backend/scripts/run-eval.mjs
+          node-version: "20"
+
+      - name: Install backend dependencies
+        # Mirrors `backend` job in ci.yml — no package-lock.json yet so use npm install.
+        run: npm install
+
+      - name: Run AUTO-022 eval harness
+        # Replay mode: reads from .cache/ entries committed in the repo. CI
+        # never calls the LLM. Aggregate score compared to eval-baseline.json
+        # — exits non-zero on >5% regression.
+        run: node scripts/run-eval.mjs --report=/tmp/eval-report.json
+
+      - name: Upload per-case eval report
+        # Always upload — both pass and fail paths benefit from the artifact
+        # so reviewers can inspect score trends without rerunning the job.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-report
+          path: /tmp/eval-report.json
+          retention-days: 14

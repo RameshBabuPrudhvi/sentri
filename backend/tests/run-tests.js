@@ -114,7 +114,9 @@ const files = [
   "tests/failure-clusterer.test.js",
   "tests/worker-pool-dashboard.test.js",
   "tests/observability.test.js",
+  // AUTO-022 — AI eval harness scorer + regression-detection.
   "tests/eval-pipeline.test.js",
+  "tests/eval-regression.test.js",
 ];
 
 let passed = 0;
