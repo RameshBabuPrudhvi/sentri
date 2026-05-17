@@ -22,8 +22,10 @@ import {
   createDefaultPipeline,
 } from "../src/eval/pipelineAdapter.js";
 import { persistEvalRun } from "../src/eval/evalPersistence.js";
-const REGRESSION_THRESHOLD = 0.05;       // >5% aggregate drop fails CI
-const PER_CASE_DELTA_THRESHOLD = 0.20;   // per-case aggregate delta worth naming
+const REGRESSION_THRESHOLD = 0.05;            // >5% aggregate drop fails CI
+const PER_DIMENSION_REGRESSION_THRESHOLD = 0.10; // >10% drop on any single dimension fails CI
+const PER_CASE_DELTA_THRESHOLD = 0.20;        // per-case aggregate delta worth naming
+const DIMENSIONS = ["selectors", "actions", "assertions"];
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -55,6 +57,24 @@ function loadBaseline() {
 function formatPct(n) {
   return `${(n * 100).toFixed(2)}%`;
 }
+
+/**
+ * Compute per-dimension means across every case. Surfaces drift that the
+ * aggregate metric can mask — e.g. if selector quality drops 12% but
+ * assertions improve 8%, the aggregate may stay inside the 5% gate while
+ * selectors quietly regress. The per-dimension gate at PER_DIMENSION_REGRESSION_THRESHOLD
+ * catches that.
+ */
+function computeDimensionMeans(cases) {
+  if (cases.length === 0) {
+    return Object.fromEntries(DIMENSIONS.map((d) => [d, 0]));
+  }
+  const out = {};
+  for (const d of DIMENSIONS) {
+    out[d] = cases.reduce((sum, c) => sum + c.score[d], 0) / cases.length;
+  }
+  return out;
+}
 async function main() {
   const generate = await buildAdapter();
   const results = await runEval({ goldenDir, generate });
@@ -72,9 +92,14 @@ async function main() {
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
     fs.writeFileSync(reportPath, JSON.stringify(results, null, 2));
   }
+  // Compute per-dimension means once — used by both --write-baseline and the
+  // per-dimension regression gate below.
+  const dimensionMeans = computeDimensionMeans(results.cases);
+
   if (writeBaseline) {
     const payload = {
       aggregate: results.aggregate,
+      byDimension: dimensionMeans,
       byCategory: Object.fromEntries(
         Object.entries(results.byCategory).map(([k, v]) => [k, v.aggregate]),
       ),
@@ -96,12 +121,48 @@ async function main() {
     console.log("no baseline found — first run. Re-run with --write-baseline to capture.");
     return 0;
   }
-  const regression = baseline.aggregate - results.aggregate;
-  if (regression <= REGRESSION_THRESHOLD) {
-    console.log(`PASS — aggregate ${formatPct(results.aggregate)} vs baseline ${formatPct(baseline.aggregate)} (delta ${formatPct(-regression)})`);
+  // Per-dimension gate — catch regressions the aggregate metric can mask.
+  // `byDimension` may be absent on legacy baselines written before this gate
+  // was added; in that case skip the per-dimension check and fall through to
+  // the aggregate-only gate. The next `--write-baseline` will populate it.
+  const dimensionRegressions = [];
+  if (baseline.byDimension) {
+    for (const d of DIMENSIONS) {
+      const before = baseline.byDimension[d];
+      if (typeof before !== "number") continue;
+      const after = dimensionMeans[d];
+      const delta = before - after;
+      if (delta > PER_DIMENSION_REGRESSION_THRESHOLD) {
+        dimensionRegressions.push({ dimension: d, before, after, delta });
+      }
+    }
+  }
+
+  const aggregateRegression = baseline.aggregate - results.aggregate;
+  const aggregateFailed = aggregateRegression > REGRESSION_THRESHOLD;
+  const dimensionFailed = dimensionRegressions.length > 0;
+
+  if (!aggregateFailed && !dimensionFailed) {
+    console.log(`PASS — aggregate ${formatPct(results.aggregate)} vs baseline ${formatPct(baseline.aggregate)} (delta ${formatPct(-aggregateRegression)})`);
+    for (const d of DIMENSIONS) {
+      const before = baseline.byDimension?.[d];
+      const after = dimensionMeans[d];
+      if (typeof before === "number") {
+        console.log(`  ${d.padEnd(12)} ${formatPct(after)} vs ${formatPct(before)} (delta ${formatPct(after - before)})`);
+      }
+    }
     return 0;
   }
-  console.error(`FAIL — regression vs baseline: ${formatPct(regression)} (threshold ${formatPct(REGRESSION_THRESHOLD)})`);
+
+  if (aggregateFailed) {
+    console.error(`FAIL — aggregate regression vs baseline: ${formatPct(aggregateRegression)} (threshold ${formatPct(REGRESSION_THRESHOLD)})`);
+  }
+  if (dimensionFailed) {
+    console.error(`FAIL — per-dimension regression vs baseline (threshold ${formatPct(PER_DIMENSION_REGRESSION_THRESHOLD)}):`);
+    for (const r of dimensionRegressions) {
+      console.error(`  - ${r.dimension}: ${formatPct(r.before)} → ${formatPct(r.after)} (-${formatPct(r.delta)})`);
+    }
+  }
   console.error("affected cases (per-case aggregate drop > " + formatPct(PER_CASE_DELTA_THRESHOLD) + "):");
   const perCaseBaseline = baseline.perCase || {};
   const affected = [];

@@ -25,9 +25,26 @@ import crypto from "node:crypto";
 // Bumped manually whenever a prompt template change is intentional.
 // Changing this invalidates every cache entry → forces a record pass.
 export const PROMPT_VERSION = "1";
+
+/**
+ * Identifier for the LLM model the cache was recorded against. Defaults to
+ * the env var that the production provider abstraction reads, with a
+ * sentinel fallback so cache keys stay stable when the var is unset (e.g.
+ * in unit tests that never call the live adapter). Folded into the cache
+ * key so swapping models invalidates every entry — otherwise a quiet model
+ * swap could ship green against stale recordings.
+ *
+ * @type {string}
+ */
+export const EVAL_MODEL = process.env.EVAL_MODEL || process.env.AI_MODEL || "default";
+
 function cacheKey(golden) {
   const h = crypto.createHash("sha256");
   h.update(PROMPT_VERSION);
+  h.update("\0");
+  h.update(EVAL_MODEL);
+  h.update("\0");
+  h.update(String(golden.id ?? ""));
   h.update("\0");
   h.update(String(golden.snapshot ?? ""));
   h.update("\0");

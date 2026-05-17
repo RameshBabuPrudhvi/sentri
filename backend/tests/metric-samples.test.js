@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { getDatabase } from "../src/database/sqlite.js";
-import { insertSample, getSeries } from "../src/database/repositories/metricSamplesRepo.js";
+import { insertSample, getSeries, getSeriesByRunId } from "../src/database/repositories/metricSamplesRepo.js";
 import { recordMetric } from "../src/utils/recordMetric.js";
 
 let passed = 0;
@@ -76,6 +76,43 @@ test("recordMetric coerces numeric strings", () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].value, 7.5);
   assert.deepEqual(rows[0].tags, { strategy: 1 });
+});
+
+test("getSeriesByRunId filters by tags.runId at the SQL layer", () => {
+  // AUTO-022 regression coverage: getEvalRunCases relies on this helper so
+  // recent drill-downs don't fall off the oldest-N edge of getSeries().
+  // Three rows under runId 'run-A' and two under runId 'run-B'; the helper
+  // must return exactly the runId-matching rows regardless of insertion
+  // order or row count under the same (projectId, metricKey).
+  insertSample({ projectId: "PRJ-MET-5", metricKey: "eval.aggregate", ts: 1000, value: 0.9, tags: { runId: "run-A", caseId: "c1" } });
+  insertSample({ projectId: "PRJ-MET-5", metricKey: "eval.aggregate", ts: 1100, value: 0.7, tags: { runId: "run-B", caseId: "c1" } });
+  insertSample({ projectId: "PRJ-MET-5", metricKey: "eval.aggregate", ts: 1200, value: 0.95, tags: { runId: "run-A", caseId: "c2" } });
+  insertSample({ projectId: "PRJ-MET-5", metricKey: "eval.aggregate", ts: 1300, value: 0.8, tags: { runId: "run-B", caseId: "c2" } });
+  insertSample({ projectId: "PRJ-MET-5", metricKey: "eval.aggregate", ts: 1400, value: 1.0, tags: { runId: "run-A", caseId: "c3" } });
+
+  const runA = getSeriesByRunId("PRJ-MET-5", "eval.aggregate", "run-A");
+  assert.equal(runA.length, 3);
+  // ts ASC ordering — guarantees deterministic per-case reconstruction.
+  assert.deepEqual(runA.map((r) => r.ts), [1000, 1200, 1400]);
+  assert.deepEqual(runA.map((r) => r.tags.caseId), ["c1", "c2", "c3"]);
+
+  const runB = getSeriesByRunId("PRJ-MET-5", "eval.aggregate", "run-B");
+  assert.equal(runB.length, 2);
+  assert.deepEqual(runB.map((r) => r.value), [0.7, 0.8]);
+
+  // Unknown runId → empty array, not null.
+  assert.deepEqual(getSeriesByRunId("PRJ-MET-5", "eval.aggregate", "run-DNE"), []);
+});
+
+test("getSeriesByRunId ignores rows whose tags lack a runId", () => {
+  // Rows tagged without a runId (e.g. healing.savings) must not leak into
+  // an eval drill-down query against the same metric_samples table.
+  insertSample({ projectId: "PRJ-MET-6", metricKey: "eval.aggregate", ts: 2000, value: 0.5, tags: null });
+  insertSample({ projectId: "PRJ-MET-6", metricKey: "eval.aggregate", ts: 2100, value: 0.6, tags: { strategy: 2 } });
+  insertSample({ projectId: "PRJ-MET-6", metricKey: "eval.aggregate", ts: 2200, value: 0.7, tags: { runId: "run-X" } });
+  const rows = getSeriesByRunId("PRJ-MET-6", "eval.aggregate", "run-X");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].value, 0.7);
 });
 
 resetDb();
