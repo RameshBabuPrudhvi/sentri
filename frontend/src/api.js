@@ -626,6 +626,20 @@ export const api = {
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
 
+  /**
+   * AUTO-022 — read the per-case breakdown for one AI eval-harness run.
+   * Powers the Dashboard `EvalPanel` drill-down side panel.
+   *
+   * @param {string} runId - UUID minted by `persistEvalRun` when the harness
+   *                         ran with `--persist`.
+   * @returns {Promise<{runId: string, createdAt: string|null, cases: Array<{
+   *   caseId: string, category: string,
+   *   score: { aggregate: number, selectors: number, actions: number, assertions: number },
+   *   expected: string|null, actual: string|null
+   * }>}>}
+   */
+  getEvalRunDetail: (runId) => req("GET", `/dashboard/eval/${runId}`),
+
   // ── Healing Dashboard (CAP-004) ─────────────────────────────────────────────
   /**
    * Self-healing telemetry summary across the current workspace.

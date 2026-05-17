@@ -10,6 +10,8 @@ import { getDatabase } from "../src/database/sqlite.js";
 import { insertSamples, getSeries } from "../src/database/repositories/metricSamplesRepo.js";
 import {
   persistEvalRun,
+  getEvalTrend,
+  getEvalRunCases,
   EVAL_HARNESS_PROJECT_ID,
   EVAL_METRIC_KEYS,
 } from "../src/eval/evalPersistence.js";
@@ -36,9 +38,9 @@ function resetEvalRows() {
 
 function buildCases() {
   return [
-    { caseId: "case-001", category: "form-fill", score: { aggregate: 0.9, selectors: 0.95, actions: 0.85, assertions: 0.9 } },
-    { caseId: "case-002", category: "modal",     score: { aggregate: 0.7, selectors: 0.6,  actions: 0.8,  assertions: 0.7 } },
-    { caseId: "case-003", category: "list-click", score: { aggregate: 1.0, selectors: 1.0,  actions: 1.0,  assertions: 1.0 } },
+    { caseId: "case-001", category: "form-fill", actual: "await page.click('save');", score: { aggregate: 0.9, selectors: 0.95, actions: 0.85, assertions: 0.9 } },
+    { caseId: "case-002", category: "modal",     actual: "await page.click('confirm');", score: { aggregate: 0.7, selectors: 0.6,  actions: 0.8,  assertions: 0.7 } },
+    { caseId: "case-003", category: "list-click", actual: "await page.click('row');",    score: { aggregate: 1.0, selectors: 1.0,  actions: 1.0,  assertions: 1.0 } },
   ];
 }
 
@@ -129,6 +131,70 @@ test("insertSamples noop on empty array", () => {
   insertSamples([]);
   insertSamples(null);
   insertSamples(undefined);
+});
+
+test("actual is persisted on the aggregate row only and round-trips via getEvalRunCases", () => {
+  resetEvalRows();
+  const { runId } = persistEvalRun({ cases: buildCases() });
+  // Read back via the drill-down helper — the aggregate row tags should
+  // carry `actual` while the dimension rows must not.
+  const aggregateRow = getSeries(EVAL_HARNESS_PROJECT_ID, EVAL_METRIC_KEYS.aggregate)
+    .find((r) => r.tags?.caseId === "case-001");
+  const selectorRow = getSeries(EVAL_HARNESS_PROJECT_ID, EVAL_METRIC_KEYS.selectors)
+    .find((r) => r.tags?.caseId === "case-001");
+  assert.equal(aggregateRow.tags.actual, "await page.click('save');");
+  assert.equal(selectorRow.tags.actual, undefined, "dimension rows must not carry actual");
+
+  const detail = getEvalRunCases(runId);
+  assert.equal(detail.runId, runId);
+  assert.equal(detail.cases.length, 3);
+  const c1 = detail.cases.find((c) => c.caseId === "case-001");
+  assert.equal(c1.actual, "await page.click('save');");
+  assert.equal(c1.score.aggregate, 0.9);
+  assert.equal(c1.score.selectors, 0.95);
+  assert.equal(c1.category, "form-fill");
+});
+
+test("actual is truncated above the 4 KB cap", () => {
+  resetEvalRows();
+  const oversize = "x".repeat(8 * 1024); // 8 KB — twice the cap
+  persistEvalRun({
+    cases: [
+      { caseId: "case-big", category: "form-fill", actual: oversize, score: { aggregate: 0.5, selectors: 0.5, actions: 0.5, assertions: 0.5 } },
+    ],
+  });
+  const row = getSeries(EVAL_HARNESS_PROJECT_ID, EVAL_METRIC_KEYS.aggregate)[0];
+  assert.ok(row.tags.actual.length <= 4 * 1024, `expected ≤ 4096 chars, got ${row.tags.actual.length}`);
+});
+
+test("getEvalTrend buckets per-run, returns mean per dimension, sorts ascending", () => {
+  resetEvalRows();
+  // Two distinct runs separated by 1 second so the sort order is stable.
+  persistEvalRun({ cases: buildCases(), ts: 1_700_000_000_000 });
+  persistEvalRun({ cases: buildCases(), ts: 1_700_000_001_000 });
+  const trend = getEvalTrend({ windowDays: 365 });
+  assert.equal(trend.length, 2);
+  // Sorted ascending by createdAt.
+  assert.ok(new Date(trend[0].createdAt) < new Date(trend[1].createdAt));
+  // Aggregate mean = (0.9 + 0.7 + 1.0) / 3 ≈ 0.8667.
+  for (const run of trend) {
+    assert.ok(Math.abs(run.aggregate - (0.9 + 0.7 + 1.0) / 3) < 1e-9);
+    assert.equal(run.caseCount, 3);
+    assert.ok(run.runId);
+  }
+});
+
+test("getEvalTrend returns [] when no rows exist", () => {
+  resetEvalRows();
+  assert.deepEqual(getEvalTrend(), []);
+});
+
+test("getEvalRunCases returns null for unknown runId", () => {
+  resetEvalRows();
+  persistEvalRun({ cases: buildCases() });
+  assert.equal(getEvalRunCases("nonexistent-run-id"), null);
+  assert.equal(getEvalRunCases(""), null);
+  assert.equal(getEvalRunCases(null), null);
 });
 
 resetEvalRows();

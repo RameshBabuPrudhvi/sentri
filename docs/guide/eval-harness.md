@@ -187,6 +187,27 @@ read-only and never touches the database. Persist locally (or from a
 nightly job against `develop`) so the trend chart has data without
 bloating PR-time CI runs.
 
+### Dashboard surface
+
+When `metric_samples` has rows under the `__eval_harness__` sentinel, the
+Dashboard renders the **AI Eval Quality** panel with four trend charts
+(aggregate / selectors / actions / assertions) over the last 30 days plus
+a "drill down" button on the most recent run. The drill-down opens a
+side panel listing every case's per-dimension scores so you can see
+which cases drove the latest run's score.
+
+Backend surfaces:
+
+| Route | Auth | Returns |
+|---|---|---|
+| `GET /api/v1/dashboard` | `anyAuthenticatedMember` | `evalTrend` block (null when no rows) |
+| `GET /api/v1/dashboard/eval/:runId` | `anyAuthenticatedMember` | Per-case scores + `actual` + `expected` (404 if runId unknown) |
+
+`actual` Playwright code is persisted on the `metric_samples` aggregate
+row at run time (capped at 4 KB). `expected` is read from the on-disk
+golden JSON at request time so the file on disk stays the canonical
+source of truth — no risk of the DB and the fixture drifting apart.
+
 ## CI workflow
 
 `.github/workflows/eval.yml` triggers on PRs that touch:
