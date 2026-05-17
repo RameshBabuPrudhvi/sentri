@@ -346,7 +346,16 @@ export function createTestRunner() {
   }
 
   /**
-   * Print summary and exit with code 1 if any tests failed.
+   * Print summary and exit with the appropriate status code.
+   *
+   * INF-007: explicitly `process.exit(0)` on success rather than letting the
+   * event loop drain naturally. `prom-client`'s `collectDefaultMetrics`
+   * (transitively imported by anything that touches `utils/metrics.js`) starts
+   * internal `perf_hooks.monitorEventLoopDelay` handles that remain ref'd in
+   * v15 — `collectDefaultMetrics()` returns void, so the `.unref()` pattern
+   * used elsewhere can't reach them. Without an explicit exit, test processes
+   * would hang for ~10s per file waiting for those handles to time out.
+   * Matches what most Node test runners do (Jest, Mocha, node:test).
    *
    * @param {string} [label] — Optional label for the summary line.
    */
@@ -354,6 +363,7 @@ export function createTestRunner() {
     console.log(`\n  ${passed} passed, ${failed} failed`);
     if (failed > 0) process.exit(1);
     if (label) console.log(`\n🎉 All ${label} tests passed!`);
+    process.exit(0);
   }
 
   return {
