@@ -539,8 +539,15 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     // executed in a browser". Best-effort: a metrics hiccup must never fail
     // the run. `durationMs` is set by `executeTest.js` for every result; the
     // `?? 0` defence covers synth crash rows that didn't carry timing.
+    //
+    // Browser label: prefer `result.browser` (always populated by
+    // `executeTest.js` from the test's actual launch options) over
+    // `run.browser` (set once at the run level). They agree today, but
+    // preferring the per-result value future-proofs the metric against any
+    // change that lets individual tests override the run-level browser
+    // (e.g. cross-browser sharding in a single run).
     try {
-      const labels = { status: result.status || "unknown", browser: run?.browser || "unknown" };
+      const labels = { status: result.status || "unknown", browser: result.browser || run?.browser || "unknown" };
       testsExecutedTotal.inc(labels);
       const seconds = Number(result.durationMs ?? 0) / 1000;
       if (Number.isFinite(seconds) && seconds >= 0) testDurationSeconds.observe(labels, seconds);
