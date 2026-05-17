@@ -7,13 +7,14 @@
 # Open http://localhost:3000 in your browser.
 #
 # ─── Database (INF-001) ───────────────────────────────────────────────────────
-# By default Sentri uses SQLite (zero config, data in backend/data/sentri.db).
+# By default Sentri uses PostgreSQL (bundled `postgres` service).
 # To use PostgreSQL instead, uncomment the `postgres` service below and set
 # DATABASE_URL on the backend service:
 #
 #   DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
 #
-# Then: docker compose --profile postgres up --build
+# Then: docker compose up --build
+# SQLite opt-out: docker compose --profile sqlite up --build
 
 services:
   backend:
@@ -50,7 +51,7 @@ services:
       #   REDIS_URL=redis://redis:6379
       # then run with `--profile redis --profile postgres`. Workers MUST share
       # the backend's database (SQLite cannot be shared across containers).
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=${DATABASE_URL:-postgres://sentri:sentri@postgres:5432/sentri}
       - REDIS_URL=${REDIS_URL:-}
     ports:
       - "3001:3001"
@@ -162,8 +163,6 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: sentri-postgres
-    profiles:
-      - postgres
     environment:
       POSTGRES_USER: sentri
       POSTGRES_PASSWORD: sentri

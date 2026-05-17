@@ -56,6 +56,7 @@ const files = [
   // SEC-007 Part C — SIEM forwarder (HMAC + retry + DLQ + config CRUD).
   "tests/audit-siem-forwarder.test.js",
   "tests/postgres-adapter.test.js",
+  "tests/migration-runner.test.js",
   "tests/device-emulation.test.js",
   "tests/ai-fallback.test.js",
   "tests/openrouter-provider.test.js",

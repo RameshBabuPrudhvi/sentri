@@ -87,14 +87,23 @@ function getAppliedMigrations(db) {
 }
 
 /**
- * Discover all migration files sorted by filename.
+ * Discover all migration files sorted by numeric prefix, then full filename.
+ *
+ * IMPORTANT: Migration filename prefixes (NNN_) must be globally unique.
  * @returns {Array<{version: string, filePath: string}>}
  */
 function discoverMigrations() {
   if (!fs.existsSync(MIGRATIONS_DIR)) return [];
   return fs.readdirSync(MIGRATIONS_DIR)
     .filter(f => f.endsWith(".sql"))
-    .sort()
+    .sort((a, b) => {
+      const [aPrefix] = a.split("_");
+      const [bPrefix] = b.split("_");
+      const aNum = Number.parseInt(aPrefix, 10);
+      const bNum = Number.parseInt(bPrefix, 10);
+      if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+      return a.localeCompare(b);
+    })
     .map(f => ({
       version: f.replace(/\.sql$/, ""),
       filePath: path.join(MIGRATIONS_DIR, f),
