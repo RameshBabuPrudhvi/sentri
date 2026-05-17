@@ -1,0 +1,4 @@
+{
+  "snapshot": "<button>Save</button>",
+  "expected": "await page.getByRole('button', { name: 'Save' }).click();\nawait expect(page.getByText('Saved')).toBeVisible();"
+}

@@ -1,0 +1,20 @@
+name: eval
+on:
+  pull_request:
+    paths:
+      - 'backend/src/pipeline/**'
+      - 'backend/src/aiProvider.js'
+      - 'backend/src/pipeline/prompts/**'
+      - 'backend/src/eval/**'
+      - 'backend/scripts/run-eval.mjs'
+      - 'backend/tests/fixtures/eval-goldens/**'
+      - 'eval-baseline.json'
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node backend/scripts/run-eval.mjs

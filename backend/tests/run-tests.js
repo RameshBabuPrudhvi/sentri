@@ -114,6 +114,7 @@ const files = [
   "tests/failure-clusterer.test.js",
   "tests/worker-pool-dashboard.test.js",
   "tests/observability.test.js",
+  "tests/eval-pipeline.test.js",
 ];
 
 let passed = 0;
