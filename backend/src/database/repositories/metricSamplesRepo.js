@@ -34,6 +34,32 @@ export function insertSample({ projectId, metricKey, ts = Date.now(), value, tag
 }
 
 /**
+ * Insert many samples in a single transaction. Used by AUTO-022 to persist
+ * 4 rows per golden case (selectors / actions / assertions / aggregate) on
+ * every eval run — one round-trip is meaningfully cheaper than 200 when the
+ * golden set is filled out (50 cases × 4 dims).
+ *
+ * @param {Array<{projectId: string, metricKey: string, ts?: number, value: number, tags?: (Object|null)}>} samples
+ */
+export function insertSamples(samples) {
+  if (!Array.isArray(samples) || samples.length === 0) return;
+  const db = getDatabase();
+  const stmt = db.prepare(`INSERT INTO metric_samples (projectId, metricKey, ts, value, tags) VALUES (?, ?, ?, ?, ?)`);
+  const insertMany = db.transaction((rows) => {
+    for (const r of rows) {
+      stmt.run(
+        r.projectId,
+        r.metricKey,
+        r.ts ?? Date.now(),
+        r.value,
+        r.tags ? JSON.stringify(r.tags) : null,
+      );
+    }
+  });
+  insertMany(samples);
+}
+
+/**
  * Read a project's samples for a metric, ordered ascending by timestamp.
  *
  * @param {string} projectId

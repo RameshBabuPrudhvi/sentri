@@ -52,7 +52,7 @@ backend/src/eval/
 └── pipelineEval.js      pure scorer (levenshtein, parseTuples, scoreCase, runEval)
 
 backend/scripts/
-└── run-eval.mjs         CI entrypoint: --write-baseline, --report=, EVAL_RECORD=1
+└── run-eval.mjs         CI entrypoint: --write-baseline, --report=, --persist, EVAL_RECORD=1
 
 backend/tests/
 ├── eval-pipeline.test.js              17 unit tests covering the scorer
@@ -156,6 +156,36 @@ Open a dedicated `chore(eval): rebaseline AUTO-022` PR with the new
 `eval-baseline.json` so the rebaseline has its own review trail
 separate from the change that caused it. Never bundle a rebaseline into
 a `feat(prompt):` PR — they're separate concerns.
+
+## Persisting scores for the Dashboard
+
+The harness can write per-case scores into the existing `metric_samples`
+time-series table (introduced by INF-007 / MET-001) so the Dashboard
+`EvalPanel` renders trend charts without re-running the harness on every
+page load:
+
+```bash
+node backend/scripts/run-eval.mjs --persist
+```
+
+Storage layout:
+
+| Column | Value |
+|---|---|
+| `projectId` | `__eval_harness__` (sentinel — eval is workspace-agnostic) |
+| `metricKey` | `eval.aggregate` / `eval.selectors` / `eval.actions` / `eval.assertions` |
+| `value` | score in `[0, 1]` |
+| `tags` | `{ runId, caseId, category }` (JSON) |
+
+One row is written per dimension per case → 4 rows per case, so a 50-case
+golden set produces 200 rows per harness invocation. Every row of one run
+shares the same `runId` (uuid) so the Dashboard can group them when
+rendering the drill-down view.
+
+`--persist` is an opt-in flag — the default replay-mode CI path stays
+read-only and never touches the database. Persist locally (or from a
+nightly job against `develop`) so the trend chart has data without
+bloating PR-time CI runs.
 
 ## CI workflow
 

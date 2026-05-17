@@ -6,6 +6,7 @@
  *   EVAL_RECORD=1 node backend/scripts/run-eval.mjs      # record mode (dev)
  *   node backend/scripts/run-eval.mjs --write-baseline   # regenerate eval-baseline.json
  *   node backend/scripts/run-eval.mjs --report=path.json # write per-case report artifact
+ *   node backend/scripts/run-eval.mjs --persist          # write metric_samples rows (Dashboard EvalPanel)
  *
  * Exits non-zero when aggregate regression vs baseline exceeds REGRESSION_THRESHOLD.
  * Prints affected cases (delta < -PER_CASE_DELTA_THRESHOLD on aggregate) so reviewers
@@ -20,6 +21,7 @@ import {
   createLiveAdapter,
   createDefaultPipeline,
 } from "../src/eval/pipelineAdapter.js";
+import { persistEvalRun } from "../src/eval/evalPersistence.js";
 const REGRESSION_THRESHOLD = 0.05;       // >5% aggregate drop fails CI
 const PER_CASE_DELTA_THRESHOLD = 0.20;   // per-case aggregate delta worth naming
 const __filename = fileURLToPath(import.meta.url);
@@ -30,6 +32,7 @@ const cacheDir = path.join(goldenDir, ".cache");
 const baselinePath = path.join(repoRoot, "eval-baseline.json");
 const args = new Set(process.argv.slice(2));
 const writeBaseline = args.has("--write-baseline");
+const persistMetrics = args.has("--persist");
 const reportArg = process.argv.slice(2).find((a) => a.startsWith("--report="));
 const reportPath = reportArg ? reportArg.slice("--report=".length) : null;
 const recordMode = process.env.EVAL_RECORD === "1";
@@ -55,6 +58,16 @@ function formatPct(n) {
 async function main() {
   const generate = await buildAdapter();
   const results = await runEval({ goldenDir, generate });
+  if (persistMetrics) {
+    // Lazy-init the DB only when --persist is requested. Replay-mode CI runs
+    // never touch better-sqlite3, so the default offline path stays clean.
+    // `getDatabase()` is the singleton entry point — it runs pending migrations
+    // (incl. 016_metric_samples.sql) on first call.
+    const { getDatabase } = await import("../src/database/sqlite.js");
+    getDatabase();
+    const { runId, rowsWritten } = persistEvalRun({ cases: results.cases });
+    console.log(`persisted ${rowsWritten} metric_samples rows (runId=${runId})`);
+  }
   if (reportPath) {
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
     fs.writeFileSync(reportPath, JSON.stringify(results, null, 2));
