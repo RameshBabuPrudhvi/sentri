@@ -82,29 +82,24 @@ function computeDimensionMeans(cases) {
  * very first PR after this lands would crash CI on `eval cache miss`,
  * blocking the merge that would have unblocked recording in the first place.
  *
- * We detect the bootstrap state by two signals together:
- *   1. The replay cache directory is empty (or absent).
- *   2. `eval-baseline.json` is the placeholder shape — `aggregate: 1` with
- *      no `perCase` / `byDimension` keys (those are only written by
- *      `--write-baseline` against real recordings).
+ * Single signal: the replay cache directory is empty (or absent). If there
+ * are no `.cache/*.txt` files, the replay adapter physically cannot succeed
+ * — every case will throw `eval cache miss`. The shape of `eval-baseline.json`
+ * is irrelevant in that state: a fancy baseline with `perCase` / `byDimension`
+ * keys can't be honoured against an empty cache.
  *
- * When both hold, we emit a warning and exit 0 so CI is green and the merge
- * can proceed. Once a maintainer runs `EVAL_RECORD=1 ... --write-baseline`
- * and commits the recordings, the baseline gains `perCase` + `byDimension`
- * keys → this guard turns off automatically and the harness reverts to
- * strict replay-or-fail behaviour.
+ * When the cache is empty, we emit a warning and exit 0 so CI is green and
+ * the merge can proceed. Once a maintainer runs `EVAL_RECORD=1 ... --write-baseline`
+ * and commits the recordings to `.cache/`, the cache is no longer empty →
+ * this guard turns off automatically and the harness reverts to strict
+ * replay-or-fail behaviour.
  *
  * Record mode (`EVAL_RECORD=1`) skips this guard — that path is the one we
  * actually want to populate the cache.
  */
-function isBootstrapState(baseline) {
+function isBootstrapState() {
   if (recordMode) return false;
-  if (!baseline) return false;
-  // A real baseline always carries at least `perCase` (per the
-  // --write-baseline payload at line 100). The placeholder ships with
-  // only `aggregate`.
-  if (baseline.perCase || baseline.byDimension) return false;
-  // Empty / missing cache dir → no recordings exist yet.
+  // Empty / missing cache dir → no recordings exist yet → replay cannot work.
   let cacheEmpty = true;
   try {
     const entries = fs.readdirSync(cacheDir);
@@ -118,8 +113,7 @@ function isBootstrapState(baseline) {
 async function main() {
   // Check bootstrap state BEFORE building the replay adapter so we don't
   // even touch the cache miss path on a cold start.
-  const baselineForBootstrap = loadBaseline();
-  if (isBootstrapState(baselineForBootstrap)) {
+  if (isBootstrapState()) {
     console.log("⚠️  AUTO-022 cold start — no cache entries recorded yet and baseline is the placeholder.");
     console.log("    Skipping replay. CI is green so the merge can proceed.");
     console.log("    To activate the gate: run `EVAL_RECORD=1 node backend/scripts/run-eval.mjs --write-baseline`");
