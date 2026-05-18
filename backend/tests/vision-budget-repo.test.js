@@ -54,7 +54,7 @@ resetBudget();
 
 await test("dayKey / monthKey format YYYY-MM-DD / YYYY-MM in UTC (no prefix)", () => {
   // Pin a known timestamp so the assertion is portable across timezones.
-  // The period prefix lives in the `window` column now, not the key itself.
+  // The period prefix lives in the `windowKind` column now, not the key itself.
   const t = new Date(Date.UTC(2026, 0, 15, 10, 30, 0)); // 2026-01-15 10:30 UTC
   assert.equal(budgetRepo.dayKey(t), "2026-01-15");
   assert.equal(budgetRepo.monthKey(t), "2026-01");
@@ -158,8 +158,8 @@ await test("purgeOlderThan removes stale buckets, preserves recent", () => {
   const db = getDatabase();
   const oldTs = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
   const newTs = new Date().toISOString();
-  // Raw INSERT against the new schema — discriminator column 'window' must
-  // satisfy the CHECK constraint (`window IN ('day', 'month')`).
+  // Raw INSERT against the new schema — discriminator column 'windowKind' must
+  // satisfy the CHECK constraint (`windowKind IN ('day', 'month')`).
   db.prepare("INSERT INTO vision_budget_counters VALUES (?, ?, ?, ?, ?, ?)").run("PRJ-X", "day", "2024-01-01", 5, 0, oldTs);
   db.prepare("INSERT INTO vision_budget_counters VALUES (?, ?, ?, ?, ?, ?)").run("PRJ-X", "day", "2026-01-15", 1, 0, newTs);
   const removed = budgetRepo.purgeOlderThan(90);
@@ -176,10 +176,10 @@ await test("deleteByProjectId is scoped to project", () => {
   assert.equal(budgetRepo.getDailyCalls("PRJ-DEL-B"), 1);
 });
 
-await test("CHECK constraint rejects invalid window discriminator", () => {
+await test("CHECK constraint rejects invalid windowKind discriminator", () => {
   resetBudget();
   const db = getDatabase();
-  // Direct INSERT with a bogus window value should fail the CHECK constraint
+  // Direct INSERT with a bogus windowKind value should fail the CHECK constraint
   // at insert time — confirms the schema actually defends against typos.
   let threw = false;
   try {
@@ -189,7 +189,7 @@ await test("CHECK constraint rejects invalid window discriminator", () => {
   } catch {
     threw = true;
   }
-  assert.equal(threw, true, "CHECK (window IN ('day','month')) should reject 'year'");
+  assert.equal(threw, true, "CHECK (windowKind IN ('day','month')) should reject 'year'");
 });
 
 resetBudget();

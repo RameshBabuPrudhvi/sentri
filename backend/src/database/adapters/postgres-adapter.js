@@ -22,6 +22,7 @@
  * - `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`
  * - `INSERT OR REPLACE` → upsert via `ON CONFLICT DO UPDATE SET`
  * - `LIKE` → `ILIKE` (case-insensitive matching)
+ * - `BLOB` column type → `BYTEA` (binary data; MNT-001b element baselines)
  * - `PRAGMA table_info(t)` → `information_schema.columns` query
  *
  * ### Column name case mapping
@@ -134,6 +135,19 @@ function translateSingleStatement(stmt) {
   // SQLite LIKE is case-insensitive by default; PostgreSQL LIKE is case-sensitive.
   // Case-insensitive flag so both `LIKE` and `like` are translated.
   out = out.replace(/\bLIKE\b/gi, "ILIKE");
+
+  // BLOB column type → BYTEA. SQLite uses BLOB for binary columns;
+  // PostgreSQL has no BLOB type and the migration would fail with
+  // `type "blob" does not exist`. Used by migration 036_element_baselines
+  // (MNT-001b) for the `cropPng` baseline crop column. Word-bounded so
+  // `BLOB` inside an identifier (unlikely but possible) is untouched.
+  // String literals are already masked at this point, so a comment like
+  // `-- BLOB column: ...` won't trigger because comments are stripped
+  // at the statement-splitter level (not inside maskStringLiterals), and
+  // because translation runs per-statement on DDL bodies — comments
+  // landing inside the same statement get the regex applied but a stray
+  // BLOB → BYTEA inside a comment is harmless.
+  out = out.replace(/\bBLOB\b/g, "BYTEA");
 
   return restore(out);
 }

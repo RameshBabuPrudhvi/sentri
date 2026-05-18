@@ -7,10 +7,12 @@
  *   - day   — `calls`   vs `project.visionHealMaxCallsPerDay`
  *   - month — `costUsd` vs `project.visionHealMaxCostUsdPerMonth`
  *
- * Schema (`vision_budget_counters`): one row per (projectId, window,
- * windowKey). The `window` column is the discriminator ('day' | 'month')
+ * Schema (`vision_budget_counters`): one row per (projectId, windowKind,
+ * windowKey). The `windowKind` column is the discriminator ('day' | 'month')
  * with a CHECK constraint; `windowKey` is the bare date / month string
  * (no prefix — the discriminator lives in its own column for indexability).
+ * Named `windowKind` rather than `window` because `window` is a reserved
+ * keyword in PostgreSQL (window functions) and unquoted DDL fails there.
  *
  * UTC throughout: a day rolls over at 00:00 UTC, a month at the 1st 00:00
  * UTC. We don't try to align to a tenant's local timezone — operators
@@ -73,9 +75,9 @@ export function record(projectId, costUsd = 0, now = new Date()) {
   // windows. `excluded.costUsd` references the value bound on THIS call so
   // subsequent calls accumulate cost on the monthly row.
   const stmt = db.prepare(`
-    INSERT INTO vision_budget_counters (projectId, window, windowKey, calls, costUsd, updatedAt)
+    INSERT INTO vision_budget_counters (projectId, windowKind, windowKey, calls, costUsd, updatedAt)
     VALUES (?, ?, ?, 1, ?, ?)
-    ON CONFLICT(projectId, window, windowKey) DO UPDATE SET
+    ON CONFLICT(projectId, windowKind, windowKey) DO UPDATE SET
       calls = calls + 1,
       costUsd = costUsd + excluded.costUsd,
       updatedAt = excluded.updatedAt
@@ -102,10 +104,10 @@ export function getCounters(projectId, now = new Date()) {
   const today = dayKey(now);
   const thisMonth = monthKey(now);
   const dayRow = db.prepare(
-    "SELECT calls FROM vision_budget_counters WHERE projectId = ? AND window = 'day' AND windowKey = ?"
+    "SELECT calls FROM vision_budget_counters WHERE projectId = ? AND windowKind = 'day' AND windowKey = ?"
   ).get(projectId, today);
   const monthRow = db.prepare(
-    "SELECT costUsd FROM vision_budget_counters WHERE projectId = ? AND window = 'month' AND windowKey = ?"
+    "SELECT costUsd FROM vision_budget_counters WHERE projectId = ? AND windowKind = 'month' AND windowKey = ?"
   ).get(projectId, thisMonth);
   return {
     dailyCalls: dayRow?.calls ?? 0,

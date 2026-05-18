@@ -1,9 +1,14 @@
 -- MNT-001b — per-project, per-window counters for the vision-heal budget
 -- circuit-breaker enforced by `tryVisionHeal` stage 8.
 --
--- Two row shapes share one table, distinguished by the `window` column:
---   window='day',   windowKey='2026-05-18'  (UTC YYYY-MM-DD)
---   window='month', windowKey='2026-05'     (UTC YYYY-MM)
+-- Two row shapes share one table, distinguished by the `windowKind` column:
+--   windowKind='day',   windowKey='2026-05-18'  (UTC YYYY-MM-DD)
+--   windowKind='month', windowKey='2026-05'     (UTC YYYY-MM)
+--
+-- NOTE: column is named `windowKind`, not `window` — `window` is a reserved
+-- keyword in PostgreSQL (used for window functions) and unquoted DDL fails
+-- with a syntax error on that dialect. `windowKind` is portable across
+-- SQLite + PostgreSQL without identifier quoting.
 --
 -- The CHECK constraint catches typos at insert time. Splitting the
 -- discriminator into its own column (instead of prefix-encoding into
@@ -17,14 +22,14 @@
 -- Old rows age out via the daily retention sweep.
 CREATE TABLE IF NOT EXISTS vision_budget_counters (
   projectId  TEXT    NOT NULL,
-  window     TEXT    NOT NULL CHECK (window IN ('day', 'month')),
+  windowKind TEXT    NOT NULL CHECK (windowKind IN ('day', 'month')),
   windowKey  TEXT    NOT NULL,
   calls      INTEGER NOT NULL DEFAULT 0,
   costUsd    REAL    NOT NULL DEFAULT 0,
   updatedAt  TEXT    NOT NULL,
-  PRIMARY KEY (projectId, window, windowKey)
+  PRIMARY KEY (projectId, windowKind, windowKey)
 );
 CREATE INDEX IF NOT EXISTS idx_vision_budget_lookup
-  ON vision_budget_counters (projectId, window, windowKey);
+  ON vision_budget_counters (projectId, windowKind, windowKey);
 CREATE INDEX IF NOT EXISTS idx_vision_budget_updatedAt
   ON vision_budget_counters (updatedAt);
