@@ -1875,3 +1875,49 @@ A release is QA-approved only when **all** of the following are true:
 - Verify run logs include `pipeline.pii_redacted` with non-zero category counts.
 - Verify generated tests do not contain raw secrets/PII values.
 - Set `piiAllowlist` with a known token fragment and verify that fragment is not redacted while others remain redacted.
+
+---
+
+### Vision healing (MNT-001) manual test plan
+
+1. **Toggle off**
+   - Set project `visionHealing=off`.
+   - Break DOM selectors so normal waterfall fails.
+   - **Expected:** test is marked broken, no vision fallback invoked.
+
+2. **Pixelmatch only**
+   - Set `visionHealing=pixelmatch_only` and keep valid baseline crop artifacts.
+   - Break DOM selectors while retaining similar visual placement.
+   - **Expected:** pixelmatch fallback can recover; no LLM call path.
+
+3. **Pixelmatch + LLM**
+   - Set `visionHealing=pixelmatch_and_llm`.
+   - Force pixelmatch confidence below threshold.
+   - **Expected:** LLM vision fallback is attempted only in this mode.
+
+4. **Provider not configured guard**
+   - Clear `VISION_MODEL` and `AI_MODEL` server-side.
+   - Attempt `pixelmatch_and_llm`.
+   - **Expected:** backend rejects update with `VISION_PROVIDER_NOT_CONFIGURED`.
+
+5. **Daily call budget circuit breaker**
+   - Set `visionHealMaxCallsPerDay` to a very low value (e.g. 1).
+   - Run two failure scenarios requiring stage 8.
+   - **Expected:** first may call LLM, second soft-disables stage 8 and falls back to pixelmatch-only behavior.
+
+6. **Monthly cost budget circuit breaker**
+   - Set `visionHealMaxCostUsdPerMonth` to a very low value.
+   - Trigger LLM vision calls until threshold is exceeded.
+   - **Expected:** subsequent stage 8 usage is disabled for current window.
+
+7. **Healing summary surface**
+   - Open Healing dashboard after runs.
+   - **Expected:** vision panel renders with `visionHealCount`, `visionHealCostUsd`, and strategy split.
+
+8. **Zero-state rendering**
+   - Use a workspace with no vision heals.
+   - **Expected:** Healing dashboard vision panel renders without error at zero values.
+
+9. **Auditability**
+   - Inspect activity/audit views during vision heals and budget exhaustion.
+   - **Expected:** vision healing activity is attributable and visible for compliance review.
