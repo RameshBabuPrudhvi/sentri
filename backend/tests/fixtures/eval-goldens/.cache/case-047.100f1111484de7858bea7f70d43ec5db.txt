@@ -1,0 +1,3 @@
+await page.getByRole('button', { name: 'Save' }).click();
+await expect(page.getByRole('status')).toContainText('Saved');
+await expect(page.getByRole('status')).toBeHidden({ timeout: 10_000 });

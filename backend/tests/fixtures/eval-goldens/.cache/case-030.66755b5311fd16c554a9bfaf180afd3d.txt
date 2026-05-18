@@ -1,0 +1,3 @@
+await expect(page.getByRole('alertdialog', { name: 'Payment failed' })).toBeVisible();
+await page.getByRole('button', { name: 'OK' }).click();
+await expect(page.getByRole('alertdialog', { name: 'Payment failed' })).toBeHidden();

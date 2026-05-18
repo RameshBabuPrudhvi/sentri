@@ -1,0 +1,3 @@
+await page.getByLabel('Select row 1').check();
+await page.getByRole('button', { name: 'Archive selected' }).click();
+await expect(page.getByText('1 archived')).toBeVisible();

@@ -1,0 +1,4 @@
+await page.getByRole('button', { name: 'Import data' }).click();
+await expect(page.getByRole('dialog', { name: 'Import wizard' })).toBeVisible();
+await page.getByRole('button', { name: 'Next' }).click();
+await expect(page.getByText('Step 2 of 2')).toBeVisible();

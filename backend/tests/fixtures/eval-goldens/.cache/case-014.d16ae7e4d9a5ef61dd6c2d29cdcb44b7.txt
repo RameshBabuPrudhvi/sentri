@@ -1,0 +1,3 @@
+await page.getByLabel('I accept the terms').check();
+await page.getByRole('button', { name: 'Continue' }).click();
+await expect(page).toHaveURL(/\/onboarding\/done$/);

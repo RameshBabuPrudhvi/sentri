@@ -1,0 +1,5 @@
+await page.getByLabel('Email').fill('new@example.com');
+await page.getByLabel('Password').fill('hunter2!');
+await page.getByRole('button', { name: 'Create account' }).click();
+await expect(page).toHaveURL(/\/verify-email/);
+await expect(page.getByRole('heading', { name: 'Verify your email' })).toBeVisible();

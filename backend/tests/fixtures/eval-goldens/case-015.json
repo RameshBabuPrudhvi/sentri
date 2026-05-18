@@ -1,7 +1,7 @@
 {
   "id": "case-015",
   "category": "list-click",
-  "description": "Skeleton golden — table row click → detail. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Table row click \u2192 detail.",
   "url": "https://eval.local/users",
   "snapshot": "<table><thead><tr><th>Name</th></tr></thead><tbody><tr><td><a href='/users/1'>Alice</a></td></tr><tr><td><a href='/users/2'>Bob</a></td></tr></tbody></table>",
   "expected": "await page.getByRole('link', { name: 'Alice' }).click();\nawait expect(page).toHaveURL(/\\/users\\/1$/);\nawait expect(page.getByRole('heading', { name: 'Alice' })).toBeVisible();"

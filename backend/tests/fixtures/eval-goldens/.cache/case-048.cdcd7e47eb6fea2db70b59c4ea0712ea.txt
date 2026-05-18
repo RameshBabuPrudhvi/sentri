@@ -1,0 +1,5 @@
+const link = page.getByRole('link', { name: 'Playwright docs' });
+await expect(link).toBeVisible();
+await expect(link).toHaveAttribute('href', 'https://playwright.dev');
+await expect(link).toHaveAttribute('target', '_blank');
+await expect(link).toHaveAttribute('rel', 'noopener noreferrer');

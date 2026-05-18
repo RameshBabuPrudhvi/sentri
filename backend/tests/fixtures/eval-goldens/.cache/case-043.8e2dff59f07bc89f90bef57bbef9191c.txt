@@ -1,0 +1,3 @@
+await expect(page.getByTestId('kpi-pass-rate')).toHaveText('92%');
+await expect(page.getByTestId('kpi-runs')).toHaveText('47');
+await expect(page.getByTestId('kpi-failures')).toHaveText('3');

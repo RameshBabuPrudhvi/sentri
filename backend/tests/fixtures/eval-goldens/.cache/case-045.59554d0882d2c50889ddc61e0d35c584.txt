@@ -1,0 +1,4 @@
+await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
+await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
+await expect(page.getByRole('columnheader', { name: 'Updated' })).toBeVisible();
+await expect(page.getByRole('row')).toHaveCount(3);

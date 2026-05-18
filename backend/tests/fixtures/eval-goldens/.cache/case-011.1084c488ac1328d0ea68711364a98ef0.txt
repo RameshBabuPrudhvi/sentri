@@ -1,0 +1,4 @@
+await page.getByLabel('Display name').fill('Sentri Bot');
+await page.getByLabel('Bio').fill('Automated test author.');
+await page.getByRole('button', { name: 'Save' }).click();
+await expect(page.getByText('Profile saved')).toBeVisible();

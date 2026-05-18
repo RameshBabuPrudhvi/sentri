@@ -1,0 +1,4 @@
+await page.getByRole('button', { name: 'Delete project' }).click();
+await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible();
+await page.getByRole('button', { name: 'Confirm' }).click();
+await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeHidden();

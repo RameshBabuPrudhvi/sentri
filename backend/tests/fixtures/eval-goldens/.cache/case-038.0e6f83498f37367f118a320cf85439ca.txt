@@ -1,0 +1,4 @@
+await page.getByRole('button', { name: 'Acme Inc' }).click();
+await page.getByRole('menuitem', { name: 'Globex Corp' }).click();
+await expect(page).toHaveURL(/\/dashboard$/);
+await expect(page.getByText('Globex Corp')).toBeVisible();

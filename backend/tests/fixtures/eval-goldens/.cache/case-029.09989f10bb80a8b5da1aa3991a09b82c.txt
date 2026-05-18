@@ -1,0 +1,4 @@
+await page.getByRole('button', { name: 'Open notifications' }).click();
+await expect(page.getByRole('dialog', { name: 'Notifications' })).toBeVisible();
+await page.getByRole('button', { name: 'Mark all read' }).click();
+await expect(page.getByText('All caught up')).toBeVisible();

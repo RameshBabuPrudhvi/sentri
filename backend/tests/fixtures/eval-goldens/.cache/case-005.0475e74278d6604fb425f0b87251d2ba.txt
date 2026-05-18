@@ -1,0 +1,4 @@
+await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();
+await expect(page.getByTestId('order-id')).toHaveText('A-1024');
+await expect(page.getByText('$42.00')).toBeVisible();
+await expect(page.getByRole('link', { name: 'View orders' })).toHaveAttribute('href', '/orders');

@@ -1,0 +1,4 @@
+await page.getByRole('button', { name: 'Share' }).click();
+await expect(page.getByRole('dialog', { name: 'Share link' })).toBeVisible();
+await page.keyboard.press('Escape');
+await expect(page.getByRole('dialog', { name: 'Share link' })).toBeHidden();

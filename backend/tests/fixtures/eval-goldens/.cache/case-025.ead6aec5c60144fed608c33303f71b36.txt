@@ -1,0 +1,5 @@
+await page.getByRole('button', { name: 'New project' }).click();
+await expect(page.getByRole('dialog', { name: 'New project' })).toBeVisible();
+await page.getByLabel('Name').fill('Eval');
+await page.getByRole('button', { name: 'Create' }).click();
+await expect(page.getByText('Project created')).toBeVisible();

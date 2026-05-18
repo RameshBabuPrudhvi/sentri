@@ -1,0 +1,3 @@
+await page.getByLabel('Search').fill('playwright');
+await page.getByRole('button', { name: 'Go' }).click();
+await expect(page.getByTestId('results')).toBeVisible();

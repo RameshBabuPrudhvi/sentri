@@ -1,7 +1,7 @@
 {
   "id": "case-019",
   "category": "list-click",
-  "description": "Skeleton golden — filter chip toggle. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Filter chip toggle.",
   "url": "https://eval.local/tasks",
   "snapshot": "<div><button aria-pressed='false'>Open</button><button aria-pressed='false'>Closed</button></div><ul data-testid='task-list'></ul>",
   "expected": "await page.getByRole('button', { name: 'Closed' }).click();\nawait expect(page.getByRole('button', { name: 'Closed' })).toHaveAttribute('aria-pressed', 'true');"

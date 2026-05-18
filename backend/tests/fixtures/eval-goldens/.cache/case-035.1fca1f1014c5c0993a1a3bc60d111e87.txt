@@ -1,0 +1,3 @@
+await page.getByRole('link', { name: 'PRJ-1' }).click();
+await expect(page).toHaveURL(/\/projects\/PRJ-1$/);
+await expect(page.getByRole('heading', { name: 'PRJ-1' })).toBeVisible();

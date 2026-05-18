@@ -1,0 +1,5 @@
+await expect(page).toHaveURL(/\/login\?next=/);
+await page.getByLabel('Email').fill('user@example.com');
+await page.getByLabel('Password').fill('hunter2');
+await page.getByRole('button', { name: 'Sign in' }).click();
+await expect(page).toHaveURL(/\/settings\/billing$/);

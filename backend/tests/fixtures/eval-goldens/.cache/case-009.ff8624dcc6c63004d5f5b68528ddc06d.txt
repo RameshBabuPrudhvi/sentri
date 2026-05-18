@@ -1,0 +1,4 @@
+await page.getByLabel('Email').fill('hello@example.com');
+await page.getByLabel('Message').fill('Question about pricing.');
+await page.getByRole('button', { name: 'Send' }).click();
+await expect(page.getByText('Thanks, we\'ll be in touch')).toBeVisible();

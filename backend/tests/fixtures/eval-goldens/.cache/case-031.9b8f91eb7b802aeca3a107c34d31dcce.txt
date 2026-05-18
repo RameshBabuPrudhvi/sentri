@@ -1,0 +1,5 @@
+await page.getByRole('button', { name: 'Delete account' }).click();
+await expect(page.getByRole('dialog', { name: 'Confirm delete account' })).toBeVisible();
+await page.getByLabel('Confirmation').fill('DELETE');
+await page.getByRole('button', { name: 'Delete forever' }).click();
+await expect(page.getByText('Account deleted')).toBeVisible();

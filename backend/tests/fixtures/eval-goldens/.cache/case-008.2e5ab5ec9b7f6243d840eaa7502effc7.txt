@@ -1,0 +1,5 @@
+await page.getByLabel('Current password').fill('oldpass1');
+await page.getByLabel('New password').fill('newpass2!');
+await page.getByLabel('Confirm new password').fill('newpass2!');
+await page.getByRole('button', { name: 'Update password' }).click();
+await expect(page.getByText('Password updated')).toBeVisible();

@@ -1,0 +1,5 @@
+await page.getByLabel('Search').fill('eval harness');
+await page.getByRole('button', { name: 'Search' }).click();
+await expect(page).toHaveURL(/\/search\?q=eval/);
+await page.getByRole('link', { name: /eval harness/i }).first().click();
+await expect(page.getByRole('heading', { name: /eval harness/i })).toBeVisible();

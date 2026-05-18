@@ -1,0 +1,4 @@
+await page.getByRole('button', { name: 'Account menu' }).click();
+await page.getByRole('menuitem', { name: 'Log out' }).click();
+await expect(page).toHaveURL(/\/login$/);
+await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();

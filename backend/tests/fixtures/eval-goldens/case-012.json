@@ -1,7 +1,7 @@
 {
   "id": "case-012",
   "category": "form-fill",
-  "description": "Skeleton golden — comment box submit. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Comment box submit.",
   "url": "https://eval.local/posts/1",
   "snapshot": "<form><label>Comment<textarea name='body'></textarea></label><button>Post comment</button></form><ul data-testid='comments'></ul>",
   "expected": "await page.getByLabel('Comment').fill('Great post!');\nawait page.getByRole('button', { name: 'Post comment' }).click();\nawait expect(page.getByTestId('comments')).toContainText('Great post!');"

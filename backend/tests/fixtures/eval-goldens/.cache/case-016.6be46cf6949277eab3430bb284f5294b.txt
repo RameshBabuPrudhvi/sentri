@@ -1,0 +1,2 @@
+await page.getByRole('link', { name: 'Gadget' }).click();
+await expect(page.getByRole('heading', { name: 'Gadget' })).toBeVisible();

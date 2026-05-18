@@ -1,0 +1,5 @@
+await page.getByRole('button', { name: 'Create account' }).click();
+await expect(page.getByText('Email is required')).toBeVisible();
+await expect(page.getByText('Password too short')).toBeVisible();
+await expect(page.getByLabel('Email')).toHaveAttribute('aria-invalid', 'true');
+await expect(page.getByLabel('Password')).toHaveAttribute('aria-invalid', 'true');

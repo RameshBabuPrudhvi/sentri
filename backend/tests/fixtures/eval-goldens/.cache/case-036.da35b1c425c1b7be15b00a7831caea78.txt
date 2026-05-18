@@ -1,0 +1,5 @@
+await page.getByRole('button', { name: 'Proceed to checkout' }).click();
+await expect(page).toHaveURL(/\/checkout\/address$/);
+await page.getByLabel('Street').fill('1 Eval Lane');
+await page.getByRole('button', { name: 'Continue' }).click();
+await expect(page).toHaveURL(/\/checkout\/payment$/);

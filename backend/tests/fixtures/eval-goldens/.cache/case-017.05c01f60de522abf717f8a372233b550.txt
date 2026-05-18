@@ -1,0 +1,2 @@
+await page.getByRole('button', { name: 'Next' }).click();
+await expect(page.getByText('Page 2 of 3')).toBeVisible();

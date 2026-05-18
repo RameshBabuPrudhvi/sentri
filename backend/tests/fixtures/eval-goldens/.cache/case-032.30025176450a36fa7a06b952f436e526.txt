@@ -1,0 +1,5 @@
+await page.getByRole('button', { name: 'Edit' }).click();
+await expect(page.getByRole('dialog', { name: 'Edit member' })).toBeVisible();
+await page.getByLabel('Role').selectOption('Admin');
+await page.getByRole('button', { name: 'Save' }).click();
+await expect(page.getByText('Member updated')).toBeVisible();

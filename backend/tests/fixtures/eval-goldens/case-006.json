@@ -1,7 +1,7 @@
 {
   "id": "case-006",
   "category": "form-fill",
-  "description": "Skeleton golden — multi-field signup form. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Multi-field signup form.",
   "url": "https://eval.local/signup",
   "snapshot": "<form><label>Name<input name='name'/></label><label>Email<input type='email' name='email'/></label><label>Password<input type='password' name='password'/></label><button type='submit'>Create account</button></form>",
   "expected": "await page.getByLabel('Name').fill('Eval User');\nawait page.getByLabel('Email').fill('eval@example.com');\nawait page.getByLabel('Password').fill('hunter2!');\nawait page.getByRole('button', { name: 'Create account' }).click();\nawait expect(page.getByText('Check your email')).toBeVisible();"

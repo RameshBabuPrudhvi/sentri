@@ -1,0 +1,2 @@
+await page.getByRole('button', { name: 'How do I reset my password?' }).click();
+await expect(page.getByText('Click forgot password.')).toBeVisible();

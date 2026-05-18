@@ -1,0 +1,2 @@
+await page.getByRole('tab', { name: 'Billing' }).click();
+await expect(page.getByRole('tab', { name: 'Billing' })).toHaveAttribute('aria-selected', 'true');

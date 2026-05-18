@@ -1,0 +1,2 @@
+await page.getByRole('button', { name: 'Closed' }).click();
+await expect(page.getByRole('button', { name: 'Closed' })).toHaveAttribute('aria-pressed', 'true');

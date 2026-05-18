@@ -1,0 +1,3 @@
+await page.getByLabel('Timezone').selectOption('PT');
+await page.getByRole('button', { name: 'Save' }).click();
+await expect(page.getByText('Preferences saved')).toBeVisible();

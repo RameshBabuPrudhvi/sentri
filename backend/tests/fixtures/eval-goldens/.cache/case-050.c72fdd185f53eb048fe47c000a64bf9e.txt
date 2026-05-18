@@ -1,0 +1,5 @@
+await expect(page.getByRole('banner')).toBeVisible();
+await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
+await expect(page.getByRole('main')).toBeVisible();
+await expect(page.getByRole('contentinfo')).toBeVisible();
+await expect(page.getByRole('heading', { level: 1, name: 'Welcome' })).toBeVisible();

@@ -1,7 +1,7 @@
 {
   "id": "case-039",
   "category": "multi-page-nav",
-  "description": "Skeleton golden — search results → result detail. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Search results \u2192 result detail.",
   "url": "https://eval.local/",
   "snapshot": "<form role='search'><input type='search' name='q' aria-label='Search'/><button>Search</button></form>",
   "expected": "await page.getByLabel('Search').fill('eval harness');\nawait page.getByRole('button', { name: 'Search' }).click();\nawait expect(page).toHaveURL(/\\/search\\?q=eval/);\nawait page.getByRole('link', { name: /eval harness/i }).first().click();\nawait expect(page.getByRole('heading', { name: /eval harness/i })).toBeVisible();"

@@ -1,0 +1,4 @@
+await page.getByRole('link', { name: 'Guides' }).click();
+await expect(page).toHaveURL(/\/docs\/guides$/);
+await page.getByRole('link', { name: 'Getting started' }).click();
+await expect(page).toHaveURL(/\/docs\/guides\/getting-started$/);

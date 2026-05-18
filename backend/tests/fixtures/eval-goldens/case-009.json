@@ -1,7 +1,7 @@
 {
   "id": "case-009",
   "category": "form-fill",
-  "description": "Skeleton golden — contact form with textarea. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Contact form with textarea.",
   "url": "https://eval.local/contact",
   "snapshot": "<form><label>Email<input type='email' name='email'/></label><label>Message<textarea name='message'></textarea></label><button>Send</button></form>",
   "expected": "await page.getByLabel('Email').fill('hello@example.com');\nawait page.getByLabel('Message').fill('Question about pricing.');\nawait page.getByRole('button', { name: 'Send' }).click();\nawait expect(page.getByText('Thanks, we\\'ll be in touch')).toBeVisible();"

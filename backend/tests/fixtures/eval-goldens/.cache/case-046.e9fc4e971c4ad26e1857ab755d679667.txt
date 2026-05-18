@@ -1,0 +1,3 @@
+await expect(page.getByRole('button', { name: 'Create' })).toBeDisabled();
+await page.getByLabel('Name').fill('Eval');
+await expect(page.getByRole('button', { name: 'Create' })).toBeEnabled();

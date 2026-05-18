@@ -1,0 +1,3 @@
+await page.getByLabel('Comment').fill('Great post!');
+await page.getByRole('button', { name: 'Post comment' }).click();
+await expect(page.getByTestId('comments')).toContainText('Great post!');

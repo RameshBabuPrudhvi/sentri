@@ -1,7 +1,7 @@
 {
   "id": "case-042",
   "category": "assertion-heavy",
-  "description": "Skeleton golden — invoice detail with multi-field validation. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Invoice detail with multi-field validation.",
   "url": "https://eval.local/invoices/INV-7",
   "snapshot": "<main><h1>Invoice INV-7</h1><dl><dt>Status</dt><dd data-testid='status'>Paid</dd><dt>Amount</dt><dd>$120.00</dd><dt>Due</dt><dd>2025-01-15</dd></dl></main>",
   "expected": "await expect(page.getByRole('heading', { name: 'Invoice INV-7' })).toBeVisible();\nawait expect(page.getByTestId('status')).toHaveText('Paid');\nawait expect(page.getByText('$120.00')).toBeVisible();\nawait expect(page.getByText('2025-01-15')).toBeVisible();"

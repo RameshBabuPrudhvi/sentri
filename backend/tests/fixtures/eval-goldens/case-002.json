@@ -1,7 +1,7 @@
 {
   "id": "case-002",
   "category": "list-click",
-  "description": "Skeleton golden — list/grid row click. Replace snapshot with a real DOM capture from tests/e2e/specs and re-record with EVAL_RECORD=1.",
+  "description": "List/grid row click.",
   "url": "https://eval.local/items",
   "snapshot": "<ul><li><button>Item A</button></li><li><button>Item B</button></li></ul><h1 data-testid='item-detail'></h1>",
   "expected": "await page.getByRole('button', { name: 'Item B' }).click();\nawait expect(page.getByTestId('item-detail')).toContainText('Item B');"

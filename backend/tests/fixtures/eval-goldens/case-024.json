@@ -1,7 +1,7 @@
 {
   "id": "case-024",
   "category": "modal",
-  "description": "Skeleton golden — info modal open/close. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Info modal open/close.",
   "url": "https://eval.local/help",
   "snapshot": "<button>About this app</button><div role='dialog' aria-label='About' hidden><h2>About</h2><button>Close</button></div>",
   "expected": "await page.getByRole('button', { name: 'About this app' }).click();\nawait expect(page.getByRole('dialog', { name: 'About' })).toBeVisible();\nawait page.getByRole('button', { name: 'Close' }).click();\nawait expect(page.getByRole('dialog', { name: 'About' })).toBeHidden();"

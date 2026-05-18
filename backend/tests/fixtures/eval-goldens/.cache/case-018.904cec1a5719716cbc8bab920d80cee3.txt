@@ -1,0 +1,2 @@
+await page.getByRole('button', { name: 'Amount' }).click();
+await expect(page.locator('tbody tr').first()).toContainText('$50');

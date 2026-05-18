@@ -1,0 +1,2 @@
+await page.getByRole('button', { name: 'Item B' }).click();
+await expect(page.getByTestId('item-detail')).toContainText('Item B');

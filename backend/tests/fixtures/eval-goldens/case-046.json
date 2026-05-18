@@ -1,7 +1,7 @@
 {
   "id": "case-046",
   "category": "assertion-heavy",
-  "description": "Skeleton golden — disabled / enabled button states after input. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Disabled / enabled button states after input.",
   "url": "https://eval.local/projects/new",
   "snapshot": "<form><label>Name<input name='name'/></label><button disabled>Create</button></form>",
   "expected": "await expect(page.getByRole('button', { name: 'Create' })).toBeDisabled();\nawait page.getByLabel('Name').fill('Eval');\nawait expect(page.getByRole('button', { name: 'Create' })).toBeEnabled();"

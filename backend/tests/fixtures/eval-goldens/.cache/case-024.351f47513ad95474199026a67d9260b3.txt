@@ -1,0 +1,4 @@
+await page.getByRole('button', { name: 'About this app' }).click();
+await expect(page.getByRole('dialog', { name: 'About' })).toBeVisible();
+await page.getByRole('button', { name: 'Close' }).click();
+await expect(page.getByRole('dialog', { name: 'About' })).toBeHidden();

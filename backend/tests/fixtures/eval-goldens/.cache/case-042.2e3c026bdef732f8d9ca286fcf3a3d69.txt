@@ -1,0 +1,4 @@
+await expect(page.getByRole('heading', { name: 'Invoice INV-7' })).toBeVisible();
+await expect(page.getByTestId('status')).toHaveText('Paid');
+await expect(page.getByText('$120.00')).toBeVisible();
+await expect(page.getByText('2025-01-15')).toBeVisible();

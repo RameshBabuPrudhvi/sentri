@@ -1,0 +1,3 @@
+await page.getByRole('button', { name: 'More actions for report.pdf' }).click();
+await page.getByRole('menuitem', { name: 'Rename' }).click();
+await expect(page.getByRole('dialog', { name: 'Rename file' })).toBeVisible();

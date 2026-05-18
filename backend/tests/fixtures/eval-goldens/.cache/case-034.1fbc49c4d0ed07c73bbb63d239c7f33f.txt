@@ -1,0 +1,3 @@
+await page.getByRole('link', { name: 'Settings' }).click();
+await expect(page).toHaveURL(/\/settings$/);
+await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();

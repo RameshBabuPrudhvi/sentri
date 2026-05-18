@@ -1,0 +1,5 @@
+await page.getByLabel('Name').fill('Eval User');
+await page.getByLabel('Email').fill('eval@example.com');
+await page.getByLabel('Password').fill('hunter2!');
+await page.getByRole('button', { name: 'Create account' }).click();
+await expect(page.getByText('Check your email')).toBeVisible();

@@ -1,7 +1,7 @@
 {
   "id": "case-026",
   "category": "modal",
-  "description": "Skeleton golden — cancel destructive confirm. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "description": "Cancel destructive confirm.",
   "url": "https://eval.local/items/42",
   "snapshot": "<button>Delete item</button><div role='dialog' aria-label='Confirm delete' hidden><p>Are you sure?</p><button>Cancel</button><button>Delete</button></div>",
   "expected": "await page.getByRole('button', { name: 'Delete item' }).click();\nawait expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible();\nawait page.getByRole('button', { name: 'Cancel' }).click();\nawait expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeHidden();"

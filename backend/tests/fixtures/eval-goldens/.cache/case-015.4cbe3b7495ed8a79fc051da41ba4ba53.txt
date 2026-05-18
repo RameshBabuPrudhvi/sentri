@@ -1,0 +1,3 @@
+await page.getByRole('link', { name: 'Alice' }).click();
+await expect(page).toHaveURL(/\/users\/1$/);
+await expect(page.getByRole('heading', { name: 'Alice' })).toBeVisible();
