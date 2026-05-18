@@ -17,7 +17,9 @@ import { recordHealing, recordHealingFailure } from "../selfHealing.js";
 import { trackTelemetry } from "../utils/telemetry.js";
 import { recordMetric } from "../utils/recordMetric.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { logActivity } from "../utils/activityLogger.js";
 import * as testRepo from "../database/repositories/testRepo.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
 
 /**
  * persistHealingEvents(testId, events)
@@ -58,6 +60,63 @@ export function persistHealingEvents(testId, events) {
       if (evt.kind === "vision_pixelmatch") visionHealStrategy.pixelmatch += 1;
       if (evt.kind === "vision_llm") visionHealStrategy.llm += 1;
       if (Number.isFinite(evt.costUsd)) visionHealCostUsd += Number(evt.costUsd);
+
+      // MNT-001b — SEC-007-compatible audit row, one per heal. Routed
+      // through logActivity so workspace scoping + hash-chain continuation
+      // happen automatically. The `kind` translates 1:1 to the activity
+      // `type` (`healing.vision_pixelmatch` / `healing.vision_llm`) so SIEM
+      // filters and the dashboard's audit-log drill-down can match on
+      // `healing.vision_*`.
+      //
+      // No request context is available here (this runs from the test
+      // runner, not an HTTP handler) — meta fields come from the event
+      // itself + the test row's denormalised projectId / workspaceId.
+      // workspaceId is the load-bearing field for multi-tenant scoping;
+      // a row without it is invisible to `/api/v1/activities`, so we
+      // skip the write rather than silently leak across workspaces.
+      try {
+        const baseTestId = String(testId).replace(/@v\d+$/, "");
+        const test = testRepo.getById(baseTestId);
+        if (test?.projectId && test?.workspaceId) {
+          // Look up project name lazily — testRepo doesn't denormalise it.
+          // Failure here is non-fatal; we'll log the row without it.
+          let projectName = null;
+          try {
+            const project = projectRepo.getById(test.projectId);
+            projectName = project?.name || null;
+          } catch { /* projectRepo down — log without name */ }
+
+          const confidencePct = Number.isFinite(evt.confidence)
+            ? (evt.confidence * 100).toFixed(1)
+            : "?";
+          const detail = evt.kind === "vision_pixelmatch"
+            ? `Vision healed via pixelmatch (confidence ${confidencePct}%)`
+            : `Vision healed via LLM ${evt.model || "(unknown model)"} (confidence ${confidencePct}%, $${Number(evt.costUsd || 0).toFixed(4)})`;
+
+          logActivity({
+            type: `healing.${evt.kind}`,
+            projectId: test.projectId,
+            projectName,
+            testId: baseTestId,
+            testName: test.name || null,
+            workspaceId: test.workspaceId,
+            detail,
+            meta: {
+              key: evt.key,
+              confidence: Number.isFinite(evt.confidence) ? evt.confidence : null,
+              strategyIndex: evt.strategyIndex,
+              box: evt.box || null,
+              model: evt.model || null,
+              costUsd: Number.isFinite(evt.costUsd) ? evt.costUsd : 0,
+            },
+          });
+        }
+      } catch (err) {
+        // Audit write failure must not break heal recording — the heal
+        // already happened; losing the audit row is a separate concern.
+        console.warn(formatLogLine("warn", null,
+          `[healing] Failed to write vision audit row for ${evt.key}: ${err.message}`));
+      }
       continue;
     }
     // Guard: malformed non-vision entries without a key are ignored so one
