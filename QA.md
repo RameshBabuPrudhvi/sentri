@@ -1921,3 +1921,68 @@ A release is QA-approved only when **all** of the following are true:
 9. **Auditability**
    - Inspect activity/audit views during vision heals and budget exhaustion.
    - **Expected:** vision healing activity is attributable and visible for compliance review.
+
+---
+
+### Vision healing (MNT-001) — release verification checklist
+
+Once-per-release smoke. Pass all 8 sections before tagging.
+
+**Backend wiring:**
+- [ ] `STRATEGY_VERSION === 4` in `backend/src/selfHealing.js` (grep confirms)
+- [ ] `pixelmatch` + `pngjs` resolve in `backend/node_modules` (run `node -e "require('pixelmatch'); require('pngjs')"` → no `MODULE_NOT_FOUND`)
+- [ ] Migrations 035 / 036 / 037 applied (`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('element_baselines', 'vision_budget_counters')` returns 2 rows; `projects.visionHealing` column exists)
+- [ ] `GET /api/v1/system/vision-provider-status` returns `{ available: boolean, model: string|null }` when `VISION_MODEL` is set; `{ available: false, model: null }` when unset
+
+**Runtime integration:**
+- [ ] `executeTest.js` passes real `pixelmatchHeal` + `llmVisionHeal` + `isBudgetExhausted` deps to `tryVisionHeal` (grep `tryVisionHeal(` → second arg is non-empty `{ pixelmatchHeal, llmVisionHeal, isBudgetExhausted }`)
+- [ ] `codeExecutor.js` runtime helper exposes `__requestVisionLocator` in the sandbox context
+- [ ] Green run captures baselines (run a test, check `SELECT COUNT(*) FROM element_baselines WHERE projectId = '<PRJ>'` increments)
+- [ ] Failing run with `visionHealing="pixelmatch_only"` against a moved-but-visually-identical element passes on the **second** attempt (first run records the heal; second run uses the cached hint)
+
+**Audit + telemetry:**
+- [ ] `healing.vision_pixelmatch` row appears in `activities` after a stage-7 heal (column `meta` carries `confidence`, `strategyIndex: 7`, `box`)
+- [ ] `healing.vision_llm` row appears after a stage-8 heal (column `meta` adds `model` + `costUsd`)
+- [ ] `healing.vision_budget_exhausted` row appears when daily-call cap is hit (column `meta.reason` is `daily_calls` or `monthly_cost`)
+- [ ] `GET /metrics` (with `METRICS_SCRAPE_KEY` Bearer) returns:
+  - `app_ai_provider_tokens_total{operation="vision_heal"}` non-zero after a stage-8 heal
+  - `app_ai_cost_usd_total{operation="vision_heal"}` non-zero after a stage-8 heal
+  - `app_vision_heal_budget_exhausted_total{projectId,reason}` non-zero after triggering the cap
+- [ ] `AUDIT_HASH_CHAIN=true; POST /api/v1/system/verify-audit-chain` returns `{ verified: true }` after a run that produced vision-heal rows
+
+**Frontend:**
+- [ ] Quality card → **Vision Healing** tab reachable on `/automation`
+- [ ] `pixelmatch_and_llm` radio is disabled with tooltip "VISION_MODEL not configured server-side" when backend reports `available: false`
+- [ ] `pixelmatch_and_llm` radio shows `via <model>` hint when backend reports a vision-capable model
+- [ ] Daily / monthly cap inputs accept values, save via `PATCH /projects/:id`, persist on reload
+- [ ] Healing dashboard → **Vision-based healing** panel renders: zero-state when no heals; with stats + sparkline + audit-log link when heals exist
+- [ ] Audit log deep-link from the panel filters activities to `healing.vision_*` types
+
+**Tests:**
+- [ ] `cd backend && npm test` passes — includes `self-healing-vision.test.js`, `vision-heal-pixelmatch.test.js`, `element-baseline-repo.test.js`, `vision-budget-repo.test.js`, and the `app_ai_cost_usd_total` + `app_vision_heal_budget_exhausted_total` regression assertions in `observability.test.js`
+- [ ] `cd frontend && npm test` passes — includes `vision-healing-toggle.test.js`
+- [ ] All five new backend test files registered in `backend/tests/run-tests.js`
+- [ ] Frontend test file registered in `frontend/tests/run-tests.js` (or picked up by glob)
+
+**Docs + sprint hand-off:**
+- [ ] `docs/changelog.md` MNT-001 entry under `## [Unreleased]` no longer carries "deferred to MNT-001b" caveats
+- [ ] `docs/guide/vision-healing.md` covers debugging low-confidence pixelmatch matches + cost-ceiling guidance + incident-disable runbook + audit-log fields reference
+- [ ] `ROADMAP.md` MNT-001 section flipped to ✅ Complete with the PR number; Phase Summary `Ongoing — Maintenance` row updated; Completed Work Summary table row added
+- [ ] `NEXT.md` slot-1 is something other than MNT-001 (or carries a "promote next item" placeholder)
+
+**Manual debugging recipes** — operator skill that catches the 80% of low-confidence stage-7 issues. Run each at least once before signing off:
+
+1. **"I have baselines but pixelmatch never matches"** — `SELECT projectId, healingKey, cropWidth, cropHeight, capturedAt FROM element_baselines WHERE projectId = '<PRJ>' ORDER BY capturedAt DESC LIMIT 20;`. If `cropWidth`/`cropHeight` < 10 px the element was captured mid-render (skeleton state) — add `await page.waitForLoadState("networkidle")` before the affected step in the green test, re-run, verify next capture has larger dimensions.
+2. **"Confidence hovers around 0.7"** — drop `VISION_HEAL_PIXEL_CONFIDENCE=0.75` for a week, watch `app_ai_cost_usd_total{operation="vision_heal"}` rate. If LLM-fallback rate drops without false positives in the audit log (look for `healing.vision_pixelmatch` rows where the next step then fails), keep the lower threshold.
+3. **"LLM heal returned a bbox but click landed on the wrong element"** — overlay (modal/tooltip/dropdown) intercepted the coordinate click. Inspect the run's `result.network` for unexpected requests after the heal; add `page.locator("[role=dialog]").waitFor({ state: "detached" })` before the failed step so the overlay is closed before stage 7 captures the failure screenshot.
+4. **Visual debug** — set `VISION_HEAL_DEBUG=1` on the worker process. After every stage-7 attempt, the runner writes `artifacts/vision-debug/<runId>-<stepIndex>-bbox.png` (red rectangle drawn on the failure screenshot at the match coordinates). View via the run detail page → Artifacts. Disable in production (~50 ms per heal overhead).
+5. **Cost ceiling recommendations:**
+
+   | Use case | `visionHealMaxCallsPerDay` | `visionHealMaxCostUsdPerMonth` |
+   |---|---|---|
+   | Dev / staging | 10 | 1 |
+   | Small prod project | 100 (default) | 50 (default) |
+   | Large multi-tenant SaaS | 500 | 200 |
+   | Tight enterprise hard-cap | 20 | 10 |
+
+6. **Emergency global disable (SRE path)** — `kubectl set env deployment/sentri-backend VISION_HEAL_DISABLED=1`. Bypasses every per-project setting; `tryVisionHeal` returns `null` immediately. Use only during active incidents.
