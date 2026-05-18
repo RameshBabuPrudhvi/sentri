@@ -223,3 +223,17 @@ groups:
           summary: "Prometheus cannot scrape {{ $labels.instance }}"
           description: "/metrics endpoint is unreachable for 3 minutes. Either the backend is down, the scrape key changed, or the network path is broken. Without this signal, every other alert is silently dark."
           runbook_url: "https://docs.sentri.dev/guide/observability#backendscrapedown"
+
+
+  - name: sentri-saas-vision-healing
+    rules:
+      - alert: VisionHealBudgetExhausted
+        expr: increase(vision_heal_budget_exhausted_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: ai
+        annotations:
+          summary: "Vision heal LLM budget exhausted"
+          description: "One or more projects exhausted vision-heal budget in the last hour; LLM fallback is soft-disabled."
+          runbook_url: "https://docs.sentri.dev/guide/vision-healing#incident-disable"

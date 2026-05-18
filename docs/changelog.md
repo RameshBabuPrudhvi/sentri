@@ -8,12 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **AUTO-022** — AI eval harness with golden-set regression. New `backend/src/eval/pipelineEval.js` deterministic scorer parses generated Playwright code into selector / action / assertion tuples and scores each dimension via length-normalised Levenshtein distance (40 / 30 / 30 weighted). New `backend/src/eval/pipelineAdapter.js` provides record / replay adapters keyed on `sha256(promptVersion + snapshot + url)` so CI runs are offline and deterministic. New `backend/scripts/run-eval.mjs` CLI (`--write-baseline`, `--report=`, `--persist`, `EVAL_RECORD=1`) compares aggregate score to `eval-baseline.json` and exits non-zero on >5% regression, naming each per-case aggregate drop > 20%. New `--persist` flag writes per-case scores into the existing `metric_samples` table (4 rows per case under `eval.aggregate` / `eval.selectors` / `eval.actions` / `eval.assertions`, scoped to the `__eval_harness__` sentinel projectId, tagged with a per-run uuid for Dashboard grouping; `actual` Playwright code persisted on the aggregate row capped at 4 KB). New Dashboard **AI Eval Quality** panel renders a 30-day per-dimension trend with drill-down — backed by a new `evalTrend` block on `GET /api/v1/dashboard` and a new `GET /api/v1/dashboard/eval/:runId` route that joins persisted scores with `expected` lifted from the on-disk golden JSON so the file stays single-source-of-truth. New `.github/workflows/eval.yml` path-filtered to `pipeline/**`, `aiProvider.js`, `eval/**`, and prompt template files; uploads `eval-report.json` as an artifact on every run. Five canonical golden templates (one per category — form-fill, list-click, modal, multi-page-nav, assertion-heavy) under `backend/tests/fixtures/eval-goldens/` with operator guide at `docs/guide/eval-harness.md`. Remaining 45 cases tracked as AUTO-022 follow-up (need real DOM captures from `tests/e2e/specs/`). 32 unit + integration tests cover all six scorer exports, regression-detection diagnostics, metric_samples persistence (runId minting, dimension keys, tag shape, run isolation, ts override, empty-input safety, actual round-trip + 4 KB truncation), and Dashboard reader helpers (`getEvalTrend` per-runId aggregation + `getEvalRunCases` drill-down).
 - **INF-007** — Production-SaaS observability baseline. **Distributed tracing** via OpenTelemetry with auto-instrumentation for Express / pg / ioredis / HTTP, preloaded via `node --import ./src/otel-preload.mjs` so the SDK monkey-patches dependencies before the app graph loads. **Per-request correlation** via `AsyncLocalStorage` — every response carries `X-Request-Id`, every `formatLogLine()` / `structuredLog()` output carries `requestId` + `traceId` + `spanId` (the three-way pivot collapses Sentry → Loki → Jaeger investigations). **Prometheus `/metrics`** endpoint (admin-only, timing-safe `METRICS_SCRAPE_KEY` Bearer token, live `app_queue_depth` gauge refresh on every scrape) exposing 14 brand-neutral metrics: HTTP RED histograms (`app_http_request_duration_seconds`, `app_http_requests_total` labelled by route template), run lifecycle (`app_runs_total`, `app_run_outcome_total`, `app_run_duration_seconds`), per-test telemetry (`app_tests_executed_total`, `app_test_duration_seconds`), pipeline stage histogram, AI provider latency / token / error counters (the SaaS unit-economics surface), and BullMQ queue gauges. **Sentry crash reporting** with multi-tenant identification (backend `Sentry.setUser({ id })` + `workspace_id`/`user_role` tags from `workspaceScope`, frontend `browserTracingIntegration` for route-change breadcrumbs + PII scrubbing of input values, query strings, and auto-collected `email`/`ip_address` fields). **Operational artifacts**: 11 Prometheus alert rules (`monitoring/prometheus/alerts.yml`) covering availability / latency / queue / AI provider / runtime SLOs, each with a `runbook_url` anchor in the new `docs/guide/observability.md` on-call runbook. All env vars optional — every layer is a no-op when its toggle is unset.
 
 ## [1.7.3] — 2026-05-16
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **SEC-007** — Compliance audit log surface. New admin-only `GET /api/v1/workspaces/:workspaceId/audit-log` endpoint with cursor pagination (`?cursor=…&limit=…`), CSV / NDJSON export (`?format=csv|ndjson` with `Content-Disposition: attachment`), and per-(workspace × admin) export rate limiter (10 / 15 min, configurable via `AUDIT_EXPORT_RATE_LIMIT`, JSON browsing exempt) to guard against bulk exfiltration. New `GET /api/v1/audit/verify` admin endpoint walks the optional SHA-256 prevHash chain (enabled with `AUDIT_HASH_CHAIN=true`) and reports `firstBrokenRowId` on tamper. New `GET /api/v1/workspaces/:workspaceId/audit-log/dlq` and `POST .../dlq/:dlqId/replay` admin endpoints for SIEM dead-letter inspection and replay (returns `503 SIEM_NOT_CONFIGURED` until the forwarder lands in a follow-up PR). Daily retention sweep deletes activity rows older than `AUDIT_RETENTION_DAYS` (default 365, SOC 2 CC7.2 baseline); `0` disables, `< 90` is rejected at boot. Migration `031_activities_compliance.sql` adds `ipAddress` / `userAgent` / `prevHash` columns (null-tolerant for historical rows) and the `audit_dlq` table. Frontend `AuditLog.jsx` page mounted at `/audit-log` (admin-only via `ProtectedRoute requiredRole="admin"`).
 - **SEC-007** — Eight new password-path auth activity types — `auth.login`, `auth.login.failed`, `auth.logout`, `auth.password.reset`, `auth.role.change`, `auth.api_key.create`, `auth.api_key.revoke`, `auth.session.revoke` — emit from `routes/auth.js`, `routes/workspaces.js`, `routes/settings.js`, and the shared `_internalRevokeCurrentSession` helper. Every emission captures `req.ip` and `req.get('user-agent')` for SOC 2 / ISO 27001 session-reconstruction evidence.
 - **SEC-007** — Meta-audit: every read of the audit log itself emits `audit.read` (JSON) or `audit.export` (CSV/NDJSON), satisfying PCI-DSS 10.2.6 and SOC 2 CC7.2. The activity's `meta` captures the full filter shape and row count so reviewers can answer "who pulled which window of the log, when?".
@@ -46,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.7.2] — 2026-05-15
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **AUTO-010** — Root cause clustering: Run Detail now groups failed tests by shared error fingerprint, URL, and selector in a collapsible "Root Cause Summary" panel to reduce triage overhead.
 - **CAP-002** — Distributed test sharding: test runs can be split across multiple parallel workers with `shards: N`. Results, quality gates, Web Vitals evaluation, GitHub Check Runs, and CI callbacks are finalized exactly once when all shards complete.
 - **DIF-012** — Multi-environment support: projects now support named environments (e.g. staging, production) each with their own base URL and optional credentials. Any run or CI trigger can target a specific environment without modifying the project.
@@ -56,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.7.1] — 2026-05-13
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **AUTO-004** — Impact analysis: CI trigger runs can accept `changedFiles[]` (or auto-fetch changed files from a GitHub PR) to scope execution to only the affected tests; unaffected tests are recorded as `skipped_no_impact`.
 - **INT-002b** — GitHub App integration: admins can launch the install flow from Settings; uninstall and repository-removal webhooks automatically disable stale PR check configurations.
 - **INT-002** — GitHub Check Runs: projects can opt in to native GitHub PR Check Runs reporting test results, quality gates, and Web Vitals directly on pull requests.
@@ -71,6 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.7.0] — 2026-05-08
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **AUTO-002 / AUTO-015** — Diff-aware crawling: crawl runs compare against a stored baseline and scope test generation to changed pages only; no-change crawls complete without regenerating tests. Vercel and Netlify deployment webhooks trigger preview crawls automatically, with a "Last deployment run" badge in the project header.
 - **AUTO-003b** — Confidence-based auto-approval: projects can set an `autoApproveThreshold` (0–1) so high-confidence AI-generated tests are approved without manual review. An `DISABLE_AUTO_APPROVAL` env var overrides all thresholds at runtime without a redeploy.
 - **AUTO-017.3** — Web Vitals trend charts: Project Quality card now shows LCP, CLS, INP, and TTFB trend charts per run with threshold lines from project budgets.
@@ -107,6 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.6.10] — 2026-05-01
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **AUTO-016** — Accessibility scanning: every crawled page is scanned with axe-core and violations are persisted per run; CrawlView shows a per-page violation panel and the Dashboard includes a "Top Accessibility Offenders" rollup.
 - **DIF-007** — "Edit with AI" panel on Test Detail: describe a change in plain language and receive a diff of the updated Playwright test code with one-click apply.
 - **MNT-006** — Object storage abstraction: screenshots, videos, and traces can now be stored in any S3-compatible backend (AWS S3, Cloudflare R2, MinIO) by setting `STORAGE_BACKEND=s3`.
@@ -132,6 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.6.9] — 2026-04-30
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - Anonymous opt-out PostHog telemetry covering install, crawl, generate, run, review, and healing events; no PII collected. Disable with `SENTRI_TELEMETRY=0`. (#DIF-013)
 - Per-run network condition simulation (`fast` / `slow3g` / `offline`) with selector in the Run Regression modal. (#AUTO-006)
 - Automatic per-test retry and flake isolation; configurable via `MAX_TEST_RETRIES`. (#AUTO-005)
@@ -169,6 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.6.x] — 2026-04-17 – 2026-04-25
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - Recorder selector engine upgraded to delegate to Playwright's own `InjectedScript`-based generator for ancestor scoring, shadow-DOM traversal, and iframe locator chains. (#DIF-015b)
 - `selectorGenerator` now appends `>> nth=N` when a CSS selector matches multiple elements. (#DIF-015b)
 - UI login→dashboard and project-create E2E specs. (#QA)
@@ -193,6 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.0] — 2026-04-17
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **SEC-001** — Email verification on registration: new users must verify their address before signing in; verification emails sent via Resend, SMTP, or console fallback.
 - **INF-001** — PostgreSQL support: set `DATABASE_URL=postgres://…` to use PostgreSQL instead of SQLite; all repositories work unchanged via a shared adapter interface.
 - **INF-002** — Redis support for rate limiting, token revocation, and SSE pub/sub; falls back to in-memory stores when `REDIS_URL` is unset.
@@ -214,6 +223,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.4.0] — 2026-04-16
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **ENH-008** — Dedicated `run_logs` table: log lines are single-row INSERTs with a monotonic sequence counter, replacing the previous O(n²) JSON read-modify-write on `runs.logs`.
 - **ENH-011** — CI/CD webhook trigger: `POST /api/projects/:id/trigger` (Bearer token authenticated) returns `202 Accepted` with a `statusUrl` for polling and optional `callbackUrl` for push notification on completion.
 - Per-project trigger token management: create (plaintext shown once), list, and revoke tokens via the API.
@@ -241,6 +251,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.0] — 2026-04-14
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - **ENH-020** — Soft delete & Recycle Bin: deleting tests, projects, or runs moves them to a recoverable Recycle Bin; items can be restored or permanently purged from Settings.
 - **ENH-010** — Server-side pagination on `GET /api/projects/:id/tests`, `GET /api/tests`, and `GET /api/projects/:id/runs` via `?page=N&pageSize=N`.
 - Lightweight `GET /api/projects/:id/tests/counts` endpoint returning per-status counts without fetching row data. (#ENH-010)
@@ -263,6 +274,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] — 2026-04-13
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - AI provider API keys are persisted to the database (AES-256-GCM encrypted at rest) and restored on startup — no longer lost on restart or redeployment. (#ENH-004)
 
 ### Security
@@ -274,6 +286,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.0] — 2026-04-12
 
 ### Added
+- **MNT-001 (partial)** — Added project-level vision-healing controls (`visionHealing`, `visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`), `/api/v1/healing/summary` vision fields, and Healing dashboard Vision panel. Includes explicit cost-governance knobs for LLM fallback adoption.
 - Three-tier global rate limiting: general (300 req / 15 min), expensive operations (20 / hr), and AI generation (30 / hr). (#78)
 - Password reset via `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` with database-backed tokens that survive server restarts. (#78)
 - Per-user audit trail: every activity log entry now records the acting user's identity. (#78)

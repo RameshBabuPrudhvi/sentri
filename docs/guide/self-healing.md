@@ -43,3 +43,8 @@ To reset the healing history and force the waterfall to start fresh:
 
 - **UI:** Settings → Data Management → Clear Self-Healing History
 - **API:** `DELETE /api/v1/data/healing`
+
+
+## Vision fallback
+
+Sentri also supports project-gated vision fallback modes (pixelmatch, then optional LLM vision) for UI redesign resilience. See `docs/guide/vision-healing.md`.
