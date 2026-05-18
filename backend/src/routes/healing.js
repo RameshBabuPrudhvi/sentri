@@ -22,6 +22,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import * as metricSamplesRepo from "../database/repositories/metricSamplesRepo.js";
+import * as visionBudgetRepo from "../database/repositories/visionBudgetRepo.js";
 import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();

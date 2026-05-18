@@ -130,6 +130,8 @@ const files = [
   "tests/eval-pipeline.test.js",
   "tests/eval-regression.test.js",
   "tests/eval-persistence.test.js",
+  // AUTO-022 — CLI E2E subprocess tests for run-eval.mjs exit codes + report artifact.
+  "tests/eval-cli-e2e.test.js",
 ];
 
 let passed = 0;
