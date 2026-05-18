@@ -1,0 +1,8 @@
+{
+  "id": "case-034",
+  "category": "multi-page-nav",
+  "description": "Skeleton golden — top-nav navigate to settings → tab. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/",
+  "snapshot": "<nav><a href='/settings'>Settings</a></nav><main><h1>Home</h1></main>",
+  "expected": "await page.getByRole('link', { name: 'Settings' }).click();\nawait expect(page).toHaveURL(/\\/settings$/);\nawait expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();"
+}

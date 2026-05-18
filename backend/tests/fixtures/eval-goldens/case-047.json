@@ -1,0 +1,8 @@
+{
+  "id": "case-047",
+  "category": "assertion-heavy",
+  "description": "Skeleton golden — toast notification appears and auto-dismisses. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/settings",
+  "snapshot": "<button>Save</button><div role='status' aria-live='polite'></div>",
+  "expected": "await page.getByRole('button', { name: 'Save' }).click();\nawait expect(page.getByRole('status')).toContainText('Saved');\nawait expect(page.getByRole('status')).toBeHidden({ timeout: 10_000 });"
+}

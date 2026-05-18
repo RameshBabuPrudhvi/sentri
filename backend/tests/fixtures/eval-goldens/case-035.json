@@ -1,0 +1,8 @@
+{
+  "id": "case-035",
+  "category": "multi-page-nav",
+  "description": "Skeleton golden — breadcrumb back-navigation. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/projects/PRJ-1/runs/RUN-7",
+  "snapshot": "<nav aria-label='Breadcrumb'><a href='/projects'>Projects</a> / <a href='/projects/PRJ-1'>PRJ-1</a> / <span>RUN-7</span></nav>",
+  "expected": "await page.getByRole('link', { name: 'PRJ-1' }).click();\nawait expect(page).toHaveURL(/\\/projects\\/PRJ-1$/);\nawait expect(page.getByRole('heading', { name: 'PRJ-1' })).toBeVisible();"
+}

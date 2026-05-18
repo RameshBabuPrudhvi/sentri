@@ -1,0 +1,8 @@
+{
+  "id": "case-005",
+  "category": "assertion-heavy",
+  "description": "Skeleton golden — assertion-heavy success path with multiple post-conditions. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/checkout/success",
+  "snapshot": "<main><h1>Order confirmed</h1><dl><dt>Order #</dt><dd data-testid='order-id'>A-1024</dd><dt>Total</dt><dd>$42.00</dd></dl><a href='/orders'>View orders</a></main>",
+  "expected": "await expect(page.getByRole('heading', { name: 'Order confirmed' })).toBeVisible();\nawait expect(page.getByTestId('order-id')).toHaveText('A-1024');\nawait expect(page.getByText('$42.00')).toBeVisible();\nawait expect(page.getByRole('link', { name: 'View orders' })).toHaveAttribute('href', '/orders');"
+}

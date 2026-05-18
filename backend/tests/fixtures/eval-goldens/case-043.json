@@ -1,0 +1,8 @@
+{
+  "id": "case-043",
+  "category": "assertion-heavy",
+  "description": "Skeleton golden — dashboard KPI tiles all visible + values. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/dashboard",
+  "snapshot": "<section><div data-testid='kpi-pass-rate'>92%</div><div data-testid='kpi-runs'>47</div><div data-testid='kpi-failures'>3</div></section>",
+  "expected": "await expect(page.getByTestId('kpi-pass-rate')).toHaveText('92%');\nawait expect(page.getByTestId('kpi-runs')).toHaveText('47');\nawait expect(page.getByTestId('kpi-failures')).toHaveText('3');"
+}

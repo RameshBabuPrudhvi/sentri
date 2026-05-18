@@ -1,0 +1,8 @@
+{
+  "id": "case-031",
+  "category": "modal",
+  "description": "Skeleton golden — confirm-by-typing destructive action. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/account/delete",
+  "snapshot": "<button>Delete account</button><div role='dialog' aria-label='Confirm delete account' hidden><p>Type DELETE to confirm.</p><label>Confirmation<input name='confirm'/></label><button>Delete forever</button></div>",
+  "expected": "await page.getByRole('button', { name: 'Delete account' }).click();\nawait expect(page.getByRole('dialog', { name: 'Confirm delete account' })).toBeVisible();\nawait page.getByLabel('Confirmation').fill('DELETE');\nawait page.getByRole('button', { name: 'Delete forever' }).click();\nawait expect(page.getByText('Account deleted')).toBeVisible();"
+}

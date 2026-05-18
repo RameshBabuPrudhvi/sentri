@@ -1,0 +1,8 @@
+{
+  "id": "case-036",
+  "category": "multi-page-nav",
+  "description": "Skeleton golden — checkout multi-step flow. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/cart",
+  "snapshot": "<h1>Cart</h1><button>Proceed to checkout</button>",
+  "expected": "await page.getByRole('button', { name: 'Proceed to checkout' }).click();\nawait expect(page).toHaveURL(/\\/checkout\\/address$/);\nawait page.getByLabel('Street').fill('1 Eval Lane');\nawait page.getByRole('button', { name: 'Continue' }).click();\nawait expect(page).toHaveURL(/\\/checkout\\/payment$/);"
+}

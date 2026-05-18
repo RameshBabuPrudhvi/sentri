@@ -1,0 +1,8 @@
+{
+  "id": "case-038",
+  "category": "multi-page-nav",
+  "description": "Skeleton golden — switch workspace then verify URL + title. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/dashboard",
+  "snapshot": "<button>Acme Inc ▾</button><div role='menu' hidden><button>Globex Corp</button></div>",
+  "expected": "await page.getByRole('button', { name: 'Acme Inc' }).click();\nawait page.getByRole('menuitem', { name: 'Globex Corp' }).click();\nawait expect(page).toHaveURL(/\\/dashboard$/);\nawait expect(page.getByText('Globex Corp')).toBeVisible();"
+}

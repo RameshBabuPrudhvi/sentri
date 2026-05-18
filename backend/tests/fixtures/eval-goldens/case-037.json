@@ -1,0 +1,8 @@
+{
+  "id": "case-037",
+  "category": "multi-page-nav",
+  "description": "Skeleton golden — logout returns to /login. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/dashboard",
+  "snapshot": "<header><button>Account menu</button></header><div role='menu' hidden><button>Log out</button></div>",
+  "expected": "await page.getByRole('button', { name: 'Account menu' }).click();\nawait page.getByRole('menuitem', { name: 'Log out' }).click();\nawait expect(page).toHaveURL(/\\/login$/);\nawait expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();"
+}

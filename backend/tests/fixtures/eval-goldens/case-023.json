@@ -1,0 +1,8 @@
+{
+  "id": "case-023",
+  "category": "list-click",
+  "description": "Skeleton golden — context-menu action. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/files",
+  "snapshot": "<ul><li>report.pdf <button aria-label='More actions for report.pdf'>⋯</button></li></ul><div role='menu' hidden><button>Rename</button><button>Delete</button></div>",
+  "expected": "await page.getByRole('button', { name: 'More actions for report.pdf' }).click();\nawait page.getByRole('menuitem', { name: 'Rename' }).click();\nawait expect(page.getByRole('dialog', { name: 'Rename file' })).toBeVisible();"
+}

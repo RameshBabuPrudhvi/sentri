@@ -1,0 +1,8 @@
+{
+  "id": "case-016",
+  "category": "list-click",
+  "description": "Skeleton golden — card grid click → detail. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/products",
+  "snapshot": "<ul><li><a href='/products/1'><h3>Widget</h3></a></li><li><a href='/products/2'><h3>Gadget</h3></a></li></ul>",
+  "expected": "await page.getByRole('link', { name: 'Gadget' }).click();\nawait expect(page.getByRole('heading', { name: 'Gadget' })).toBeVisible();"
+}

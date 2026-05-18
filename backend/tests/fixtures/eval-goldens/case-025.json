@@ -1,0 +1,8 @@
+{
+  "id": "case-025",
+  "category": "modal",
+  "description": "Skeleton golden — form-inside-modal submit. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
+  "url": "https://eval.local/projects",
+  "snapshot": "<button>New project</button><div role='dialog' aria-label='New project' hidden><form><label>Name<input name='name'/></label><button>Create</button><button>Cancel</button></form></div>",
+  "expected": "await page.getByRole('button', { name: 'New project' }).click();\nawait expect(page.getByRole('dialog', { name: 'New project' })).toBeVisible();\nawait page.getByLabel('Name').fill('Eval');\nawait page.getByRole('button', { name: 'Create' }).click();\nawait expect(page.getByText('Project created')).toBeVisible();"
+}

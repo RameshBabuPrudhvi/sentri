@@ -42,6 +42,60 @@
 .dash-env-green-link    { font-size: 0.78rem; color: var(--green); cursor: pointer; }
 .dash-env-never         { font-size: 0.78rem; color: var(--text3); }
 
+/* AI Eval panel (AUTO-022) — 4-column trend grid + drill-down side panel.
+   The trend cards themselves come from <TrendChart>; these rules only style
+   the layout grid and the latest-run / drill-down rows. */
+.dash-eval-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.dash-eval-latest {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.dash-eval-latest-row {
+  display: flex; align-items: center; gap: 12px;
+}
+.dash-eval-latest-row > div:first-child { flex: 1; min-width: 0; }
+.dash-eval-latest-label { font-weight: 600; font-size: 0.82rem; }
+.dash-eval-latest-meta  { font-size: 0.72rem; color: var(--text3); margin-top: 2px; }
+.dash-eval-latest-score { min-width: 64px; text-align: right; }
+
+.dash-eval-score        { font-weight: 700; font-size: 0.82rem; font-family: var(--font-mono); }
+.dash-eval-score--good  { color: var(--green); }
+.dash-eval-score--warn  { color: var(--amber); }
+.dash-eval-score--bad   { color: var(--red); }
+.dash-eval-score--none  { color: var(--text3); }
+
+.dash-eval-drilldown {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface);
+}
+.dash-eval-drilldown-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 10px;
+}
+.dash-eval-case-id {
+  font-family: var(--font-mono); font-size: 0.78rem;
+}
+.dash-eval-loading, .dash-eval-error {
+  padding: 16px; text-align: center; color: var(--text2); font-size: 0.85rem;
+}
+.dash-eval-error { color: var(--red); }
+
+/* Responsive — 2-up at narrow widths so the grid doesn't crush the labels. */
+@media (max-width: 900px) {
+  .dash-eval-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  .dash-eval-grid { grid-template-columns: 1fr; }
+}
+
 /* Export PDF button override */
 .dash-export-btn {
   background: var(--surface);
