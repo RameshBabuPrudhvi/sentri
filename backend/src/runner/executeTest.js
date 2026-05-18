@@ -174,6 +174,99 @@ async function resolveLocatorForBaseline(page, action, label) {
 }
 
 /**
+ * MNT-001b — perform the originally-failed verb at the coordinates returned
+ * by a successful vision heal. Exported for unit testing; callers in
+ * `executeTest` invoke this only after confirming the heal returned a
+ * finite bbox.
+ *
+ * ### IMPORTANT: this is record-keeping, not rescue
+ *
+ * The test body has already thrown and the vm sandbox has unwound by the
+ * time we reach this helper — re-actioning won't resurrect downstream
+ * steps in the SAME run. The real win is the NEXT run:
+ *
+ *   - `recordHealing()` inside `tryVisionHeal` already promoted index 7/8
+ *     into the adaptive hint map, so the next run starts there.
+ *   - The persisted baseline crop lets stage 7 fire faster + cheaper than
+ *     stage 8 on subsequent failures.
+ *
+ * We perform the re-action anyway so the audit log captures a "we did try
+ * to recover" entry, which matters for compliance and for operators
+ * investigating why a vision heal "succeeded" but the run still failed.
+ *
+ * ### Verb coverage
+ *
+ * - `click` / `press` / `tap` → `page.mouse.click(x, y)`
+ * - `dblclick` → `page.mouse.dblclick(x, y)`
+ * - `hover` → `page.mouse.move(x, y)`
+ * - `rightclick` → `page.mouse.click(x, y, { button: "right" })`
+ * - `fill` / `select` / `check` → no-op (need the original value, which
+ *   was bound inside the sandbox and isn't reachable here — deferred to
+ *   MNT-001c via a sandbox export).
+ *
+ * Coordinate clicks are safer than re-resolving the locator: the pixelmatch
+ * / LLM result IS the locator. Going through `elementFromPoint` would
+ * re-introduce the DOM brittleness vision healing is meant to bypass.
+ *
+ * Best-effort: any error is swallowed so a re-action failure can't make
+ * an already-failing run any worse.
+ *
+ * @param {Object} page  Playwright Page (or any object with the same `mouse` shape — for tests).
+ * @param {string} action  Original verb from the healing event key.
+ * @param {{x: number, y: number, width: number, height: number}} box
+ * @param {string} label  Human-readable label (logged for traceability).
+ * @param {string} key    Composite healing key (`action::label`) — logged on error.
+ * @returns {Promise<{verb: string, x: number, y: number, dispatched: boolean}>}
+ *   Resolves with the dispatched verb + center coords + whether a method
+ *   was actually invoked (false for unsupported verbs / non-finite box).
+ *   Never throws.
+ */
+export async function performVisionHealReaction(page, action, box, label, key) {
+  const verbLower = String(action || "").toLowerCase();
+  const result = { verb: verbLower, x: 0, y: 0, dispatched: false };
+
+  if (!box || !Number.isFinite(box.x) || !Number.isFinite(box.y) ||
+      !Number.isFinite(box.width) || !Number.isFinite(box.height)) {
+    return result;
+  }
+  const centerX = Math.round(box.x + box.width / 2);
+  const centerY = Math.round(box.y + box.height / 2);
+  result.x = centerX;
+  result.y = centerY;
+
+  if (!page?.mouse) return result;
+
+  try {
+    if (verbLower === "click" || verbLower === "press" || verbLower === "tap") {
+      await page.mouse.click(centerX, centerY).catch(() => {});
+      result.dispatched = true;
+    } else if (verbLower === "dblclick") {
+      await page.mouse.dblclick(centerX, centerY).catch(() => {});
+      result.dispatched = true;
+    } else if (verbLower === "hover") {
+      await page.mouse.move(centerX, centerY).catch(() => {});
+      result.dispatched = true;
+    } else if (verbLower === "rightclick") {
+      await page.mouse.click(centerX, centerY, { button: "right" }).catch(() => {});
+      result.dispatched = true;
+    }
+    // fill / select / check / uncheck / focus / select fall through —
+    // value-aware re-action is MNT-001c territory.
+    if (result.dispatched) {
+      console.log(formatLogLine("info", null,
+        `[executeTest] Vision heal re-action completed: ${verbLower} at (${centerX},${centerY}) for "${label}"`));
+    }
+  } catch (reactionErr) {
+    // Belt-and-braces — the `.catch(() => {})` inside the if-branches
+    // absorbs the typical case. This handles weirdness like the page
+    // being closed mid-call (cleanup race).
+    console.warn(formatLogLine("warn", null,
+      `[executeTest] Vision heal re-action failed for ${key}: ${reactionErr.message}`));
+  }
+  return result;
+}
+
+/**
  * Attach network & console listeners to a page.
  * Returns { networkLogs, consoleLogs, dispose } — the arrays are mutated
  * in-place as events arrive. Call `dispose()` before closing the page to
@@ -709,6 +802,13 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
               }
               console.log(formatLogLine("info", null,
                 `[executeTest] Vision heal succeeded for ${test.id} (${heal.kind}, confidence=${heal.confidence?.toFixed?.(2) ?? heal.confidence})`));
+
+              // MNT-001b — coordinate re-action. See `performVisionHealReaction`
+              // jsdoc above for the design rationale (record-keeping vs.
+              // rescue-the-run semantics).
+              if (heal.box && Number.isFinite(heal.box.x) && Number.isFinite(heal.box.y)) {
+                await performVisionHealReaction(page, action, heal.box, label, evt.key);
+              }
             }
           }
         }

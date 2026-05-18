@@ -17,6 +17,9 @@ const files = [
   "tests/vision-heal-pixelmatch.test.js",
   "tests/element-baseline-repo.test.js",
   "tests/vision-budget-repo.test.js",
+  // MNT-001b — coordinate re-action after a successful vision heal.
+  // Unit-tested against a fake Playwright page; no real browser.
+  "tests/vision-heal-reaction.test.js",
   "tests/pipeline.test.js",
   "tests/api-flow.test.js",
   "tests/project-edit.test.js",
