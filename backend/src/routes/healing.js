@@ -109,8 +109,13 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
     .sort((a, b) => b.healCount - a.healCount)
     .slice(0, 10);
 
-  // Aggregate savings trend across ALL workspace projects, merging by timestamp.
+  // Aggregate savings trend AND vision-heal cost across ALL workspace
+  // projects in a single loop. `visionHealCostUsd` is the workspace-wide
+  // current-month LLM spend — read from `vision_budget_counters` (the
+  // table the budget circuit-breaker writes to). Best-effort: if the repo
+  // throws for one project we skip it rather than dark the whole summary.
   const merged = new Map();
+  let visionHealCostUsd = 0;
   for (const pid of projectIds) {
     const series = metricSamplesRepo.getSeries(pid, "healing.savings", { limit: 90 });
     for (const s of series) {
@@ -118,6 +123,9 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
       cur.value += Number(s.value || 0);
       merged.set(s.ts, cur);
     }
+    try {
+      visionHealCostUsd += Number(visionBudgetRepo.getMonthlyCost(pid) || 0);
+    } catch { /* per-project blip — skip */ }
   }
   const savingsTrend = [...merged.values()].sort((a, b) => a.ts - b.ts);
 
@@ -131,7 +139,7 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
     estimates: { testsThatWouldHaveFailed: wouldFail },
     savingsTrend,
     visionHealCount,
-    visionHealCostUsd: 0,
+    visionHealCostUsd,
     visionHealStrategy,
   });
 });

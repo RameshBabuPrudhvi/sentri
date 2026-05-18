@@ -156,8 +156,7 @@ router.patch("/:id/environments/:environmentId", requireRole("admin"), async (re
   //      secret because `password: ""` would re-encrypt as empty. Mirrors the
   //      project PATCH path's merge logic at routes/projects.js:243-273.
   if (Object.hasOwn(req.body || {}, 'credentials')) {
-  
-  if (req.body.credentials === null) {
+    if (req.body.credentials === null) {
       fields.credentials = null;
     } else if (req.body.credentials && typeof req.body.credentials === "object") {
       const incoming = req.body.credentials;

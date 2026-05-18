@@ -193,8 +193,13 @@ export async function tryVisionHeal(ctx, deps = {}) {
   if (mode === "off") return null;
   if (!ctx.failureScreenshot) return null;
 
-  const PIXEL_CONFIDENCE = parseFloat(process.env.VISION_HEAL_PIXEL_CONFIDENCE) || 0.85;
-  const LLM_CONFIDENCE   = parseFloat(process.env.VISION_HEAL_LLM_CONFIDENCE)   || 0.7;
+  // Use Number.isFinite guard rather than `||` so an explicit `0` from the
+  // operator is preserved instead of silently falling back to the default
+  // (parseFloat("0") === 0 is falsy under ||).
+  const rawPixel = parseFloat(process.env.VISION_HEAL_PIXEL_CONFIDENCE);
+  const PIXEL_CONFIDENCE = Number.isFinite(rawPixel) ? rawPixel : 0.85;
+  const rawLlm = parseFloat(process.env.VISION_HEAL_LLM_CONFIDENCE);
+  const LLM_CONFIDENCE   = Number.isFinite(rawLlm) ? rawLlm : 0.7;
   const key = `${ctx.action}::${ctx.label}`;
 
   // ── Stage 7 — pixelmatch CV (deterministic, free) ──────────────────────
