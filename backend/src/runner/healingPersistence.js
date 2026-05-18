@@ -38,6 +38,9 @@ export function persistHealingEvents(testId, events) {
   // already captured in the healing_history table.
   let succeededCount = 0;
   let failedCount = 0;
+  let visionHealCount = 0;
+  let visionHealCostUsd = 0;
+  const visionHealStrategy = { pixelmatch: 0, llm: 0 };
   // Histogram of which strategy index actually succeeded — index 0 means
   // "primary selector worked, no healing needed", >0 means a fallback won.
   const strategyHistogram = {};
@@ -51,6 +54,13 @@ export function persistHealingEvents(testId, events) {
     // Use bounded split so labels containing '::' don't corrupt args
     const [action, ...rest] = evt.key.split("::");
     const label = rest.join("::");
+    if (evt.kind === "vision_pixelmatch" || evt.kind === "vision_llm") {
+      visionHealCount += 1;
+      if (evt.kind === "vision_pixelmatch") visionHealStrategy.pixelmatch += 1;
+      if (evt.kind === "vision_llm") visionHealStrategy.llm += 1;
+      if (Number.isFinite(evt.costUsd)) visionHealCostUsd += Number(evt.costUsd);
+      continue;
+    }
     if (evt.failed) {
       recordHealingFailure(testId, action, label);
       failedCount += 1;
@@ -75,6 +85,9 @@ export function persistHealingEvents(testId, events) {
     // PostHog accepts nested objects on `properties` — surfaces nicely as a
     // breakdown chart in the UI ("how often does strategy 2 win?").
     strategyHistogram,
+    visionHealCount,
+    visionHealCostUsd,
+    visionHealStrategy,
   });
 
   // MET-001: record a savings sample so the healing dashboard's TrendChart

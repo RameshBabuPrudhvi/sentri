@@ -155,7 +155,30 @@ router.patch("/:id/environments/:environmentId", requireRole("admin"), async (re
   //      secret because `password: ""` would re-encrypt as empty. Mirrors the
   //      project PATCH path's merge logic at routes/projects.js:243-273.
   if (Object.hasOwn(req.body || {}, 'credentials')) {
-    if (req.body.credentials === null) {
+  
+  if (Object.hasOwn(req.body, "visionHealing")) {
+    const mode = req.body.visionHealing;
+    const allowedModes = new Set(["off", "pixelmatch_only", "pixelmatch_and_llm"]);
+    if (!allowedModes.has(mode)) return res.status(400).json({ error: "visionHealing must be one of: off, pixelmatch_only, pixelmatch_and_llm." });
+    if (mode === "pixelmatch_and_llm" && !process.env.VISION_MODEL && !process.env.AI_MODEL) {
+      return res.status(400).json({ error: "VISION_PROVIDER_NOT_CONFIGURED" });
+    }
+    fields.visionHealing = mode;
+  }
+
+  if (Object.hasOwn(req.body, "visionHealMaxCallsPerDay")) {
+    const cap = req.body.visionHealMaxCallsPerDay;
+    if (!Number.isInteger(cap) || cap < 1 || cap > 10000) return res.status(400).json({ error: "visionHealMaxCallsPerDay must be an integer between 1 and 10000." });
+    fields.visionHealMaxCallsPerDay = cap;
+  }
+
+  if (Object.hasOwn(req.body, "visionHealMaxCostUsdPerMonth")) {
+    const cap = req.body.visionHealMaxCostUsdPerMonth;
+    if (!Number.isFinite(cap) || cap < 0 || cap > 100000) return res.status(400).json({ error: "visionHealMaxCostUsdPerMonth must be a number between 0 and 100000." });
+    fields.visionHealMaxCostUsdPerMonth = cap;
+  }
+
+  if (req.body.credentials === null) {
       fields.credentials = null;
     } else if (req.body.credentials && typeof req.body.credentials === "object") {
       const incoming = req.body.credentials;
@@ -252,7 +275,7 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
   // is gated on the body containing *exactly* its field name so an
   // attempted `status` / `workspaceId` injection still falls through to
   // the full `validateProjectPayload` + field-whitelist path below.
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth"]);
   const isSingleFieldPatch = bodyKeys.length === 1 && SINGLE_FIELD_BYPASS.has(bodyKeys[0]);
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
@@ -313,6 +336,29 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
     } else {
       return res.status(400).json({ error: "piiAllowlist must be null or an array of up to 200 strings." });
     }
+  }
+
+
+  if (Object.hasOwn(req.body, "visionHealing")) {
+    const mode = req.body.visionHealing;
+    const allowedModes = new Set(["off", "pixelmatch_only", "pixelmatch_and_llm"]);
+    if (!allowedModes.has(mode)) return res.status(400).json({ error: "visionHealing must be one of: off, pixelmatch_only, pixelmatch_and_llm." });
+    if (mode === "pixelmatch_and_llm" && !process.env.VISION_MODEL && !process.env.AI_MODEL) {
+      return res.status(400).json({ error: "VISION_PROVIDER_NOT_CONFIGURED" });
+    }
+    fields.visionHealing = mode;
+  }
+
+  if (Object.hasOwn(req.body, "visionHealMaxCallsPerDay")) {
+    const cap = req.body.visionHealMaxCallsPerDay;
+    if (!Number.isInteger(cap) || cap < 1 || cap > 10000) return res.status(400).json({ error: "visionHealMaxCallsPerDay must be an integer between 1 and 10000." });
+    fields.visionHealMaxCallsPerDay = cap;
+  }
+
+  if (Object.hasOwn(req.body, "visionHealMaxCostUsdPerMonth")) {
+    const cap = req.body.visionHealMaxCostUsdPerMonth;
+    if (!Number.isFinite(cap) || cap < 0 || cap > 100000) return res.status(400).json({ error: "visionHealMaxCostUsdPerMonth must be a number between 0 and 100000." });
+    fields.visionHealMaxCostUsdPerMonth = cap;
   }
 
   if (req.body.credentials === null) {

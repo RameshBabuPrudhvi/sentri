@@ -76,6 +76,7 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
   const byStrategy = new Map();
   const selectorAgg = new Map(); // selector → { selector, healCount, totalCount }
   let wouldFail = 0;
+  const visionHealStrategy = { pixelmatch: 0, llm: 0 };
 
   for (const r of rows) {
     const key = r.strategyIndex >= 0 ? String(r.strategyIndex) : "failed";
@@ -84,6 +85,8 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
     if (r.strategyIndex >= 0 && r.succeededAt) prev.successes += 1;
     byStrategy.set(key, prev);
     if (r.strategyIndex > 0) wouldFail += 1;
+    if (r.strategyIndex === 7) visionHealStrategy.pixelmatch += 1;
+    if (r.strategyIndex === 8) visionHealStrategy.llm += 1;
 
     // Healing keys are formatted "<testId>::<action>::<label>" (see
     // selfHealing.js:48). The selector aggregation should preserve both
@@ -117,6 +120,7 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
   }
   const savingsTrend = [...merged.values()].sort((a, b) => a.ts - b.ts);
 
+  const visionHealCount = visionHealStrategy.pixelmatch + visionHealStrategy.llm;
   res.json({
     strategies: [...byStrategy.values()].map((s) => ({
       ...s,
@@ -125,6 +129,9 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
     topSelectors,
     estimates: { testsThatWouldHaveFailed: wouldFail },
     savingsTrend,
+    visionHealCount,
+    visionHealCostUsd: 0,
+    visionHealStrategy,
   });
 });
 
