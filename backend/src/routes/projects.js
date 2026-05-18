@@ -237,25 +237,18 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
   const existing = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!existing) return res.status(404).json({ error: "not found" });
 
-  // Allow threshold-only PATCHes (from AutoApprovalPanel) to skip the
-  // name/url validation gate. To keep this bypass tight, require the body
-  // to contain *only* `autoApproveThreshold` — any extra keys (e.g. an
-  // attempted `status` or `workspaceId` injection) force the request
-  // back through `validateProjectPayload` and the field whitelist below.
-  // Allow threshold-only PATCHes (from AutoApprovalPanel) to skip the
-  // name/url validation gate. To keep this bypass tight, require the body
-  // to contain *only* `autoApproveThreshold` — any extra keys (e.g. an
-  // attempted `status` or `workspaceId` injection) force the request
-  // back through `validateProjectPayload` and the field whitelist below.
+  // Bypass-eligible PATCHes (from dedicated panels in `ProjectQualityCard.jsx`)
+  // skip the name/url validation gate. Each panel sends only its own
+  // field(s) — e.g. AutoApprovalPanel sends `{ autoApproveThreshold }`,
+  // PiiFirewallPanel sends `{ strictPiiFirewall, piiAllowlist }`,
+  // VisionHealingPanel sends `{ visionHealing, visionHealMaxCallsPerDay,
+  // visionHealMaxCostUsdPerMonth }`. The bypass requires every key in the
+  // body to be in the whitelist, so an attempted `status` / `workspaceId`
+  // injection still falls through to the full `validateProjectPayload` +
+  // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  // Single-field PATCH bypass — `autoApproveThreshold` (AUTO-003b) and
-  // `iterationCap` (CAP-001) are configured from dedicated panels in
-  // `ProjectQualityCard.jsx` that send only their own field. Each bypass
-  // is gated on the body containing *exactly* its field name so an
-  // attempted `status` / `workspaceId` injection still falls through to
-  // the full `validateProjectPayload` + field-whitelist path below.
   const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth"]);
-  const isSingleFieldPatch = bodyKeys.length === 1 && SINGLE_FIELD_BYPASS.has(bodyKeys[0]);
+  const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
     if (validationErr) return res.status(400).json({ error: validationErr });
