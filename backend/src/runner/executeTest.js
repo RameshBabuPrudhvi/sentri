@@ -18,7 +18,8 @@
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
-import { getHealingHistoryForTest } from "../selfHealing.js";
+import { getHealingHistoryForTest, tryVisionHeal } from "../selfHealing.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
 import { extractTestBody, isApiTest } from "./codeParsing.js";
 import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
@@ -465,19 +466,73 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
     // Persist healing events from the failed run
     const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
-    persistHealingEvents(healingScopeId, err.__healingEvents);
 
     // Collect any per-step captures/timings gathered before the failure
     result.stepCaptures = err.__stepCaptures || [];
     result.stepTimings = err.__stepTimings || [];
     result.stepStatuses = err.__stepStatuses || [];
 
-    // Screenshot the failure state
+    // Screenshot the failure state — also feeds the vision-healing waterfall below.
+    let failureShot = null;
     try {
       const shot = await captureScreenshot(page, runId, stepIndex, { failed: true });
       result.screenshot = shot.base64;
       result.screenshotPath = shot.artifactPath;
+      failureShot = Buffer.from(shot.base64, "base64");
     } catch { /* page may be closed */ }
+
+    // ── MNT-001: host-side vision-healing waterfall (stages 7-8) ───────────
+    // Invoked AFTER the runtime helper waterfall (stages 0-6) failed.
+    // Best-effort: any internal error is swallowed; a vision-heal never
+    // *causes* a test failure that wouldn't already have happened.
+    //
+    // The failing locator is the last "failed" event in __healingEvents
+    // (every run emits exactly one failed entry per broken element thanks
+    // to the runtime helper). We attempt heal on each failed event so a
+    // multi-step test that breaks on more than one selector gets a heal
+    // attempt per breakage.
+    const visionEvents = [];
+    try {
+      const failedEvents = (err.__healingEvents || []).filter((e) => e?.failed && typeof e.key === "string");
+      if (failedEvents.length > 0 && failureShot) {
+        // Load project's vision config once; null-safe so a misconfigured
+        // run (project deleted mid-execution, db blip) skips stages 7-8.
+        let project = null;
+        try { project = test.projectId ? projectRepo.getById(test.projectId) : null; } catch { /* ignore */ }
+        if (project && project.visionHealing && project.visionHealing !== "off") {
+          for (const evt of failedEvents) {
+            const [action, ...rest] = evt.key.split("::");
+            const label = rest.join("::");
+            // No deps passed yet — pixelmatchHeal / llmVisionHeal land in
+            // MNT-001b. Without them, tryVisionHeal returns null and the
+            // test stays marked broken (existing behaviour). The wiring
+            // is in place for the follow-up PR to drop in the deps.
+            const heal = await tryVisionHeal({
+              testId: healingScopeId,
+              action, label, project,
+              failureScreenshot: failureShot,
+              baselineCrop: null, // MNT-001b: read from baseline repo
+            });
+            if (heal) {
+              visionEvents.push(heal);
+              console.log(formatLogLine("info", null,
+                `[executeTest] Vision heal succeeded for ${test.id} (${heal.kind}, confidence=${heal.confidence?.toFixed?.(2) ?? heal.confidence})`));
+            }
+          }
+        }
+      }
+    } catch (visionErr) {
+      console.warn(formatLogLine("warn", null,
+        `[executeTest] Vision-healing waterfall failed for ${test.id}: ${visionErr.message}`));
+    }
+
+    // Combine runtime + vision events for persistence. Vision events are
+    // distinguished by `kind: "vision_pixelmatch" | "vision_llm"` so
+    // `persistHealingEvents` can route them to the vision counters.
+    persistHealingEvents(healingScopeId, [
+      ...(err.__healingEvents || []),
+      ...visionEvents,
+    ]);
 
   } finally {
     clearTimeout(testTimeoutHandle);

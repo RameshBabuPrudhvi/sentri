@@ -1343,6 +1343,190 @@ export async function generateText(prompt, options) {
   }
 }
 
+// ─── MNT-001 — Vision (multimodal) provider abstraction ─────────────────────
+// Whitelist of vision-capable model identifiers. An explicit VISION_MODEL
+// env var bypasses the whitelist (operator opt-in). Conservative on purpose:
+// sending an image payload to a non-vision model silently degrades to
+// ignoring the image, which would produce false-positive healing "matches"
+// against random page regions.
+const VISION_CAPABLE_MODELS = new Set([
+  "claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620",
+  "claude-3-opus-20240229", "claude-sonnet-4-20250514",
+  "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4-vision-preview",
+  "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-flash",
+]);
+
+/**
+ * Resolve which vision-capable model to use, or `null` when none is
+ * configured. Used by stage 8 of the MNT-001 healing waterfall and by
+ * `PATCH /projects/:id` to reject `pixelmatch_and_llm` mode with
+ * `VISION_PROVIDER_NOT_CONFIGURED` when no usable model exists.
+ *
+ * Resolution order:
+ *   1. `VISION_MODEL` env var (explicit override, no whitelist check).
+ *   2. `AI_MODEL` env var if it's in `VISION_CAPABLE_MODELS`.
+ *   3. The active provider's default model if vision-capable.
+ *   4. `null`.
+ *
+ * @returns {string|null}
+ */
+export function resolveVisionModel() {
+  if (process.env.VISION_MODEL) return process.env.VISION_MODEL;
+  if (process.env.AI_MODEL && VISION_CAPABLE_MODELS.has(process.env.AI_MODEL)) return process.env.AI_MODEL;
+  const provider = getProvider();
+  if (!provider) return null;
+  const meta = getProviderMeta();
+  if (meta?.model && VISION_CAPABLE_MODELS.has(meta.model)) return meta.model;
+  return null;
+}
+
+/**
+ * Whether a vision-capable provider is configured server-side. Used by
+ * the project route validator (MNT-001) to gate `pixelmatch_and_llm`.
+ *
+ * @returns {boolean}
+ */
+export function hasVisionProvider() {
+  return resolveVisionModel() !== null;
+}
+
+/**
+ * MNT-001 — multimodal LLM call for vision-based locator healing (stage 8).
+ *
+ * Sends a screenshot + intent prompt to a vision-capable LLM and expects
+ * strict JSON describing where the broken element is now located. On any
+ * failure (rate limit, provider error, non-JSON response, sub-threshold
+ * confidence) returns `null` so the caller falls through to "no heal".
+ *
+ * Per-provider multimodal request shapes:
+ *   - Anthropic: `content: [{type:"image", source:{...}}, {type:"text"}]`
+ *   - OpenAI / OpenRouter / compat: `content: [{type:"text"}, {type:"image_url"}]`
+ *   - Google Gemini: `parts: [{text}, {inlineData:{mimeType, data}}]`
+ *
+ * Cost is a rough estimate (input × $5/M + output × $15/M) — proper
+ * per-model pricing is MNT-001b territory. The budget circuit-breaker
+ * only needs *some* signal to enforce caps; it does not need accuracy.
+ *
+ * @param {Object} params
+ * @param {Buffer} params.screenshot     - PNG buffer of the failure viewport.
+ * @param {Object} params.intent         - `{ action, label }`.
+ * @param {string} [params.contextHtml]  - Last-known DOM context for the broken locator.
+ * @param {AbortSignal} [params.signal]
+ * @returns {Promise<{confidence: number, box: ({x,y,width,height}|null), model: string, costUsd: number, reasoning: string|null}|null>}
+ */
+export async function callVisionModel({ screenshot, intent, contextHtml, signal } = {}) {
+  if (!screenshot || !intent?.label) return null;
+  const model = resolveVisionModel();
+  if (!model) return null;
+  const provider = getProvider();
+  if (!provider) return null;
+
+  const userPrompt =
+    `A web-test locator has broken. The target action was \`${intent.action}\` on the element ` +
+    `labelled "${intent.label}". The attached screenshot is the current page viewport. ` +
+    `Locate the element visually and respond with strict JSON only:\n\n` +
+    `{"x":number,"y":number,"width":number,"height":number,"confidence":number,"reasoning":string}\n\n` +
+    `Coordinates are viewport pixels. \`confidence\` is in [0, 1]. ` +
+    `If you cannot locate the element, return {"confidence":0,"reasoning":"<why>"}.` +
+    (contextHtml ? `\n\nLast-known DOM context:\n${String(contextHtml).slice(0, 800)}` : "");
+
+  const base64 = screenshot.toString("base64");
+  const dataUrl = `data:image/png;base64,${base64}`;
+
+  let raw = "";
+  let usage = null;
+  try {
+    if (provider === "anthropic") {
+      const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
+      const msg = await client.messages.create({
+        model, max_tokens: 512,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/png", data: base64 } },
+            { type: "text", text: userPrompt },
+          ],
+        }],
+      }, { signal });
+      raw = msg.content?.[0]?.text || "";
+      usage = { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens };
+    } else if (provider === "openai" || provider === "openrouter" || isCompatProvider(provider)) {
+      let client;
+      if (provider === "openai") {
+        client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
+      } else if (provider === "openrouter") {
+        client = new OpenAI({ apiKey: getKey("OPENROUTER_API_KEY"), baseURL: OPENROUTER_BASE_URL });
+      } else {
+        const compat = getCompatConfig(provider);
+        client = new OpenAI({ apiKey: compat?.apiKey, baseURL: compat?.baseUrl, fetch: createSsrfGuardedFetch() });
+      }
+      const res = await client.chat.completions.create({
+        model, max_tokens: 512,
+        response_format: { type: "json_object" },
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: userPrompt },
+            { type: "image_url", image_url: { url: dataUrl } },
+          ],
+        }],
+      }, { signal });
+      raw = res.choices?.[0]?.message?.content || "";
+      usage = { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens };
+    } else if (provider === "google") {
+      const genAI = new GoogleGenerativeAI(getKey("GOOGLE_API_KEY"));
+      const m = genAI.getGenerativeModel({
+        model,
+        generationConfig: { maxOutputTokens: 512, responseMimeType: "application/json" },
+      });
+      const result = await m.generateContent({
+        contents: [{
+          role: "user",
+          parts: [
+            { text: userPrompt },
+            { inlineData: { mimeType: "image/png", data: base64 } },
+          ],
+        }],
+      }, { signal });
+      raw = result.response.text();
+      const um = result?.response?.usageMetadata;
+      usage = { input: um?.promptTokenCount, output: um?.candidatesTokenCount };
+    } else {
+      return null; // local / unknown provider — no multimodal support
+    }
+  } catch {
+    return null; // provider failure → no heal
+  }
+
+  if (usage) {
+    try { recordAiTokens(provider, usage); } catch { /* best-effort */ }
+  }
+
+  let parsed;
+  try { parsed = parseJSON(raw); } catch { return null; }
+
+  const confidence = Number(parsed?.confidence);
+  if (!Number.isFinite(confidence) || confidence <= 0) return null;
+
+  const x = Number(parsed?.x), y = Number(parsed?.y);
+  const width = Number(parsed?.width), height = Number(parsed?.height);
+  const box = (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height))
+    ? { x, y, width, height }
+    : null;
+
+  const inK = (Number(usage?.input) || 0) / 1_000_000;
+  const outK = (Number(usage?.output) || 0) / 1_000_000;
+  const costUsd = inK * 5 + outK * 15;
+
+  return {
+    confidence: Math.min(1, Math.max(0, confidence)),
+    box,
+    model,
+    costUsd,
+    reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null,
+  };
+}
+
 /**
  * Parse AI response text as JSON. Strips markdown code fences if present.
  *

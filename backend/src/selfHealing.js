@@ -123,7 +123,130 @@ const HEALING_VISIBLE_WAIT_CAP = parseInt(process.env.HEALING_VISIBLE_WAIT_CAP, 
 // (e.g. adding/removing/reordering strategies in safeClick, safeFill, etc.).
 // Healing hints recorded with a different version are ignored so stale
 // strategyIndex values don't point to the wrong strategy after an upgrade.
-export const STRATEGY_VERSION = 3;
+//
+// MNT-001: bumped 3 → 4 to reserve strategy indices 7 (pixelmatch CV) and
+// 8 (LLM vision) for host-side post-waterfall vision-healing. Runtime
+// helpers still only emit 0..6; the host emits 7/8 via `tryVisionHeal()`.
+export const STRATEGY_VERSION = 4;
+
+// MNT-001 — reserved strategy indices for host-side vision heals. Runtime
+// helpers never produce these values; only `tryVisionHeal()` does. Tagged
+// here so callers reading `healing_history` can identify vision-sourced
+// hints without string-matching the key.
+export const STRATEGY_INDEX_PIXELMATCH = 7;
+export const STRATEGY_INDEX_LLM_VISION = 8;
+export const VISION_STRATEGY_INDICES = Object.freeze([
+  STRATEGY_INDEX_PIXELMATCH,
+  STRATEGY_INDEX_LLM_VISION,
+]);
+
+/**
+ * MNT-001 — host-side vision-healing entrypoint.
+ *
+ * Invoked by `executeTest.js` AFTER a test errored out and every DOM
+ * strategy in the runtime waterfall failed. Stages 7-8 live here (not
+ * in the injected runtime helper code) because they need Node-side
+ * libraries (pixelmatch, png decoder), the production `aiProvider`,
+ * and the SQLite-backed budget circuit-breaker — none of which are
+ * serialisable into the runtime string template.
+ *
+ * Returns a healing-event object the caller appends to the run's
+ * `healingEvents` stream (consumed by `persistHealingEvents`):
+ *
+ *   { kind: "vision_pixelmatch" | "vision_llm",
+ *     key: "<action>::<label>", strategyIndex: 7 | 8,
+ *     confidence, model?, costUsd?, box?, healed: true }
+ *
+ * Returns `null` when feature off, both stages declined, budget is
+ * exhausted, or any internal error fires — vision healing must never
+ * *cause* a test failure that wouldn't already have happened.
+ *
+ * Gates:
+ *   project.visionHealing === "off"                → null (feature off)
+ *   project.visionHealing === "pixelmatch_only"    → stage 7 only
+ *   project.visionHealing === "pixelmatch_and_llm" → stage 7, then 8
+ *
+ * Dependencies are injected so unit tests can stub pixelmatch and the
+ * vision provider without monkey-patching real modules.
+ *
+ * @param {Object} ctx
+ * @param {string} ctx.testId           - Versioned test id ("TC-1@v2").
+ * @param {string} ctx.action           - Action verb ("click", "fill", …).
+ * @param {string} ctx.label            - Human label / target text.
+ * @param {Object} ctx.project          - Project row (visionHealing,
+ *   visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth fields read).
+ * @param {Buffer} [ctx.failureScreenshot] - PNG of viewport at failure.
+ * @param {Buffer} [ctx.baselineCrop]   - PNG of element's last green crop.
+ * @param {Object} [deps]
+ * @param {Function} [deps.pixelmatchHeal] - Async (failure, baseline,
+ *   threshold) => { confidence, box }|null. MNT-001b lands the real
+ *   sliding-window CV; this PR ships the integration surface.
+ * @param {Function} [deps.llmVisionHeal] - Async ({failure, intent}) =>
+ *   { confidence, box, model, costUsd }|null.
+ * @param {Function} [deps.isBudgetExhausted] - Async (projectId) =>
+ *   { dailyCalls, monthlyCost }. Both booleans.
+ * @returns {Promise<Object|null>}
+ */
+export async function tryVisionHeal(ctx, deps = {}) {
+  if (!ctx || !ctx.project) return null;
+  const mode = ctx.project.visionHealing || "off";
+  if (mode === "off") return null;
+  if (!ctx.failureScreenshot) return null;
+
+  const PIXEL_CONFIDENCE = parseFloat(process.env.VISION_HEAL_PIXEL_CONFIDENCE) || 0.85;
+  const LLM_CONFIDENCE   = parseFloat(process.env.VISION_HEAL_LLM_CONFIDENCE)   || 0.7;
+  const key = `${ctx.action}::${ctx.label}`;
+
+  // ── Stage 7 — pixelmatch CV (deterministic, free) ──────────────────────
+  if (deps.pixelmatchHeal && ctx.baselineCrop) {
+    try {
+      const r = await deps.pixelmatchHeal(ctx.failureScreenshot, ctx.baselineCrop, PIXEL_CONFIDENCE);
+      if (r && r.confidence >= PIXEL_CONFIDENCE) {
+        recordHealing(ctx.testId, ctx.action, ctx.label, STRATEGY_INDEX_PIXELMATCH);
+        return {
+          kind: "vision_pixelmatch", key,
+          strategyIndex: STRATEGY_INDEX_PIXELMATCH,
+          confidence: r.confidence, box: r.box || null, healed: true,
+        };
+      }
+    } catch { /* fall through to stage 8 / no-heal */ }
+  }
+
+  // ── Stage 8 — LLM vision (paid, gated) ─────────────────────────────────
+  if (mode !== "pixelmatch_and_llm") return null;
+
+  if (deps.isBudgetExhausted) {
+    try {
+      const budget = await deps.isBudgetExhausted(ctx.project.id);
+      if (budget?.dailyCalls || budget?.monthlyCost) return null;
+    } catch {
+      return null; // conservative: don't call LLM on budget-check failure
+    }
+  }
+
+  if (!deps.llmVisionHeal) return null;
+
+  try {
+    const r = await deps.llmVisionHeal({
+      failure: ctx.failureScreenshot,
+      intent: { action: ctx.action, label: ctx.label },
+    });
+    if (r && r.confidence >= LLM_CONFIDENCE) {
+      recordHealing(ctx.testId, ctx.action, ctx.label, STRATEGY_INDEX_LLM_VISION);
+      return {
+        kind: "vision_llm", key,
+        strategyIndex: STRATEGY_INDEX_LLM_VISION,
+        confidence: r.confidence,
+        model: r.model || null,
+        costUsd: Number.isFinite(r.costUsd) ? r.costUsd : 0,
+        box: r.box || null,
+        healed: true,
+      };
+    }
+  } catch { /* provider outage / network error — return no-heal */ }
+
+  return null;
+}
 
 /**
  * Generate the self-healing runtime helper code as a string for injection

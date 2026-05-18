@@ -41,6 +41,7 @@ import * as notificationSettingsRepo from "../database/repositories/notification
 import * as metricSamplesRepo from "../database/repositories/metricSamplesRepo.js";
 import { generateNotificationSettingId } from "../utils/idGenerator.js";
 import { validateUrl } from "../utils/ssrfGuard.js";
+import { hasVisionProvider } from "../aiProvider.js";
 import cron from "node-cron";
 
 const router = Router();
@@ -317,11 +318,21 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
   }
 
 
+  // MNT-001: per-project vision-healing toggle. Validates the mode string
+  // and gates `pixelmatch_and_llm` behind a server-side vision-capable
+  // provider check (via aiProvider.hasVisionProvider() — more accurate
+  // than raw env-var sniffing because it respects runtime key overrides
+  // configured in Settings and the model-capability whitelist).
   if (Object.hasOwn(req.body, "visionHealing")) {
     const mode = req.body.visionHealing;
     const allowedModes = new Set(["off", "pixelmatch_only", "pixelmatch_and_llm"]);
-    if (!allowedModes.has(mode)) return res.status(400).json({ error: "visionHealing must be one of: off, pixelmatch_only, pixelmatch_and_llm." });
-    if (mode === "pixelmatch_and_llm" && !process.env.VISION_MODEL && !process.env.AI_MODEL) {
+    if (!allowedModes.has(mode)) {
+      return res.status(400).json({ error: "visionHealing must be one of: off, pixelmatch_only, pixelmatch_and_llm." });
+    }
+    if (mode === "pixelmatch_and_llm" && !hasVisionProvider()) {
+      // Surfaced verbatim by Settings.jsx as a disabled-state tooltip
+      // ("VISION_MODEL not configured server-side"). Don't change this
+      // error code without updating the frontend consumer.
       return res.status(400).json({ error: "VISION_PROVIDER_NOT_CONFIGURED" });
     }
     fields.visionHealing = mode;
