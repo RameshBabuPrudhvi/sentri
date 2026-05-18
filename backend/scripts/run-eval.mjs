@@ -29,9 +29,16 @@ const DIMENSIONS = ["selectors", "actions", "assertions"];
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
-const goldenDir = path.join(repoRoot, "backend", "tests", "fixtures", "eval-goldens");
-const cacheDir = path.join(goldenDir, ".cache");
-const baselinePath = path.join(repoRoot, "eval-baseline.json");
+// Env-var overrides exist so the CLI E2E test (`tests/eval-cli-e2e.test.js`)
+// can stage a synthetic golden dir + baseline in a tmpdir without having to
+// copy the entire `backend/src/` tree alongside this script. CI never sets
+// these; the defaults remain the canonical repo paths.
+const goldenDir = process.env.EVAL_GOLDEN_DIR
+  || path.join(repoRoot, "backend", "tests", "fixtures", "eval-goldens");
+const cacheDir = process.env.EVAL_CACHE_DIR
+  || path.join(goldenDir, ".cache");
+const baselinePath = process.env.EVAL_BASELINE_PATH
+  || path.join(repoRoot, "eval-baseline.json");
 const args = new Set(process.argv.slice(2));
 const writeBaseline = args.has("--write-baseline");
 const persistMetrics = args.has("--persist");

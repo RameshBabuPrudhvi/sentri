@@ -45,21 +45,17 @@ function cacheKeyFor(golden) {
   return h.digest("hex").slice(0, 32);
 }
 function stageHarness({ goldens, baseline, cacheEntries }) {
+  // Stage only the data (goldens + cache + baseline) in a tmpdir. The real
+  // `run-eval.mjs` is invoked in place and pointed at the tmpdir via the
+  // EVAL_GOLDEN_DIR / EVAL_CACHE_DIR / EVAL_BASELINE_PATH env overrides.
+  // Copying `backend/src/eval/*.js` to the tmpdir doesn't work because
+  // evalPersistence.js imports `../database/repositories/metricSamplesRepo.js`
+  // which sits outside `eval/` — the in-place strategy avoids dragging the
+  // whole module graph into the staging dir.
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "eval-cli-e2e-"));
-  const fakeScripts = path.join(tmpRoot, "backend", "scripts");
-  const fakeGoldenDir = path.join(tmpRoot, "backend", "tests", "fixtures", "eval-goldens");
+  const fakeGoldenDir = path.join(tmpRoot, "eval-goldens");
   const fakeCacheDir = path.join(fakeGoldenDir, ".cache");
-  const fakeEvalSrc = path.join(tmpRoot, "backend", "src", "eval");
-  fs.mkdirSync(fakeScripts, { recursive: true });
   fs.mkdirSync(fakeCacheDir, { recursive: true });
-  fs.mkdirSync(fakeEvalSrc, { recursive: true });
-  fs.copyFileSync(realScript, path.join(fakeScripts, "run-eval.mjs"));
-  for (const name of ["pipelineEval.js", "pipelineAdapter.js", "evalPersistence.js"]) {
-    fs.copyFileSync(
-      path.join(repoRoot, "backend", "src", "eval", name),
-      path.join(fakeEvalSrc, name),
-    );
-  }
   for (const g of goldens) {
     fs.writeFileSync(path.join(fakeGoldenDir, `${g.id}.json`), JSON.stringify(g, null, 2));
   }
@@ -70,11 +66,19 @@ function stageHarness({ goldens, baseline, cacheEntries }) {
   }
   const baselinePath = path.join(tmpRoot, "eval-baseline.json");
   fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2));
-  return { scriptPath: path.join(fakeScripts, "run-eval.mjs"), tmpRoot };
+  return {
+    scriptPath: realScript,
+    tmpRoot,
+    env: {
+      EVAL_GOLDEN_DIR: fakeGoldenDir,
+      EVAL_CACHE_DIR: fakeCacheDir,
+      EVAL_BASELINE_PATH: baselinePath,
+    },
+  };
 }
-function runScript(scriptPath, args = []) {
+function runScript(scriptPath, args = [], extraEnv = {}) {
   const result = spawnSync(process.execPath, [scriptPath, ...args], {
-    env: { ...process.env, EVAL_RECORD: "", EVAL_MODEL: TEST_EVAL_MODEL },
+    env: { ...process.env, EVAL_RECORD: "", EVAL_MODEL: TEST_EVAL_MODEL, ...extraEnv },
     encoding: "utf8",
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
@@ -111,12 +115,12 @@ function buildPerfectBaseline(goldens) {
 test("AC #1 — run-eval.mjs exits 0 on healthy tree and emits one report row per golden", () => {
   const goldens = buildGoldens();
   const cacheEntries = Object.fromEntries(goldens.map((g) => [g.id, g.expected]));
-  const { scriptPath, tmpRoot } = stageHarness({
+  const { scriptPath, tmpRoot, env } = stageHarness({
     goldens, baseline: buildPerfectBaseline(goldens), cacheEntries,
   });
   const reportPath = path.join(tmpRoot, "report.json");
-  const { status, stdout } = runScript(scriptPath, [`--report=${reportPath}`]);
-  assert.equal(status, 0, `expected exit 0, got ${status}`);
+  const { status, stdout, stderr } = runScript(scriptPath, [`--report=${reportPath}`], env);
+  assert.equal(status, 0, `expected exit 0, got ${status}\nstderr: ${stderr}`);
   assert.match(stdout, /PASS/, "stdout must contain PASS line");
   const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
   assert.equal(report.cases.length, 5, "one report row per golden");
@@ -138,10 +142,10 @@ test("AC #2 — selector regression on 3 cases makes the script exit non-zero wi
       .replace(/page\.getByText\([^)]*\)/g, `page.locator('css=broken-text-${JUNK}')`);
     return [g.id, broken];
   }));
-  const { scriptPath } = stageHarness({
+  const { scriptPath, env } = stageHarness({
     goldens, baseline: buildPerfectBaseline(goldens), cacheEntries,
   });
-  const { status, stderr } = runScript(scriptPath);
+  const { status, stderr } = runScript(scriptPath, [], env);
   assert.notEqual(status, 0, `expected non-zero exit on regression, got ${status}`);
   assert.match(stderr, /regression vs baseline/i, "stderr must say 'regression vs baseline'");
   assert.match(stderr, /case-001/, "stderr must name case-001");
