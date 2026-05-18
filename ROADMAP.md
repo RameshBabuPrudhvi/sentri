@@ -15,11 +15,11 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `INF-008` (Postgres-default + dual-DB CI matrix) — promoted after `INF-007` (OpenTelemetry + Sentry observability + Prometheus `/metrics` + `X-Request-Id` + structured-log trace correlation) shipped in PR #14. AUTO-022 (AI eval harness) holds queue slot 1, INF-009 (Helm chart + K8s + DR) slot 2, MNT-001 (vision-based locator healing) slot 3.
+> **Current sprint:** `INF-008` (Postgres-default + dual-DB CI matrix) — promoted after `INF-007` (OpenTelemetry + Sentry observability + Prometheus `/metrics` + `X-Request-Id` + structured-log trace correlation) shipped in PR #14. AUTO-022 (AI eval harness) holds queue slot 1, INF-009 (Helm chart + K8s + DR) slot 2. MNT-001 (vision-based locator healing) shipped in PR #17 — see Completed Work Summary for full details.
 >
 > **Blockers:** none remaining · **Remaining:** ~14 planned items across Phases 2–5 + Maintenance (see Summary table at the bottom for the authoritative breakdown).
 >
-> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): INF-007 PR #14 · SEC-007 PR #12 · SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
+> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): MNT-001 + AUTO-022 PR #17 · INF-007 PR #14 · SEC-007 PR #12 · SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
 
 ---
 
