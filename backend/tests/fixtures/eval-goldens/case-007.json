@@ -1,0 +1,8 @@
+{
+  "id": "case-007",
+  "category": "form-fill",
+  "description": "Search bar submit.",
+  "url": "https://eval.local/search",
+  "snapshot": "<form role='search'><label>Search<input type='search' name='q'/></label><button>Go</button></form><ol data-testid='results'></ol>",
+  "expected": "await page.getByLabel('Search').fill('playwright');\nawait page.getByRole('button', { name: 'Go' }).click();\nawait expect(page.getByTestId('results')).toBeVisible();"
+}

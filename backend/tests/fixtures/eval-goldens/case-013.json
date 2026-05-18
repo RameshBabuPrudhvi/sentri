@@ -1,0 +1,8 @@
+{
+  "id": "case-013",
+  "category": "form-fill",
+  "description": "Select dropdown + submit.",
+  "url": "https://eval.local/preferences",
+  "snapshot": "<form><label>Timezone<select name='tz'><option value='UTC'>UTC</option><option value='PT'>Pacific</option></select></label><button>Save</button></form>",
+  "expected": "await page.getByLabel('Timezone').selectOption('PT');\nawait page.getByRole('button', { name: 'Save' }).click();\nawait expect(page.getByText('Preferences saved')).toBeVisible();"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "case-029",
+  "category": "modal",
+  "description": "Drawer/sidesheet open with action.",
+  "url": "https://eval.local/notifications",
+  "snapshot": "<button>Open notifications</button><aside role='dialog' aria-label='Notifications' hidden><ul><li>1 new comment</li></ul><button>Mark all read</button></aside>",
+  "expected": "await page.getByRole('button', { name: 'Open notifications' }).click();\nawait expect(page.getByRole('dialog', { name: 'Notifications' })).toBeVisible();\nawait page.getByRole('button', { name: 'Mark all read' }).click();\nawait expect(page.getByText('All caught up')).toBeVisible();"
+}
