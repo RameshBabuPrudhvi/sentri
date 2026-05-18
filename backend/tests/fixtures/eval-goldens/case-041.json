@@ -1,8 +1,0 @@
-{
-  "id": "case-041",
-  "category": "multi-page-nav",
-  "description": "Skeleton golden — sidebar drill-down two levels. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/docs",
-  "snapshot": "<aside><a href='/docs/guides'>Guides</a></aside>",
-  "expected": "await page.getByRole('link', { name: 'Guides' }).click();\nawait expect(page).toHaveURL(/\\/docs\\/guides$/);\nawait page.getByRole('link', { name: 'Getting started' }).click();\nawait expect(page).toHaveURL(/\\/docs\\/guides\\/getting-started$/);"
-}

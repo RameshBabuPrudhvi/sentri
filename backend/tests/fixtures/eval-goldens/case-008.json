@@ -1,8 +1,0 @@
-{
-  "id": "case-008",
-  "category": "form-fill",
-  "description": "Skeleton golden — password change form. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/settings/password",
-  "snapshot": "<form><label>Current password<input type='password' name='current'/></label><label>New password<input type='password' name='next'/></label><label>Confirm new password<input type='password' name='confirm'/></label><button>Update password</button></form>",
-  "expected": "await page.getByLabel('Current password').fill('oldpass1');\nawait page.getByLabel('New password').fill('newpass2!');\nawait page.getByLabel('Confirm new password').fill('newpass2!');\nawait page.getByRole('button', { name: 'Update password' }).click();\nawait expect(page.getByText('Password updated')).toBeVisible();"
-}

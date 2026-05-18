@@ -1,8 +1,0 @@
-{
-  "id": "case-010",
-  "category": "form-fill",
-  "description": "Skeleton golden — newsletter subscribe inline form. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/blog",
-  "snapshot": "<form><label>Email<input type='email' name='email'/></label><button>Subscribe</button></form><div role='status' aria-live='polite'></div>",
-  "expected": "await page.getByLabel('Email').fill('reader@example.com');\nawait page.getByRole('button', { name: 'Subscribe' }).click();\nawait expect(page.getByRole('status')).toContainText('Subscribed');"
-}

@@ -1,8 +1,0 @@
-{
-  "id": "case-020",
-  "category": "list-click",
-  "description": "Skeleton golden — tab switch. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/account",
-  "snapshot": "<div role='tablist'><button role='tab' aria-selected='true'>Profile</button><button role='tab' aria-selected='false'>Billing</button></div><div role='tabpanel'></div>",
-  "expected": "await page.getByRole('tab', { name: 'Billing' }).click();\nawait expect(page.getByRole('tab', { name: 'Billing' })).toHaveAttribute('aria-selected', 'true');"
-}

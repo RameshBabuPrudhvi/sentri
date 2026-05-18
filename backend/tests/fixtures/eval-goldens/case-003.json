@@ -1,8 +1,0 @@
-{
-  "id": "case-003",
-  "category": "modal",
-  "description": "Skeleton golden — modal open / confirm / dismiss flow. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/projects/delete",
-  "snapshot": "<button>Delete project</button><div role='dialog' aria-label='Confirm delete' hidden><button>Cancel</button><button>Confirm</button></div>",
-  "expected": "await page.getByRole('button', { name: 'Delete project' }).click();\nawait expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible();\nawait page.getByRole('button', { name: 'Confirm' }).click();\nawait expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeHidden();"
-}

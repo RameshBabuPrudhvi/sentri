@@ -1,8 +1,0 @@
-{
-  "id": "case-011",
-  "category": "form-fill",
-  "description": "Skeleton golden — profile edit form. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/settings/profile",
-  "snapshot": "<form><label>Display name<input name='name'/></label><label>Bio<textarea name='bio'></textarea></label><button>Save</button></form>",
-  "expected": "await page.getByLabel('Display name').fill('Sentri Bot');\nawait page.getByLabel('Bio').fill('Automated test author.');\nawait page.getByRole('button', { name: 'Save' }).click();\nawait expect(page.getByText('Profile saved')).toBeVisible();"
-}

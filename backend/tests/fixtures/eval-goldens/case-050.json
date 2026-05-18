@@ -1,8 +1,0 @@
-{
-  "id": "case-050",
-  "category": "assertion-heavy",
-  "description": "Skeleton golden — accessibility tree shape (roles + landmarks). Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/",
-  "snapshot": "<header><nav aria-label='Main'><a href='/'>Home</a></nav></header><main><h1>Welcome</h1></main><footer><a href='/privacy'>Privacy</a></footer>",
-  "expected": "await expect(page.getByRole('banner')).toBeVisible();\nawait expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();\nawait expect(page.getByRole('main')).toBeVisible();\nawait expect(page.getByRole('contentinfo')).toBeVisible();\nawait expect(page.getByRole('heading', { level: 1, name: 'Welcome' })).toBeVisible();"
-}

@@ -1,8 +1,0 @@
-{
-  "id": "case-014",
-  "category": "form-fill",
-  "description": "Skeleton golden — checkbox + submit (accept terms). Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/onboarding/terms",
-  "snapshot": "<form><label><input type='checkbox' name='accept'/> I accept the terms</label><button>Continue</button></form>",
-  "expected": "await page.getByLabel('I accept the terms').check();\nawait page.getByRole('button', { name: 'Continue' }).click();\nawait expect(page).toHaveURL(/\\/onboarding\\/done$/);"
-}

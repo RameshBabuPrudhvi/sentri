@@ -1,8 +1,0 @@
-{
-  "id": "case-030",
-  "category": "modal",
-  "description": "Skeleton golden — error modal acknowledge. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/billing",
-  "snapshot": "<div role='alertdialog' aria-label='Payment failed'><p>Card declined.</p><button>OK</button></div>",
-  "expected": "await expect(page.getByRole('alertdialog', { name: 'Payment failed' })).toBeVisible();\nawait page.getByRole('button', { name: 'OK' }).click();\nawait expect(page.getByRole('alertdialog', { name: 'Payment failed' })).toBeHidden();"
-}

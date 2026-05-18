@@ -1,8 +1,0 @@
-{
-  "id": "case-032",
-  "category": "modal",
-  "description": "Skeleton golden — modal opened from row action. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/team",
-  "snapshot": "<ul><li>Alice <button>Edit</button></li></ul><div role='dialog' aria-label='Edit member' hidden><label>Role<select><option>Member</option><option>Admin</option></select></label><button>Save</button></div>",
-  "expected": "await page.getByRole('button', { name: 'Edit' }).click();\nawait expect(page.getByRole('dialog', { name: 'Edit member' })).toBeVisible();\nawait page.getByLabel('Role').selectOption('Admin');\nawait page.getByRole('button', { name: 'Save' }).click();\nawait expect(page.getByText('Member updated')).toBeVisible();"
-}

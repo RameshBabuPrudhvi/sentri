@@ -1,8 +1,0 @@
-{
-  "id": "case-048",
-  "category": "assertion-heavy",
-  "description": "Skeleton golden — link href + target + rel attributes. Replace snapshot with a real DOM capture and re-record with EVAL_RECORD=1.",
-  "url": "https://eval.local/docs",
-  "snapshot": "<p>See <a href='https://playwright.dev' target='_blank' rel='noopener noreferrer'>Playwright docs</a>.</p>",
-  "expected": "const link = page.getByRole('link', { name: 'Playwright docs' });\nawait expect(link).toBeVisible();\nawait expect(link).toHaveAttribute('href', 'https://playwright.dev');\nawait expect(link).toHaveAttribute('target', '_blank');\nawait expect(link).toHaveAttribute('rel', 'noopener noreferrer');"
-}
