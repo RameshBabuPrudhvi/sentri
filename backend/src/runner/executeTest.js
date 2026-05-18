@@ -20,10 +20,14 @@ import path from "path";
 import fs from "fs";
 import { getHealingHistoryForTest, tryVisionHeal } from "../selfHealing.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as elementBaselineRepo from "../database/repositories/elementBaselineRepo.js";
+import * as visionBudgetRepo from "../database/repositories/visionBudgetRepo.js";
+import { pixelmatchHeal, llmVisionHeal } from "./visionHealAdapters.js";
 import { extractTestBody, isApiTest } from "./codeParsing.js";
 import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
-import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes, captureWebVitals, registerWebVitalsInitScript } from "./pageCapture.js";
+import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes, captureWebVitals, registerWebVitalsInitScript, captureElementCrop } from "./pageCapture.js";
+import { PNG } from "pngjs";
 import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR, SHOTS_DIR, resolveDevice } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -86,6 +90,85 @@ function endsWithNonVisualAction(playwrightCode) {
     return NON_VISUAL_PATTERNS.some(re => re.test(trimmed));
   }
   return false;
+}
+
+/**
+ * MNT-001b — best-effort locator reconstruction for green-run baseline
+ * captures. The runtime helper's full waterfall lives inside the vm
+ * sandbox; here we only need to find ONE working locator to crop, so we
+ * try the most common label-based forms in priority order. Returns the
+ * first locator that resolves to a visible element, or null.
+ *
+ * We deliberately do NOT use the full healing waterfall — a baseline
+ * capture failure is fine (next green run will retry); the risk of a
+ * locator factory hanging the post-test cleanup path is not.
+ *
+ * @param {Object} page    Playwright Page.
+ * @param {string} action  "click" | "fill" | "check" | "expect" | …
+ * @param {string} label   Human-readable target text / label.
+ * @returns {Promise<Object|null>}
+ */
+async function resolveLocatorForBaseline(page, action, label) {
+  if (!page || !label) return null;
+  // Per-action shortlist. Mirrors the top-of-waterfall strategies the
+  // runtime helper tries first (selfHealing.js:500+). Each candidate is a
+  // factory; we resolve to the first match that's actually visible.
+  const candidates = (() => {
+    switch (action) {
+      case "click":
+      case "dblclick":
+      case "tap":
+      case "hover":
+      case "rightclick":
+      case "press":
+        return [
+          () => page.getByRole("button", { name: label }),
+          () => page.getByRole("link",   { name: label }),
+          () => page.getByText(label, { exact: true }),
+          () => page.getByText(label),
+        ];
+      case "fill":
+      case "focus":
+        return [
+          () => page.getByLabel(label),
+          () => page.getByPlaceholder(label),
+          () => page.getByRole("textbox",   { name: label }),
+          () => page.getByRole("searchbox", { name: label }),
+        ];
+      case "check":
+      case "uncheck":
+        return [
+          () => page.getByRole("checkbox", { name: label }),
+          () => page.getByLabel(label),
+        ];
+      case "select":
+        return [
+          () => page.getByLabel(label),
+          () => page.getByRole("combobox", { name: label }),
+        ];
+      case "expect":
+        return [
+          () => page.getByRole("heading", { name: label }),
+          () => page.getByText(label, { exact: true }),
+          () => page.getByText(label),
+        ];
+      default:
+        return [
+          () => page.getByText(label, { exact: true }),
+          () => page.getByText(label),
+        ];
+    }
+  })();
+  for (const factory of candidates) {
+    try {
+      const locator = factory();
+      // `isVisible()` returns false (no throw) for missing / hidden
+      // elements; either way we move on without raising.
+      const visible = await locator.first().isVisible().catch(() => false);
+      if (visible) return locator.first();
+    } catch { /* selector engine threw — try next */ }
+  }
+  return null;
 }
 
 /**
@@ -377,6 +460,55 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         });
         persistHealingEvents(healingScopeId, codeResult.healingEvents);
 
+        // ── MNT-001b: capture per-element baseline crops on green runs ────
+        // For every healing event with a healingKey, re-resolve the element
+        // via a best-effort locator factory and persist a tight PNG crop.
+        // Stage 7 (pixelmatch) reads these on the next failure.
+        //
+        // Strictly best-effort: any error is swallowed so a baseline-capture
+        // failure can never flip an otherwise-passing test. De-duped by key
+        // so a multi-action loop touching the same element doesn't trigger
+        // N upserts per run.
+        if (test.projectId && Array.isArray(codeResult.healingEvents) && codeResult.healingEvents.length > 0) {
+          const seenKeys = new Set();
+          for (const evt of codeResult.healingEvents) {
+            if (!evt || evt.failed || typeof evt.key !== "string") continue;
+            if (seenKeys.has(evt.key)) continue;
+            seenKeys.add(evt.key);
+            const [action, ...rest] = evt.key.split("::");
+            const label = rest.join("::");
+            try {
+              const locator = await resolveLocatorForBaseline(page, action, label);
+              if (!locator) continue;
+              const cropPng = await captureElementCrop(page, locator);
+              if (!cropPng) continue;
+              // Parse dimensions from the PNG header so the DB row has
+              // dimensions ready for stage-7 fit checks without re-decoding.
+              let cropWidth = 0;
+              let cropHeight = 0;
+              try {
+                const meta = PNG.sync.read(cropPng);
+                cropWidth = meta.width;
+                cropHeight = meta.height;
+              } catch { /* malformed → skip persistence */ continue; }
+              elementBaselineRepo.upsert({
+                projectId: test.projectId,
+                healingKey: `${healingScopeId}::${evt.key}`,
+                cropPng,
+                cropWidth,
+                cropHeight,
+                capturedAt: new Date().toISOString(),
+              });
+            } catch (baselineErr) {
+              // Single-event failure must never propagate. Log at debug
+              // level (warn) so operators can investigate hot keys without
+              // it dominating run logs.
+              console.warn(formatLogLine("warn", null,
+                `[executeTest] Baseline capture failed for ${evt.key}: ${baselineErr.message}`));
+            }
+          }
+        }
+
         // Collect per-step captures and timings from the instrumented run
         result.stepCaptures = codeResult.stepCaptures || [];
         result.stepTimings = codeResult.stepTimings || [];
@@ -503,18 +635,45 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
           for (const evt of failedEvents) {
             const [action, ...rest] = evt.key.split("::");
             const label = rest.join("::");
-            // No deps passed yet — pixelmatchHeal / llmVisionHeal land in
-            // MNT-001b. Without them, tryVisionHeal returns null and the
-            // test stays marked broken (existing behaviour). The wiring
-            // is in place for the follow-up PR to drop in the deps.
+            // MNT-001b — load the last-known baseline crop for stage 7 by
+            // the same composite key the green-run capture hook writes
+            // (`${healingScopeId}::${evt.key}`). Missing rows are normal
+            // (first-ever failure for this element) and degrade gracefully:
+            // `tryVisionHeal` skips stage 7 when baselineCrop is null.
+            let baselineCrop = null;
+            try {
+              const row = test.projectId
+                ? elementBaselineRepo.get(test.projectId, `${healingScopeId}::${evt.key}`)
+                : null;
+              baselineCrop = row?.cropPng ?? null;
+            } catch { /* repo blip — fall through to no baseline */ }
+
             const heal = await tryVisionHeal({
               testId: healingScopeId,
               action, label, project,
               failureScreenshot: failureShot,
-              baselineCrop: null, // MNT-001b: read from baseline repo
+              baselineCrop,
+            }, {
+              pixelmatchHeal,
+              llmVisionHeal,
+              isBudgetExhausted: visionBudgetRepo.isBudgetExhausted,
             });
             if (heal) {
               visionEvents.push(heal);
+              // Record LLM-vision spend against the project's budget so
+              // the next stage-8 attempt sees the increment. Pixelmatch
+              // is free (cost = 0) and skipped automatically.
+              if (heal.kind === "vision_llm" && test.projectId) {
+                try {
+                  visionBudgetRepo.recordCall({
+                    projectId: test.projectId,
+                    costUsd: heal.costUsd || 0,
+                  });
+                } catch (budgetErr) {
+                  console.warn(formatLogLine("warn", null,
+                    `[executeTest] Failed to record vision-heal budget for ${test.projectId}: ${budgetErr.message}`));
+                }
+              }
               console.log(formatLogLine("info", null,
                 `[executeTest] Vision heal succeeded for ${test.id} (${heal.kind}, confidence=${heal.confidence?.toFixed?.(2) ?? heal.confidence})`));
             }

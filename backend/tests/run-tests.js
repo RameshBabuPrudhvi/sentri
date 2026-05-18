@@ -11,6 +11,12 @@ const files = [
   // MNT-001 — host-side vision-healing waterfall (stages 7 pixelmatch + 8 LLM).
   // Stub-driven via dependency injection; no real CV / no real network in CI.
   "tests/self-healing-vision.test.js",
+  // MNT-001b — real pixelmatch CV adapter, baseline crop persistence repo,
+  // and per-project budget circuit breaker. Real SQLite + real pixelmatch
+  // (no stubs); each fixture is synthesised in-memory.
+  "tests/vision-heal-pixelmatch.test.js",
+  "tests/element-baseline-repo.test.js",
+  "tests/vision-budget-repo.test.js",
   "tests/pipeline.test.js",
   "tests/api-flow.test.js",
   "tests/project-edit.test.js",
