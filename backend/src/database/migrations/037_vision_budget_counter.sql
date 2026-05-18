@@ -1,23 +1,30 @@
--- MNT-001b — per-project per-window counters for the vision-heal budget
+-- MNT-001b — per-project, per-window counters for the vision-heal budget
 -- circuit-breaker enforced by `tryVisionHeal` stage 8.
 --
--- `windowKey` is a string identifier for the (projectId, kind, period)
--- tuple — e.g. "daily:2026-01-15" for the daily-calls bucket and
--- "monthly:2026-01" for the monthly-cost bucket. Storing the period as
--- part of the key (instead of derived columns) keeps the increment path
--- a single UPSERT and lets old buckets age out naturally — the budget
--- check only ever queries the current window's key.
+-- Two row shapes share one table, distinguished by the `window` column:
+--   window='day',   windowKey='2026-05-18'  (UTC YYYY-MM-DD)
+--   window='month', windowKey='2026-05'     (UTC YYYY-MM)
 --
--- `dailyCalls` and `monthlyCost` would normally live in separate tables,
--- but co-locating them lets a single `isBudgetExhausted(projectId)` read
--- return both flags from one (projectId, windowKey) lookup per row type.
-CREATE TABLE IF NOT EXISTS vision_heal_budget (
-  projectId    TEXT    NOT NULL,
-  windowKey    TEXT    NOT NULL,  -- "daily:YYYY-MM-DD" | "monthly:YYYY-MM"
-  callCount    INTEGER NOT NULL DEFAULT 0,
-  costUsd      REAL    NOT NULL DEFAULT 0,
-  updatedAt    TEXT    NOT NULL,
-  PRIMARY KEY (projectId, windowKey)
+-- The CHECK constraint catches typos at insert time. Splitting the
+-- discriminator into its own column (instead of prefix-encoding into
+-- windowKey) makes per-window queries indexable on a real column without
+-- `LIKE 'daily:%'` scans, and keeps the date itself parseable for the
+-- dashboard's trend chart without string-splitting on every row.
+--
+-- Both windows roll automatically: `dayKey()` / `monthKey()` return a fresh
+-- string at the UTC boundary, so the next call after midnight falls through
+-- to a fresh row (callCount=0 default) instead of inheriting yesterday's.
+-- Old rows age out via the daily retention sweep.
+CREATE TABLE IF NOT EXISTS vision_budget_counters (
+  projectId  TEXT    NOT NULL,
+  window     TEXT    NOT NULL CHECK (window IN ('day', 'month')),
+  windowKey  TEXT    NOT NULL,
+  calls      INTEGER NOT NULL DEFAULT 0,
+  costUsd    REAL    NOT NULL DEFAULT 0,
+  updatedAt  TEXT    NOT NULL,
+  PRIMARY KEY (projectId, window, windowKey)
 );
-CREATE INDEX IF NOT EXISTS idx_vision_heal_budget_updatedAt
-  ON vision_heal_budget (updatedAt);
+CREATE INDEX IF NOT EXISTS idx_vision_budget_lookup
+  ON vision_budget_counters (projectId, window, windowKey);
+CREATE INDEX IF NOT EXISTS idx_vision_budget_updatedAt
+  ON vision_budget_counters (updatedAt);

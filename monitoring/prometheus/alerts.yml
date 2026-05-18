@@ -227,13 +227,22 @@ groups:
 
   - name: sentri-saas-vision-healing
     rules:
+      # ── MNT-001 vision-heal budget circuit breaker ─────────────────────────
+      # Fires whenever stage 8 (LLM vision) is soft-disabled because a project
+      # hit its daily-calls or monthly-cost cap. The `app_` prefix matches the
+      # rest of the registry's naming convention; `projectId` + `reason`
+      # labels let the on-call engineer go straight to the right Vision
+      # Healing tab and confirm whether the cap hit was intentional. We use
+      # `for: 5m` (not 0m) so a single legitimate cap hit on a low-budget
+      # demo project doesn't page — only sustained or recurring exhaustion
+      # crosses the alert threshold.
       - alert: VisionHealBudgetExhausted
-        expr: increase(vision_heal_budget_exhausted_total[1h]) > 0
-        for: 0m
+        expr: increase(app_vision_heal_budget_exhausted_total[1h]) > 0
+        for: 5m
         labels:
           severity: warning
           component: ai
         annotations:
-          summary: "Vision heal LLM budget exhausted"
-          description: "One or more projects exhausted vision-heal budget in the last hour; LLM fallback is soft-disabled."
+          summary: "Vision heal LLM budget exhausted on project {{ $labels.projectId }}"
+          description: "Stage-8 LLM vision heals have been skipped for project {{ $labels.projectId }} in the past hour due to cap (reason={{ $labels.reason }}). Operator should visit the project's Vision Healing tab to confirm intent or raise the cap."
           runbook_url: "https://docs.sentri.dev/guide/vision-healing#incident-disable"

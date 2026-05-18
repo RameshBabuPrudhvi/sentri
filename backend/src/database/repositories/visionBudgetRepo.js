@@ -4,44 +4,47 @@
  * `tryVisionHeal` stage 8.
  *
  * Two windows per project:
- *   - daily   — `callCount`  vs `project.visionHealMaxCallsPerDay`
- *   - monthly — `costUsd`    vs `project.visionHealMaxCostUsdPerMonth`
+ *   - day   — `calls`   vs `project.visionHealMaxCallsPerDay`
+ *   - month — `costUsd` vs `project.visionHealMaxCostUsdPerMonth`
  *
- * Window keys encode the period so old buckets age out naturally — the
- * check only ever queries the current window's row. UTC throughout: a
- * day rolls over at 00:00 UTC, a month at the 1st 00:00 UTC. We don't
- * try to align to a tenant's local timezone — operators looking at the
- * budget gauge see a single global rollover, which is easier to reason
- * about than per-tenant clocks.
+ * Schema (`vision_budget_counters`): one row per (projectId, window,
+ * windowKey). The `window` column is the discriminator ('day' | 'month')
+ * with a CHECK constraint; `windowKey` is the bare date / month string
+ * (no prefix — the discriminator lives in its own column for indexability).
+ *
+ * UTC throughout: a day rolls over at 00:00 UTC, a month at the 1st 00:00
+ * UTC. We don't try to align to a tenant's local timezone — operators
+ * looking at the budget gauge see a single global rollover, which is
+ * easier to reason about than per-tenant clocks.
  */
 import { getDatabase } from "../sqlite.js";
 import * as projectRepo from "./projectRepo.js";
 
 /**
- * Compute the current daily-window key from `now`. Format `daily:YYYY-MM-DD`
- * in UTC so callers across timezones share one bucket per project.
+ * Compute the current day-window key from `now`. Format `YYYY-MM-DD` in
+ * UTC so callers across timezones share one bucket per project. Bare —
+ * the discriminator ('day') lives in its own column, not as a prefix.
  *
  * @param {Date} [now=new Date()]
  * @returns {string}
  */
-export function dailyWindowKey(now = new Date()) {
+export function dayKey(now = new Date()) {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   const d = String(now.getUTCDate()).padStart(2, "0");
-  return `daily:${y}-${m}-${d}`;
+  return `${y}-${m}-${d}`;
 }
 
 /**
- * Compute the current monthly-window key from `now`. Format
- * `monthly:YYYY-MM` in UTC.
+ * Compute the current month-window key from `now`. Format `YYYY-MM` in UTC.
  *
  * @param {Date} [now=new Date()]
  * @returns {string}
  */
-export function monthlyWindowKey(now = new Date()) {
+export function monthKey(now = new Date()) {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
-  return `monthly:${y}-${m}`;
+  return `${y}-${m}`;
 }
 
 /**
@@ -49,70 +52,91 @@ export function monthlyWindowKey(now = new Date()) {
  * Increments both the daily call counter and the monthly cost counter
  * in one transaction so the two buckets stay consistent.
  *
- * @param {Object} params
- * @param {string} params.projectId
- * @param {number} params.costUsd  Cost of this single call.
- * @param {Date}   [params.now]
+ * Stage-7 (pixelmatch) heals pass `costUsd=0` — the daily-call counter
+ * still ticks (so "how many heal attempts hit the LLM path" stays
+ * accurate for telemetry) but the monthly-cost counter stays put. Stage-8
+ * (LLM) passes the per-call cost estimate from `callVisionModel`.
+ *
+ * @param {string} projectId
+ * @param {number} [costUsd=0]  Cost of this single call.
+ * @param {Date}   [now]        Override for tests; default `new Date()`.
  */
-export function recordCall({ projectId, costUsd = 0, now = new Date() }) {
+export function record(projectId, costUsd = 0, now = new Date()) {
   if (!projectId) return;
   const db = getDatabase();
   const updatedAt = now.toISOString();
-  const dailyKey = dailyWindowKey(now);
-  const monthlyKey = monthlyWindowKey(now);
+  const dKey = dayKey(now);
+  const mKey = monthKey(now);
   const cost = Number.isFinite(costUsd) ? Number(costUsd) : 0;
+  // Single UPSERT statement reused for both row shapes — the discriminator
+  // and key are bound per call so the transaction is atomic across both
+  // windows. `excluded.costUsd` references the value bound on THIS call so
+  // subsequent calls accumulate cost on the monthly row.
+  const stmt = db.prepare(`
+    INSERT INTO vision_budget_counters (projectId, window, windowKey, calls, costUsd, updatedAt)
+    VALUES (?, ?, ?, 1, ?, ?)
+    ON CONFLICT(projectId, window, windowKey) DO UPDATE SET
+      calls = calls + 1,
+      costUsd = costUsd + excluded.costUsd,
+      updatedAt = excluded.updatedAt
+  `);
   const txn = db.transaction(() => {
-    // Daily bucket: increment callCount, leave costUsd at 0 (cost lives in
-    // the monthly bucket per the schema's split-rollover semantics).
-    db.prepare(`
-      INSERT INTO vision_heal_budget (projectId, windowKey, callCount, costUsd, updatedAt)
-      VALUES (@projectId, @windowKey, 1, 0, @updatedAt)
-      ON CONFLICT(projectId, windowKey) DO UPDATE SET
-        callCount = callCount + 1,
-        updatedAt = @updatedAt
-    `).run({ projectId, windowKey: dailyKey, updatedAt });
-    // Monthly bucket: increment costUsd, leave callCount at 0.
-    db.prepare(`
-      INSERT INTO vision_heal_budget (projectId, windowKey, callCount, costUsd, updatedAt)
-      VALUES (@projectId, @windowKey, 0, @cost, @updatedAt)
-      ON CONFLICT(projectId, windowKey) DO UPDATE SET
-        costUsd = costUsd + @cost,
-        updatedAt = @updatedAt
-    `).run({ projectId, windowKey: monthlyKey, cost, updatedAt });
+    stmt.run(projectId, "day",   dKey, cost, updatedAt);
+    stmt.run(projectId, "month", mKey, cost, updatedAt);
   });
   txn();
 }
 
 /**
- * Current daily call count for a project, or 0 when no calls have landed
- * in today's bucket yet.
+ * Read both window counters for the current day + month in a single
+ * helper. Returns `{ dailyCalls, monthlyCostUsd, day, month }` so callers
+ * (dashboard route, `isBudgetExhausted`) get a one-shot view without
+ * threading dates through two separate calls.
+ *
+ * @param {string} projectId
+ * @param {Date}   [now]
+ * @returns {{dailyCalls: number, monthlyCostUsd: number, day: string, month: string}}
+ */
+export function getCounters(projectId, now = new Date()) {
+  const db = getDatabase();
+  const today = dayKey(now);
+  const thisMonth = monthKey(now);
+  const dayRow = db.prepare(
+    "SELECT calls FROM vision_budget_counters WHERE projectId = ? AND window = 'day' AND windowKey = ?"
+  ).get(projectId, today);
+  const monthRow = db.prepare(
+    "SELECT costUsd FROM vision_budget_counters WHERE projectId = ? AND window = 'month' AND windowKey = ?"
+  ).get(projectId, thisMonth);
+  return {
+    dailyCalls: dayRow?.calls ?? 0,
+    monthlyCostUsd: monthRow?.costUsd ?? 0,
+    day: today,
+    month: thisMonth,
+  };
+}
+
+/**
+ * Current daily call count for a project. Thin wrapper over
+ * {@link getCounters} kept for test ergonomics + dashboard convenience.
  *
  * @param {string} projectId
  * @param {Date}   [now]
  * @returns {number}
  */
 export function getDailyCalls(projectId, now = new Date()) {
-  const db = getDatabase();
-  const row = db.prepare(
-    "SELECT callCount FROM vision_heal_budget WHERE projectId = ? AND windowKey = ?"
-  ).get(projectId, dailyWindowKey(now));
-  return row?.callCount ?? 0;
+  return getCounters(projectId, now).dailyCalls;
 }
 
 /**
- * Current monthly cost (USD) for a project, or 0 when no calls have
- * landed in this month's bucket yet.
+ * Current monthly cost (USD) for a project. Thin wrapper over
+ * {@link getCounters}.
  *
  * @param {string} projectId
  * @param {Date}   [now]
  * @returns {number}
  */
 export function getMonthlyCost(projectId, now = new Date()) {
-  const db = getDatabase();
-  const row = db.prepare(
-    "SELECT costUsd FROM vision_heal_budget WHERE projectId = ? AND windowKey = ?"
-  ).get(projectId, monthlyWindowKey(now));
-  return row?.costUsd ?? 0;
+  return getCounters(projectId, now).monthlyCostUsd;
 }
 
 /**
@@ -137,11 +161,12 @@ export async function isBudgetExhausted(projectId) {
     ? project.visionHealMaxCallsPerDay : 100;
   const monthlyCap = Number.isFinite(project.visionHealMaxCostUsdPerMonth)
     ? project.visionHealMaxCostUsdPerMonth : 50;
-  const calls = getDailyCalls(projectId);
-  const cost = getMonthlyCost(projectId);
+  // One round-trip via getCounters instead of two — same data, half the
+  // statement preparation cost on the hot stage-8 check path.
+  const { dailyCalls, monthlyCostUsd } = getCounters(projectId);
   return {
-    dailyCalls:  calls >= dailyCap,
-    monthlyCost: cost >= monthlyCap,
+    dailyCalls:  dailyCalls >= dailyCap,
+    monthlyCost: monthlyCostUsd >= monthlyCap,
   };
 }
 
@@ -161,7 +186,7 @@ export function purgeOlderThan(days) {
   if (!Number.isFinite(days) || days <= 0) return 0;
   const db = getDatabase();
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  return db.prepare("DELETE FROM vision_heal_budget WHERE updatedAt < ?").run(cutoff).changes;
+  return db.prepare("DELETE FROM vision_budget_counters WHERE updatedAt < ?").run(cutoff).changes;
 }
 
 /**
@@ -172,5 +197,5 @@ export function purgeOlderThan(days) {
  */
 export function deleteByProjectId(projectId) {
   const db = getDatabase();
-  return db.prepare("DELETE FROM vision_heal_budget WHERE projectId = ?").run(projectId).changes;
+  return db.prepare("DELETE FROM vision_budget_counters WHERE projectId = ?").run(projectId).changes;
 }

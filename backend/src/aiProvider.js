@@ -43,6 +43,7 @@ import {
   aiProviderLatencySeconds,
   aiProviderTokensTotal,
   aiProviderErrorsTotal,
+  aiProviderCostUsdTotal,
   classifyAiError,
 } from "./utils/metrics.js";
 
@@ -1035,13 +1036,17 @@ function getFallbackProviders(primaryProvider) {
  * `res.usage`, `result.response.usageMetadata`, etc).
  */
 async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat) {
+  // All call sites in this file are test-generation traffic. Vision-heal
+  // calls live in `callVisionModel` below and pass `operation: "vision_heal"`
+  // to the same metric counters directly.
+  const operation = "generation";
   const label = providerMetricLabel(provider);
   const startedAt = process.hrtime.bigint();
   try {
     const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat);
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      aiProviderLatencySeconds.observe({ provider: label, outcome: "success" }, seconds);
+      aiProviderLatencySeconds.observe({ provider: label, outcome: "success", operation }, seconds);
     } catch { /* best-effort */ }
     return result;
   } catch (err) {
@@ -1049,34 +1054,43 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: label, outcome }, seconds);
-      aiProviderErrorsTotal.inc({ provider: label, reason });
+      aiProviderLatencySeconds.observe({ provider: label, outcome, operation }, seconds);
+      aiProviderErrorsTotal.inc({ provider: label, reason, operation });
     } catch { /* best-effort */ }
     throw err;
   }
 }
 
 /**
- * Record token usage from a provider response, bucketed by `kind`. Each
- * provider's SDK exposes usage on a different shape; the caller passes the
- * normalised `{ input, output }` counts. Per-1k token cost varies by provider
- * and model, so the dashboard layer multiplies these counters by a pricing
- * lookup to compute spend.
+ * Record token usage from a provider response, bucketed by `kind` +
+ * `operation`. Each provider's SDK exposes usage on a different shape;
+ * the caller passes the normalised `{ input, output }` counts plus the
+ * surface that made the call:
+ *
+ *   - `"generation"` — test-generation pipeline (default for every
+ *     call site in this file's generateText / streamText paths).
+ *   - `"vision_heal"` — MNT-001 stage-8 vision-healing path. Bucketed
+ *     separately so SaaS unit-economics dashboards can attribute spend
+ *     to the healing surface vs. core test generation.
+ *
+ * Per-1k token cost varies by provider and model, so the dashboard layer
+ * multiplies these counters by a pricing lookup to compute spend.
  *
  * @param {string} provider - Detected provider id (used as label after normalisation).
  * @param {object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
+ * @param {"generation"|"vision_heal"} [operation="generation"] - Which surface initiated the call.
  */
-function recordAiTokens(provider, usage) {
+function recordAiTokens(provider, usage, operation = "generation") {
   if (!usage) return;
   const label = providerMetricLabel(provider);
   try {
     const inTokens = Number(usage.input);
     if (Number.isFinite(inTokens) && inTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, kind: "input" }, inTokens);
+      aiProviderTokensTotal.inc({ provider: label, kind: "input", operation }, inTokens);
     }
     const outTokens = Number(usage.output);
     if (Number.isFinite(outTokens) && outTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, kind: "output" }, outTokens);
+      aiProviderTokensTotal.inc({ provider: label, kind: "output", operation }, outTokens);
     }
   } catch { /* best-effort */ }
 }
@@ -1421,6 +1435,13 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal 
   const provider = getProvider();
   if (!provider) return null;
 
+  // MNT-001b — observe latency + errors per AC #4. Histogram observation
+  // happens in both branches below (success after the parsed-confidence
+  // check, error in the catch). Lives outside the try/catch so the start
+  // timestamp is captured even if the prompt build throws.
+  const metricLabel = providerMetricLabel(provider);
+  const startedAt = process.hrtime.bigint();
+
   const userPrompt =
     `A web-test locator has broken. The target action was \`${intent.action}\` on the element ` +
     `labelled "${intent.label}". The attached screenshot is the current page viewport. ` +
@@ -1494,12 +1515,23 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal 
     } else {
       return null; // local / unknown provider — no multimodal support
     }
-  } catch {
-    return null; // provider failure → no heal
+  } catch (err) {
+    // MNT-001b — emit error/latency telemetry on provider failure. We
+    // intentionally don't rethrow: the caller (`tryVisionHeal`) treats
+    // any failure as a "no heal" so the test stays broken instead of
+    // being caused to fail by the heal attempt itself.
+    try {
+      const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
+      const reason = classifyAiError(err);
+      const outcome = reason === "rate_limit" ? "rate_limited" : "error";
+      aiProviderLatencySeconds.observe({ provider: metricLabel, outcome, operation: "vision_heal" }, seconds);
+      aiProviderErrorsTotal.inc({ provider: metricLabel, reason, operation: "vision_heal" });
+    } catch { /* best-effort */ }
+    return null;
   }
 
   if (usage) {
-    try { recordAiTokens(provider, usage); } catch { /* best-effort */ }
+    try { recordAiTokens(provider, usage, "vision_heal"); } catch { /* best-effort */ }
   }
 
   let parsed;
@@ -1517,6 +1549,17 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal 
   const inK = (Number(usage?.input) || 0) / 1_000_000;
   const outK = (Number(usage?.output) || 0) / 1_000_000;
   const costUsd = inK * 5 + outK * 15;
+
+  // MNT-001b — success-path latency + cost telemetry. Cost is an estimate
+  // ($5/M input + $15/M output midpoint, matching the per-call estimate
+  // returned to the caller). Per-model accurate pricing is MNT-001c.
+  try {
+    const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
+    aiProviderLatencySeconds.observe({ provider: metricLabel, outcome: "success", operation: "vision_heal" }, seconds);
+    if (Number.isFinite(costUsd) && costUsd > 0) {
+      aiProviderCostUsdTotal.inc({ provider: metricLabel, operation: "vision_heal" }, costUsd);
+    }
+  } catch { /* best-effort */ }
 
   return {
     confidence: Math.min(1, Math.max(0, confidence)),

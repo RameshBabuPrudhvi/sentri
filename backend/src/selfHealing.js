@@ -218,7 +218,25 @@ export async function tryVisionHeal(ctx, deps = {}) {
   if (deps.isBudgetExhausted) {
     try {
       const budget = await deps.isBudgetExhausted(ctx.project.id);
-      if (budget?.dailyCalls || budget?.monthlyCost) return null;
+      if (budget?.dailyCalls || budget?.monthlyCost) {
+        // MNT-001b — soft-disable sentinel. We return a distinguishable
+        // object (NOT `null`) so the caller can emit an audit row + bump
+        // the `app_vision_heal_budget_exhausted_total` Prometheus counter
+        // BEFORE deciding whether to push it onto the healing-event stream.
+        // `healed: false` keeps `persistHealingEvents` from treating it as
+        // a successful heal; the caller filters it out of `visionEvents`.
+        //
+        // Without this sentinel, a budget-soft-disable was invisible —
+        // operators couldn't tell whether stage 8 was off because of a cap
+        // hit, a provider outage, or a config flip. The audit row makes
+        // the soft-disable attributable.
+        return {
+          kind: "vision_budget_exhausted",
+          key,
+          reason: budget.dailyCalls ? "daily_calls" : "monthly_cost",
+          healed: false,
+        };
+      }
     } catch {
       return null; // conservative: don't call LLM on budget-check failure
     }

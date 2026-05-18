@@ -47,6 +47,12 @@ export function persistHealingEvents(testId, events) {
 
   for (const evt of events) {
     if (!evt) continue;
+    // MNT-001b — budget-exhausted sentinel never reaches persistence in
+    // practice (executeTest.js filters it before pushing onto visionEvents),
+    // but guard defensively so a future caller can't accidentally count a
+    // skipped stage 8 as a "heal". The audit row + Prometheus counter are
+    // the canonical record for budget-exhausted events.
+    if (evt.kind === "vision_budget_exhausted") continue;
     if (evt.kind === "vision_pixelmatch" || evt.kind === "vision_llm") {
       visionHealCount += 1;
       if (evt.kind === "vision_pixelmatch") visionHealStrategy.pixelmatch += 1;

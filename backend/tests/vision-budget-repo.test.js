@@ -27,7 +27,7 @@ async function test(name, fn) {
 
 function resetBudget() {
   const db = getDatabase();
-  db.exec("DELETE FROM vision_heal_budget");
+  db.exec("DELETE FROM vision_budget_counters");
 }
 
 function createProject({ id, dailyCap = 100, monthlyCap = 50, workspaceId = "WS-VBR" }) {
@@ -52,28 +52,40 @@ console.log("\n── MNT-001b visionBudgetRepo ──");
 getDatabase();
 resetBudget();
 
-await test("dailyWindowKey / monthlyWindowKey format YYYY-MM-DD / YYYY-MM in UTC", () => {
+await test("dayKey / monthKey format YYYY-MM-DD / YYYY-MM in UTC (no prefix)", () => {
   // Pin a known timestamp so the assertion is portable across timezones.
+  // The period prefix lives in the `window` column now, not the key itself.
   const t = new Date(Date.UTC(2026, 0, 15, 10, 30, 0)); // 2026-01-15 10:30 UTC
-  assert.equal(budgetRepo.dailyWindowKey(t), "daily:2026-01-15");
-  assert.equal(budgetRepo.monthlyWindowKey(t), "monthly:2026-01");
+  assert.equal(budgetRepo.dayKey(t), "2026-01-15");
+  assert.equal(budgetRepo.monthKey(t), "2026-01");
 });
 
-await test("recordCall increments daily callCount and monthly costUsd in one txn", async () => {
+await test("record increments daily calls and monthly costUsd in one txn", async () => {
   resetBudget();
   const t = new Date(Date.UTC(2026, 0, 15, 12, 0, 0));
-  budgetRepo.recordCall({ projectId: "PRJ-VBR-1", costUsd: 0.012, now: t });
-  budgetRepo.recordCall({ projectId: "PRJ-VBR-1", costUsd: 0.008, now: t });
+  budgetRepo.record("PRJ-VBR-1", 0.012, t);
+  budgetRepo.record("PRJ-VBR-1", 0.008, t);
   assert.equal(budgetRepo.getDailyCalls("PRJ-VBR-1", t), 2);
   // 0.012 + 0.008 = 0.020 — use approx compare for FP safety.
   const cost = budgetRepo.getMonthlyCost("PRJ-VBR-1", t);
   assert.ok(Math.abs(cost - 0.020) < 1e-9, `expected ~0.020, got ${cost}`);
 });
 
+await test("getCounters bundles day + month reads with window keys", () => {
+  resetBudget();
+  const t = new Date(Date.UTC(2026, 0, 15, 12, 0, 0));
+  budgetRepo.record("PRJ-VBR-COUNTER", 0.05, t);
+  const c = budgetRepo.getCounters("PRJ-VBR-COUNTER", t);
+  assert.equal(c.dailyCalls, 1);
+  assert.ok(Math.abs(c.monthlyCostUsd - 0.05) < 1e-9);
+  assert.equal(c.day, "2026-01-15");
+  assert.equal(c.month, "2026-01");
+});
+
 await test("daily and monthly buckets are independent across projects", async () => {
   resetBudget();
-  budgetRepo.recordCall({ projectId: "PRJ-VBR-A", costUsd: 0.01 });
-  budgetRepo.recordCall({ projectId: "PRJ-VBR-B", costUsd: 0.02 });
+  budgetRepo.record("PRJ-VBR-A", 0.01);
+  budgetRepo.record("PRJ-VBR-B", 0.02);
   assert.equal(budgetRepo.getDailyCalls("PRJ-VBR-A"), 1);
   assert.equal(budgetRepo.getDailyCalls("PRJ-VBR-B"), 1);
   assert.ok(Math.abs(budgetRepo.getMonthlyCost("PRJ-VBR-A") - 0.01) < 1e-9);
@@ -89,16 +101,16 @@ await test("getDailyCalls / getMonthlyCost return 0 for empty buckets", () => {
 await test("isBudgetExhausted is false under both caps", async () => {
   resetBudget();
   createProject({ id: "PRJ-VBR-UNDER", dailyCap: 100, monthlyCap: 50 });
-  budgetRepo.recordCall({ projectId: "PRJ-VBR-UNDER", costUsd: 0.5 });
+  budgetRepo.record("PRJ-VBR-UNDER", 0.5);
   const r = await budgetRepo.isBudgetExhausted("PRJ-VBR-UNDER");
   assert.deepEqual(r, { dailyCalls: false, monthlyCost: false });
 });
 
-await test("isBudgetExhausted trips dailyCalls when callCount >= cap", async () => {
+await test("isBudgetExhausted trips dailyCalls when calls >= cap", async () => {
   resetBudget();
   createProject({ id: "PRJ-VBR-DAILY", dailyCap: 3, monthlyCap: 1000 });
   for (let i = 0; i < 3; i++) {
-    budgetRepo.recordCall({ projectId: "PRJ-VBR-DAILY", costUsd: 0.01 });
+    budgetRepo.record("PRJ-VBR-DAILY", 0.01);
   }
   const r = await budgetRepo.isBudgetExhausted("PRJ-VBR-DAILY");
   assert.equal(r.dailyCalls, true);
@@ -108,7 +120,7 @@ await test("isBudgetExhausted trips dailyCalls when callCount >= cap", async () 
 await test("isBudgetExhausted trips monthlyCost when cost >= cap", async () => {
   resetBudget();
   createProject({ id: "PRJ-VBR-MONTHLY", dailyCap: 1000, monthlyCap: 0.5 });
-  budgetRepo.recordCall({ projectId: "PRJ-VBR-MONTHLY", costUsd: 0.6 });
+  budgetRepo.record("PRJ-VBR-MONTHLY", 0.6);
   const r = await budgetRepo.isBudgetExhausted("PRJ-VBR-MONTHLY");
   assert.equal(r.dailyCalls, false);
   assert.equal(r.monthlyCost, true);
@@ -124,19 +136,19 @@ await test("isBudgetExhausted returns both true for null/empty projectId", async
   assert.deepEqual(await budgetRepo.isBudgetExhausted(null), { dailyCalls: true, monthlyCost: true });
 });
 
-await test("recordCall is a noop for falsy projectId", () => {
+await test("record is a noop for falsy projectId", () => {
   resetBudget();
-  budgetRepo.recordCall({ projectId: "", costUsd: 1 });
-  budgetRepo.recordCall({ projectId: null, costUsd: 1 });
+  budgetRepo.record("", 1);
+  budgetRepo.record(null, 1);
   const db = getDatabase();
-  const cnt = db.prepare("SELECT COUNT(*) as c FROM vision_heal_budget").get().c;
+  const cnt = db.prepare("SELECT COUNT(*) as c FROM vision_budget_counters").get().c;
   assert.equal(cnt, 0);
 });
 
-await test("recordCall coerces non-finite costUsd to 0", () => {
+await test("record coerces non-finite costUsd to 0", () => {
   resetBudget();
-  budgetRepo.recordCall({ projectId: "PRJ-NAN", costUsd: NaN });
-  budgetRepo.recordCall({ projectId: "PRJ-NAN", costUsd: "not-a-number" });
+  budgetRepo.record("PRJ-NAN", NaN);
+  budgetRepo.record("PRJ-NAN", "not-a-number");
   assert.equal(budgetRepo.getDailyCalls("PRJ-NAN"), 2);
   assert.equal(budgetRepo.getMonthlyCost("PRJ-NAN"), 0);
 });
@@ -146,20 +158,38 @@ await test("purgeOlderThan removes stale buckets, preserves recent", () => {
   const db = getDatabase();
   const oldTs = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
   const newTs = new Date().toISOString();
-  db.prepare("INSERT INTO vision_heal_budget VALUES (?, ?, ?, ?, ?)").run("PRJ-X", "daily:2024-01-01", 5, 0, oldTs);
-  db.prepare("INSERT INTO vision_heal_budget VALUES (?, ?, ?, ?, ?)").run("PRJ-X", "daily:2026-01-15", 1, 0, newTs);
+  // Raw INSERT against the new schema — discriminator column 'window' must
+  // satisfy the CHECK constraint (`window IN ('day', 'month')`).
+  db.prepare("INSERT INTO vision_budget_counters VALUES (?, ?, ?, ?, ?, ?)").run("PRJ-X", "day", "2024-01-01", 5, 0, oldTs);
+  db.prepare("INSERT INTO vision_budget_counters VALUES (?, ?, ?, ?, ?, ?)").run("PRJ-X", "day", "2026-01-15", 1, 0, newTs);
   const removed = budgetRepo.purgeOlderThan(90);
   assert.equal(removed, 1);
 });
 
 await test("deleteByProjectId is scoped to project", () => {
   resetBudget();
-  budgetRepo.recordCall({ projectId: "PRJ-DEL-A", costUsd: 1 });
-  budgetRepo.recordCall({ projectId: "PRJ-DEL-B", costUsd: 1 });
+  budgetRepo.record("PRJ-DEL-A", 1);
+  budgetRepo.record("PRJ-DEL-B", 1);
   const removed = budgetRepo.deleteByProjectId("PRJ-DEL-A");
   assert.ok(removed >= 1);
   assert.equal(budgetRepo.getDailyCalls("PRJ-DEL-A"), 0);
   assert.equal(budgetRepo.getDailyCalls("PRJ-DEL-B"), 1);
+});
+
+await test("CHECK constraint rejects invalid window discriminator", () => {
+  resetBudget();
+  const db = getDatabase();
+  // Direct INSERT with a bogus window value should fail the CHECK constraint
+  // at insert time — confirms the schema actually defends against typos.
+  let threw = false;
+  try {
+    db.prepare("INSERT INTO vision_budget_counters VALUES (?, ?, ?, ?, ?, ?)").run(
+      "PRJ-CHECK", "year", "2026", 1, 0, new Date().toISOString(),
+    );
+  } catch {
+    threw = true;
+  }
+  assert.equal(threw, true, "CHECK (window IN ('day','month')) should reject 'year'");
 });
 
 resetBudget();

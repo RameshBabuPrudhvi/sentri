@@ -209,7 +209,12 @@ await test("pixelmatch_and_llm: missing costUsd defaults to 0", async () => {
 });
 
 // ── Budget circuit-breaker ───────────────────────────────────────────────────
-await test("budget: dailyCalls exhausted -> stage 8 skipped, returns null", async () => {
+await test("budget: dailyCalls exhausted -> stage 8 skipped, returns sentinel", async () => {
+  // MNT-001b — the budget-exhausted path now returns a distinguishable
+  // sentinel object (NOT null) so executeTest.js can emit an audit row
+  // and bump the `app_vision_heal_budget_exhausted_total` counter before
+  // filtering it out of the healing-event stream. `healed: false` keeps
+  // persistHealingEvents from treating it as a successful heal.
   let llmCalled = false;
   const r = await tryVisionHeal(
     ctx({ project: { id: "P", visionHealing: "pixelmatch_and_llm" }, baselineCrop: null }),
@@ -218,11 +223,15 @@ await test("budget: dailyCalls exhausted -> stage 8 skipped, returns null", asyn
       llmVisionHeal: async () => { llmCalled = true; return { confidence: 1.0 }; },
     },
   );
-  assert.equal(r, null);
+  assert.ok(r, "expected sentinel object, not null");
+  assert.equal(r.kind, "vision_budget_exhausted");
+  assert.equal(r.reason, "daily_calls");
+  assert.equal(r.healed, false);
+  assert.equal(r.key, "click::Sign in");
   assert.equal(llmCalled, false, "Stage 8 must skip LLM when daily cap is hit");
 });
 
-await test("budget: monthlyCost exhausted -> stage 8 skipped, returns null", async () => {
+await test("budget: monthlyCost exhausted -> stage 8 skipped, returns sentinel", async () => {
   let llmCalled = false;
   const r = await tryVisionHeal(
     ctx({ project: { id: "P", visionHealing: "pixelmatch_and_llm" }, baselineCrop: null }),
@@ -231,8 +240,30 @@ await test("budget: monthlyCost exhausted -> stage 8 skipped, returns null", asy
       llmVisionHeal: async () => { llmCalled = true; return { confidence: 1.0 }; },
     },
   );
-  assert.equal(r, null);
+  assert.ok(r);
+  assert.equal(r.kind, "vision_budget_exhausted");
+  assert.equal(r.reason, "monthly_cost");
+  assert.equal(r.healed, false);
+  // Daily cap takes precedence in the ternary — verify monthly-only fires
+  // with the right reason label, which is what the Prometheus counter
+  // surfaces to operators.
   assert.equal(llmCalled, false);
+});
+
+await test("budget: dailyCalls cap takes precedence over monthlyCost in sentinel.reason", async () => {
+  // Both flags true → reason is "daily_calls". This pins the documented
+  // tie-break behaviour so a future refactor doesn't silently swap to
+  // monthly_cost (which would re-attribute alert volume in dashboards).
+  const r = await tryVisionHeal(
+    ctx({ project: { id: "P", visionHealing: "pixelmatch_and_llm" }, baselineCrop: null }),
+    {
+      isBudgetExhausted: async () => ({ dailyCalls: true, monthlyCost: true }),
+      llmVisionHeal: async () => ({ confidence: 1.0 }),
+    },
+  );
+  assert.ok(r);
+  assert.equal(r.kind, "vision_budget_exhausted");
+  assert.equal(r.reason, "daily_calls");
 });
 
 await test("budget: under both caps -> stage 8 invoked normally", async () => {

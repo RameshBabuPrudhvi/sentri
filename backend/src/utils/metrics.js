@@ -114,25 +114,69 @@ export const pipelineStageDurationSeconds = new client.Histogram({
 });
 
 // ─── AI provider calls (unit-economics critical for SaaS) ────────────────────
+//
+// MNT-001b — every AI-call counter carries an `operation` label
+// (`generation` | `vision_heal`) so the dashboards can split SaaS cost-
+// per-customer per surface. Existing call sites in aiProvider.js pass
+// `"generation"` by default; the vision-heal path in `callVisionModel`
+// passes `"vision_heal"` so token / latency / cost / error rates can be
+// attributed to the healing waterfall vs. test-generation traffic.
+//
+// Migration note for dashboards: queries that previously aggregated
+// across `{provider, kind}` will now see two rows per (provider, kind)
+// — one per operation. Update Grafana queries to `sum(...) by (kind)`
+// or filter `operation="generation"` to recover the old shape.
 export const aiProviderLatencySeconds = new client.Histogram({
   name: "app_ai_provider_latency_seconds",
-  help: "Latency of outbound LLM calls. `provider` ∈ {anthropic, openai, google, openrouter, ollama, compat}; `outcome` ∈ {success, rate_limited, error}. Histograms enable p99 SLO dashboards per provider so a degraded vendor can be detected and the fallback chain (FEA-003) verified.",
-  labelNames: ["provider", "outcome"],
+  help: "Latency of outbound LLM calls. `provider` ∈ {anthropic, openai, google, openrouter, ollama, compat}; `outcome` ∈ {success, rate_limited, error}; `operation` ∈ {generation, vision_heal}. Histograms enable p99 SLO dashboards per provider so a degraded vendor can be detected and the fallback chain (FEA-003) verified.",
+  labelNames: ["provider", "outcome", "operation"],
   buckets: AI_BUCKETS,
   registers: [register],
 });
 
 export const aiProviderTokensTotal = new client.Counter({
   name: "app_ai_provider_tokens_total",
-  help: "Total tokens consumed across all LLM calls. `kind` ∈ {input, output}. Combined with provider-specific pricing, this is the canonical SaaS unit-economics input: cost per workspace per day = sum(rate(app_ai_provider_tokens_total[1d])) × price_per_token.",
-  labelNames: ["provider", "kind"],
+  help: "Total tokens consumed across all LLM calls. `kind` ∈ {input, output}; `operation` ∈ {generation, vision_heal}. Combined with provider-specific pricing, this is the canonical SaaS unit-economics input: cost per workspace per day = sum(rate(app_ai_provider_tokens_total[1d])) × price_per_token, split by operation so vision-heal cost can be tracked against the per-project budget cap.",
+  labelNames: ["provider", "kind", "operation"],
   registers: [register],
 });
 
 export const aiProviderErrorsTotal = new client.Counter({
   name: "app_ai_provider_errors_total",
-  help: "AI provider failures bucketed by category. `reason` ∈ {rate_limit, timeout, auth, server_error, network, unknown}. Drives the AI provider health alert and the circuit-breaker (FEA-003) trip decisions.",
-  labelNames: ["provider", "reason"],
+  help: "AI provider failures bucketed by category. `reason` ∈ {rate_limit, timeout, auth, server_error, network, unknown}; `operation` ∈ {generation, vision_heal}. Drives the AI provider health alert and the circuit-breaker (FEA-003) trip decisions.",
+  labelNames: ["provider", "reason", "operation"],
+  registers: [register],
+});
+
+// MNT-001b — cumulative LLM spend in USD, bucketed by provider + operation.
+// Stage 8 vision heals increment this with the per-call cost estimate from
+// `callVisionModel` ($5/M input + $15/M output midpoint). Generation calls
+// don't yet emit cost (pricing-lookup table is MNT-001c). The SaaS unit-
+// economics dashboard divides by workspace_active_count to get cost-per-
+// customer; alerting on `increase(...[1h])` per project surfaces runaway
+// spend before the monthly cap trips the budget circuit-breaker.
+export const aiProviderCostUsdTotal = new client.Counter({
+  name: "app_ai_cost_usd_total",
+  help: "Cumulative LLM spend in USD, bucketed by provider + operation. Vision-heal cost uses $5/M input + $15/M output midpoint estimate; generation cost tracking is a follow-up (MNT-001c). SaaS unit-economics dashboard divides by workspace count to get cost-per-customer.",
+  labelNames: ["provider", "operation"],
+  registers: [register],
+});
+
+// MNT-001b — budget circuit-breaker trip counter. Increments every time
+// stage 8 is skipped due to per-project daily-call OR monthly-cost cap.
+// Drives the `VisionHealBudgetExhausted` alert in alerts.yml — any non-zero
+// value over a 1h window fires the warning so an operator visits the
+// project's Vision Healing tab to confirm intent (legitimate cap hit) or
+// raise the cap.
+//
+// The `projectId` label is intentionally unbounded — Prometheus operators
+// who run very large multi-tenant deployments can drop it via relabel_configs
+// if cardinality is a concern; the default for self-hosted Sentri (single
+// digits to low hundreds of projects) is well within the comfort zone.
+export const visionHealBudgetExhaustedTotal = new client.Counter({
+  name: "app_vision_heal_budget_exhausted_total",
+  help: "Stage-8 LLM vision heals skipped due to budget cap. Labelled by projectId and reason (daily_calls vs monthly_cost). The presence of any non-zero value over a 1h window fires the VisionHealBudgetExhausted alert — operator visits the project's Vision Healing tab to confirm intent or raise the cap. Runbook: docs/guide/vision-healing.md#incident-disable.",
+  labelNames: ["projectId", "reason"],
   registers: [register],
 });
 

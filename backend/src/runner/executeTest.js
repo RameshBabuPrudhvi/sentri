@@ -23,6 +23,8 @@ import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as elementBaselineRepo from "../database/repositories/elementBaselineRepo.js";
 import * as visionBudgetRepo from "../database/repositories/visionBudgetRepo.js";
 import { pixelmatchHeal, llmVisionHeal } from "./visionHealAdapters.js";
+import { visionHealBudgetExhaustedTotal } from "../utils/metrics.js";
+import { logActivity } from "../utils/activityLogger.js";
 import { extractTestBody, isApiTest } from "./codeParsing.js";
 import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
@@ -658,17 +660,48 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
               llmVisionHeal,
               isBudgetExhausted: visionBudgetRepo.isBudgetExhausted,
             });
-            if (heal) {
+            if (heal?.kind === "vision_budget_exhausted") {
+              // MNT-001b — stage 8 soft-disable. Emit audit + Prometheus
+              // BEFORE filtering out so operators can attribute the skip
+              // (intentional cap hit? raise the cap? provider misconfig?).
+              // NOT pushed onto visionEvents — persistHealingEvents would
+              // either undercount the failed-event arm or, worse, ignore
+              // it entirely; the dedicated audit row + counter ARE the
+              // record for budget-exhausted events.
+              try {
+                visionHealBudgetExhaustedTotal.inc({
+                  projectId: test.projectId || "unknown",
+                  reason: heal.reason,
+                });
+              } catch (metricErr) {
+                console.warn(formatLogLine("warn", null,
+                  `[executeTest] Failed to bump vision budget metric: ${metricErr.message}`));
+              }
+              try {
+                logActivity({
+                  type: "healing.vision_budget_exhausted",
+                  projectId: test.projectId,
+                  projectName: project.name,
+                  workspaceId: project.workspaceId,
+                  testId: test.id,
+                  testName: test.name,
+                  detail: `Vision-heal stage 8 skipped — ${heal.reason} cap reached`,
+                  meta: { reason: heal.reason, key: heal.key },
+                });
+              } catch (auditErr) {
+                console.warn(formatLogLine("warn", null,
+                  `[executeTest] Failed to log vision budget audit row: ${auditErr.message}`));
+              }
+              console.warn(formatLogLine("warn", null,
+                `[executeTest] Vision heal budget exhausted for ${test.projectId} (${heal.reason}) — stage 8 skipped for "${label}"`));
+            } else if (heal) {
               visionEvents.push(heal);
               // Record LLM-vision spend against the project's budget so
               // the next stage-8 attempt sees the increment. Pixelmatch
               // is free (cost = 0) and skipped automatically.
               if (heal.kind === "vision_llm" && test.projectId) {
                 try {
-                  visionBudgetRepo.recordCall({
-                    projectId: test.projectId,
-                    costUsd: heal.costUsd || 0,
-                  });
+                  visionBudgetRepo.record(test.projectId, heal.costUsd || 0);
                 } catch (budgetErr) {
                   console.warn(formatLogLine("warn", null,
                     `[executeTest] Failed to record vision-heal budget for ${test.projectId}: ${budgetErr.message}`));
