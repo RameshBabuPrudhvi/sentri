@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `INF-008` (Postgres-default + dual-DB CI matrix) — promoted after `INF-007` (OpenTelemetry + Sentry observability + Prometheus `/metrics` + `X-Request-Id` + structured-log trace correlation) shipped in PR #14. AUTO-022 (AI eval harness) holds queue slot 1, INF-009 (Helm chart + K8s + DR) slot 2. MNT-001 (vision-based locator healing) shipped in PR #17 — see Completed Work Summary for full details.
+> **Current sprint:** AUTO-022b (eval harness — record real LLM cache + first real baseline) — promoted after MNT-001 + AUTO-022 plumbing shipped in PR #17. INF-009 (Helm chart + K8s + DR) holds queue slot 1. MNT-001 + AUTO-022 (vision healing + AI eval harness plumbing) shipped in PR #17 — see Completed Work Summary for full details.
 >
 > **Blockers:** none remaining · **Remaining:** ~14 planned items across Phases 2–5 + Maintenance (see Summary table at the bottom for the authoritative breakdown).
 >
@@ -149,7 +149,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | ✅ Mostly complete — SEC-001/002/003/004, INF-001/002/003/004/005/006, ACL-001/002, FEA-001/002/003, ENH-036 + ENH-036b all ✅ (SEC-004 MFA shipped in PR #10 with TOTP + WebAuthn + per-workspace enforcement); SEC-005 (SSO) tracked as 🟢 Strategic under Phase 5 per AUDIT.md severity reconciliation | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/005/006/007/011/012/013/014/015/016 ✅ — DIF-005 embedded trace viewer shipped in PR #9; **INT-002** GitHub PR check comments shipped in PR #15; **DIF-012** multi-environment support shipped in PR #2); remaining: DIF-008–010, DIF-015b/c sub-items | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-001/002/002b/003/003b/004/005/006/007/008/010/012/013/015/015b/016/016b/017/017.3/019 ✅ (AUTO-008 shipped in PR #9, AUTO-010 in PR #6, AUTO-004 in PR #18, AUTO-001 in PR #15); remaining: AUTO-009, AUTO-011, AUTO-014, AUTO-018, AUTO-021 (AUTO-020 superseded by AUTO-015) · Capabilities row: CAP-001 (data-driven) ✅ PR #1, CAP-002 (sharding) ✅ PR #3; CAP-002b (SaaS-readiness follow-ups) tracked separately in Summary | 14–18 weeks |
-| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11), SEC-007 compliance audit log ✅ (PR #12), INF-007 OTel/Sentry observability ✅ (PR #14); INF-008 Postgres-default — current sprint; remaining 1× 🔴 Blocker (AUTO-022 eval harness). Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
+| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11), SEC-007 compliance audit log ✅ (PR #12), INF-007 OTel/Sentry observability ✅ (PR #14), AUTO-022 eval harness plumbing ✅ (PR #17 — gate dormant until AUTO-022b records real LLM cache); AUTO-022b is the current sprint. Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
@@ -544,7 +544,57 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ---
 
-### AUTO-022 — AI evaluation harness with golden-set regression 🔴 Blocker
+### AUTO-022 — AI evaluation harness with golden-set regression
+
+**Status:** ✅ Plumbing complete (PR #17) — see Completed Work Summary below for the full implementation details. The scorer (`backend/src/eval/pipelineEval.js`), record/replay adapters (`pipelineAdapter.js`), `metric_samples` persistence (`evalPersistence.js`), Dashboard `EvalPanel` + drill-down route, path-filtered `eval.yml` CI workflow, 5 canonical golden templates, and 32 unit + integration tests all shipped. The regression gate itself is **dormant** until a maintainer runs `EVAL_RECORD=1 ... --write-baseline` against the live LLM and commits the resulting `.cache/*.txt` recordings + first real `eval-baseline.json` — tracked separately as `AUTO-022b` below per the AGENT.md issue-handling rule.
+
+---
+
+### AUTO-022b — Eval harness: record real LLM cache + first real baseline 🔴 Blocker
+
+**Status:** 🔄 Current sprint | **Effort:** M (4–8 hours of focused maintainer work with an LLM API key) | **Dependencies:** AUTO-022 ✅ (PR #17 plumbing) | **Source:** PR #17 follow-up — `docs/guide/eval-harness-record-goldens.md`
+
+**Problem:** AUTO-022 (PR #17) shipped the eval harness wiring end-to-end — scorer, adapters, CI workflow, Dashboard panel, persistence layer — but the regression gate it's supposed to enforce is currently inert. Two gaps keep it dormant:
+
+1. The 50 golden cases under `backend/tests/fixtures/eval-goldens/case-*.json` are synthetic 3-element HTML fragments, not real DOM captures from `tests/e2e/specs/`. The production pipeline (`generateAllTests`) is tuned for real-app DOM with hundreds of elements / ARIA / state machines; synthetic snippets produce either trivial output that scores high by accident or empty output that scores zero — neither measures real pipeline quality.
+2. There are no `.cache/*.txt` recordings committed. The `.gitignore` is set up to allow `*.txt` entries in `backend/tests/fixtures/eval-goldens/.cache/`, but the directory is currently empty. The cold-start guard in `backend/scripts/run-eval.mjs:71-91` short-circuits CI to exit 0 in this state so the merge wasn't blocked — but until real recordings exist, every regression that would have been caught silently ships.
+3. `eval-baseline.json` is a placeholder (every score is `1.0`). A real baseline gets generated by `--write-baseline` against the live LLM after real recordings exist.
+
+**Fix:** A dedicated maintainer session with an LLM API key (Anthropic / OpenAI / Google / Ollama) walks the documented procedure in `docs/guide/eval-harness-record-goldens.md`:
+
+1. Capture real DOM snapshots from the running Sentri app (or any candidate target) via a one-off Playwright `page.content()` script. Replace the synthetic `snapshot` field in each `case-NNN.json`; reference snapshots > 5 KB via `@file:snapshots/<id>.html`. Update each case's `description` from "Skeleton golden — Replace ..." to a real flow name.
+2. Run `EVAL_RECORD=1 node backend/scripts/run-eval.mjs` to populate `.cache/<id>.<hash>.txt` against the live pipeline.
+3. Iterate per-case until each case's score ≥ 0.7 (or consciously delete cases that can't reach 0.4 — 40 good cases beats 50 mediocre ones). Adjust `expected` to mirror the pipeline's actual phrasing, NOT idealised target code — the harness measures regression, not aspiration.
+4. Run `EVAL_RECORD=1 node backend/scripts/run-eval.mjs --write-baseline` to regenerate `eval-baseline.json` with real `aggregate` / `byDimension` / `byCategory` / `perCase` keys.
+5. Force-add the cache files: `git add -f backend/tests/fixtures/eval-goldens/.cache/*.txt`. Commit + push.
+6. Verify CI: the `Eval — Golden-set regression check` job runs in replay mode, scores against the new baseline, exits 0 on the recording commit (aggregate equals baseline) and exits non-zero on any subsequent prompt / model / pipeline change that crosses the 5% aggregate or 10% per-dimension threshold.
+
+**Files to change:**
+- `backend/tests/fixtures/eval-goldens/case-*.json` — replace synthetic `snapshot` + `description` fields with real captures
+- `backend/tests/fixtures/eval-goldens/snapshots/` (new directory) — large DOM captures referenced via `@file:` URIs
+- `backend/tests/fixtures/eval-goldens/.cache/*.txt` — force-add recorded LLM responses (one per case, named `<id>.<32-char-hash>.txt`)
+- `eval-baseline.json` — regenerate via `--write-baseline` after recordings exist; gains real `perCase` + `byDimension` + `byCategory` keys
+- `docs/guide/eval-harness.md` — add a "What constitutes a real golden vs a skeleton" section per the maintainer brief (case must have non-skeleton `description`, snapshot from `page.content()`, matching cache entry, baseline `perCase` score ≥ 0.4)
+
+**Acceptance criteria:**
+- `node backend/scripts/run-eval.mjs` exits 0 on the current tree with a non-zero `aggregate` line (replay against committed `.cache/` rather than cold-start bypass).
+- Modifying a prompt template file to deliberately lower selector quality on ≥ 3 cases re-records the cache for those cases, and the eval-workflow CI job exits non-zero with the named affected cases listed in stderr.
+- Dashboard `EvalPanel` renders a non-placeholder sparkline after `--persist` writes the first 200 `metric_samples` rows under the `__eval_harness__` sentinel projectId.
+- `eval-baseline.json` has a `perCase` block with one entry per committed case, each with a numeric score in `[0, 1]` (not all `1.0`).
+- The cold-start guard at `backend/scripts/run-eval.mjs:71-91` is no longer triggered (cache directory non-empty).
+
+**PR checklist (AUTO-022b):**
+- [ ] PR title `chore(eval): AUTO-022b — record real LLM cache + first real baseline`
+- [ ] 50 case JSON files updated with real DOM captures (or consciously trimmed to N < 50 with the rest deleted, not skeleton'd)
+- [ ] `.cache/*.txt` recordings force-committed (`git add -f`), one per remaining case
+- [ ] `eval-baseline.json` regenerated with real `perCase` + `byDimension` + `byCategory` + numeric `aggregate` ≠ 1.0
+- [ ] CI `Eval — Golden-set regression check` exits 0 on the recording commit (verify the artifact `eval-report.json` has `bootstrap: false` and a non-null `aggregate`)
+- [ ] `docs/guide/eval-harness.md` gains the "What constitutes a real golden" section
+- [ ] `docs/changelog.md` updated under `## [Unreleased]` § Added (mark AUTO-022 fully active, not just plumbing)
+- [ ] ROADMAP.md `### AUTO-022b` section flipped to `**Status:** ✅ Complete (PR #N)` and Completed Work Summary row added
+- [ ] NEXT.md current-sprint slot rotated to the next queue item
+
+**Why this is a separate PR:** Recording requires an LLM API key and 4–8 hours of focused per-case iteration. Bundling it into PR #17 (the plumbing PR) would have meant the plumbing couldn't ship until a maintainer with API access had time to do the recording — and recording itself can't happen until the plumbing is in `develop`. The cold-start guard exists exactly to break this chicken-and-egg deadlock: ship the harness inert, light it up later.
 
 **Status:** 🔲 Planned | **Effort:** L | **Source:** AUDIT.md AI2, AI3, AI6 (formerly `AI-EVAL-001` in AUDIT_IMPL.md; supersedes the looser `MNT-003` prompt A/B testing item)
 
