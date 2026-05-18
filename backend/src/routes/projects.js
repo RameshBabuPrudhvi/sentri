@@ -156,28 +156,6 @@ router.patch("/:id/environments/:environmentId", requireRole("admin"), async (re
   //      project PATCH path's merge logic at routes/projects.js:243-273.
   if (Object.hasOwn(req.body || {}, 'credentials')) {
   
-  if (Object.hasOwn(req.body, "visionHealing")) {
-    const mode = req.body.visionHealing;
-    const allowedModes = new Set(["off", "pixelmatch_only", "pixelmatch_and_llm"]);
-    if (!allowedModes.has(mode)) return res.status(400).json({ error: "visionHealing must be one of: off, pixelmatch_only, pixelmatch_and_llm." });
-    if (mode === "pixelmatch_and_llm" && !process.env.VISION_MODEL && !process.env.AI_MODEL) {
-      return res.status(400).json({ error: "VISION_PROVIDER_NOT_CONFIGURED" });
-    }
-    fields.visionHealing = mode;
-  }
-
-  if (Object.hasOwn(req.body, "visionHealMaxCallsPerDay")) {
-    const cap = req.body.visionHealMaxCallsPerDay;
-    if (!Number.isInteger(cap) || cap < 1 || cap > 10000) return res.status(400).json({ error: "visionHealMaxCallsPerDay must be an integer between 1 and 10000." });
-    fields.visionHealMaxCallsPerDay = cap;
-  }
-
-  if (Object.hasOwn(req.body, "visionHealMaxCostUsdPerMonth")) {
-    const cap = req.body.visionHealMaxCostUsdPerMonth;
-    if (!Number.isFinite(cap) || cap < 0 || cap > 100000) return res.status(400).json({ error: "visionHealMaxCostUsdPerMonth must be a number between 0 and 100000." });
-    fields.visionHealMaxCostUsdPerMonth = cap;
-  }
-
   if (req.body.credentials === null) {
       fields.credentials = null;
     } else if (req.body.credentials && typeof req.body.credentials === "object") {

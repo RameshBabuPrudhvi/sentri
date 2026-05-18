@@ -46,14 +46,7 @@ export function persistHealingEvents(testId, events) {
   const strategyHistogram = {};
 
   for (const evt of events) {
-    // Guard: a bug in findElement could push an event with a missing key
-    // (e.g. if hintKey was null but the event was still emitted). Without
-    // this check, evt.key.split("::") throws TypeError and halts persistence
-    // of all subsequent events in the loop.
-    if (!evt || typeof evt.key !== "string") continue;
-    // Use bounded split so labels containing '::' don't corrupt args
-    const [action, ...rest] = evt.key.split("::");
-    const label = rest.join("::");
+    if (!evt) continue;
     if (evt.kind === "vision_pixelmatch" || evt.kind === "vision_llm") {
       visionHealCount += 1;
       if (evt.kind === "vision_pixelmatch") visionHealStrategy.pixelmatch += 1;
@@ -61,6 +54,12 @@ export function persistHealingEvents(testId, events) {
       if (Number.isFinite(evt.costUsd)) visionHealCostUsd += Number(evt.costUsd);
       continue;
     }
+    // Guard: malformed non-vision entries without a key are ignored so one
+    // bad event does not block persistence of the rest.
+    if (typeof evt.key !== "string") continue;
+    // Use bounded split so labels containing '::' don't corrupt args
+    const [action, ...rest] = evt.key.split("::");
+    const label = rest.join("::");
     if (evt.failed) {
       recordHealingFailure(testId, action, label);
       failedCount += 1;
