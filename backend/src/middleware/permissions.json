@@ -343,6 +343,7 @@
   "anyAuthenticatedMember": [
     "GET /api/v1/dashboard",
     "GET /api/v1/dashboard/eval/:runId",
+    "GET /api/v1/system/vision-provider-status",
     "GET /api/v1/runs",
     "GET /api/v1/runs/:runId",
     "GET /api/v1/runs/:runId/compare/:otherRunId",
