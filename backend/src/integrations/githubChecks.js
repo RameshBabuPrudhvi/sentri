@@ -325,6 +325,100 @@ export async function getChangedFilesForPr({ repo, prNumber, installationId }, o
 }
 
 /**
+ * AUTO-009d — List changed line ranges per file from a pull request, parsed
+ * directly from the GitHub PR Files API `patch` field. Returns the diff hunks
+ * as inclusive `[start, end]` ranges of LINE NUMBERS IN THE HEAD VERSION of
+ * each file (the version that's actually on disk in CI) so the coverage
+ * aggregator can ask "of the lines this PR added/modified, which are covered
+ * by the test run?"
+ *
+ * ### Hunk header parse
+ * GitHub returns unified-diff hunk headers like `@@ -10,7 +20,12 @@`:
+ *   - `-10,7`  → source side: 7 lines starting at line 10
+ *   - `+20,12` → head   side: 12 lines starting at line 20
+ *
+ * We only care about the `+side` (head) range — that's the line numbers a
+ * developer sees in their IDE and what `coverageSummary.topUncoveredFiles[]`
+ * line numbers will match against post-source-map resolution (AUTO-009b).
+ *
+ * ### Removed lines / deletions
+ * Hunks that are purely deletions (no `+` lines in the body) still appear in
+ * the patch but contribute zero lines to the head version. We skip them via
+ * the `headCount > 0` guard — there's nothing to demand coverage for.
+ *
+ * ### Renames / binary files
+ * GitHub omits the `patch` field entirely for:
+ *   - Binary files (PNG, ZIP, …) — no diff to parse.
+ *   - Renames where `status === "renamed"` AND no content changed.
+ *   - Files past the 3000-line / 1MB patch-size cap (GitHub API limit).
+ * Each of those skips the file (no entry in the returned map). The coverage
+ * gate degrades gracefully — coverage-of-changed-lines is undefined for an
+ * unparseable file, which is the honest signal.
+ *
+ * ### Bounded pagination
+ * Same 10-page cap as `getChangedFilesForPr` so a giant PR can't unbounded-
+ * fetch. Files past page 10 are silently dropped; the gate evaluator
+ * already accepts partial data (covered ≤ total, gate fires on partial
+ * coverage just like full coverage).
+ *
+ * @param {Object} args
+ * @param {string} args.repo            - `owner/name`.
+ * @param {number|string} args.prNumber - PR number (must be a positive integer).
+ * @param {string|number} args.installationId
+ * @param {Object} [options]
+ * @param {Function} [options.fetchImpl]
+ * @returns {Promise<Object>} `{ [filename]: Array<[startLine, endLine]> }`
+ *   where ranges are inclusive head-side line numbers. Files with no
+ *   parseable patch are omitted entirely.
+ */
+export async function getChangedFileRangesForPr({ repo, prNumber, installationId }, options = {}) {
+  const { owner, name } = parseRepo(repo);
+  const n = Number(prNumber);
+  if (!Number.isInteger(n) || n <= 0) throw new Error("GitHub prNumber must be a positive integer");
+  const token = await getInstallationToken(installationId, options);
+  const fetchImpl = options.fetchImpl || fetch;
+  // GitHub's `patch` field contains zero or more unified-diff hunks. The
+  // header regex extracts the `+side` (head) start + count — both groups
+  // are decimal integers; `count` defaults to 1 when omitted (single-line
+  // hunk shorthand, e.g. `@@ -10 +20 @@`).
+  const hunkHeaderRe = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@/gm;
+  /** @type {Object<string, Array<[number, number]>>} */
+  const rangesByFile = {};
+  let page = 1;
+  while (page <= 10) {
+    const data = await githubFetch(`/repos/${owner}/${name}/pulls/${n}/files?per_page=100&page=${page}`, {
+      token,
+      fetchImpl,
+    });
+    const batch = Array.isArray(data) ? data : [];
+    for (const f of batch) {
+      const filename = f?.filename;
+      const patch = typeof f?.patch === "string" ? f.patch : null;
+      if (!filename || !patch) continue;
+      const ranges = [];
+      hunkHeaderRe.lastIndex = 0;
+      let match;
+      while ((match = hunkHeaderRe.exec(patch)) !== null) {
+        const headStart = Number(match[1]);
+        const headCount = match[2] != null ? Number(match[2]) : 1;
+        if (!Number.isFinite(headStart) || !Number.isFinite(headCount) || headCount <= 0) continue;
+        // Inclusive end = start + count - 1. count===1 yields [N, N] (single
+        // line); count===0 hunks (pure deletion) are filtered above.
+        ranges.push([headStart, headStart + headCount - 1]);
+      }
+      if (ranges.length === 0) continue;
+      // A renamed file may appear twice across batches (once per page edge);
+      // dedupe + concat to preserve order while staying idempotent.
+      if (!rangesByFile[filename]) rangesByFile[filename] = [];
+      rangesByFile[filename].push(...ranges);
+    }
+    if (batch.length < 100) break;
+    page++;
+  }
+  return rangesByFile;
+}
+
+/**
  * Create a queued GitHub Check Run.
  *
  * @param {string} runId
