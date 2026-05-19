@@ -8,18 +8,47 @@
  *   node backend/scripts/run-eval.mjs --report=path.json # write per-case report artifact
  *   node backend/scripts/run-eval.mjs --persist          # write metric_samples rows (Dashboard EvalPanel)
  *
+ * Incremental recording flags (for rate-limited providers — e.g. Gemini's
+ * 20-requests-per-day free tier — where recording all 50 goldens in one
+ * sitting is impossible):
+ *
+ *   --cases=<csv>      Only run cases whose id matches one of the comma-
+ *                       separated globs. Examples:
+ *                         --cases=case-001,case-002,case-003
+ *                         --cases=case-00*           (case-001..009)
+ *                         --cases=case-0[0-1]*       (case-001..019)
+ *   --skip-cached      Skip any case that already has a `.cache/<id>.<hash>.txt`
+ *                       file. Combined with `EVAL_RECORD=1`, this lets you
+ *                       re-run the harness daily and only spend API calls on
+ *                       cases that haven't been recorded yet.
+ *   --limit=N          Hard cap on number of cases actually processed in this
+ *                       invocation (after `--cases` filter + `--skip-cached`).
+ *                       Defaults to no cap. Pair with `EVAL_RECORD=1` to stay
+ *                       inside a daily provider quota — e.g. `--limit=18`
+ *                       leaves headroom against Gemini's 20/day free tier.
+ *
+ * Typical incremental record workflow for a rate-limited maintainer:
+ *   Day 1: EVAL_RECORD=1 node backend/scripts/run-eval.mjs --skip-cached --limit=18
+ *   Day 2: EVAL_RECORD=1 node backend/scripts/run-eval.mjs --skip-cached --limit=18
+ *   Day 3: EVAL_RECORD=1 node backend/scripts/run-eval.mjs --skip-cached --limit=18
+ *   …     (each day records the next ~18 missing cases until all 50 are done)
+ *   Final: node backend/scripts/run-eval.mjs --write-baseline   # rebaseline from full cache
+ *
  * Exits non-zero when aggregate regression vs baseline exceeds REGRESSION_THRESHOLD.
  * Prints affected cases (delta < -PER_CASE_DELTA_THRESHOLD on aggregate) so reviewers
  * can localise the regression without re-running CI.
  */
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { runEval } from "../src/eval/pipelineEval.js";
+import { runEval, loadGoldens, scoreCase } from "../src/eval/pipelineEval.js";
 import {
   createReplayAdapter,
   createLiveAdapter,
   createDefaultPipeline,
+  PROMPT_VERSION,
+  EVAL_MODEL,
 } from "../src/eval/pipelineAdapter.js";
 import { persistEvalRun } from "../src/eval/evalPersistence.js";
 const REGRESSION_THRESHOLD = 0.05;            // >5% aggregate drop fails CI
@@ -39,12 +68,65 @@ const cacheDir = process.env.EVAL_CACHE_DIR
   || path.join(goldenDir, ".cache");
 const baselinePath = process.env.EVAL_BASELINE_PATH
   || path.join(repoRoot, "eval-baseline.json");
-const args = new Set(process.argv.slice(2));
+const rawArgs = process.argv.slice(2);
+const args = new Set(rawArgs);
 const writeBaseline = args.has("--write-baseline");
 const persistMetrics = args.has("--persist");
-const reportArg = process.argv.slice(2).find((a) => a.startsWith("--report="));
+const skipCached = args.has("--skip-cached");
+const reportArg = rawArgs.find((a) => a.startsWith("--report="));
 const reportPath = reportArg ? reportArg.slice("--report=".length) : null;
+const casesArg = rawArgs.find((a) => a.startsWith("--cases="));
+const casesPatterns = casesArg
+  ? casesArg.slice("--cases=".length).split(",").map((s) => s.trim()).filter(Boolean)
+  : null;
+const limitArg = rawArgs.find((a) => a.startsWith("--limit="));
+const limit = limitArg ? parseInt(limitArg.slice("--limit=".length), 10) : null;
+if (limitArg && (!Number.isInteger(limit) || limit < 1)) {
+  console.error(`invalid --limit value: ${limitArg.slice("--limit=".length)} (expected positive integer)`);
+  process.exit(2);
+}
 const recordMode = process.env.EVAL_RECORD === "1";
+
+/**
+ * Convert a glob (`*`, `?`, `[abc]`) into an anchored RegExp. Anchoring is
+ * deliberate — partial matches would let `--cases=case-1` accept `case-100`
+ * too, which is almost never what an operator wants when staging an
+ * incremental record session against a tight daily quota.
+ */
+function globToRegExp(glob) {
+  let re = "^";
+  for (const ch of glob) {
+    if (ch === "*") re += ".*";
+    else if (ch === "?") re += ".";
+    else if (ch === "[") re += "[";
+    else if (ch === "]") re += "]";
+    else if (/[.+(){}|^$\\]/.test(ch)) re += `\\${ch}`;
+    else re += ch;
+  }
+  return new RegExp(re + "$");
+}
+
+/**
+ * Compute the cache filename for a golden — must match `pipelineAdapter.js`'s
+ * cacheKey() exactly (PROMPT_VERSION + EVAL_MODEL + id + snapshot + url),
+ * otherwise `--skip-cached` would think a recording is missing when it isn't.
+ * We import PROMPT_VERSION + EVAL_MODEL from the adapter to keep them in sync.
+ */
+function cachedRecordExists(golden) {
+  const h = crypto.createHash("sha256");
+  h.update(PROMPT_VERSION);
+  h.update("\0");
+  h.update(EVAL_MODEL);
+  h.update("\0");
+  h.update(String(golden.id ?? ""));
+  h.update("\0");
+  h.update(String(golden.snapshot ?? ""));
+  h.update("\0");
+  h.update(String(golden.url ?? ""));
+  const key = h.digest("hex").slice(0, 32);
+  return fs.existsSync(path.join(cacheDir, `${golden.id}.${key}.txt`));
+}
+
 async function buildAdapter() {
   if (recordMode) {
     const pipeline = await createDefaultPipeline();
@@ -135,7 +217,76 @@ async function main() {
   }
 
   const generate = await buildAdapter();
-  const results = await runEval({ goldenDir, generate });
+  let results;
+  // Fast path: no incremental flags → use the canonical runEval() entrypoint
+  // unchanged. Keeps test coverage of the library function honest and avoids
+  // duplicating its aggregation logic when CI (which never passes these
+  // flags) is the caller.
+  const hasIncrementalFlags = casesPatterns || skipCached || limit != null;
+  if (!hasIncrementalFlags) {
+    results = await runEval({ goldenDir, generate });
+  } else {
+    // Incremental path: filter the golden list before generating so a
+    // rate-limited maintainer can stage one batch per day. Filter order
+    // matters: `--cases` narrows first (operator intent), then `--skip-cached`
+    // removes already-recorded entries, then `--limit` caps the result.
+    let goldens = loadGoldens(goldenDir);
+    const initialCount = goldens.length;
+    if (casesPatterns) {
+      const regexes = casesPatterns.map(globToRegExp);
+      goldens = goldens.filter((g) => regexes.some((re) => re.test(g.id)));
+      console.log(`--cases filter: ${goldens.length}/${initialCount} cases match patterns [${casesPatterns.join(", ")}]`);
+    }
+    if (skipCached) {
+      const before = goldens.length;
+      goldens = goldens.filter((g) => !cachedRecordExists(g));
+      console.log(`--skip-cached: ${goldens.length}/${before} cases have no existing recording`);
+    }
+    if (limit != null && goldens.length > limit) {
+      console.log(`--limit=${limit}: processing first ${limit} of ${goldens.length} remaining cases`);
+      goldens = goldens.slice(0, limit);
+    }
+    if (goldens.length === 0) {
+      console.log("No cases to process after filters. Nothing to do.");
+      // Exit 0 — an empty incremental run is success, not failure (operator
+      // ran `--skip-cached` after everything is already cached). Skip the
+      // baseline-comparison block below by short-circuiting here.
+      return 0;
+    }
+    // Walk the filtered list manually so we mirror runEval()'s output shape
+    // (including byCategory aggregation) without re-importing internals.
+    const cases = [];
+    for (const golden of goldens) {
+      const actual = await generate(golden);
+      const score = scoreCase(actual, golden.expected);
+      cases.push({
+        caseId: golden.id,
+        category: golden.category,
+        score,
+        expected: golden.expected,
+        actual,
+      });
+    }
+    const aggregate = cases.length === 0
+      ? 0
+      : cases.reduce((sum, c) => sum + c.score.aggregate, 0) / cases.length;
+    const byCategory = {};
+    for (const c of cases) {
+      if (!byCategory[c.category]) byCategory[c.category] = { count: 0, sum: 0 };
+      byCategory[c.category].count += 1;
+      byCategory[c.category].sum += c.score.aggregate;
+    }
+    for (const cat of Object.keys(byCategory)) {
+      byCategory[cat].aggregate = byCategory[cat].sum / byCategory[cat].count;
+    }
+    results = { aggregate, cases, byCategory };
+    // Loud reminder that an incremental run is NOT a full evaluation —
+    // operator should not trust the aggregate as a gate signal when only
+    // a subset of cases ran. The baseline-comparison block below also
+    // short-circuits with a warning so CI on `--cases=X` never falsely
+    // fails just because the partial subset diverged.
+    console.log(`\n⚠️  Incremental run — ${cases.length} of ${initialCount} cases processed. Aggregate is a subset average, NOT a baseline comparison.\n`);
+  }
   if (persistMetrics) {
     // Lazy-init the DB only when --persist is requested. Replay-mode CI runs
     // never touch better-sqlite3, so the default offline path stays clean.
@@ -155,6 +306,16 @@ async function main() {
   const dimensionMeans = computeDimensionMeans(results.cases);
 
   if (writeBaseline) {
+    // Guard rail: `--write-baseline` against an incremental subset would
+    // overwrite the canonical baseline with a misleading partial-aggregate.
+    // Refuse the combination — operator must re-run without filters to
+    // rebaseline once recording is complete.
+    if (hasIncrementalFlags) {
+      console.error("--write-baseline cannot be combined with --cases / --skip-cached / --limit.");
+      console.error("Rebaseline against the FULL cache instead:");
+      console.error("  node backend/scripts/run-eval.mjs --write-baseline");
+      return 2;
+    }
     const payload = {
       aggregate: results.aggregate,
       byDimension: dimensionMeans,
@@ -168,6 +329,18 @@ async function main() {
     };
     fs.writeFileSync(baselinePath, `${JSON.stringify(payload, null, 2)}\n`);
     console.log(`wrote baseline → ${baselinePath} (aggregate=${formatPct(results.aggregate)})`);
+    return 0;
+  }
+  // Incremental runs never gate against the baseline — a 5-case subset
+  // pass-rate is not comparable to a 50-case baseline. Print per-case
+  // detail so the operator can spot-check recordings, then exit 0.
+  if (hasIncrementalFlags) {
+    console.log(`incremental aggregate: ${formatPct(results.aggregate)} (${results.cases.length} cases)`);
+    for (const c of results.cases) {
+      console.log(`  ${c.caseId.padEnd(20)} ${formatPct(c.score.aggregate)}  (${c.category})`);
+    }
+    console.log("\nNext step: re-run with `--skip-cached --limit=N` tomorrow to record the remaining cases,");
+    console.log("then `--write-baseline` (no filters) once the full cache is populated.");
     return 0;
   }
   const baseline = loadBaseline();

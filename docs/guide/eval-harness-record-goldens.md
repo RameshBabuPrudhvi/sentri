@@ -23,6 +23,108 @@ Neither measures real pipeline quality. Real DOM snapshots are non-negotiable fo
 
 ---
 
+## Rate-limited workflow (Gemini free tier, etc.)
+
+If your only LLM access is a tight daily quota (e.g. **Gemini free tier =
+20 requests/day**), you can't record all 50 cases in one sitting — and
+even partial sessions waste calls if the harness re-records cases you
+already captured yesterday. The CLI ships three flags specifically for
+this scenario:
+
+| Flag                | Purpose                                                                 |
+|---------------------|-------------------------------------------------------------------------|
+| `--cases=<csv>`     | Only run cases matching the comma-separated globs (e.g. `case-001,case-002` or `case-00*`). Anchored — `case-1` does NOT match `case-100`. |
+| `--skip-cached`     | Skip any case that already has a `.cache/<id>.<hash>.txt` file on disk. |
+| `--limit=N`         | Hard cap on cases processed (after `--cases` + `--skip-cached`). Stays inside your daily quota. |
+
+### Recommended Gemini-free-tier schedule (3 sessions, ~18 cases each)
+
+```bash
+# Session 1 — records the first 18 cases that don't yet have a recording
+EVAL_RECORD=1 EVAL_MODEL=gemini-2.5-flash \
+  node backend/scripts/run-eval.mjs --skip-cached --limit=18
+
+# Commit the 18 new cache files so they're not re-recorded tomorrow:
+git add -f backend/tests/fixtures/eval-goldens/.cache/*.txt
+git commit -m "chore(eval): record session 1 — 18 of 50 cases"
+
+# Session 2 (next day) — records the next ~18 missing cases
+EVAL_RECORD=1 EVAL_MODEL=gemini-2.5-flash \
+  node backend/scripts/run-eval.mjs --skip-cached --limit=18
+
+git add -f backend/tests/fixtures/eval-goldens/.cache/*.txt
+git commit -m "chore(eval): record session 2 — 36 of 50 cases"
+
+# Session 3 (third day) — records the remaining ~14 cases
+EVAL_RECORD=1 EVAL_MODEL=gemini-2.5-flash \
+  node backend/scripts/run-eval.mjs --skip-cached --limit=18
+
+git add -f backend/tests/fixtures/eval-goldens/.cache/*.txt
+git commit -m "chore(eval): record session 3 — all 50 cases captured"
+
+# Final step — rebaseline against the FULL cache (no filters)
+node backend/scripts/run-eval.mjs --write-baseline
+git add eval-baseline.json
+git commit -m "chore(eval): rebaseline against full cache"
+```
+
+Why `--limit=18` and not `--limit=20`: Gemini counts a tiny number of
+preflight / metadata calls against your quota in some configurations.
+The 2-call headroom protects against burning your daily allowance on
+the 19th and 20th case only to have the harness's last call return
+`429 Too Many Requests` and crash mid-record (leaving an incomplete
+cache write on disk for that case).
+
+### Single-case debugging
+
+When iterating on `expected` for one specific case (Phase 2 below), you
+also want to skip the other 49:
+
+```bash
+# Re-record only case-006 (e.g. after editing its snapshot / expected)
+EVAL_RECORD=1 node backend/scripts/run-eval.mjs --cases=case-006
+```
+
+### Verify which cases still need recording
+
+```bash
+# Lists missing cases without making any LLM calls (--skip-cached is checked first)
+node backend/scripts/run-eval.mjs --skip-cached --limit=0
+```
+
+Wait — `--limit=0` is rejected as invalid (positive integers only). To
+preview which cases would be recorded next, run with a generous limit
+in replay mode (no `EVAL_RECORD=1`) — `createReplayAdapter` will throw
+"eval cache miss" for the un-recorded ones, listing them by id. The
+harness exits with the first cache miss; that's the next case to
+record. Alternatively, count cache files directly:
+
+```bash
+# How many cases are already recorded?
+ls backend/tests/fixtures/eval-goldens/.cache/*.txt 2>/dev/null | wc -l
+
+# Which case-NNN.json files don't yet have any cache entry?
+for json in backend/tests/fixtures/eval-goldens/case-*.json; do
+  id=$(basename "$json" .json)
+  if ! ls backend/tests/fixtures/eval-goldens/.cache/$id.*.txt &>/dev/null; then
+    echo "$id"
+  fi
+done
+```
+
+### Important guard rails
+
+- **`--write-baseline` refuses to combine with incremental flags.** Partial
+  recordings cannot rebaseline — the harness exits with code 2 if you
+  pass `--write-baseline --cases=X` or any other filter. Rebaseline only
+  after every case has a cache entry.
+- **Incremental runs don't gate against the baseline.** A 5-case subset
+  aggregate is not comparable to a 50-case baseline. Incremental runs
+  always exit 0 (after printing per-case scores) so a partial subset
+  divergence doesn't falsely fail CI.
+
+---
+
 ## Phase 0 — Environment setup
 
 ### What you need
@@ -431,6 +533,6 @@ Once this PR merges, the harness gate is live. The next prompt / model change th
 - `docs/guide/eval-harness.md` — operator guide (inspect-regression / update-baseline / add-golden workflows)
 - `backend/src/eval/pipelineEval.js` — scorer source
 - `backend/src/eval/pipelineAdapter.js` — record / replay adapter (`createReplayAdapter`, `createLiveAdapter`)
-- `backend/scripts/run-eval.mjs` — CLI entrypoint (`--write-baseline`, `--report=`, `--persist`, `EVAL_RECORD=1`)
+- `backend/scripts/run-eval.mjs` — CLI entrypoint (`--write-baseline`, `--report=`, `--persist`, `--cases=<glob>`, `--skip-cached`, `--limit=N`, `EVAL_RECORD=1`)
 - `ROADMAP.md` § AUTO-022 — original spec and acceptance criteria
 - `NEXT.md` § AUTO-022 — current sprint context
