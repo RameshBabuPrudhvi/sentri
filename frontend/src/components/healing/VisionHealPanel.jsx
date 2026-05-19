@@ -15,7 +15,7 @@
  * `healingPersistence.js#recordMetric`) but the existing `useProjectMetricQuery`
  * hook is workspace-scoped and the Healing dashboard is currently
  * project-agnostic at the route level. Wiring a per-project sparkline
- * requires a `projectId` selector first — deferred to MNT-001c so this
+ * requires a `projectId` selector first — deferred until the Healing
  * PR can land cleanly without dragging in route changes.
  */
 import React from "react";

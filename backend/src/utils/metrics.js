@@ -151,13 +151,13 @@ export const aiProviderErrorsTotal = new client.Counter({
 // MNT-001b — cumulative LLM spend in USD, bucketed by provider + operation.
 // Stage 8 vision heals increment this with the per-call cost estimate from
 // `callVisionModel` ($5/M input + $15/M output midpoint). Generation calls
-// don't yet emit cost (pricing-lookup table is MNT-001c). The SaaS unit-
+// don't yet emit cost (pricing-lookup table is a future enhancement). The SaaS unit-
 // economics dashboard divides by workspace_active_count to get cost-per-
 // customer; alerting on `increase(...[1h])` per project surfaces runaway
 // spend before the monthly cap trips the budget circuit-breaker.
 export const aiProviderCostUsdTotal = new client.Counter({
   name: "app_ai_cost_usd_total",
-  help: "Cumulative LLM spend in USD, bucketed by provider + operation. Vision-heal cost uses $5/M input + $15/M output midpoint estimate; generation cost tracking is a follow-up (MNT-001c). SaaS unit-economics dashboard divides by workspace count to get cost-per-customer.",
+  help: "Cumulative LLM spend in USD, bucketed by provider + operation. Vision-heal cost uses $5/M input + $15/M output midpoint estimate; generation cost tracking is a future enhancement (needs per-model pricing-lookup table). SaaS unit-economics dashboard divides by workspace count to get cost-per-customer.",
   labelNames: ["provider", "operation"],
   registers: [register],
 });

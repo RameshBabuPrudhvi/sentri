@@ -1552,7 +1552,10 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal 
 
   // MNT-001b — success-path latency + cost telemetry. Cost is an estimate
   // ($5/M input + $15/M output midpoint, matching the per-call estimate
-  // returned to the caller). Per-model accurate pricing is MNT-001c.
+  // returned to the caller). Per-model accurate pricing is a future
+  // enhancement — the budget circuit-breaker only needs *some* signal,
+  // and the midpoint estimate errs conservative (caps fire slightly
+  // earlier than true spend would warrant).
   try {
     const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
     aiProviderLatencySeconds.observe({ provider: metricLabel, outcome: "success", operation: "vision_heal" }, seconds);

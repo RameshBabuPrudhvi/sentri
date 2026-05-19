@@ -7,9 +7,10 @@
  * the Postgres adapter translates BLOB → BYTEA. Typical row is 2-10 KB
  * (small UI element at viewport scale); 1000 baselines per project ≈ 10 MB.
  *
- * Retention: `purgeOlderThan(days)` is called from the scheduler's daily
- * sweep (when wired in MNT-001c) so stale crops from deleted tests or
- * pre-versioned code don't accumulate forever.
+ * Retention: `purgeOlderThan(days)` is exposed for scheduled cleanup so
+ * stale crops from deleted tests or pre-versioned code don't accumulate
+ * forever. Wiring it into a daily sweep job is operator-configurable
+ * (see `docs/guide/vision-healing.md` § retention).
  *
  * Cascade delete: `deleteByProjectId(projectId)` is invoked from the
  * `DELETE /api/v1/projects/:id` route handler so a project hard-delete

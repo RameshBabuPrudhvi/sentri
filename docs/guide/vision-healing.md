@@ -76,9 +76,11 @@ for a custom / self-hosted vision model).
 | Stage 8 LLM       | $0.001–$0.03 | Model-dependent. Includes one image upload (~50 KB base64) + ~200 tokens out. |
 
 Cost estimate from `aiProvider.callVisionModel` uses a $5/M input +
-$15/M output midpoint (rough Claude Sonnet / GPT-4o midrange). Proper
-per-model pricing lands in MNT-001b — the budget circuit-breaker only
-needs *some* signal, not byte-accurate accounting.
+$15/M output midpoint (rough Claude Sonnet / GPT-4o midrange) — the
+budget circuit-breaker only needs *some* signal, not byte-accurate
+accounting. Per-model accurate pricing is a future enhancement; the
+current estimate is conservative enough that the monthly cap fires
+slightly EARLIER than true spend would warrant (safe-side default).
 
 ## Budget circuit-breaker
 
@@ -145,9 +147,11 @@ const buf = await captureElementCrop(page, locator);
 ```
 
 Best-effort: returns `null` when the locator is hidden, off-screen, or
-mid-detach. Persistence to the baseline repo and the wiring of green-run
-captures is **deferred to MNT-001b** — this release ships the helper and
-the consumer surface in `tryVisionHeal({ baselineCrop })`.
+mid-detach. Persistence to the baseline repo (`element_baselines` table —
+migration 036) and the green-run capture lifecycle (`executeTest.js`
+success branch) both ship in this release. Stage 7 reads the persisted
+crop by composite key `<testId>@v<N>::<action>::<label>` so test-code
+edits invalidate stale baselines automatically.
 
 ## Incident disable
 
@@ -164,21 +168,70 @@ To disable quickly mid-incident:
    `visionHealMaxCostUsdPerMonth` to `0`. Stage 8 soft-disables within
    one heal attempt; stage 7 keeps running.
 
-## What's deferred to MNT-001b
+## Re-action verb coverage
 
-This PR ships the integration surface, the configuration plane, the
-host-side waterfall entrypoint, and the multimodal provider abstraction.
-The follow-up PR (`MNT-001b`) lands:
+After a successful vision heal, `performVisionHealReaction` (in
+`backend/src/runner/executeTest.js`) replays the originally-failed verb
+at the matched coordinates so the audit log records "we did try to
+recover" — and, in the case of `fill`, actually writes the intended
+value into the new element.
 
-- Full sliding-window pixelmatch CV implementation
-- Baseline crop persistence + green-run capture lifecycle
-- SQLite-backed budget counter (`isBudgetExhausted` real impl)
-- Re-action against the discovered bbox (currently `tryVisionHeal` returns
-  the box; the runtime then needs a coordinate-click path)
-- Audit-log event emission via `activityLogger`
-- Healing dashboard sparkline (currently shows zero-state count/cost)
+**Fully re-actioned verbs:**
 
-Until `MNT-001b` lands, projects can opt into the config without any
-behavioural change: with no `pixelmatchHeal` / `llmVisionHeal` deps wired
-in `executeTest.js`, `tryVisionHeal` returns `null` and tests stay marked
-broken (existing behaviour).
+| Verb        | Dispatch path                                           |
+|-------------|---------------------------------------------------------|
+| `click`     | `page.mouse.click(x, y)`                                |
+| `press`     | `page.mouse.click(x, y)` (treated as a focus-then-press)|
+| `tap`       | `page.mouse.click(x, y)`                                |
+| `dblclick`  | `page.mouse.dblclick(x, y)`                             |
+| `hover`     | `page.mouse.move(x, y)`                                 |
+| `rightclick`| `page.mouse.click(x, y, { button: "right" })`           |
+| `fill`      | `mouse.click` → `keyboard.press("Control+a")` → `keyboard.type(value)`. The original `value` is sourced from the sandbox's `__valueIntents` map (populated by `safeFill` in `selfHealing.js`) and surfaced via `err.__valueIntents` in `executeTest.js`'s catch arm. |
+
+**Documented limitations** (NOT a deferred-ticket gap — concrete
+justification per verb):
+
+- **`select`** — Playwright's `selectOption()` distinguishes between
+  native `<select>` (where Playwright sets `.value` programmatically and
+  fires the `change` event) and ARIA-role custom comboboxes (which need
+  a click-to-open + click-option-by-text sequence). Telling the two
+  apart from a bbox alone requires an `elementFromPoint()` round-trip
+  back into the DOM — which re-introduces exactly the brittleness
+  vision healing exists to bypass. Native dropdown heals and custom
+  combobox heals both stay marked broken.
+
+- **`check` / `uncheck`** — A coordinate click TOGGLES current state
+  rather than setting it. An already-checked checkbox getting a
+  `safeCheck` re-action would UNCHECK it (and vice versa), corrupting
+  every downstream assertion. Verifying the resulting `.checked` state
+  needs an `elementFromPoint()` round-trip — same DOM brittleness
+  problem as `select`. Worse, a click on a `<label>` element (which
+  forwards to the input) lands at the label's centre, which may sit
+  OUTSIDE the input's hit-region in some CSS layouts.
+
+- **`focus`** — Pure coordinate `mouse.click` already lands focus on
+  most focusable elements; if the test specifically needed `.focus()`
+  for an element the mouse can't reach (e.g. inside a custom widget
+  with a `tabindex`), the heal can't help anyway.
+
+For these four verbs, `tryVisionHeal` still adopts the new strategy
+hint (so the NEXT run uses the vision result) and records the audit
+row, but the current run stays marked failed — the honest outcome
+until we ship state-aware re-action.
+
+## Record-keeping vs. rescue semantics
+
+Even for fully-implemented verbs, the re-action runs in the catch arm
+AFTER the test body has thrown and the vm sandbox has unwound. The
+re-action **cannot** resurrect downstream steps in the same run — the
+real win is the next run, where:
+
+- `recordHealing()` (called inside `tryVisionHeal`) has promoted index
+  7/8 into the adaptive hint map, so subsequent runs try the vision
+  path first.
+- The persisted baseline crop lets stage 7 fire faster + cheaper than
+  stage 8 on follow-up failures.
+
+The re-action exists so the audit log captures a "we did try to
+recover" entry, which matters for compliance and for operators
+investigating why a vision heal "succeeded" but the run still failed.

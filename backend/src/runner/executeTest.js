@@ -174,7 +174,7 @@ async function resolveLocatorForBaseline(page, action, label) {
 }
 
 /**
- * MNT-001b — perform the originally-failed verb at the coordinates returned
+ * MNT-001 — perform the originally-failed verb at the coordinates returned
  * by a successful vision heal. Exported for unit testing; callers in
  * `executeTest` invoke this only after confirming the heal returned a
  * finite bbox.
@@ -196,13 +196,40 @@ async function resolveLocatorForBaseline(page, action, label) {
  *
  * ### Verb coverage
  *
+ * Implemented:
  * - `click` / `press` / `tap` → `page.mouse.click(x, y)`
- * - `dblclick` → `page.mouse.dblclick(x, y)`
- * - `hover` → `page.mouse.move(x, y)`
- * - `rightclick` → `page.mouse.click(x, y, { button: "right" })`
- * - `fill` / `select` / `check` → no-op (need the original value, which
- *   was bound inside the sandbox and isn't reachable here — deferred to
- *   MNT-001c via a sandbox export).
+ * - `dblclick`                → `page.mouse.dblclick(x, y)`
+ * - `hover`                   → `page.mouse.move(x, y)`
+ * - `rightclick`              → `page.mouse.click(x, y, { button: "right" })`
+ * - `fill`                    → focus via `mouse.click`, select existing
+ *                                text via `keyboard.press("Control+a")`,
+ *                                then `keyboard.type(value)`. Requires the
+ *                                caller to pass `intent.value` — sourced
+ *                                from the sandbox's `__valueIntents` map
+ *                                via `err.__valueIntents` in the catch arm.
+ *
+ * Documented limitations (NOT implemented — concrete justification):
+ *
+ * - `select` — Playwright's `selectOption()` distinguishes between native
+ *   `<select>` (where Playwright sets `.value` programmatically and fires
+ *   the `change` event) and ARIA-role custom comboboxes (which need a
+ *   click-to-open + click-option-by-text sequence). Telling the two apart
+ *   from a bbox alone requires an `elementFromPoint()` round-trip back
+ *   into the DOM — which re-introduces exactly the brittleness vision
+ *   healing exists to bypass.
+ *
+ * - `check` / `uncheck` — A coordinate click TOGGLES current state rather
+ *   than setting it. An already-checked checkbox getting a `safeCheck`
+ *   re-action would UNCHECK it (and vice versa), corrupting every
+ *   downstream assertion. Verifying the resulting `.checked` state needs
+ *   an `elementFromPoint()` round-trip — same DOM brittleness problem as
+ *   `select`. Leaving the test marked failed is the honest outcome until
+ *   we have state-aware re-action.
+ *
+ * - `focus` — Pure coordinate `mouse.click` already lands focus on most
+ *   focusable elements; if the test specifically needed `.focus()` for an
+ *   element the mouse can't reach (e.g. inside a custom widget with a
+ *   `tabindex`), the heal can't help anyway.
  *
  * Coordinate clicks are safer than re-resolving the locator: the pixelmatch
  * / LLM result IS the locator. Going through `elementFromPoint` would
@@ -211,17 +238,22 @@ async function resolveLocatorForBaseline(page, action, label) {
  * Best-effort: any error is swallowed so a re-action failure can't make
  * an already-failing run any worse.
  *
- * @param {Object} page  Playwright Page (or any object with the same `mouse` shape — for tests).
+ * @param {Object} page  Playwright Page (or any object with the same `mouse` / `keyboard` shape — for tests).
  * @param {string} action  Original verb from the healing event key.
  * @param {{x: number, y: number, width: number, height: number}} box
  * @param {string} label  Human-readable label (logged for traceability).
  * @param {string} key    Composite healing key (`action::label`) — logged on error.
+ * @param {Object} [intent]  Value-intent for value-bearing verbs.
+ *   `{ value: string }` for `fill`. When `fill` is dispatched without a
+ *   `value` field, the branch is skipped (audit row still records `verb`
+ *   + center coords, `dispatched: false`) so a missing intent never lands
+ *   an empty string in the field.
  * @returns {Promise<{verb: string, x: number, y: number, dispatched: boolean}>}
  *   Resolves with the dispatched verb + center coords + whether a method
- *   was actually invoked (false for unsupported verbs / non-finite box).
- *   Never throws.
+ *   was actually invoked (false for unsupported verbs / non-finite box /
+ *   missing value intent). Never throws.
  */
-export async function performVisionHealReaction(page, action, box, label, key) {
+export async function performVisionHealReaction(page, action, box, label, key, intent = {}) {
   const verbLower = String(action || "").toLowerCase();
   const result = { verb: verbLower, x: 0, y: 0, dispatched: false };
 
@@ -249,9 +281,28 @@ export async function performVisionHealReaction(page, action, box, label, key) {
     } else if (verbLower === "rightclick") {
       await page.mouse.click(centerX, centerY, { button: "right" }).catch(() => {});
       result.dispatched = true;
+    } else if (verbLower === "fill" && intent && typeof intent.value === "string" && page.keyboard) {
+      // MNT-001 — value-aware fill re-action. Three-step sequence:
+      //   1. mouse.click(x, y) lands focus on the input that vision matched.
+      //   2. keyboard.press("Control+a") selects existing text so the
+      //      subsequent type() replaces rather than appends. Playwright maps
+      //      Control+a to Cmd+a on macOS automatically.
+      //   3. keyboard.type(value) writes the original intended value (sourced
+      //      from the sandbox's __valueIntents map at the catch arm).
+      // This pattern works for native <input>/<textarea> + most ARIA textbox
+      // widgets without re-introducing DOM-locator brittleness. Custom
+      // contenteditable rich-text editors may not honour select-all but the
+      // worst case is "test stays broken" — same as the no-heal path.
+      await page.mouse.click(centerX, centerY).catch(() => {});
+      await page.keyboard.press("Control+a").catch(() => {});
+      await page.keyboard.type(intent.value).catch(() => {});
+      result.dispatched = true;
     }
-    // fill / select / check / uncheck / focus / select fall through —
-    // value-aware re-action is MNT-001c territory.
+    // select / check / uncheck / focus intentionally fall through — see
+    // "Documented limitations" in the JSDoc above for the concrete
+    // reasons each verb is not implemented (NOT because it's deferred to
+    // a follow-up ticket — because state-aware re-action requires an
+    // elementFromPoint() round-trip that defeats vision healing's purpose).
     if (result.dispatched) {
       console.log(formatLogLine("info", null,
         `[executeTest] Vision heal re-action completed: ${verbLower} at (${centerX},${centerY}) for "${label}"`));
@@ -803,11 +854,20 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
               console.log(formatLogLine("info", null,
                 `[executeTest] Vision heal succeeded for ${test.id} (${heal.kind}, confidence=${heal.confidence?.toFixed?.(2) ?? heal.confidence})`));
 
-              // MNT-001b — coordinate re-action. See `performVisionHealReaction`
+              // MNT-001 — coordinate re-action. See `performVisionHealReaction`
               // jsdoc above for the design rationale (record-keeping vs.
               // rescue-the-run semantics).
+              //
+              // Value-bearing verbs (currently just `fill`) need the original
+              // intended value, which the sandboxed safe* helpers recorded
+              // into __valueIntents keyed by "<action>::<label>" — i.e. evt.key.
+              // The map is surfaced onto the thrown error in codeExecutor.js.
+              // Missing intent (e.g. click verb, or fill without a recorded
+              // value) falls through harmlessly: the reaction skips the fill
+              // branch and the audit row records `dispatched: false`.
               if (heal.box && Number.isFinite(heal.box.x) && Number.isFinite(heal.box.y)) {
-                await performVisionHealReaction(page, action, heal.box, label, evt.key);
+                const valueIntent = (err.__valueIntents || {})[evt.key];
+                await performVisionHealReaction(page, action, heal.box, label, evt.key, valueIntent);
               }
             }
           }
