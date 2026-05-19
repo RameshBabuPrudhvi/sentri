@@ -1074,6 +1074,16 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
   } finally {
     clearTimeout(timeoutHandle);
 
+    // AUTO-009h — capture `durationMs` BEFORE the post-test coverage
+    // snapshot so the reported test duration reflects only the test
+    // itself, not the snapshot round-trip. A 50-MB coverage JSON over a
+    // staging-network HTTP GET can take 100-200ms; without this hoist
+    // every API test would appear ~200ms slower than it actually was on
+    // any project with `serverCoverageEndpoint` configured, and the
+    // p95 / p99 latency dashboards would silently drift.
+    result.durationMs = Date.now() - start;
+    result.runTimestamp = start - runStart;
+
     // AUTO-009h — snapshot the SUT's coverage AFTER the API test and diff
     // against the pre-snapshot so `result.serverCoverage` carries exactly
     // the statements / branches / functions this test newly exercised.
@@ -1094,9 +1104,6 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
         }
       } catch { /* best-effort */ }
     }
-
-    result.durationMs = Date.now() - start;
-    result.runTimestamp = start - runStart;
   }
 
   return result;

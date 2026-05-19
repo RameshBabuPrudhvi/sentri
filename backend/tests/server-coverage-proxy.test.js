@@ -127,6 +127,62 @@ await (async () => {
   assert.deepEqual(diff, {}, "no new coverage → empty diff");
 })();
 
+await (async () => {
+  // AUTO-009h — aggregator end-to-end with stub resolver that rewrites
+  // `/app/dist/server.js` → `src/server.ts`. Verifies the new code path
+  // at coverageAggregator.js — server paths get source-map-resolved
+  // when a resolver is supplied AND the path matches the `.js` regex.
+  const { aggregateRunCoverage } = await import("../src/pipeline/coverageAggregator.js");
+  const stubResolver = {
+    resolve: async (p) => (p === "/app/dist/server.js" ? { _stub: true } : null),
+    mapLine: (consumer, _line) => (consumer?._stub ? { source: "src/server.ts" } : null),
+  };
+  const results = [{
+    testId: "T1", isApiTest: true,
+    serverCoverage: {
+      "/app/dist/server.js": {
+        addedStatements: 5, addedBranches: 0, addedFunctions: 1,
+        totalStatements: 10, totalBranches: 2, totalFunctions: 1,
+      },
+    },
+  }];
+  const summary = await aggregateRunCoverage(results, { sutOrigin: "https://api.example.com", resolver: stubResolver });
+  const serverRow = (summary.topUncoveredFiles || []).find((f) => f.layer === "server");
+  assert.ok(serverRow, "server-layer row exists");
+  assert.equal(serverRow.file, "src/server.ts", "path rewritten via resolver");
+  assert.equal(serverRow.bundleUrl, "/app/dist/server.js", "original c8 path preserved on bundleUrl");
+  assert.equal(serverRow.uncoveredLines, 5, "10 total - 5 added = 5 uncovered");
+  assert.equal(summary.serverLayer, true, "serverLayer flag set");
+})();
+
+await (async () => {
+  // AUTO-009h — when c8 emits already-resolved `.ts` paths, the
+  // resolver branch never fires (regex doesn't match `.ts`). Verifies
+  // `bundleUrl` stays null and the path passes through untouched, so
+  // pre-existing operators using c8 --source-map see byte-identical
+  // shape.
+  const { aggregateRunCoverage } = await import("../src/pipeline/coverageAggregator.js");
+  let resolverCalled = false;
+  const stubResolver = {
+    resolve: async () => { resolverCalled = true; return null; },
+    mapLine: () => null,
+  };
+  const results = [{
+    testId: "T1", isApiTest: true,
+    serverCoverage: {
+      "/app/src/server.ts": {
+        addedStatements: 3, addedBranches: 0, addedFunctions: 0,
+        totalStatements: 8, totalBranches: 0, totalFunctions: 0,
+      },
+    },
+  }];
+  const summary = await aggregateRunCoverage(results, { sutOrigin: "https://api.example.com", resolver: stubResolver });
+  assert.equal(resolverCalled, false, "resolver skipped for .ts paths");
+  const serverRow = (summary.topUncoveredFiles || []).find((f) => f.layer === "server");
+  assert.equal(serverRow.file, "/app/src/server.ts", "ts path passes through");
+  assert.equal(serverRow.bundleUrl, null, "no bundleUrl when path was not rewritten");
+})();
+
   console.log("server-coverage-proxy.test.js passed");
 }
 

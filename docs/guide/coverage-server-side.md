@@ -137,12 +137,30 @@ diffs into the run-level `coverageSummary.topUncoveredFiles[]` with
   Run the instrumented build in a dedicated environment.
 - **Branch-arm resolution requires c8 ≥ 9.** Earlier versions report only
   statement-level data; branch counts will be 0 in the diff.
-- **No source-map resolution on the server side** (yet). File paths in the
-  Istanbul object are surfaced verbatim — typically already source-mapped by
-  the bundler before c8 sees them, but TypeScript SUTs that compile to a
-  separate `dist/` directory will see `dist/...` paths. AUTO-009i (planned)
-  will optionally fetch a `.map` for each source file the same way AUTO-009b
-  does for browser bundles.
+- **Source-map resolution — two paths, both supported.**
+  Sentri's aggregator surfaces the path each file appears under in
+  `global.__coverage__`. There are two ways to get original TypeScript /
+  source paths on the Dashboard:
+
+  1. **Preferred — let c8 do it.** Start the SUT with `c8 --source-map`
+     (c8 ≥ 7.10) or ensure `tsc --sourceMap` writes `.map` files next to
+     the compiled `.js`. c8 then reads the inline `//# sourceMappingURL=`
+     pragma at instrumentation time and emits already-resolved paths
+     (`/app/src/auth/login.ts`). Lowest overhead and zero configuration
+     on Sentri's side.
+
+  2. **Fallback — Sentri-side resolution via `sourcemapBaseUrl`.** When
+     the SUT runs c8 without source-map handling (paths look like
+     `/app/dist/server.js`) you can point Sentri at the maps via the
+     same `project.sourcemapBaseUrl` field that browser-side coverage
+     uses. Sentri's aggregator probes `<sourcemapBaseUrl>/<filename>.map`
+     for each `.js` / `.mjs` / `.cjs` path in the diff and rewrites it
+     to the original source. SSRF-guarded; LRU-cached (1h TTL); silently
+     no-ops when the map isn't reachable.
+
+  Quick check: `cat /tmp/coverage.json | jq 'to_entries[0].value.path'`
+  — `.ts` paths mean option 1 is working. `.js` / `dist/` paths mean
+  the SUT needs option 1 enabled, or you can configure option 2.
 - **Snapshot overhead.** Each API test costs 2 × `GET /__coverage__` round
   trips. On a 100-test API run against a 50-MB coverage object, that's ~10s
   of extra wall-clock. Set `serverCoverageEndpoint: null` when you don't need

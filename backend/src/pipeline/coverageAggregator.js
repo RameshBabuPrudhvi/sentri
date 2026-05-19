@@ -330,14 +330,26 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
   // and represents the SUT files this test newly exercised (statements /
   // branches / functions present in `after` but not in `before`).
   //
-  // We aggregate across all tests (union of added IDs is equivalent to
-  // sum-of-added because each test's "added" set is per-test-disjoint by
-  // construction of the diff). For each file we surface an entry with
-  // `layer: "server"`, `uncoveredLines = max(0, total - covered)` where
-  // "covered" is the union of `addedStatements` across tests (capped at
-  // `totalStatements` to defend against double-counting if two tests
-  // happen to exercise the same statement — diff semantics rule that
-  // out, but `Math.min` is cheap insurance).
+  // ### Aggregation contract
+  //
+  // - **Per-test diffs are disjoint by construction.** A statement id
+  //   can move from `count === 0` to `count > 0` exactly once across a
+  //   run's API tests — the second test that exercises the same line
+  //   sees `prevS = already-covered` and never adds it to its delta.
+  //   So `sum(addedStatements)` is the union, no dedup needed.
+  // - **Totals are stable per file across a run.** c8 emits file IDs
+  //   from a one-time instrumentation pass at SUT start-up; the
+  //   `statementMap` / `fnMap` / `branchMap` are fixed for the lifetime
+  //   of the SUT process, so every diff's `totalStatements` for a given
+  //   file is identical. We take the first-seen value rather than the
+  //   `Math.max` of all diffs — equivalent under the c8 contract, and
+  //   reads as "this is the file's total" rather than "we're defending
+  //   against an impossible mutation."
+  // - **No `Math.min` cap on covered counts.** The disjoint-diff guarantee
+  //   above means `addedStatements` sums up to at most `totalStatements`
+  //   (you can't add what's already there). A SUT that violates the c8
+  //   contract (e.g. restarts mid-run, re-emitting fresh IDs) would
+  //   produce a corrupted summary, but that's a SUT bug not ours.
   /** @type {Map<string, { addedStatements: number, addedBranches: number, addedFunctions: number, totalStatements: number, totalBranches: number, totalFunctions: number }>} */
   const serverFiles = new Map();
   let serverLayer = false;
@@ -347,40 +359,73 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
     serverLayer = true;
     for (const [path, delta] of Object.entries(sc)) {
       if (!delta || typeof delta !== "object") continue;
-      const existing = serverFiles.get(path) || {
-        addedStatements: 0, addedBranches: 0, addedFunctions: 0,
-        totalStatements: 0, totalBranches: 0, totalFunctions: 0,
-      };
-      // Per-test diffs are disjoint by construction (a stmt id can move
-      // from `count === 0` to `count > 0` exactly once across a run's
-      // tests — the second test's diff would see prevS=already-covered).
-      // We still sum + cap to defend against snapshot drift.
-      existing.addedStatements += delta.addedStatements || 0;
-      existing.addedBranches   += delta.addedBranches   || 0;
-      existing.addedFunctions  += delta.addedFunctions  || 0;
-      existing.totalStatements = Math.max(existing.totalStatements, delta.totalStatements || 0);
-      existing.totalBranches   = Math.max(existing.totalBranches,   delta.totalBranches   || 0);
-      existing.totalFunctions  = Math.max(existing.totalFunctions,  delta.totalFunctions  || 0);
-      serverFiles.set(path, existing);
+      const existing = serverFiles.get(path);
+      if (!existing) {
+        // First diff for this file — take totals as-is.
+        serverFiles.set(path, {
+          addedStatements: delta.addedStatements || 0,
+          addedBranches:   delta.addedBranches   || 0,
+          addedFunctions:  delta.addedFunctions  || 0,
+          totalStatements: delta.totalStatements || 0,
+          totalBranches:   delta.totalBranches   || 0,
+          totalFunctions:  delta.totalFunctions  || 0,
+        });
+      } else {
+        // Subsequent diffs — sum the disjoint adds. Totals are stable
+        // per c8 contract, so we don't touch them.
+        existing.addedStatements += delta.addedStatements || 0;
+        existing.addedBranches   += delta.addedBranches   || 0;
+        existing.addedFunctions  += delta.addedFunctions  || 0;
+      }
     }
   }
+  // AUTO-009h — server-side source-map resolution. When the operator has
+  // configured `project.sourcemapBaseUrl` AND c8 was started WITHOUT its
+  // `--source-map` flag, the paths c8 emits look like `/app/dist/server.js`.
+  // We reuse the same resolver the browser path uses (`sourceMapResolver.js`)
+  // to fetch `<sourcemapBaseUrl>/<filename>.map` and rewrite the path to
+  // the original source (`src/server.ts`). When c8 already source-mapped
+  // the paths (the recommended config), the `.map` lookup will 404 and
+  // the resolver returns null — the path stays as c8 emitted it, which
+  // is already correct. Best-effort: any resolver failure leaves the
+  // path untouched, never throws.
   for (const [path, m] of serverFiles.entries()) {
-    const coveredStatements = Math.min(m.totalStatements, m.addedStatements);
-    const coveredBranches   = Math.min(m.totalBranches,   m.addedBranches);
-    const coveredFunctions  = Math.min(m.totalFunctions,  m.addedFunctions);
+    let file = path;
+    // Only attempt resolution for paths that look like .js/.mjs/.cjs
+    // outputs (the typical c8-without-source-map shape). `.ts` / `.tsx`
+    // paths are already-resolved sources — leave them alone.
+    if (resolver?.resolve && /\.(m|c)?js$/.test(path)) {
+      try {
+        const consumer = await resolver.resolve(path);
+        if (consumer && resolver.mapLine) {
+          // The Istanbul diff doesn't carry line numbers per file, just
+          // statement/branch/function counts. We probe line 1 col 0 to
+          // pull the original `source` field — any covered line in the
+          // file is in the same compilation unit so the source name is
+          // stable. Mirrors the browser-path probe at line ~262.
+          const mapped = resolver.mapLine(consumer, 1, 0);
+          if (mapped?.source) file = mapped.source;
+        }
+      } catch { /* resolver failure → keep original path */ }
+    }
     topUncoveredFiles.push({
-      file: path,
+      file,
       layer: "server",
       // "uncoveredLines" semantics on the server side: we don't have line
       // numbers in the Istanbul diff, but `totalStatements - covered` is
       // the closest stable proxy — the Dashboard renders it under the
       // same column as browser line counts so the operator sees an
       // apples-to-apples uncovered count.
-      uncoveredLines: Math.max(0, m.totalStatements - coveredStatements),
+      uncoveredLines: Math.max(0, m.totalStatements - m.addedStatements),
       totalLines: m.totalStatements,
-      bundleUrl: null, // no bundle URL for server-side files
-      uncoveredBranches:  Math.max(0, m.totalBranches  - coveredBranches),
-      uncoveredFunctions: Math.max(0, m.totalFunctions - coveredFunctions),
+      // `bundleUrl` carries the c8-emitted path so the frontend can show
+      // it as a tooltip ("originally /app/dist/server.js") when the
+      // primary `file` was rewritten by source-map resolution. Null
+      // when resolution didn't fire so the legacy display path stays
+      // bit-for-bit identical.
+      bundleUrl: file !== path ? path : null,
+      uncoveredBranches:  Math.max(0, m.totalBranches  - m.addedBranches),
+      uncoveredFunctions: Math.max(0, m.totalFunctions - m.addedFunctions),
     });
   }
   topUncoveredFiles.sort((a, b) => b.uncoveredLines - a.uncoveredLines);

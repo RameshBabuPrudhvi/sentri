@@ -80,6 +80,15 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
   // `topUncoveredFiles[]` row carrying `layer: "server"`); otherwise we
   // default to browser-only and hide the tabs so pre-AUTO-009h SUTs look
   // identical to before.
+  //
+  // Intentional UI behavior: once `serverLayerAvailable` flips true for
+  // ANY project in the workspace, the toggle stays rendered across
+  // subsequent dashboard reads — even if the latest run on every
+  // project is browser-only. This is by design: operators expect the
+  // segmented control to be stable, not to disappear-and-reappear as
+  // the most-recent run rotates between browser and API suites. The
+  // toggle defaults to `"browser"` so a browser-only latest run is
+  // rendered correctly without an explicit user toggle.
   const [layerKey, setLayerKey] = useState("browser");
   const serverLayerAvailable = Array.from(latestSummaryByProject.values()).some((s) =>
     s?.serverLayer === true ||

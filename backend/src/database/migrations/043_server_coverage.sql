@@ -16,4 +16,9 @@
 -- SSRF-guarded at the route layer (`routes/projects.js` PATCH handler)
 -- via the same `validateUrl` helper that protects `sourcemapBaseUrl`
 -- and notification webhooks.
-ALTER TABLE projects ADD COLUMN serverCoverageEndpoint TEXT;
+--
+-- `DEFAULT NULL` is explicit (SQLite would default to NULL anyway on a
+-- nullable column added via ALTER) so the operator-facing schema is
+-- self-documenting: new projects opt-out by default, zero regression for
+-- pre-AUTO-009h rows.
+ALTER TABLE projects ADD COLUMN serverCoverageEndpoint TEXT DEFAULT NULL;
