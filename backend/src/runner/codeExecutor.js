@@ -414,7 +414,7 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
         __testError.__healingEvents = __healingEvents;
         // MNT-001 — surface value-intents map alongside healing events so the
         // host-side vision-heal re-action knows what the test was trying to
-        // write to value-bearing fields (fill verb). See `__valueIntents`
+        // write to value-bearing fields (fill verb). See __valueIntents
         // declaration in selfHealing.js#getSelfHealingHelperCode.
         __testError.__valueIntents = __valueIntents;
         throw __testError;
