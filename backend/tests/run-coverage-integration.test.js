@@ -5,8 +5,11 @@
  * `page.coverage.stopJSCoverage()` returns) through the aggregator and
  * asserts the full `runs.coverageSummary` persisted shape — every field
  * NEXT.md spec requires for the dashboard + RunDetail consumers.
+ *
+ * AUTO-009k — converted to house style: direct `node:assert/strict` calls,
+ * no `node:test` framework import. Matches the pattern at
+ * `backend/tests/failure-clusterer.test.js`.
  */
-import test from "node:test";
 import assert from "node:assert/strict";
 import { aggregateRunCoverage } from "../src/pipeline/coverageAggregator.js";
 
@@ -28,7 +31,9 @@ function buildStubJsCoverage() {
   };
 }
 
-test("AUTO-009 — coverageSummary persisted shape contains every documented field", async () => {
+async function main() {
+
+await (async () => {
   const stub = buildStubJsCoverage();
   const summary = await aggregateRunCoverage(
     [
@@ -69,24 +74,24 @@ test("AUTO-009 — coverageSummary persisted shape contains every documented fie
     assert.equal(typeof f.totalLines, "number");
   }
   assert.ok(summary.topUncoveredFiles.length <= 20, "topUncoveredFiles capped at 20");
-});
+})();
 
-test("AUTO-009 — disabled coverage path produces null summary (zero-regression)", () => {
+await (async () => {
   // Mirror testRunner.js behaviour when project.coverageEnabled is false:
   // aggregator is never called and run.coverageSummary stays null.
   const run = { results: [{ testId: "T1", status: "passed" }], coverageSummary: null };
   assert.equal(run.coverageSummary, null);
-});
+})();
 
-test("AUTO-009 — sourceMapStatus = 'fallback' when no source maps are resolved", async () => {
+await (async () => {
   const summary = await aggregateRunCoverage(
     [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/x.js", text: "a\nb\n", ranges: [{ start: 0, end: 1 }] }] }],
     { sutOrigin: "https://app.example.com" },
   );
   assert.equal(summary.sourceMapStatus, "fallback");
-});
+})();
 
-test("AUTO-009b — sourceMapStatus = 'resolved' when ≥80% of bundle lines map", async () => {
+await (async () => {
   // Stub resolver: every bundle line maps to src/Cart.tsx. The aggregator
   // should group by the original source path and surface sourceMapStatus =
   // "resolved" because 100% of bundle lines resolved.
@@ -103,9 +108,9 @@ test("AUTO-009b — sourceMapStatus = 'resolved' when ≥80% of bundle lines map
   assert.equal(summary.sourceMapStatus, "resolved");
   assert.ok(summary.topUncoveredFiles.some((f) => f.file === "src/Cart.tsx"), "groups by original source");
   assert.ok(summary.topUncoveredFiles.every((f) => "bundleUrl" in f), "retains bundleUrl secondary field");
-});
+})();
 
-test("AUTO-009b — sourceMapStatus = 'partial' when <80% of bundle lines map", async () => {
+await (async () => {
   // Resolver only maps every other line — partial resolution.
   const summary = await aggregateRunCoverage(
     [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/main.js", text: "a\nb\nc\nd\ne\n", ranges: [{ start: 0, end: 1 }] }] }],
@@ -118,9 +123,9 @@ test("AUTO-009b — sourceMapStatus = 'partial' when <80% of bundle lines map", 
     },
   );
   assert.equal(summary.sourceMapStatus, "partial");
-});
+})();
 
-test("AUTO-009c — branchPct < linePct when one branch arm never fires", async () => {
+await (async () => {
   // Synthetic SUT with two if-arms — only one is taken. We inject a stub
   // `convertV8ToIstanbul` so this test stays hermetic — no real
   // v8-to-istanbul, no source-map round-trip. The injection point is the
@@ -159,9 +164,9 @@ test("AUTO-009c — branchPct < linePct when one branch arm never fires", async 
   assert.ok(t1.deltaBranches > 0, "T1 first hit the taken branch arm");
   assert.equal(typeof t1.deltaStatements, "number");
   assert.equal(typeof t1.deltaFunctions,  "number");
-});
+})();
 
-test("AUTO-009c — granularity keys omitted when converter never produces data", async () => {
+await (async () => {
   // Stub converter that returns null for every entry — mirrors the
   // production behaviour when v8-to-istanbul is unavailable or the script
   // can't be parsed. The returned summary should NOT carry `totalBranches`
@@ -174,9 +179,9 @@ test("AUTO-009c — granularity keys omitted when converter never produces data"
   assert.equal(summary.totalBranches,   undefined);
   assert.equal(summary.coveredBranches, undefined);
   assert.equal(summary.branchPct,       undefined);
-});
+})();
 
-test("AUTO-009b — resolver throw never fails the aggregator", async () => {
+await (async () => {
   const summary = await aggregateRunCoverage(
     [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/x.js", text: "a\nb\n", ranges: [{ start: 0, end: 1 }] }] }],
     {
@@ -189,5 +194,12 @@ test("AUTO-009b — resolver throw never fails the aggregator", async () => {
   );
   // Falls back cleanly; status stays "fallback".
   assert.equal(summary.sourceMapStatus, "fallback");
-});
+})();
 
+  console.log("run-coverage-integration.test.js passed");
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

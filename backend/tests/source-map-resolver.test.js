@@ -19,7 +19,9 @@
  * whole file before SSRF / 404 / cache tests can run.
  */
 
-import test from "node:test";
+// AUTO-009k — converted to house style: direct `node:assert/strict` calls
+// inside an async main(), no `node:test` framework import. Matches the
+// pattern at `backend/tests/failure-clusterer.test.js`.
 import assert from "node:assert/strict";
 import { resolveSourceMap, mapBundleLine, __resetCacheForTest } from "../src/pipeline/sourceMapResolver.js";
 
@@ -46,7 +48,9 @@ function stubFetch(handler) {
   };
 }
 
-test("resolveSourceMap — happy path: 200 + valid .map yields a consumer", async () => {
+async function main() {
+
+await (async () => {
   __resetCacheForTest();
   let fetched = 0;
   stubFetch(async (url) => {
@@ -69,27 +73,27 @@ test("resolveSourceMap — happy path: 200 + valid .map yields a consumer", asyn
       assert.equal(typeof mapped.line, "number");
     }
   } finally { restoreFetch(); __resetCacheForTest(); }
-});
+})();
 
-test("resolveSourceMap — 404 returns null (best-effort, never throws)", async () => {
+await (async () => {
   __resetCacheForTest();
   stubFetch(async () => new Response("not found", { status: 404 }));
   try {
     const consumer = await resolveSourceMap("https://example.com/missing.js");
     assert.equal(consumer, null);
   } finally { restoreFetch(); __resetCacheForTest(); }
-});
+})();
 
-test("resolveSourceMap — malformed JSON returns null", async () => {
+await (async () => {
   __resetCacheForTest();
   stubFetch(async () => new Response("<!doctype html><html>not json</html>", { status: 200 }));
   try {
     const consumer = await resolveSourceMap("https://example.com/broken.js");
     assert.equal(consumer, null);
   } finally { restoreFetch(); __resetCacheForTest(); }
-});
+})();
 
-test("resolveSourceMap — SSRF block: loopback URL refused without fetching", async () => {
+await (async () => {
   __resetCacheForTest();
   let fetched = 0;
   stubFetch(async () => { fetched++; return new Response("x", { status: 200 }); });
@@ -98,9 +102,9 @@ test("resolveSourceMap — SSRF block: loopback URL refused without fetching", a
     assert.equal(consumer, null, "SSRF guard rejects loopback");
     assert.equal(fetched, 0, "fetch never reached the network");
   } finally { restoreFetch(); __resetCacheForTest(); }
-});
+})();
 
-test("resolveSourceMap — cache hit: second resolve for same bundleUrl does not re-fetch", async () => {
+await (async () => {
   __resetCacheForTest();
   let fetched = 0;
   stubFetch(async () => {
@@ -116,9 +120,9 @@ test("resolveSourceMap — cache hit: second resolve for same bundleUrl does not
     assert.ok(a && b, "both resolves succeed");
     assert.equal(fetched, 1, "second resolve served from cache (1 fetch total)");
   } finally { restoreFetch(); __resetCacheForTest(); }
-});
+})();
 
-test("resolveSourceMap — sourcemapBaseUrl override: fetches <base>/<filename>.map", async () => {
+await (async () => {
   __resetCacheForTest();
   let seenUrl = null;
   stubFetch(async (url) => {
@@ -131,9 +135,17 @@ test("resolveSourceMap — sourcemapBaseUrl override: fetches <base>/<filename>.
     });
     assert.equal(seenUrl, "https://example.com/maps/main.abc123.js.map");
   } finally { restoreFetch(); __resetCacheForTest(); }
-});
+})();
 
-test("mapBundleLine — null consumer / unmappable line returns null", () => {
+await (async () => {
   assert.equal(mapBundleLine(null, 1, 0), null);
   assert.equal(mapBundleLine({}, 1, 0), null);
+})();
+
+  console.log("source-map-resolver.test.js passed");
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });

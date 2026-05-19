@@ -127,6 +127,8 @@ const files = [
   "tests/worker-pool-dashboard.test.js",
   "tests/coverage-aggregator.test.js",
   "tests/run-coverage-integration.test.js",
+  "tests/run-shard-coverage.test.js",        // AUTO-009f — sharded-run parity regression
+  "tests/coverage-memory-ceiling.test.js",   // AUTO-009g — memory-ceiling enforcement
   "tests/source-map-resolver.test.js",
   "tests/observability.test.js",
   // AUTO-022 — AI eval harness scorer + regression-detection + metric_samples persistence.

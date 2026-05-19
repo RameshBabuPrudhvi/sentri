@@ -913,25 +913,15 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
 
   run.webVitalsResult = evaluateWebVitalsBudgets(project.webVitalsBudgets, run);
   run.rootCauses = clusterFailures({ results: run.results });
-  try {
-    if (project?.coverageEnabled) {
-      const sutOrigin = (() => { try { return new URL(project.url).origin; } catch { return ""; } })();
-      // AUTO-009b — per-run source-map resolver. The resolver maintains its
-      // own LRU cache (10MB / 1h TTL) so bundle URLs reused across tests
-      // only hit the network once. Best-effort: any resolver failure
-      // silently falls back to bundle coordinates inside the aggregator.
-      const sourcemapBaseUrl = project.sourcemapBaseUrl || null;
-      const resolver = {
-        resolve: (bundleUrl) => resolveSourceMap(bundleUrl, { sourcemapBaseUrl }),
-        mapLine: (consumer, line) => mapBundleLine(consumer, line, 0),
-      };
-      run.coverageSummary = await aggregateRunCoverage(run.results, { sutOrigin, resolver });
-    } else {
-      run.coverageSummary = null;
-    }
-  } catch {
-    run.coverageSummary = null;
-  }
+  // AUTO-009f — `finalizeCoverage` is the single source of truth for the
+  // post-run coverage tail. Same helper is invoked from
+  // `workers/runWorker.js#finalizeShardedRun` so sharded runs get an
+  // identical `coverageSummary` shape (parity bug fix — previously every
+  // multi-shard run with coverage enabled persisted `null`). The helper
+  // runs the aggregator + source-map resolver (AUTO-009b), enforces the
+  // AUTO-009g memory ceiling, and strips raw `jsCoverage` payloads from
+  // `run.results` AFTER aggregation so the persisted JSON column stays lean.
+  run.coverageSummary = await finalizeCoverage(project, run.results);
 
   // AUTO-009d — gate evaluation runs AFTER coverage aggregation so the
   // coverage rules see this run's freshly-computed `coverageSummary`. The
@@ -959,10 +949,10 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   }
   run.gateResult = evaluateQualityGates(project.qualityGates, run, { priorRunCoverage });
 
-  // Keep per-test raw script coverage in-memory only; do not persist heavy payloads.
-  for (const r of run.results) {
-    if (r && "jsCoverage" in r) delete r.jsCoverage;
-  }
+  // AUTO-009f — raw `jsCoverage` payloads are already stripped by
+  // `finalizeCoverage` (above), so we don't need a second cleanup loop here.
+  // The strip happens AFTER aggregation in the helper so the persisted
+  // `run.results` JSON column never carries the heavy V8 ranges.
 
   // AUTO-017.3: persist per-run Web Vitals samples for MET-001 trend charts.
   // Best-effort only — telemetry failures must never fail the run.

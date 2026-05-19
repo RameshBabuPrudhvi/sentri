@@ -41,6 +41,7 @@ import { runFeedbackLoop } from "../runner/feedbackIntegration.js"; // CAP-002 P
 import { finalizeRunIfNotAborted } from "../utils/abortHelper.js";
 import { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } from "../testRunner.js";
 import { clusterFailures } from "../pipeline/failureClusterer.js"; // AUTO-010 — sharded-run parity with single-process tail in testRunner.js
+import { finalizeCoverage } from "../pipeline/finalizeCoverage.js"; // AUTO-009f — sharded-run parity for coverage aggregation (previously every multi-shard run with coverageEnabled persisted coverageSummary: null).
 import { trackTelemetry } from "../utils/telemetry.js";
 import { safeFetch } from "../utils/ssrfGuard.js"; // CAP-002 Phase 2 — trigger-path callbackUrl POST from sharded finalizer.
 
@@ -689,6 +690,20 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
   // Root Cause Summary panel would never render for sharded runs.
   run.rootCauses = clusterFailures({ results });
 
+  // AUTO-009f — sharded-run parity for coverage aggregation. The per-shard
+  // execution path persists raw `jsCoverage` blobs into `runs.results` via
+  // `appendRunResults` (see `testRunner.js#processResult`). Without this
+  // call the multi-shard finalizer would persist `coverageSummary: null`
+  // and the Dashboard / RunDetail panels would never render for sharded
+  // runs even when `project.coverageEnabled === true`. `finalizeCoverage`
+  // also strips the raw blobs from `results[]` in place, but here that's
+  // a no-op for persistence — the strip happens on the freshly-read DB
+  // snapshot; the live `runs.results` column still has them. We rely on
+  // the AUTO-009j retention sweep (when shipped) to trim historical
+  // payloads; for now, document the cost. Coverage size is bounded by
+  // AUTO-009g's memory ceiling so a runaway shard can't OOM the finalizer.
+  run.coverageSummary = await finalizeCoverage(project, results);
+
   // Persist aggregates BEFORE the feedback loop so a feedback-loop crash
   // doesn't lose the gate verdict (CI consumers polling `/trigger/runs/:id`
   // would otherwise see a `null` gateResult on a failed-feedback run).
@@ -698,6 +713,7 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     gateResult: run.gateResult,
     webVitalsResult: run.webVitalsResult,
     rootCauses: run.rootCauses, // AUTO-010
+    coverageSummary: run.coverageSummary, // AUTO-009f
   });
 
   // Re-read live status from the DB before the (expensive) feedback loop.
