@@ -26,6 +26,8 @@ import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as scheduleRepo from "../database/repositories/scheduleRepo.js";
+import * as elementBaselineRepo from "../database/repositories/elementBaselineRepo.js";
+import * as visionBudgetRepo from "../database/repositories/visionBudgetRepo.js";
 import { getDatabase } from "../database/sqlite.js";
 import { generateProjectId, generateScheduleId } from "../utils/idGenerator.js";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
@@ -423,6 +425,14 @@ router.delete("/:id", requireRole("admin"), (req, res) => {
     // Restoring the project will NOT restore the schedule — it must be
     // reconfigured manually.
     scheduleRepo.deleteByProjectId(req.params.id);
+    // MNT-001 — vision-healing artifacts are not soft-deleted: baseline
+    // crop BLOBs (2-10 KB × hundreds of elements per project) and per-
+    // window budget counters would otherwise accumulate unbounded after
+    // every project deletion. Both repos document this cascade contract
+    // explicitly. Restoring the project will NOT restore baselines; the
+    // next green run regenerates them via captureElementCrop.
+    try { elementBaselineRepo.deleteByProjectId(req.params.id); } catch { /* best-effort */ }
+    try { visionBudgetRepo.deleteByProjectId(req.params.id); } catch { /* best-effort */ }
   })();
   stopSchedule(req.params.id);
 

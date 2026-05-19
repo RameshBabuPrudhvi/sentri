@@ -313,7 +313,7 @@ export function getSelfHealingHelperCode(healingHints) {
     // the host-side coordinate re-action needs to know WHAT the test was
     // trying to write. The sandboxed safe* helpers populate this on entry so
     // the value survives the test throwing later in the same retry attempt.
-    // The host reads it via `err.__valueIntents` in executeTest.js.
+    // The host reads it via err.__valueIntents in executeTest.js.
     const __valueIntents = {};
 
     // pierce: selector prefix — used for elements discovered inside shadow roots.
