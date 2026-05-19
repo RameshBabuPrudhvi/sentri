@@ -746,14 +746,7 @@ export default function ProjectQualityCard({
                 {/* AUTO-017.3: per-metric trend charts. Threshold lines are
                     sourced from the project's `webVitalsBudgets` so users see
                     violations in context (PR checklist NEXT.md:67). */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                    gap: 12,
-                    marginTop: 16,
-                  }}
-                >
+                <div className="aap-webvitals-grid">
                   {WEB_VITAL_METRICS.map((m) => (
                     <WebVitalTrend
                       key={m.key}

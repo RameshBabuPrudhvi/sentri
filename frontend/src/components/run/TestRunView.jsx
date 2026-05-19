@@ -117,8 +117,7 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown, cov
               (`coverageDelta == null`) or every category contributed zero. */}
           {deltaShape && (deltaShape.lines > 0 || deltaShape.statements > 0 || deltaShape.branches > 0 || deltaShape.functions > 0) && (
             <span
-              className="badge badge-blue"
-              style={{ fontSize: "0.62rem", display: "inline-flex", gap: 4 }}
+              className="badge badge-blue badge-sm-inline"
               title={[
                 deltaShape.lines      > 0 ? `${deltaShape.lines} new line${deltaShape.lines !== 1 ? "s" : ""}` : null,
                 deltaShape.statements > 0 ? `${deltaShape.statements} new statement${deltaShape.statements !== 1 ? "s" : ""}` : null,

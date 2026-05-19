@@ -103,31 +103,25 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
 
   return (
     <div className="card card-padded mb-md">
-      <div className="flex-between" style={{ marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="flex-between dash-cov-header">
+        <div className="dash-cov-header-left">
           <Activity size={14} color="var(--accent)" />
-          <span className="section-title" style={{ marginBottom: 0 }}>Coverage</span>
+          <span className="section-title dash-cov-section-title">Coverage</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="dash-cov-header-right">
           {serverLayerAvailable && (
             // AUTO-009h — Browser / Server / Combined layer toggle. Only
             // rendered when at least one project's coverage summary
             // carries server-side data; otherwise pre-AUTO-009h SUTs see
             // no UI delta. Mirrors the metric-tab style below.
-            <div role="tablist" aria-label="Coverage layer" style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
+            <div role="tablist" aria-label="Coverage layer" className="dash-cov-tablist">
               {LAYER_TABS.map((t) => (
                 <button
                   key={t.key}
                   role="tab"
                   aria-selected={layerKey === t.key}
                   onClick={() => setLayerKey(t.key)}
-                  style={{
-                    fontSize: "0.68rem", padding: "3px 9px", border: "none",
-                    cursor: "pointer",
-                    background: layerKey === t.key ? "var(--accent-bg)" : "transparent",
-                    color: layerKey === t.key ? "var(--accent)" : "var(--text3)",
-                    fontWeight: layerKey === t.key ? 600 : 400,
-                  }}
+                  className={`dash-cov-tab ${layerKey === t.key ? "dash-cov-tab--active" : ""}`}
                 >
                   {t.label}
                 </button>
@@ -139,20 +133,14 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
             // to stay visually consistent. Uses `role="tablist"` so the
             // segmented control is announced as a tabbed selector by screen
             // readers.
-            <div role="tablist" aria-label="Coverage metric" style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
+            <div role="tablist" aria-label="Coverage metric" className="dash-cov-tablist">
               {COVERAGE_METRICS.map((m) => (
                 <button
                   key={m.key}
                   role="tab"
                   aria-selected={metricKey === m.key}
                   onClick={() => setMetricKey(m.key)}
-                  style={{
-                    fontSize: "0.68rem", padding: "3px 9px", border: "none",
-                    cursor: "pointer",
-                    background: metricKey === m.key ? "var(--accent-bg)" : "transparent",
-                    color: metricKey === m.key ? "var(--accent)" : "var(--text3)",
-                    fontWeight: metricKey === m.key ? 600 : 400,
-                  }}
+                  className={`dash-cov-tab ${metricKey === m.key ? "dash-cov-tab--active" : ""}`}
                 >
                   {m.label}
                 </button>
@@ -200,17 +188,22 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
             const statusBadgeColor = sourceMapStatus === "resolved" ? "var(--green)"
               : sourceMapStatus === "partial" ? "var(--amber)"
               : "var(--text3)";
+            // Data-driven badge background / foreground — derived from the
+            // pct band (≥80 green, ≥50 amber, <50 red). Inlined as
+            // `style={{...}}` deliberately per AGENT.md §127's data-
+            // driven carve-out (used by `dash-env-rate` etc): N CSS
+            // classes per threshold band wouldn't be cleaner.
+            const latestPctBadgeStyle = {
+              background: latestPct >= 0.8 ? "var(--green-bg)" : latestPct >= 0.5 ? "var(--amber-bg)" : "var(--red-bg)",
+              color:      latestPct >= 0.8 ? "var(--green)"    : latestPct >= 0.5 ? "var(--amber)"    : "var(--red)",
+            };
             return (
-              <div key={projectId} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
-                <div className="flex-between" style={{ width: "100%" }}>
-                  <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{projectName}</div>
+              <div key={projectId} className="list-row dash-cov-project-row">
+                <div className="flex-between dash-cov-project-header">
+                  <div className="dash-cov-project-name">{projectName}</div>
                   <span
-                    className="badge"
-                    style={{
-                      fontSize: "0.72rem",
-                      background: latestPct >= 0.8 ? "var(--green-bg)" : latestPct >= 0.5 ? "var(--amber-bg)" : "var(--red-bg)",
-                      color: latestPct >= 0.8 ? "var(--green)" : latestPct >= 0.5 ? "var(--amber)" : "var(--red)",
-                    }}
+                    className="badge dash-cov-project-pct"
+                    style={latestPctBadgeStyle}
                     title={`${metric.label}: ${Math.round(latestPct * 100)}%`}
                   >
                     {`${Math.round(latestPct * 100)}%`}
@@ -223,13 +216,13 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
                   tooltipFn={(d) => `${d.name}: ${d.value}% ${metric.label.toLowerCase()}`}
                 />
                 {topUncovered.length > 0 && (
-                  <div style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
-                    <div style={{ fontWeight: 600, textTransform: "uppercase", marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                  <div className="dash-cov-files">
+                    <div className="dash-cov-files-header">
                       <span>Top uncovered files</span>
                       {isFallback && (
                         <span
-                          className="badge"
-                          style={{ fontSize: "0.6rem", padding: "1px 6px", background: "var(--bg3)", color: statusBadgeColor }}
+                          className="badge dash-cov-files-status-badge"
+                          style={{ color: statusBadgeColor }}
                           title={sourceMapStatus === "partial"
                             ? "Source maps partially resolved — some entries show original source paths, others show bundle URLs."
                             : "Source maps unavailable — file labels are bundle URLs, not original source paths. Configure project.sourcemapBaseUrl to enable resolution."}
@@ -252,9 +245,9 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
                         : "functions";
                       return (
                         <div key={`${f.file}::${f.bundleUrl || ""}`} className="truncate" title={f.bundleUrl ? `${f.file}\nbundle: ${f.bundleUrl}` : f.file}>
-                          <code style={{ fontSize: "0.7rem" }}>{f.file}</code>
-                          <span style={{ marginLeft: 6, color: "var(--red)" }}>{uncovered}</span>
-                          <span style={{ color: "var(--text3)" }}>{` uncovered ${unit}`}</span>
+                          <code className="dash-cov-file-code">{f.file}</code>
+                          <span className="dash-cov-file-uncovered">{uncovered}</span>
+                          <span className="dash-cov-file-meta">{` uncovered ${unit}`}</span>
                         </div>
                       );
                     })}

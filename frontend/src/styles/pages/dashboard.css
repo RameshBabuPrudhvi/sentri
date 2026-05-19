@@ -103,6 +103,106 @@
   .dash-eval-grid { grid-template-columns: 1fr; }
 }
 
+/* ── AUTO-009 / 009b / 009c / 009h — Coverage panel ─────────────────────────
+   CoveragePanel (frontend/src/pages/Dashboard.jsx) renders the 30-day
+   sparkline + per-project Top-Uncovered list with a Browser / Server /
+   Combined layer toggle and a Lines / Branches / Functions metric
+   toggle. These classes replace per-element inline styles per AGENT.md
+   §127 — "Do not reinvent CSS classes; do not write equivalent inline
+   styles." Keep the data-driven values (badge background colour, badge
+   `title=` tooltip strings) inline because they're derived from
+   `coveragePct` at render time and would require N CSS classes per
+   threshold band otherwise.
+   ───────────────────────────────────────────────────────────────────── */
+
+.dash-cov-header        { margin-bottom: 10px; }
+.dash-cov-header-left   { display: flex; align-items: center; gap: 8px; }
+.dash-cov-header-right  { display: flex; align-items: center; gap: 8px; }
+.dash-cov-section-title { margin-bottom: 0; }
+
+/* Segmented control (Browser/Server/Combined + Lines/Branches/Functions).
+   Shared rule for both `role="tablist"` containers. */
+.dash-cov-tablist {
+  display: inline-flex;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.dash-cov-tab {
+  font-size: 0.68rem;
+  padding: 3px 9px;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text3);
+  font-weight: 400;
+}
+.dash-cov-tab--active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Per-project row inside the panel — wraps the latest-pct badge,
+   sparkline, and top-uncovered list. */
+.dash-cov-project-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.dash-cov-project-header {
+  width: 100%;
+}
+.dash-cov-project-name {
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+.dash-cov-project-pct {
+  font-size: 0.72rem;
+}
+
+/* Top uncovered files block (per project). */
+.dash-cov-files {
+  font-size: 0.72rem;
+  color: var(--text3);
+}
+.dash-cov-files-header {
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dash-cov-files-status-badge {
+  font-size: 0.6rem;
+  padding: 1px 6px;
+  background: var(--bg3);
+  /* color set inline based on sourceMapStatus — `resolved`, `partial`,
+     `fallback` map to three distinct vars and rendering them via N
+     modifier classes would balloon the CSS. */
+}
+.dash-cov-file-code {
+  font-size: 0.7rem;
+}
+.dash-cov-file-uncovered {
+  margin-left: 6px;
+  color: var(--red);
+}
+.dash-cov-file-meta {
+  color: var(--text3);
+}
+
+/* AUTO-017.3 — Web Vitals trend grid inside ProjectQualityCard's Web
+   Vitals tab. Class-driven per AGENT.md §127 (was inline `style={{...}}`
+   on the wrapping div in ProjectQualityCard.jsx). */
+.aap-webvitals-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
 /* Export PDF button override */
 .dash-export-btn {
   background: var(--surface);
