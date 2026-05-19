@@ -675,12 +675,7 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
   run.retryCount = results.reduce((sum, r) => sum + (r.retryCount || 0), 0);
   run.failedAfterRetry = results.filter((r) => r.failedAfterRetry).length;
 
-  // Quality gates + web vitals — same evaluators as the single-shard path.
-  // The exported `__evaluateQualityGatesForTest` / `__evaluateWebVitalsBudgetsForTest`
-  // aliases are the public test-friendly names; we deliberately reuse them
-  // here rather than duplicate the logic (it's a moderately large pure
-  // function with subtle data-driven-skip handling — see testRunner.js).
-  run.gateResult = __evaluateQualityGatesForTest(project.qualityGates, run);
+  // Web vitals — evaluated independently of coverage (no ordering dep).
   run.webVitalsResult = __evaluateWebVitalsBudgetsForTest(project.webVitalsBudgets, run);
 
   // AUTO-010 — Deterministic root-cause clustering on the full DB results
@@ -714,6 +709,29 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
     delete run.coverageSummary.prCoverageDiff;
   }
+
+  // AUTO-009d — quality-gate evaluation runs AFTER coverage aggregation so
+  // the four coverage rules (`minCoveragePct`, `minBranchPct`,
+  // `minPrCoveragePct`, `maxCoverageRegressionPct`) see this run's freshly-
+  // computed `coverageSummary`. Mirrors the single-process ordering at
+  // `testRunner.js:933-950`. The regression rule needs the previous
+  // coverage-enabled run's summary; we pull it via the lean
+  // `getRunsWithCoverage` accessor and pick the most-recent row that isn't
+  // `run.id` itself. Best-effort — a repo failure falls back to
+  // `priorRunCoverage: null` which short-circuits the regression rule.
+  let priorRunCoverage = null;
+  if (project?.coverageEnabled) {
+    try {
+      const history = runRepo.getRunsWithCoverage([project.id]);
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].id !== run.id && history[i].coverageSummary) {
+          priorRunCoverage = history[i].coverageSummary;
+          break;
+        }
+      }
+    } catch { /* best-effort — null prior degrades cleanly */ }
+  }
+  run.gateResult = __evaluateQualityGatesForTest(project.qualityGates, run, { priorRunCoverage });
 
   // Persist aggregates BEFORE the feedback loop so a feedback-loop crash
   // doesn't lose the gate verdict (CI consumers polling `/trigger/runs/:id`
