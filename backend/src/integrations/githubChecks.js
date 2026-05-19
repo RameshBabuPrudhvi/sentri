@@ -372,6 +372,36 @@ export async function getChangedFilesForPr({ repo, prNumber, installationId }, o
  *   parseable patch are omitted entirely.
  */
 export async function getChangedFileRangesForPr({ repo, prNumber, installationId }, options = {}) {
+  const { ranges } = await getChangedFilesWithRangesForPr({ repo, prNumber, installationId }, options);
+  return ranges;
+}
+
+/**
+ * AUTO-009d — Combined helper that fetches both the PR's changed-file list
+ * AND per-file head-side line ranges in a SINGLE pagination pass against
+ * the GitHub `/pulls/:n/files` endpoint. Replaces the redundant pair of
+ * `getChangedFilesForPr` + `getChangedFileRangesForPr` calls in
+ * `routes/trigger.js#resolveChangedFiles`, which previously doubled the
+ * rate-limit consumption per PR trigger (2–20 calls instead of 1–10).
+ *
+ * Both legacy single-purpose helpers remain exported as thin wrappers
+ * around this function so existing callers (and tests that target them
+ * individually) keep working unchanged.
+ *
+ * @param {Object} args
+ * @param {string} args.repo            - `owner/name`.
+ * @param {number|string} args.prNumber - PR number (must be a positive integer).
+ * @param {string|number} args.installationId
+ * @param {Object} [options]
+ * @param {Function} [options.fetchImpl]
+ * @returns {Promise<{ files: string[], ranges: Object }>}
+ *   `files` — deduped filenames in PR order (same shape `getChangedFilesForPr` returns).
+ *   `ranges` — `{ [filename]: Array<[startLine, endLine]> }` (same shape
+ *   `getChangedFileRangesForPr` returns). Files with no parseable patch
+ *   appear in `files` but are omitted from `ranges` (coverage gate degrades
+ *   gracefully — see `getChangedFileRangesForPr` JSDoc § Renames / binary).
+ */
+export async function getChangedFilesWithRangesForPr({ repo, prNumber, installationId }, options = {}) {
   const { owner, name } = parseRepo(repo);
   const n = Number(prNumber);
   if (!Number.isInteger(n) || n <= 0) throw new Error("GitHub prNumber must be a positive integer");
@@ -382,14 +412,7 @@ export async function getChangedFileRangesForPr({ repo, prNumber, installationId
   // are decimal integers; `count` defaults to 1 when omitted (single-line
   // hunk shorthand, e.g. `@@ -10 +20 @@`).
   const hunkHeaderRe = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@/gm;
-  // `rangesByFile` shape: `{ [filename]: Array<number[2]> }` where each
-  // inner `[startLine, endLine]` pair is an inclusive head-side line
-  // range. JSDoc `@type` is intentionally omitted — the nested tuple
-  // syntax `Array<[number, number]>` is TypeScript-only and fails the
-  // `Backend — Docs` CI step (jsdoc parser rejects `[`), per AGENT.md
-  // § "Do not use TypeScript syntax in JSDoc comments." See the
-  // `@returns` tag above for the prose-form type contract that
-  // consumers should rely on.
+  const files = [];
   const rangesByFile = {};
   let page = 1;
   while (page <= 10) {
@@ -400,8 +423,10 @@ export async function getChangedFileRangesForPr({ repo, prNumber, installationId
     const batch = Array.isArray(data) ? data : [];
     for (const f of batch) {
       const filename = f?.filename;
+      if (!filename) continue;
+      files.push(filename);
       const patch = typeof f?.patch === "string" ? f.patch : null;
-      if (!filename || !patch) continue;
+      if (!patch) continue;
       const ranges = [];
       hunkHeaderRe.lastIndex = 0;
       let match;
@@ -422,7 +447,7 @@ export async function getChangedFileRangesForPr({ repo, prNumber, installationId
     if (batch.length < 100) break;
     page++;
   }
-  return rangesByFile;
+  return { files: [...new Set(files)], ranges: rangesByFile };
 }
 
 /**

@@ -157,9 +157,12 @@ test.describe('Coverage UI (AUTO-009) — Dashboard + RunDetail + ProjectQuality
 
     await page.goto(`/runs/${fakeRunId}`);
 
-    // Test row renders with the `+47 lines` blue badge — see
-    // `frontend/src/components/run/TestRunView.jsx` TestCaseRow.
-    await expect(page.getByText('+47 lines')).toBeVisible();
+    // Test row renders with the `+47L` blue badge — see
+    // `frontend/src/components/run/TestRunView.jsx` TestCaseRow. The badge
+    // visible text uses the compact `+NL` form (the word "lines" only
+    // appears in the tooltip `title` attribute, which `getByText` doesn't
+    // search).
+    await expect(page.getByText('+47L')).toBeVisible();
   });
 
   test('ProjectQualityCard → Coverage tab toggles coverageEnabled via PATCH', async ({ page, baseURL }) => {

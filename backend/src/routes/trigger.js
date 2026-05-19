@@ -38,7 +38,7 @@ import { fireNotifications } from "../utils/notifications.js";
 import { validateUrl, safeFetch } from "../utils/ssrfGuard.js";
 import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
 import { computeImpactedTests } from "../pipeline/impactAnalysis.js";
-import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesForPr, getChangedFileRangesForPr } from "../integrations/githubChecks.js";
+import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesWithRangesForPr } from "../integrations/githubChecks.js";
 import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { envScopedProject as buildEnvScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
@@ -375,22 +375,14 @@ async function resolveChangedFiles(project, body, runId) {
 
   try {
     // AUTO-009d — fetch the PR's file list AND the per-file line ranges in
-    // parallel. Both helpers hit the SAME `/pulls/:n/files` endpoint; the
-    // ranges helper just additionally parses the `patch` field per file.
-    // Running them concurrently keeps the wall-clock cost identical to the
-    // pre-AUTO-009d single-call path.
-    const [changedFiles, changedFileRanges] = await Promise.all([
-      getChangedFilesForPr({
-        repo: payload.repo,
-        prNumber: payload.prNumber,
-        installationId: settings.installationId,
-      }),
-      getChangedFileRangesForPr({
-        repo: payload.repo,
-        prNumber: payload.prNumber,
-        installationId: settings.installationId,
-      }),
-    ]);
+    // a SINGLE pagination pass against the GitHub `/pulls/:n/files`
+    // endpoint. The combined helper halves API rate-limit consumption vs.
+    // the previous parallel-call shape (2–20 calls → 1–10).
+    const { files: changedFiles, ranges: changedFileRanges } = await getChangedFilesWithRangesForPr({
+      repo: payload.repo,
+      prNumber: payload.prNumber,
+      installationId: settings.installationId,
+    });
     return { changedFiles, changedFileRanges, fallbackReason: null };
   } catch (err) {
     console.error(formatLogLine("warn", runId, `[impact-analysis] Failed to fetch GitHub PR files: ${err.message}`));
