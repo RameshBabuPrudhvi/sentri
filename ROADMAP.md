@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** AUTO-022b (eval harness — record real LLM cache + first real baseline) — promoted after MNT-001 + AUTO-022 plumbing shipped in PR #17. INF-009 (Helm chart + K8s + DR) holds queue slot 1. MNT-001 + AUTO-022 (vision healing + AI eval harness plumbing) shipped in PR #17 — see Completed Work Summary for full details.
+> **Current sprint:** AUTO-009 (browser code coverage mapping) — promoted after MNT-001 + AUTO-022 plumbing shipped in PR #17. INF-009 (Helm chart + K8s + DR) holds queue slot 1, AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 2, AUTO-014 (test dependency + execution ordering) slot 3. MNT-001 + AUTO-022 (vision healing + AI eval harness plumbing) shipped in PR #17 — see Completed Work Summary for full details.
 >
 > **Blockers:** none remaining · **Remaining:** ~14 planned items across Phases 2–5 + Maintenance (see Summary table at the bottom for the authoritative breakdown).
 >
@@ -149,7 +149,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | ✅ Mostly complete — SEC-001/002/003/004, INF-001/002/003/004/005/006, ACL-001/002, FEA-001/002/003, ENH-036 + ENH-036b all ✅ (SEC-004 MFA shipped in PR #10 with TOTP + WebAuthn + per-workspace enforcement); SEC-005 (SSO) tracked as 🟢 Strategic under Phase 5 per AUDIT.md severity reconciliation | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/005/006/007/011/012/013/014/015/016 ✅ — DIF-005 embedded trace viewer shipped in PR #9; **INT-002** GitHub PR check comments shipped in PR #15; **DIF-012** multi-environment support shipped in PR #2); remaining: DIF-008–010, DIF-015b/c sub-items | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-001/002/002b/003/003b/004/005/006/007/008/010/012/013/015/015b/016/016b/017/017.3/019 ✅ (AUTO-008 shipped in PR #9, AUTO-010 in PR #6, AUTO-004 in PR #18, AUTO-001 in PR #15); remaining: AUTO-009, AUTO-011, AUTO-014, AUTO-018, AUTO-021 (AUTO-020 superseded by AUTO-015) · Capabilities row: CAP-001 (data-driven) ✅ PR #1, CAP-002 (sharding) ✅ PR #3; CAP-002b (SaaS-readiness follow-ups) tracked separately in Summary | 14–18 weeks |
-| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11), SEC-007 compliance audit log ✅ (PR #12), INF-007 OTel/Sentry observability ✅ (PR #14), AUTO-022 eval harness plumbing ✅ (PR #17 — gate dormant until AUTO-022b records real LLM cache); AUTO-022b is the current sprint. Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
+| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11), SEC-007 compliance audit log ✅ (PR #12), INF-007 OTel/Sentry observability ✅ (PR #14), AUTO-022 eval harness plumbing ✅ (PR #17 — gate dormant until AUTO-022b records real LLM cache, deferred). Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
@@ -596,7 +596,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 **Why this is a separate PR:** Recording requires an LLM API key and 4–8 hours of focused per-case iteration. Bundling it into PR #17 (the plumbing PR) would have meant the plumbing couldn't ship until a maintainer with API access had time to do the recording — and recording itself can't happen until the plumbing is in `develop`. The cold-start guard exists exactly to break this chicken-and-egg deadlock: ship the harness inert, light it up later.
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** AUDIT.md AI2, AI3, AI6 (formerly `AI-EVAL-001` in AUDIT_IMPL.md; supersedes the looser `MNT-003` prompt A/B testing item)
+**Original AUDIT.md source:** AUDIT.md AI2, AI3, AI6 (formerly `AI-EVAL-001` in AUDIT_IMPL.md; supersedes the looser `MNT-003` prompt A/B testing item).
 
 **Problem:** Prompt changes ship on intuition. There is no golden-set regression test, no LangSmith/Phoenix integration, and no automatic quality rollback. Silent regressions in AI-generated test quality are undetectable. Rated Critical for the "Autonomous QA" brand promise.
 
