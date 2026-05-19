@@ -31,6 +31,7 @@
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest, executeTestIterations } from "./runner/executeTest.js";
 import { aggregateRunCoverage } from "./pipeline/coverageAggregator.js";
+import { resolveSourceMap, mapBundleLine } from "./pipeline/sourceMapResolver.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { clusterFailures } from "./pipeline/failureClusterer.js";
@@ -830,7 +831,16 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   try {
     if (project?.coverageEnabled) {
       const sutOrigin = (() => { try { return new URL(project.url).origin; } catch { return ""; } })();
-      run.coverageSummary = aggregateRunCoverage(run.results, { sutOrigin });
+      // AUTO-009b — per-run source-map resolver. The resolver maintains its
+      // own LRU cache (10MB / 1h TTL) so bundle URLs reused across tests
+      // only hit the network once. Best-effort: any resolver failure
+      // silently falls back to bundle coordinates inside the aggregator.
+      const sourcemapBaseUrl = project.sourcemapBaseUrl || null;
+      const resolver = {
+        resolve: (bundleUrl) => resolveSourceMap(bundleUrl, { sourcemapBaseUrl }),
+        mapLine: (consumer, line) => mapBundleLine(consumer, line, 0),
+      };
+      run.coverageSummary = await aggregateRunCoverage(run.results, { sutOrigin, resolver });
     } else {
       run.coverageSummary = null;
     }

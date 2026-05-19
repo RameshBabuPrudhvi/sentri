@@ -214,6 +214,17 @@ export default function Dashboard() {
                       const projectName = (data?.recentRuns || []).find((r) => r.projectId === projectId)?.projectName || projectId.slice(0, 8);
                       const summary = latestSummaryByProject.get(projectId);
                       const topUncovered = Array.isArray(summary?.topUncoveredFiles) ? summary.topUncoveredFiles.slice(0, 5) : [];
+                      // AUTO-009b — when source-map resolution succeeded the
+                      // aggregator persists `file` as an original source path
+                      // (`src/Cart.tsx`) and retains the bundle URL as
+                      // `bundleUrl`. When it fell back to raw bundle
+                      // coordinates we badge the panel so reviewers know the
+                      // file labels are bundle URLs, not source paths.
+                      const sourceMapStatus = summary?.sourceMapStatus || "fallback";
+                      const isFallback = sourceMapStatus !== "resolved";
+                      const statusBadgeColor = sourceMapStatus === "resolved" ? "var(--green)"
+                        : sourceMapStatus === "partial" ? "var(--amber)"
+                        : "var(--text3)";
                       return (
                         <div key={projectId} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
                           <div className="flex-between" style={{ width: "100%" }}>
@@ -237,9 +248,22 @@ export default function Dashboard() {
                           />
                           {topUncovered.length > 0 && (
                             <div style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
-                              <div style={{ fontWeight: 600, textTransform: "uppercase", marginBottom: 2 }}>Top uncovered files</div>
+                              <div style={{ fontWeight: 600, textTransform: "uppercase", marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                                <span>Top uncovered files</span>
+                                {isFallback && (
+                                  <span
+                                    className="badge"
+                                    style={{ fontSize: "0.6rem", padding: "1px 6px", background: "var(--bg3)", color: statusBadgeColor }}
+                                    title={sourceMapStatus === "partial"
+                                      ? "Source maps partially resolved — some entries show original source paths, others show bundle URLs."
+                                      : "Source maps unavailable — file labels are bundle URLs, not original source paths. Configure project.sourcemapBaseUrl to enable resolution."}
+                                  >
+                                    {sourceMapStatus === "partial" ? "partial maps" : "fallback mode"}
+                                  </span>
+                                )}
+                              </div>
                               {topUncovered.map((f) => (
-                                <div key={f.file} className="truncate" title={f.file}>
+                                <div key={`${f.file}::${f.bundleUrl || ""}`} className="truncate" title={f.bundleUrl ? `${f.file}\nbundle: ${f.bundleUrl}` : f.file}>
                                   <code style={{ fontSize: "0.7rem" }}>{f.file}</code>
                                   <span style={{ marginLeft: 6, color: "var(--red)" }}>{f.uncoveredLines}</span>
                                   <span style={{ color: "var(--text3)" }}>{` / ${f.totalLines} lines`}</span>

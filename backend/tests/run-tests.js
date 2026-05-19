@@ -127,6 +127,7 @@ const files = [
   "tests/worker-pool-dashboard.test.js",
   "tests/coverage-aggregator.test.js",
   "tests/run-coverage-integration.test.js",
+  "tests/source-map-resolver.test.js",
   "tests/observability.test.js",
   // AUTO-022 — AI eval harness scorer + regression-detection + metric_samples persistence.
   "tests/eval-pipeline.test.js",

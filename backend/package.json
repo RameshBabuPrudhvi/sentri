@@ -27,6 +27,7 @@
     "pixelmatch": "^7.1.0",
     "playwright": "^1.50.1",
     "pngjs": "^7.0.0",
+    "source-map": "^0.7.4",
     "uuid": "^11.0.5",
     "@axe-core/playwright": "^4.10.2",
     "web-vitals": "^4.2.4",

@@ -28,9 +28,9 @@ function buildStubJsCoverage() {
   };
 }
 
-test("AUTO-009 — coverageSummary persisted shape contains every documented field", () => {
+test("AUTO-009 — coverageSummary persisted shape contains every documented field", async () => {
   const stub = buildStubJsCoverage();
-  const summary = aggregateRunCoverage(
+  const summary = await aggregateRunCoverage(
     [
       { testId: "T1", jsCoverage: stub.t1 },
       { testId: "T2", jsCoverage: stub.t2 },
@@ -78,13 +78,60 @@ test("AUTO-009 — disabled coverage path produces null summary (zero-regression
   assert.equal(run.coverageSummary, null);
 });
 
-test("AUTO-009 — sourceMapStatus = 'fallback' when no source maps are resolved", () => {
-  // TODO(AUTO-009b): once source-map resolution lands, extend this test to
-  // assert sourceMapStatus = "resolved" when a valid .map is reachable.
-  const summary = aggregateRunCoverage(
+test("AUTO-009 — sourceMapStatus = 'fallback' when no source maps are resolved", async () => {
+  const summary = await aggregateRunCoverage(
     [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/x.js", text: "a\nb\n", ranges: [{ start: 0, end: 1 }] }] }],
     { sutOrigin: "https://app.example.com" },
   );
+  assert.equal(summary.sourceMapStatus, "fallback");
+});
+
+test("AUTO-009b — sourceMapStatus = 'resolved' when ≥80% of bundle lines map", async () => {
+  // Stub resolver: every bundle line maps to src/Cart.tsx. The aggregator
+  // should group by the original source path and surface sourceMapStatus =
+  // "resolved" because 100% of bundle lines resolved.
+  const summary = await aggregateRunCoverage(
+    [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/main.js", text: "a\nb\nc\n", ranges: [{ start: 0, end: 1 }] }] }],
+    {
+      sutOrigin: "https://app.example.com",
+      resolver: {
+        resolve: async () => ({ /* fake consumer */ }),
+        mapLine: (_c, line) => ({ source: "src/Cart.tsx", line }),
+      },
+    },
+  );
+  assert.equal(summary.sourceMapStatus, "resolved");
+  assert.ok(summary.topUncoveredFiles.some((f) => f.file === "src/Cart.tsx"), "groups by original source");
+  assert.ok(summary.topUncoveredFiles.every((f) => "bundleUrl" in f), "retains bundleUrl secondary field");
+});
+
+test("AUTO-009b — sourceMapStatus = 'partial' when <80% of bundle lines map", async () => {
+  // Resolver only maps every other line — partial resolution.
+  const summary = await aggregateRunCoverage(
+    [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/main.js", text: "a\nb\nc\nd\ne\n", ranges: [{ start: 0, end: 1 }] }] }],
+    {
+      sutOrigin: "https://app.example.com",
+      resolver: {
+        resolve: async () => ({}),
+        mapLine: (_c, line) => (line % 2 === 0 ? { source: "src/Partial.tsx", line } : null),
+      },
+    },
+  );
+  assert.equal(summary.sourceMapStatus, "partial");
+});
+
+test("AUTO-009b — resolver throw never fails the aggregator", async () => {
+  const summary = await aggregateRunCoverage(
+    [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/x.js", text: "a\nb\n", ranges: [{ start: 0, end: 1 }] }] }],
+    {
+      sutOrigin: "https://app.example.com",
+      resolver: {
+        resolve: async () => { throw new Error("network down"); },
+        mapLine: () => null,
+      },
+    },
+  );
+  // Falls back cleanly; status stays "fallback".
   assert.equal(summary.sourceMapStatus, "fallback");
 });
 
