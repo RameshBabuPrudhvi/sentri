@@ -175,17 +175,86 @@ export default function Dashboard() {
             <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<SquareCheckBig size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
           </div>
-          <div className="card card-padded mt-md">
-            <div className="section-title">Coverage</div>
-            {!data?.coverageTrend?.series?.length ? (
-              <div className="text-sm text-muted">Enable coverage on a project to start tracking.</div>
-            ) : (
-              <div className="text-sm">
-                <div>{`30-day points: ${data.coverageTrend.series.length}`}</div>
-                <div>{`Latest coverage: ${Math.round((data.coverageTrend.series[data.coverageTrend.series.length - 1]?.coveragePct || 0) * 100)}%`}</div>
+          {/* ── AUTO-009: Browser JS coverage trend + top uncovered files ── */}
+          {(() => {
+            const series = data?.coverageTrend?.series || [];
+            // Group the 30-day series by project so each project gets its
+            // own sparkline. Recent runs win the "latest" badge.
+            const byProject = new Map();
+            for (const point of series) {
+              if (!byProject.has(point.projectId)) byProject.set(point.projectId, []);
+              byProject.get(point.projectId).push(point);
+            }
+            // Pull the latest coverageSummary per project off recentRuns
+            // so we can render `topUncoveredFiles` alongside the sparkline.
+            const latestSummaryByProject = new Map();
+            for (const r of data?.recentRuns || []) {
+              if (!r.coverageSummary || latestSummaryByProject.has(r.projectId)) continue;
+              latestSummaryByProject.set(r.projectId, r.coverageSummary);
+            }
+            return (
+              <div className="card card-padded mb-md">
+                <div className="flex-between" style={{ marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Activity size={14} color="var(--accent)" />
+                    <span className="section-title" style={{ marginBottom: 0 }}>Coverage</span>
+                  </div>
+                  {series.length > 0 && (
+                    <span className="text-xs text-muted">{`30-day · ${series.length} run${series.length !== 1 ? "s" : ""}`}</span>
+                  )}
+                </div>
+                {series.length === 0 ? (
+                  <div className="text-sm text-muted">
+                    Enable coverage on a project to start tracking. Go to <strong>Automation → Quality → Coverage</strong> and toggle <em>Enable browser JS coverage capture</em>.
+                  </div>
+                ) : (
+                  <div className="flex-col gap-sm">
+                    {Array.from(byProject.entries()).map(([projectId, points]) => {
+                      const latestPct = points[points.length - 1]?.coveragePct || 0;
+                      const projectName = (data?.recentRuns || []).find((r) => r.projectId === projectId)?.projectName || projectId.slice(0, 8);
+                      const summary = latestSummaryByProject.get(projectId);
+                      const topUncovered = Array.isArray(summary?.topUncoveredFiles) ? summary.topUncoveredFiles.slice(0, 5) : [];
+                      return (
+                        <div key={projectId} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+                          <div className="flex-between" style={{ width: "100%" }}>
+                            <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{projectName}</div>
+                            <span
+                              className="badge"
+                              style={{
+                                fontSize: "0.72rem",
+                                background: latestPct >= 0.8 ? "var(--green-bg)" : latestPct >= 0.5 ? "var(--amber-bg)" : "var(--red-bg)",
+                                color: latestPct >= 0.8 ? "var(--green)" : latestPct >= 0.5 ? "var(--amber)" : "var(--red)",
+                              }}
+                            >
+                              {`${Math.round(latestPct * 100)}%`}
+                            </span>
+                          </div>
+                          <SparklineChart
+                            data={points.map((p, i) => ({ name: `#${i + 1}`, value: Math.round(p.coveragePct * 100) }))}
+                            height={40}
+                            color="var(--accent)"
+                            tooltipFn={(d) => `${d.name}: ${d.value}%`}
+                          />
+                          {topUncovered.length > 0 && (
+                            <div style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
+                              <div style={{ fontWeight: 600, textTransform: "uppercase", marginBottom: 2 }}>Top uncovered files</div>
+                              {topUncovered.map((f) => (
+                                <div key={f.file} className="truncate" title={f.file}>
+                                  <code style={{ fontSize: "0.7rem" }}>{f.file}</code>
+                                  <span style={{ marginLeft: 6, color: "var(--red)" }}>{f.uncoveredLines}</span>
+                                  <span style={{ color: "var(--text3)" }}>{` / ${f.totalLines} lines`}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })()}
 
           {/* ── Row 2: Duration / Created / Fixed / Healing ── */}
           <div className="stat-grid">

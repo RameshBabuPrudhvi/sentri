@@ -625,7 +625,24 @@ export const api = {
   // ── Dashboard ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
-  getCoverageTrend: () => req("GET", "/dashboard").then((d) => d?.coverageTrend || null),
+  /**
+   * AUTO-009 — read the 30-day project-wide coverage trend.
+   *
+   * Backed by `GET /api/v1/dashboard`'s `coverageTrend` block. The
+   * `projectId` parameter is accepted for API parity with `NEXT.md`'s
+   * spec and to allow caller-side filtering; the server payload already
+   * carries `projectId` on each series point so we narrow client-side.
+   *
+   * @param {string} [projectId] — Narrow the series to one project.
+   * @returns {Promise<{ windowDays: number, series: Array<{ date: string, projectId: string, coveragePct: number }> } | null>}
+   */
+  getCoverageTrend: (projectId) => req("GET", "/dashboard").then((d) => {
+    const trend = d?.coverageTrend;
+    if (!trend?.series?.length) return null;
+    if (!projectId) return trend;
+    const series = trend.series.filter((p) => p.projectId === projectId);
+    return series.length > 0 ? { ...trend, series } : null;
+  }),
 
   /**
    * AUTO-022 — read the per-case breakdown for one AI eval-harness run.

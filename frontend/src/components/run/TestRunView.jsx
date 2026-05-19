@@ -54,7 +54,7 @@ function statusBadgeClass(status) {
 
 // ─── Test Case Row ────────────────────────────────────────────────────────────
 
-function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown }) {
+function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown, coverageDelta }) {
   const steps = result.steps || [];
 
   return (
@@ -103,6 +103,19 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown }) {
           <span className={`badge ${statusBadgeClass(result.status)}`} style={{ fontSize: "0.62rem" }}>
             {result.status}
           </span>
+          {/* AUTO-009 — per-test coverage delta: lines this test first exercised
+              in the run that no earlier test had already covered. Hidden when
+              coverage capture is disabled (coverageDelta == null) or the test
+              contributed zero new lines. */}
+          {coverageDelta != null && coverageDelta > 0 && (
+            <span
+              className="badge badge-blue"
+              style={{ fontSize: "0.62rem" }}
+              title={`Coverage delta: this test first exercised ${coverageDelta} line${coverageDelta !== 1 ? "s" : ""} not previously covered in this run`}
+            >
+              +{coverageDelta} lines
+            </span>
+          )}
           <span style={{ fontSize: "0.67rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
             {fmtMs(result.durationMs)}
           </span>
@@ -509,16 +522,26 @@ export default function TestRunView({ run, frames = [] }) {
           })()}
         </div>
         <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
-          {results.map((result, ci) => (
-            <TestCaseRow
-              key={ci}
-              result={result}
-              caseIndex={ci}
-              isSelected={selectedCase === ci}
-              onSelect={setSelectedCase}
-              onDrillDown={(idx) => setDrilledCase(idx)}
-            />
-          ))}
+          {results.map((result, ci) => {
+            // AUTO-009 — look up this test's per-test coverage delta from
+            // the run's aggregated coverageSummary (populated by
+            // pipeline/coverageAggregator.js when project.coverageEnabled).
+            const perTest = run?.coverageSummary?.perTest;
+            const delta = Array.isArray(perTest)
+              ? perTest.find((p) => p.testId === result.testId)?.deltaLines
+              : null;
+            return (
+              <TestCaseRow
+                key={ci}
+                result={result}
+                caseIndex={ci}
+                isSelected={selectedCase === ci}
+                onSelect={setSelectedCase}
+                onDrillDown={(idx) => setDrilledCase(idx)}
+                coverageDelta={delta}
+              />
+            );
+          })}
           {/* Skeleton rows for tests not yet completed */}
           {isRunning && Array.from({ length: pending }).map((_, i) => {
             const queuedTest = testQueue[results.length + i];

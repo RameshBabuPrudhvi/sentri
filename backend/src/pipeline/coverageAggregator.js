@@ -1,6 +1,14 @@
 /**
  * @module pipeline/coverageAggregator
  * @description AUTO-009 browser JS coverage aggregation helpers.
+ *
+ * TODO(AUTO-009b): wire `source-map@^0.7` resolution against
+ * `project.sourcemapBaseUrl` (or `<bundleUrl>.map`) so `file` labels and
+ * line numbers in `topUncoveredFiles[]` map back to original source paths
+ * (`src/foo/bar.ts:42`) instead of bundled coordinates. Until then
+ * `sourceMapStatus` is hardcoded to `"fallback"` — see ROADMAP.md
+ * AUTO-009b. Best-effort try/catch must wrap the resolution path so
+ * coverage capture never fails a run.
  */
 
 function normalizeUrl(url) {

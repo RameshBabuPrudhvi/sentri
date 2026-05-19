@@ -423,7 +423,9 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ### AUTO-009 — Browser code coverage mapping 🟢 Differentiator
 
-**Status:** ✅ Complete (PR #N) | **Effort:** L | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (PR #19) | **Effort:** L | **Source:** Competitive Gap Analysis
+
+> **Follow-up — AUTO-009b:** Source-map resolution against `project.sourcemapBaseUrl` is deferred. PR #19 ships the raw-bundle aggregator with `sourceMapStatus: "fallback"` hardcoded; once `source-map@^0.7` lands the aggregator will map bundle coordinates back to original source paths/lines in `topUncoveredFiles[]`. TODO marker lives at `backend/src/pipeline/coverageAggregator.js`.
 
 **Problem:** There is no way to know what percentage of application code is exercised by the test suite. Playwright supports V8 code coverage via `page.coverage.startJSCoverage()`. This would answer "what percentage of my app is actually tested?"
 

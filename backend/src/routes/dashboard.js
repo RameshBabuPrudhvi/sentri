@@ -88,7 +88,7 @@ router.get("/dashboard", async (req, res) => {
     .slice(0, 8)
     .map((r) => {
       const p = projectsById[r.projectId];
-      return { id: r.id, projectId: r.projectId, projectName: p?.name || null, type: r.type, status: r.status, startedAt: r.startedAt, passed: r.passed, failed: r.failed, total: r.total };
+      return { id: r.id, projectId: r.projectId, projectName: p?.name || null, type: r.type, status: r.status, startedAt: r.startedAt, passed: r.passed, failed: r.failed, total: r.total, coverageSummary: r.coverageSummary || null };
     });
 
   // ── Run status distribution ─────────────────────────────────────────────
