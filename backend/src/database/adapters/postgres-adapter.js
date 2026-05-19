@@ -141,13 +141,15 @@ function translateSingleStatement(stmt) {
   // `type "blob" does not exist`. Used by migration 036_element_baselines
   // (MNT-001b) for the `cropPng` baseline crop column. Word-bounded so
   // `BLOB` inside an identifier (unlikely but possible) is untouched.
-  // String literals are already masked at this point, so a comment like
-  // `-- BLOB column: ...` won't trigger because comments are stripped
-  // at the statement-splitter level (not inside maskStringLiterals), and
-  // because translation runs per-statement on DDL bodies — comments
-  // landing inside the same statement get the regex applied but a stray
-  // BLOB → BYTEA inside a comment is harmless.
-  out = out.replace(/\bBLOB\b/g, "BYTEA");
+  // Case-insensitive flag matches the adjacent LIKE→ILIKE translation so
+  // a future migration using lowercase `blob` doesn't silently break on
+  // PostgreSQL. String literals are already masked at this point, so a
+  // comment like `-- BLOB column: ...` won't trigger because comments
+  // are stripped at the statement-splitter level (not inside
+  // maskStringLiterals), and because translation runs per-statement on
+  // DDL bodies — comments landing inside the same statement get the
+  // regex applied but a stray BLOB → BYTEA inside a comment is harmless.
+  out = out.replace(/\bBLOB\b/gi, "BYTEA");
 
   return restore(out);
 }
