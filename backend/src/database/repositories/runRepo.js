@@ -42,6 +42,7 @@ const JSON_FIELDS = [
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
   "coverageSummary", // AUTO-009: aggregated per-run JS coverage summary (migration 038)
+  "shardCoverageSummaries", // AUTO-009f: per-shard pre-aggregated coverage (migration 042) — sparse array indexed by shardIndex; merged into `coverageSummary` by the boundary-crossing finalizer.
 ];
 
 // Fields whose canonical empty shape is an array, not null. Keeping them as
@@ -110,6 +111,7 @@ const INSERT_COLS = [
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
   "coverageSummary", // AUTO-009: aggregated per-run JS coverage summary (migration 038)
+  "shardCoverageSummaries", // AUTO-009f: per-shard pre-aggregated coverage (migration 042)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -879,6 +881,41 @@ export function incrementRunStats(runId, { passedDelta = 0, failedDelta = 0, tot
  * @param {number} shardIndex - 0-based shard index.
  * @param {string} path       - Public artifact URL for this shard's trace.
  */
+/**
+ * AUTO-009f — Atomically write a per-shard pre-aggregated coverage summary
+ * into the sparse `shardCoverageSummaries` JSON array. Each shard writes
+ * its own slot exactly once at the runTests-tail (shard mode); the
+ * boundary-crossing finalizer reads the array and merges all per-shard
+ * summaries into the final `coverageSummary` blob via
+ * `pipeline/finalizeCoverage.js#mergeShardSummaries`.
+ *
+ * Mirrors `setShardTracePath` — transaction-wrapped read-modify-write with
+ * a dialect-conditional `FOR UPDATE` lock on Postgres so two concurrent
+ * shards writing different array slots cannot lose each other's writes.
+ * Best-effort by contract: a write failure is swallowed by the caller so
+ * coverage capture never fails a run.
+ *
+ * @param {string} runId
+ * @param {number} shardIndex - 0-based shard index.
+ * @param {Object} summary    - This shard's `aggregateRunCoverage` output.
+ */
+export function setShardCoverageSummary(runId, shardIndex, summary) {
+  if (!runId || shardIndex == null || !summary || typeof summary !== "object") return;
+  const db = getDatabase();
+  const lockClause = getDatabaseDialect() === "postgres" ? " FOR UPDATE" : "";
+  db.transaction(() => {
+    const row = db.prepare(`SELECT shardCoverageSummaries FROM runs WHERE id = ?${lockClause}`).get(runId);
+    if (!row) return;
+    let arr = [];
+    if (row.shardCoverageSummaries) {
+      try { arr = JSON.parse(row.shardCoverageSummaries) || []; } catch { arr = []; }
+    }
+    if (!Array.isArray(arr)) arr = [];
+    arr[shardIndex] = summary;
+    db.prepare("UPDATE runs SET shardCoverageSummaries = ? WHERE id = ?").run(JSON.stringify(arr), runId);
+  })();
+}
+
 export function setShardTracePath(runId, shardIndex, path) {
   if (!runId || shardIndex == null || typeof path !== "string") return;
   const db = getDatabase();

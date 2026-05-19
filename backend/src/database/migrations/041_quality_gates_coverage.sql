@@ -1,0 +1,21 @@
+-- AUTO-009d — Coverage quality gates.
+--
+-- `projects.qualityGates` is a TEXT column holding a JSON blob (added
+-- by AUTO-012 in migration 014). AUTO-009d extends the JSON shape with
+-- four optional coverage thresholds:
+--   `minCoveragePct`           — minimum overall line coverage (0–100).
+--   `minBranchPct`             — minimum branch coverage (0–100); only
+--                                 enforced when v8-to-istanbul produces
+--                                 branch data (AUTO-009c).
+--   `minPrCoveragePct`         — minimum PR-touched-files coverage; today
+--                                 aliases `coveragePct` until AUTO-009e
+--                                 lands the PR-files filter.
+--   `maxCoverageRegressionPct` — max allowed drop relative to the
+--                                 previous coverage-enabled run.
+--
+-- No DDL change required — JSON readers tolerate the new keys and
+-- pre-AUTO-009d rows render the new gate UI fields as blank. This
+-- migration file exists as a no-op marker so the bump is recorded in
+-- `schema_migrations` and ROADMAP / changelog references can point at
+-- a real migration version.
+SELECT 1;

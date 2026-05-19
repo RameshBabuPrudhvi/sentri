@@ -1,0 +1,17 @@
+-- AUTO-009f — Shard-aware coverage aggregation.
+--
+-- Each shard worker pre-aggregates its slice's coverage via
+-- `aggregateRunCoverage` (jsCoverage blobs never leave the worker process
+-- because they're megabytes per test). The shard then writes the
+-- summarised JSON into a sparse `shardCoverageSummaries[]` array on the
+-- parent run, indexed by shardIndex. The boundary-crossing finalizer
+-- (in `runWorker.js#finalizeShardedRun`) reads the array and merges all
+-- shard summaries into the final `runs.coverageSummary` blob.
+--
+-- Per-test deltas are not re-attributable across shards (each test runs
+-- on exactly one shard, so `perTest[]` from each shard concatenates
+-- losslessly), but lines/statements/branches/functions covered by
+-- multiple shards are de-duped during merge via the union of per-file
+-- covered-line sets that each shard summary already carries as count
+-- totals — see `pipeline/finalizeCoverage.js#mergeShardSummaries`.
+ALTER TABLE runs ADD COLUMN shardCoverageSummaries TEXT;

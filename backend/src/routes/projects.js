@@ -64,12 +64,43 @@ function validateQualityGates(payload) {
     if (!Number.isInteger(payload.maxFailures) || payload.maxFailures < 0) return "maxFailures must be a non-negative integer";
     gates.maxFailures = payload.maxFailures;
   }
+  // AUTO-009d — coverage gates. All four are expressed as percentages
+  // (0–100) so the UI can share the same `<input type="number" min=0 max=100
+  // step=1>` primitive as `minPassRate` / `maxFlakyPct`. The evaluator
+  // compares against `coveragePct` / `branchPct` (which are stored as 0–1
+  // ratios on `run.coverageSummary`) by multiplying by 100 once at
+  // comparison time — keeps the wire format human-readable and avoids
+  // a footgun where a user types `0.7` expecting "70%" and gets "0.7%".
+  if (payload.minCoveragePct != null) {
+    if (!Number.isFinite(payload.minCoveragePct) || payload.minCoveragePct < 0 || payload.minCoveragePct > 100) {
+      return "minCoveragePct must be between 0 and 100";
+    }
+    gates.minCoveragePct = payload.minCoveragePct;
+  }
+  if (payload.minBranchPct != null) {
+    if (!Number.isFinite(payload.minBranchPct) || payload.minBranchPct < 0 || payload.minBranchPct > 100) {
+      return "minBranchPct must be between 0 and 100";
+    }
+    gates.minBranchPct = payload.minBranchPct;
+  }
+  if (payload.minPrCoveragePct != null) {
+    if (!Number.isFinite(payload.minPrCoveragePct) || payload.minPrCoveragePct < 0 || payload.minPrCoveragePct > 100) {
+      return "minPrCoveragePct must be between 0 and 100";
+    }
+    gates.minPrCoveragePct = payload.minPrCoveragePct;
+  }
+  if (payload.maxCoverageRegressionPct != null) {
+    if (!Number.isFinite(payload.maxCoverageRegressionPct) || payload.maxCoverageRegressionPct < 0 || payload.maxCoverageRegressionPct > 100) {
+      return "maxCoverageRegressionPct must be between 0 and 100";
+    }
+    gates.maxCoverageRegressionPct = payload.maxCoverageRegressionPct;
+  }
   // Reject empty payloads — without at least one gate field, the stored
   // `{}` would render as "Active" in the UI and cause the evaluator to
   // return `{ passed: true }` for every run despite no thresholds being
   // configured. Clients clearing all gates should use DELETE instead.
   if (Object.keys(gates).length === 0) {
-    return "qualityGates must contain at least one gate field (minPassRate, maxFlakyPct, maxFailures)";
+    return "qualityGates must contain at least one gate field (minPassRate, maxFlakyPct, maxFailures, minCoveragePct, minBranchPct, minPrCoveragePct, maxCoverageRegressionPct)";
   }
   return gates;
 }

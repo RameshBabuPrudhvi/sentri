@@ -53,7 +53,25 @@ import { isNonExecutedSkip } from "./utils/skipReasons.js";
 import { testsExecutedTotal, testDurationSeconds, recordRunOutcome } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry.
 
 
-function evaluateQualityGates(gates, run) {
+/**
+ * Evaluate per-project quality gates against a finalised run.
+ *
+ * @param {Object} gates - Validated `project.qualityGates` payload (see
+ *   `validateQualityGates` in `routes/projects.js`). Coverage thresholds
+ *   (`minCoveragePct`, `minBranchPct`, `minPrCoveragePct`,
+ *   `maxCoverageRegressionPct`) are AUTO-009d additions; all four are
+ *   expressed as percentages (0–100) and compared against `run.coverageSummary`
+ *   ratios after a single ×100 conversion.
+ * @param {Object} run   - Run record. `run.coverageSummary` must be populated
+ *   BEFORE this is called (mutated in-place by `aggregateRunCoverage`).
+ * @param {Object} [opts]
+ * @param {Object|null} [opts.priorRunCoverage] - Previous run's
+ *   `coverageSummary` for regression-gate comparison. Pass `null` (no prior
+ *   run) and the regression rule short-circuits to a no-op — first-ever
+ *   coverage-enabled run can't regress against something that doesn't exist.
+ * @returns {{ passed: boolean, violations: Array }|null}
+ */
+function evaluateQualityGates(gates, run, { priorRunCoverage = null } = {}) {
   // Defense-in-depth: `validateQualityGates` in `backend/src/routes/projects.js`
   // already rejects payloads that produce an empty object, but a corrupted DB
   // row or direct DB manipulation could still surface `{}` here. Treat any
@@ -105,6 +123,75 @@ function evaluateQualityGates(gates, run) {
   }
   if (Number.isFinite(gates.maxFailures) && failed > gates.maxFailures) {
     violations.push({ rule: "maxFailures", threshold: gates.maxFailures, actual: failed });
+  }
+
+  // AUTO-009d — coverage gates. Only evaluated when (a) the project has at
+  // least one coverage threshold configured AND (b) the run actually
+  // produced a `coverageSummary` (`project.coverageEnabled === true` and
+  // aggregation didn't no-op). When coverage is enabled on the project but
+  // a transient capture failure left `coverageSummary` null, the gates
+  // short-circuit rather than failing the run on missing data — same
+  // best-effort philosophy as `evaluateWebVitalsBudgets` (`anyMeasured`
+  // guard). The single source of truth for the rule names + percent
+  // semantics is `validateQualityGates` in `routes/projects.js`.
+  const cov = run.coverageSummary;
+  const hasCoverageGate =
+    Number.isFinite(gates.minCoveragePct) ||
+    Number.isFinite(gates.minBranchPct) ||
+    Number.isFinite(gates.minPrCoveragePct) ||
+    Number.isFinite(gates.maxCoverageRegressionPct);
+  if (hasCoverageGate && cov && typeof cov === "object") {
+    // Line / overall coverage — `coveragePct` is a 0–1 ratio on the summary.
+    if (Number.isFinite(gates.minCoveragePct) && Number.isFinite(cov.coveragePct)) {
+      const actualPct = Number((cov.coveragePct * 100).toFixed(2));
+      if (actualPct < gates.minCoveragePct) {
+        violations.push({ rule: "minCoveragePct", threshold: gates.minCoveragePct, actual: actualPct });
+      }
+    }
+    // Branch coverage — only present when AUTO-009c v8-to-istanbul produced
+    // data. Missing key (line-only coverage runs) → rule no-ops, NOT a
+    // violation — operator's gate is moot when there's nothing to measure.
+    if (Number.isFinite(gates.minBranchPct) && Number.isFinite(cov.branchPct)) {
+      const actualPct = Number((cov.branchPct * 100).toFixed(2));
+      if (actualPct < gates.minBranchPct) {
+        violations.push({ rule: "minBranchPct", threshold: gates.minBranchPct, actual: actualPct });
+      }
+    }
+    // PR coverage — currently aliases the overall `coveragePct` because we
+    // don't yet split PR-touched files from the full bundle. When DIF-008 /
+    // AUTO-009e lands a "PR-touched files only" filter, this branch will
+    // read a dedicated `cov.prCoveragePct`. Keeping the rule wired today
+    // means the gate UI is forward-compatible without a schema rev.
+    if (Number.isFinite(gates.minPrCoveragePct) && Number.isFinite(cov.coveragePct)) {
+      const actualPct = Number((cov.coveragePct * 100).toFixed(2));
+      if (actualPct < gates.minPrCoveragePct) {
+        violations.push({ rule: "minPrCoveragePct", threshold: gates.minPrCoveragePct, actual: actualPct });
+      }
+    }
+    // Regression — drop relative to the previous coverage-enabled run.
+    // Skipped when no prior run exists (first-ever coverage run) so a
+    // brand-new project doesn't fail its first coverage gate on missing
+    // history.
+    if (
+      Number.isFinite(gates.maxCoverageRegressionPct) &&
+      priorRunCoverage &&
+      Number.isFinite(priorRunCoverage.coveragePct) &&
+      Number.isFinite(cov.coveragePct)
+    ) {
+      const dropPct = Number(((priorRunCoverage.coveragePct - cov.coveragePct) * 100).toFixed(2));
+      if (dropPct > gates.maxCoverageRegressionPct) {
+        violations.push({
+          rule: "maxCoverageRegressionPct",
+          threshold: gates.maxCoverageRegressionPct,
+          actual: dropPct,
+          // Surface the comparison context so the violation message in the
+          // GitHub Check summary / RunDetail panel can read "coverage
+          // dropped 12% (from 80% to 68%)" — without this, the operator
+          // sees the delta but not the baseline.
+          priorCoveragePct: Number((priorRunCoverage.coveragePct * 100).toFixed(2)),
+        });
+      }
+    }
   }
 
   return { passed: violations.length === 0, violations };
@@ -825,7 +912,6 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   run.retryCount = run.results.reduce((sum, r) => sum + (r.retryCount || 0), 0);
   run.failedAfterRetry = run.results.filter(r => r.failedAfterRetry).length;
 
-  run.gateResult = evaluateQualityGates(project.qualityGates, run);
   run.webVitalsResult = evaluateWebVitalsBudgets(project.webVitalsBudgets, run);
   run.rootCauses = clusterFailures({ results: run.results });
   try {
@@ -847,6 +933,32 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   } catch {
     run.coverageSummary = null;
   }
+
+  // AUTO-009d — gate evaluation runs AFTER coverage aggregation so the
+  // coverage rules see this run's freshly-computed `coverageSummary`. The
+  // regression rule needs the previous coverage-enabled run's summary; we
+  // pull it via the lean `getRunsWithCoverage` accessor (added for the
+  // dashboard) and pick the most-recent row that isn't `run.id` itself
+  // (the row at-hand is mid-flight and not yet persisted). Best-effort —
+  // a repo failure falls back to `priorRunCoverage: null` which short-
+  // circuits the regression rule (same first-run-ever semantics).
+  let priorRunCoverage = null;
+  if (project?.coverageEnabled) {
+    try {
+      const history = runRepo.getRunsWithCoverage([project.id]);
+      // Newest-last per the accessor's contract; walk backwards skipping
+      // the current run id so the lookup is correct even if `save(run)`
+      // wrote `run.coverageSummary` to disk between aggregation and gate
+      // eval (single-process path saves on every result via `processResult`).
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].id !== run.id && history[i].coverageSummary) {
+          priorRunCoverage = history[i].coverageSummary;
+          break;
+        }
+      }
+    } catch { /* best-effort — null prior degrades cleanly */ }
+  }
+  run.gateResult = evaluateQualityGates(project.qualityGates, run, { priorRunCoverage });
 
   // Keep per-test raw script coverage in-memory only; do not persist heavy payloads.
   for (const r of run.results) {
