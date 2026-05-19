@@ -129,6 +129,7 @@ const files = [
   "tests/run-coverage-integration.test.js",
   "tests/run-shard-coverage.test.js",        // AUTO-009f — sharded-run parity regression
   "tests/coverage-memory-ceiling.test.js",   // AUTO-009g — memory-ceiling enforcement
+  "tests/coverage-pr-diff.test.js",          // AUTO-009d — PR-scoped coverage diff (the Codecov play)
   "tests/source-map-resolver.test.js",
   "tests/server-coverage-proxy.test.js", // AUTO-009h — server-side coverage capture for API tests
   "tests/observability.test.js",
