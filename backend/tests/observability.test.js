@@ -173,7 +173,11 @@ async function main() {
       // Histogram exposition surfaces `_bucket{le="..."}`. Match the
       // exposition shape rather than a specific bucket count so a future
       // bucket-list tweak doesn't break the test.
-      assert.match(body, /app_ai_provider_latency_seconds_bucket\{[^}]*operation="vision_heal"[^}]*le="[^"]+"\}/);
+      // prom-client emits labels in insertion order (le first for histogram
+      // buckets, then the user labels), so we don't pin the order — just
+      // require both `operation="vision_heal"` and a non-empty `le=` to
+      // appear in the same `{...}` block.
+      assert.match(body, /app_ai_provider_latency_seconds_bucket\{[^}]*le="[^"]+"[^}]*operation="vision_heal"[^}]*\}/);
     });
 
     await runner.test("aiProviderErrorsTotal renders operation label", async () => {

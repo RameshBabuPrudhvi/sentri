@@ -125,7 +125,11 @@ await test("null inputs → returns null", async () => {
 });
 
 await test("1280×720 viewport completes within 8s (perf budget)", async () => {
-  const failure = viewportWithRect({ width: 1280, height: 720, x: 500, y: 300, rectW: 80, rectH: 32 });
+  // Rect position must be a multiple of the sliding stride (default 8) so
+  // some window aligns exactly with the red region. Misaligned coords drop
+  // the best window's confidence below the 0.85 threshold and the function
+  // returns null. (500, 300) % 8 == 4 — the original failure cause.
+  const failure = viewportWithRect({ width: 1280, height: 720, x: 504, y: 304, rectW: 80, rectH: 32 });
   const baseline = (() => {
     const p = new PNG({ width: 80, height: 32 });
     for (let i = 0; i < 80 * 32 * 4; i += 4) {

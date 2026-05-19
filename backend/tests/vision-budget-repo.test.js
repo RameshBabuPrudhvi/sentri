@@ -30,17 +30,21 @@ function resetBudget() {
   db.exec("DELETE FROM vision_budget_counters");
 }
 
-function createProject({ id, dailyCap = 100, monthlyCap = 50, workspaceId = "WS-VBR" }) {
+function createProject({ id, dailyCap = 100, monthlyCap = 50 }) {
   const db = getDatabase();
   // Clean any prior fixture by the same id so re-runs don't conflict on PK.
   db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+  // workspaceId left null on purpose — populating it would require seeding
+  // a workspace row + a user row (workspaces.ownerId FKs to users.id with
+  // NOT NULL slug/updatedAt). `isBudgetExhausted` only reads the two cap
+  // columns, so a null workspaceId is fine for this fixture.
   projectRepo.create({
     id,
     name: id,
     url: "https://example.com",
     status: "idle",
     createdAt: new Date().toISOString(),
-    workspaceId,
+    workspaceId: null,
     visionHealing: "pixelmatch_and_llm",
     visionHealMaxCallsPerDay: dailyCap,
     visionHealMaxCostUsdPerMonth: monthlyCap,
