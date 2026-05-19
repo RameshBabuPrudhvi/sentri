@@ -30,8 +30,7 @@
 
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest, executeTestIterations } from "./runner/executeTest.js";
-import { aggregateRunCoverage } from "./pipeline/coverageAggregator.js";
-import { resolveSourceMap, mapBundleLine } from "./pipeline/sourceMapResolver.js";
+import { finalizeCoverage } from "./pipeline/finalizeCoverage.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { clusterFailures } from "./pipeline/failureClusterer.js";
