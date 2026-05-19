@@ -125,6 +125,8 @@ const files = [
   "tests/run-shard-finalizer.test.js",
   "tests/failure-clusterer.test.js",
   "tests/worker-pool-dashboard.test.js",
+  "tests/coverage-aggregator.test.js",
+  "tests/run-coverage-integration.test.js",
   "tests/observability.test.js",
   // AUTO-022 — AI eval harness scorer + regression-detection + metric_samples persistence.
   "tests/eval-pipeline.test.js",

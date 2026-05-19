@@ -52,7 +52,35 @@ const INNER_TABS = [
   { id: "iterations",  label: "Iterations",     icon: Database    },
   { id: "piifirewall", label: "PII Firewall",   icon: Lock        },
   { id: "visionheal",  label: "Vision Healing", icon: Eye         },
+  { id: "coverage",    label: "Coverage",       icon: Globe       },
 ];
+
+function CoveragePanel({ project, canEdit, onToast }) {
+  const [enabled, setEnabled] = useState(!!project.coverageEnabled);
+  const [sourcemapBaseUrl, setSourcemapBaseUrl] = useState(project.sourcemapBaseUrl || "");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.updateProject(project.id, { coverageEnabled: enabled, sourcemapBaseUrl: sourcemapBaseUrl.trim() || null });
+      onToast?.({ type: "success", message: "Coverage settings saved." });
+    } catch (err) {
+      onToast?.({ type: "error", message: err?.message || "Failed to save coverage settings." });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="aap-panel">
+      <label className="aap-stats">
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={!canEdit || saving} />
+        {" "}Enable browser JS coverage capture
+      </label>
+      <input className="aap-input" placeholder="Optional source-map base URL" value={sourcemapBaseUrl} onChange={(e) => setSourcemapBaseUrl(e.target.value)} disabled={!canEdit || saving} />
+      <button className="btn btn-primary btn-sm" onClick={save} disabled={!canEdit || saving}>{saving ? "Saving…" : "Save"}</button>
+    </div>
+  );
+}
 
 /**
  * CAP-001: configures `project.iterationCap` — the per-project ceiling on
@@ -696,6 +724,13 @@ export default function ProjectQualityCard({
             )}
             {innerTab === "visionheal" && (
               <VisionHealingPanel
+                project={project}
+                canEdit={canEdit}
+                onToast={onToast}
+              />
+            )}
+            {innerTab === "coverage" && (
+              <CoveragePanel
                 project={project}
                 canEdit={canEdit}
                 onToast={onToast}

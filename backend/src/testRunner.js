@@ -30,6 +30,7 @@
 
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest, executeTestIterations } from "./runner/executeTest.js";
+import { aggregateRunCoverage } from "./pipeline/coverageAggregator.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { clusterFailures } from "./pipeline/failureClusterer.js";
@@ -826,6 +827,21 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   run.gateResult = evaluateQualityGates(project.qualityGates, run);
   run.webVitalsResult = evaluateWebVitalsBudgets(project.webVitalsBudgets, run);
   run.rootCauses = clusterFailures({ results: run.results });
+  try {
+    if (project?.coverageEnabled) {
+      const sutOrigin = (() => { try { return new URL(project.url).origin; } catch { return ""; } })();
+      run.coverageSummary = aggregateRunCoverage(run.results, { sutOrigin });
+    } else {
+      run.coverageSummary = null;
+    }
+  } catch {
+    run.coverageSummary = null;
+  }
+
+  // Keep per-test raw script coverage in-memory only; do not persist heavy payloads.
+  for (const r of run.results) {
+    if (r && "jsCoverage" in r) delete r.jsCoverage;
+  }
 
   // AUTO-017.3: persist per-run Web Vitals samples for MET-001 trend charts.
   // Best-effort only — telemetry failures must never fail the run.
@@ -928,4 +944,3 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     emitRunEvent(run.id, "done", { status: run.status, passed: run.passed, failed: run.failed, total: run.total });
   }
 }
-

@@ -175,6 +175,17 @@ export default function Dashboard() {
             <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<SquareCheckBig size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
           </div>
+          <div className="card card-padded mt-md">
+            <div className="section-title">Coverage</div>
+            {!data?.coverageTrend?.series?.length ? (
+              <div className="text-sm text-muted">Enable coverage on a project to start tracking.</div>
+            ) : (
+              <div className="text-sm">
+                <div>{`30-day points: ${data.coverageTrend.series.length}`}</div>
+                <div>{`Latest coverage: ${Math.round((data.coverageTrend.series[data.coverageTrend.series.length - 1]?.coveragePct || 0) * 100)}%`}</div>
+              </div>
+            )}
+          </div>
 
           {/* ── Row 2: Duration / Created / Fixed / Healing ── */}
           <div className="stat-grid">

@@ -625,6 +625,7 @@ export const api = {
   // ── Dashboard ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
+  getCoverageTrend: () => req("GET", "/dashboard").then((d) => d?.coverageTrend || null),
 
   /**
    * AUTO-022 — read the per-case breakdown for one AI eval-harness run.

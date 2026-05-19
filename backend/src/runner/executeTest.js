@@ -543,6 +543,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     visualDiff: null,   // DIF-001: final-screenshot visual-regression result
     browser: opts.browser || "chromium", // DIF-002: browser engine this test ran under
     webVitals: null,
+    jsCoverage: null,
   };
 
   const start = Date.now();
@@ -737,6 +738,9 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     // Swallow the losing promise to prevent unhandled rejection
     testExecution.catch(() => {});
     await Promise.race([testExecution, testTimeoutPromise]);
+    if (coverageStarted && page?.coverage?.stopJSCoverage) {
+      try { result.jsCoverage = await page.coverage.stopJSCoverage(); } catch { result.jsCoverage = null; }
+    }
 
   } catch (err) {
     result.status = "failed";
@@ -1075,3 +1079,18 @@ export async function executeTestIterations(test, fixtureRows, runSingle) {
   }
   return out;
 }
+    let coverageStarted = false;
+    if (test.projectId) {
+      try {
+        const p = projectRepo.getById(test.projectId);
+        if (p?.coverageEnabled && page?.coverage?.startJSCoverage) {
+          await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: false });
+          coverageStarted = true;
+        }
+      } catch { /* best-effort */ }
+    }
+    try {
+      if (page?.coverage?.stopJSCoverage) {
+        result.jsCoverage = await page.coverage.stopJSCoverage();
+      }
+    } catch { /* best-effort */ }
