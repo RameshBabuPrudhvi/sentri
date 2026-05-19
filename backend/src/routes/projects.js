@@ -26,6 +26,8 @@ import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as scheduleRepo from "../database/repositories/scheduleRepo.js";
+import * as elementBaselineRepo from "../database/repositories/elementBaselineRepo.js";
+import * as visionBudgetRepo from "../database/repositories/visionBudgetRepo.js";
 import { getDatabase } from "../database/sqlite.js";
 import { generateProjectId, generateScheduleId } from "../utils/idGenerator.js";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
@@ -41,6 +43,7 @@ import * as notificationSettingsRepo from "../database/repositories/notification
 import * as metricSamplesRepo from "../database/repositories/metricSamplesRepo.js";
 import { generateNotificationSettingId } from "../utils/idGenerator.js";
 import { validateUrl } from "../utils/ssrfGuard.js";
+import { hasVisionProvider } from "../aiProvider.js";
 import cron from "node-cron";
 
 const router = Router();
@@ -235,25 +238,18 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
   const existing = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!existing) return res.status(404).json({ error: "not found" });
 
-  // Allow threshold-only PATCHes (from AutoApprovalPanel) to skip the
-  // name/url validation gate. To keep this bypass tight, require the body
-  // to contain *only* `autoApproveThreshold` — any extra keys (e.g. an
-  // attempted `status` or `workspaceId` injection) force the request
-  // back through `validateProjectPayload` and the field whitelist below.
-  // Allow threshold-only PATCHes (from AutoApprovalPanel) to skip the
-  // name/url validation gate. To keep this bypass tight, require the body
-  // to contain *only* `autoApproveThreshold` — any extra keys (e.g. an
-  // attempted `status` or `workspaceId` injection) force the request
-  // back through `validateProjectPayload` and the field whitelist below.
+  // Bypass-eligible PATCHes (from dedicated panels in `ProjectQualityCard.jsx`)
+  // skip the name/url validation gate. Each panel sends only its own
+  // field(s) — e.g. AutoApprovalPanel sends `{ autoApproveThreshold }`,
+  // PiiFirewallPanel sends `{ strictPiiFirewall, piiAllowlist }`,
+  // VisionHealingPanel sends `{ visionHealing, visionHealMaxCallsPerDay,
+  // visionHealMaxCostUsdPerMonth }`. The bypass requires every key in the
+  // body to be in the whitelist, so an attempted `status` / `workspaceId`
+  // injection still falls through to the full `validateProjectPayload` +
+  // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  // Single-field PATCH bypass — `autoApproveThreshold` (AUTO-003b) and
-  // `iterationCap` (CAP-001) are configured from dedicated panels in
-  // `ProjectQualityCard.jsx` that send only their own field. Each bypass
-  // is gated on the body containing *exactly* its field name so an
-  // attempted `status` / `workspaceId` injection still falls through to
-  // the full `validateProjectPayload` + field-whitelist path below.
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist"]);
-  const isSingleFieldPatch = bodyKeys.length === 1 && SINGLE_FIELD_BYPASS.has(bodyKeys[0]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth"]);
+  const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
     if (validationErr) return res.status(400).json({ error: validationErr });
@@ -313,6 +309,39 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
     } else {
       return res.status(400).json({ error: "piiAllowlist must be null or an array of up to 200 strings." });
     }
+  }
+
+
+  // MNT-001: per-project vision-healing toggle. Validates the mode string
+  // and gates `pixelmatch_and_llm` behind a server-side vision-capable
+  // provider check (via aiProvider.hasVisionProvider() — more accurate
+  // than raw env-var sniffing because it respects runtime key overrides
+  // configured in Settings and the model-capability whitelist).
+  if (Object.hasOwn(req.body, "visionHealing")) {
+    const mode = req.body.visionHealing;
+    const allowedModes = new Set(["off", "pixelmatch_only", "pixelmatch_and_llm"]);
+    if (!allowedModes.has(mode)) {
+      return res.status(400).json({ error: "visionHealing must be one of: off, pixelmatch_only, pixelmatch_and_llm." });
+    }
+    if (mode === "pixelmatch_and_llm" && !hasVisionProvider()) {
+      // Surfaced verbatim by Settings.jsx as a disabled-state tooltip
+      // ("VISION_MODEL not configured server-side"). Don't change this
+      // error code without updating the frontend consumer.
+      return res.status(400).json({ error: "VISION_PROVIDER_NOT_CONFIGURED" });
+    }
+    fields.visionHealing = mode;
+  }
+
+  if (Object.hasOwn(req.body, "visionHealMaxCallsPerDay")) {
+    const cap = req.body.visionHealMaxCallsPerDay;
+    if (!Number.isInteger(cap) || cap < 1 || cap > 10000) return res.status(400).json({ error: "visionHealMaxCallsPerDay must be an integer between 1 and 10000." });
+    fields.visionHealMaxCallsPerDay = cap;
+  }
+
+  if (Object.hasOwn(req.body, "visionHealMaxCostUsdPerMonth")) {
+    const cap = req.body.visionHealMaxCostUsdPerMonth;
+    if (!Number.isFinite(cap) || cap < 0 || cap > 100000) return res.status(400).json({ error: "visionHealMaxCostUsdPerMonth must be a number between 0 and 100000." });
+    fields.visionHealMaxCostUsdPerMonth = cap;
   }
 
   if (req.body.credentials === null) {
@@ -396,6 +425,14 @@ router.delete("/:id", requireRole("admin"), (req, res) => {
     // Restoring the project will NOT restore the schedule — it must be
     // reconfigured manually.
     scheduleRepo.deleteByProjectId(req.params.id);
+    // MNT-001 — vision-healing artifacts are not soft-deleted: baseline
+    // crop BLOBs (2-10 KB × hundreds of elements per project) and per-
+    // window budget counters would otherwise accumulate unbounded after
+    // every project deletion. Both repos document this cascade contract
+    // explicitly. Restoring the project will NOT restore baselines; the
+    // next green run regenerates them via captureElementCrop.
+    try { elementBaselineRepo.deleteByProjectId(req.params.id); } catch { /* best-effort */ }
+    try { visionBudgetRepo.deleteByProjectId(req.params.id); } catch { /* best-effort */ }
   })();
   stopSchedule(req.params.id);
 

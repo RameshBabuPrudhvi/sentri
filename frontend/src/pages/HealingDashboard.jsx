@@ -3,6 +3,7 @@ import { ShieldCheck, TrendingUp, Wrench, Clock } from "lucide-react";
 import { api } from "../api.js";
 import StatCard from "../components/shared/StatCard.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
+import VisionHealPanel from "../components/healing/VisionHealPanel.jsx";
 
 const EMPTY_SUMMARY = {
   strategies:   [],
@@ -285,6 +286,8 @@ export default function HealingDashboard() {
           icon={<Clock size={18} />}
         />
       </div>
+
+      <VisionHealPanel count={data?.visionHealCount || 0} costUsd={data?.visionHealCostUsd || 0} strategy={data?.visionHealStrategy || {}} />
 
       {/* Two-column: trend chart + strategy bars */}
       <div className="heal-two-col">

@@ -242,6 +242,57 @@ export async function captureScreenshot(page, runId, stepIndex, { failed = false
 }
 
 /**
+ * captureElementCrop(page, locator) — MNT-001 baseline element thumbnail
+ *
+ * Captures a tight PNG crop of one DOM element so the vision-healing
+ * waterfall (stage 7 — pixelmatch) has a baseline to slide against on
+ * future runs when DOM selectors break.
+ *
+ * Best-effort: returns `null` when the locator can't be resolved, is
+ * off-screen, has zero area, or the element is closed mid-capture. The
+ * caller — a green-run hook in `executeTest.js` — must never let a crop
+ * failure flip a passing test to failed.
+ *
+ * Decoupled from `captureScreenshot` because the use case is different:
+ *   - `captureScreenshot` is per-step / per-failure, full-viewport,
+ *     persisted as run artifact.
+ *   - `captureElementCrop` is per-element on a successful interaction,
+ *     small (typically <10 KB), stored alongside the test record as a
+ *     reusable baseline.
+ *
+ * Returns the raw PNG buffer so the caller can decide where to persist
+ * (filesystem, object store, base64 in DB, etc.). This module intentionally
+ * does NOT write the crop — separation of concerns matches the existing
+ * `captureBoundingBoxes` / `captureDomSnapshot` pattern.
+ *
+ * @param {Object} page    - Playwright Page (or FrameLocator).
+ * @param {Object} locator - Playwright Locator already resolved against `page`.
+ * @returns {Promise<Buffer|null>} PNG buffer, or `null` on any failure.
+ */
+export async function captureElementCrop(page, locator) {
+  if (!locator) return null;
+  try {
+    // Bail if the element isn't visible — sliding a baseline of a hidden
+    // element against a future failure would always score 0 and waste
+    // pixelmatch's CPU on every run. The visibility check is cheap.
+    const visible = await locator.isVisible().catch(() => false);
+    if (!visible) return null;
+
+    // `locator.screenshot()` tightly crops to the element's bounding box
+    // and auto-handles scroll-into-view; safer than computing the box
+    // ourselves and clipping a full-page shot (which races on lazy-loaded
+    // content). Timeout matches existing capture helpers.
+    const buf = await locator.screenshot({ type: "png", timeout: 5000 });
+    // Reject zero / near-zero crops — pixelmatch on a 1-byte image gives
+    // garbage similarity scores. 50 bytes is well below any real PNG.
+    if (!buf || buf.length < 50) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * captureBoundingBoxes(page) → Array<{ x, y, width, height }>
  *
  * Collects bounding boxes of the last interacted / focused elements so

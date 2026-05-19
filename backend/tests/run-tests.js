@@ -8,6 +8,18 @@ import { spawnSync } from "node:child_process";
 const files = [
   "tests/code-parsing.test.js",
   "tests/self-healing.test.js",
+  // MNT-001 — host-side vision-healing waterfall (stages 7 pixelmatch + 8 LLM).
+  // Stub-driven via dependency injection; no real CV / no real network in CI.
+  "tests/self-healing-vision.test.js",
+  // MNT-001b — real pixelmatch CV adapter, baseline crop persistence repo,
+  // and per-project budget circuit breaker. Real SQLite + real pixelmatch
+  // (no stubs); each fixture is synthesised in-memory.
+  "tests/vision-heal-pixelmatch.test.js",
+  "tests/element-baseline-repo.test.js",
+  "tests/vision-budget-repo.test.js",
+  // MNT-001b — coordinate re-action after a successful vision heal.
+  // Unit-tested against a fake Playwright page; no real browser.
+  "tests/vision-heal-reaction.test.js",
   "tests/pipeline.test.js",
   "tests/api-flow.test.js",
   "tests/project-edit.test.js",
@@ -114,6 +126,12 @@ const files = [
   "tests/failure-clusterer.test.js",
   "tests/worker-pool-dashboard.test.js",
   "tests/observability.test.js",
+  // AUTO-022 — AI eval harness scorer + regression-detection + metric_samples persistence.
+  "tests/eval-pipeline.test.js",
+  "tests/eval-regression.test.js",
+  "tests/eval-persistence.test.js",
+  // AUTO-022 — CLI E2E subprocess tests for run-eval.mjs exit codes + report artifact.
+  "tests/eval-cli-e2e.test.js",
 ];
 
 let passed = 0;

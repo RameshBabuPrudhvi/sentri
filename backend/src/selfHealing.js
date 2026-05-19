@@ -123,7 +123,163 @@ const HEALING_VISIBLE_WAIT_CAP = parseInt(process.env.HEALING_VISIBLE_WAIT_CAP, 
 // (e.g. adding/removing/reordering strategies in safeClick, safeFill, etc.).
 // Healing hints recorded with a different version are ignored so stale
 // strategyIndex values don't point to the wrong strategy after an upgrade.
-export const STRATEGY_VERSION = 3;
+//
+// MNT-001: bumped 3 → 4 to reserve strategy indices 7 (pixelmatch CV) and
+// 8 (LLM vision) for host-side post-waterfall vision-healing. Runtime
+// helpers still only emit 0..6; the host emits 7/8 via `tryVisionHeal()`.
+export const STRATEGY_VERSION = 4;
+
+// MNT-001 — reserved strategy indices for host-side vision heals. Runtime
+// helpers never produce these values; only `tryVisionHeal()` does. Tagged
+// here so callers reading `healing_history` can identify vision-sourced
+// hints without string-matching the key.
+export const STRATEGY_INDEX_PIXELMATCH = 7;
+export const STRATEGY_INDEX_LLM_VISION = 8;
+export const VISION_STRATEGY_INDICES = Object.freeze([
+  STRATEGY_INDEX_PIXELMATCH,
+  STRATEGY_INDEX_LLM_VISION,
+]);
+
+/**
+ * MNT-001 — host-side vision-healing entrypoint.
+ *
+ * Invoked by `executeTest.js` AFTER a test errored out and every DOM
+ * strategy in the runtime waterfall failed. Stages 7-8 live here (not
+ * in the injected runtime helper code) because they need Node-side
+ * libraries (pixelmatch, png decoder), the production `aiProvider`,
+ * and the SQLite-backed budget circuit-breaker — none of which are
+ * serialisable into the runtime string template.
+ *
+ * Returns a healing-event object the caller appends to the run's
+ * `healingEvents` stream (consumed by `persistHealingEvents`):
+ *
+ *   { kind: "vision_pixelmatch" | "vision_llm",
+ *     key: "<action>::<label>", strategyIndex: 7 | 8,
+ *     confidence, model?, costUsd?, box?, healed: true }
+ *
+ * Returns `null` when feature off, both stages declined, budget is
+ * exhausted, or any internal error fires — vision healing must never
+ * *cause* a test failure that wouldn't already have happened.
+ *
+ * Gates:
+ *   project.visionHealing === "off"                → null (feature off)
+ *   project.visionHealing === "pixelmatch_only"    → stage 7 only
+ *   project.visionHealing === "pixelmatch_and_llm" → stage 7, then 8
+ *
+ * Dependencies are injected so unit tests can stub pixelmatch and the
+ * vision provider without monkey-patching real modules.
+ *
+ * @param {Object} ctx
+ * @param {string} ctx.testId           - Versioned test id ("TC-1@v2").
+ * @param {string} ctx.action           - Action verb ("click", "fill", …).
+ * @param {string} ctx.label            - Human label / target text.
+ * @param {Object} ctx.project          - Project row (visionHealing,
+ *   visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth fields read).
+ * @param {Buffer} [ctx.failureScreenshot] - PNG of viewport at failure.
+ * @param {Buffer} [ctx.baselineCrop]   - PNG of element's last green crop.
+ * @param {Object} [deps]
+ * @param {Function} [deps.pixelmatchHeal] - Async (failure, baseline,
+ *   threshold) => { confidence, box }|null. MNT-001b lands the real
+ *   sliding-window CV; this PR ships the integration surface.
+ * @param {Function} [deps.llmVisionHeal] - Async ({failure, intent}) =>
+ *   { confidence, box, model, costUsd }|null.
+ * @param {Function} [deps.isBudgetExhausted] - Async (projectId) =>
+ *   { dailyCalls, monthlyCost }. Both booleans.
+ * @returns {Promise<Object|null>}
+ */
+export async function tryVisionHeal(ctx, deps = {}) {
+  if (!ctx || !ctx.project) return null;
+  // MNT-001 — emergency global kill switch documented in `QA.md` § Vision
+  // healing release-verification checklist + `docs/guide/vision-healing.md`
+  // § Incident disable. Operators set `VISION_HEAL_DISABLED=1` (e.g. via
+  // `kubectl set env deployment/sentri-backend VISION_HEAL_DISABLED=1`) to
+  // turn off both stages 7 and 8 deployment-wide without changing any
+  // per-project `visionHealing` value. Per-project flags re-take effect
+  // immediately when the env var is removed. Treated as `"1"` only — any
+  // other truthy value (including `"true"`, `"yes"`) is intentionally
+  // ignored so operators can't disable by mistake with a typo.
+  if (process.env.VISION_HEAL_DISABLED === "1") return null;
+  const mode = ctx.project.visionHealing || "off";
+  if (mode === "off") return null;
+  if (!ctx.failureScreenshot) return null;
+
+  // Use Number.isFinite guard rather than `||` so an explicit `0` from the
+  // operator is preserved instead of silently falling back to the default
+  // (parseFloat("0") === 0 is falsy under ||).
+  const rawPixel = parseFloat(process.env.VISION_HEAL_PIXEL_CONFIDENCE);
+  const PIXEL_CONFIDENCE = Number.isFinite(rawPixel) ? rawPixel : 0.85;
+  const rawLlm = parseFloat(process.env.VISION_HEAL_LLM_CONFIDENCE);
+  const LLM_CONFIDENCE   = Number.isFinite(rawLlm) ? rawLlm : 0.7;
+  const key = `${ctx.action}::${ctx.label}`;
+
+  // ── Stage 7 — pixelmatch CV (deterministic, free) ──────────────────────
+  if (deps.pixelmatchHeal && ctx.baselineCrop) {
+    try {
+      const r = await deps.pixelmatchHeal(ctx.failureScreenshot, ctx.baselineCrop, PIXEL_CONFIDENCE);
+      if (r && r.confidence >= PIXEL_CONFIDENCE) {
+        recordHealing(ctx.testId, ctx.action, ctx.label, STRATEGY_INDEX_PIXELMATCH);
+        return {
+          kind: "vision_pixelmatch", key,
+          strategyIndex: STRATEGY_INDEX_PIXELMATCH,
+          confidence: r.confidence, box: r.box || null, healed: true,
+        };
+      }
+    } catch { /* fall through to stage 8 / no-heal */ }
+  }
+
+  // ── Stage 8 — LLM vision (paid, gated) ─────────────────────────────────
+  if (mode !== "pixelmatch_and_llm") return null;
+
+  if (deps.isBudgetExhausted) {
+    try {
+      const budget = await deps.isBudgetExhausted(ctx.project.id);
+      if (budget?.dailyCalls || budget?.monthlyCost) {
+        // MNT-001b — soft-disable sentinel. We return a distinguishable
+        // object (NOT `null`) so the caller can emit an audit row + bump
+        // the `app_vision_heal_budget_exhausted_total` Prometheus counter
+        // BEFORE deciding whether to push it onto the healing-event stream.
+        // `healed: false` keeps `persistHealingEvents` from treating it as
+        // a successful heal; the caller filters it out of `visionEvents`.
+        //
+        // Without this sentinel, a budget-soft-disable was invisible —
+        // operators couldn't tell whether stage 8 was off because of a cap
+        // hit, a provider outage, or a config flip. The audit row makes
+        // the soft-disable attributable.
+        return {
+          kind: "vision_budget_exhausted",
+          key,
+          reason: budget.dailyCalls ? "daily_calls" : "monthly_cost",
+          healed: false,
+        };
+      }
+    } catch {
+      return null; // conservative: don't call LLM on budget-check failure
+    }
+  }
+
+  if (!deps.llmVisionHeal) return null;
+
+  try {
+    const r = await deps.llmVisionHeal({
+      failure: ctx.failureScreenshot,
+      intent: { action: ctx.action, label: ctx.label },
+    });
+    if (r && r.confidence >= LLM_CONFIDENCE) {
+      recordHealing(ctx.testId, ctx.action, ctx.label, STRATEGY_INDEX_LLM_VISION);
+      return {
+        kind: "vision_llm", key,
+        strategyIndex: STRATEGY_INDEX_LLM_VISION,
+        confidence: r.confidence,
+        model: r.model || null,
+        costUsd: Number.isFinite(r.costUsd) ? r.costUsd : 0,
+        box: r.box || null,
+        healed: true,
+      };
+    }
+  } catch { /* provider outage / network error — return no-heal */ }
+
+  return null;
+}
 
 /**
  * Generate the self-healing runtime helper code as a string for injection
@@ -162,6 +318,13 @@ export function getSelfHealingHelperCode(healingHints) {
     const __healingHints = ${hintsJSON};
     // Accumulates healing events during this run for the runner to persist.
     const __healingEvents = [];
+    // MNT-001 — value-intent map keyed by "<action>::<label>". When a vision
+    // heal succeeds on a value-bearing verb (fill / check / uncheck / select),
+    // the host-side coordinate re-action needs to know WHAT the test was
+    // trying to write. The sandboxed safe* helpers populate this on entry so
+    // the value survives the test throwing later in the same retry attempt.
+    // The host reads it via err.__valueIntents in executeTest.js.
+    const __valueIntents = {};
 
     // pierce: selector prefix — used for elements discovered inside shadow roots.
     // Playwright's CSS engine supports ">>" to pierce shadow DOM, and its built-in
@@ -525,6 +688,12 @@ export function getSelfHealingHelperCode(healingHints) {
         ];
 
       const healingKey = 'fill::' + labelOrPlaceholder;
+      // MNT-001 — record the intended value BEFORE attempting the fill so a
+      // throw inside the retry loop still leaves the value reachable by the
+      // host-side vision-heal re-action path. Last-write-wins is fine: if the
+      // test re-fills the same field with a different value, the later
+      // intent reflects what the test actually wanted at failure time.
+      __valueIntents[healingKey] = { value: strValue };
 
       await retry(async () => {
         // Re-resolve on every attempt so a DOM re-render (common in SPAs)

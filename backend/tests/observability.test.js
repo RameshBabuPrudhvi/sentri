@@ -24,7 +24,14 @@ import { createTestContext } from "./helpers/test-base.js";
 import { requestContext } from "../src/utils/observability.js";
 import { formatLogLine } from "../src/utils/logFormatter.js";
 import { initOpenTelemetry } from "../src/utils/observability.js";
-import { register as metricsRegister } from "../src/utils/metrics.js";
+import {
+  register as metricsRegister,
+  aiProviderTokensTotal,
+  aiProviderLatencySeconds,
+  aiProviderErrorsTotal,
+  aiProviderCostUsdTotal,
+  visionHealBudgetExhaustedTotal,
+} from "../src/utils/metrics.js";
 
 const t = createTestContext();
 const runner = t.createTestRunner();
@@ -144,6 +151,59 @@ async function main() {
       // surface here as a missing-counter assertion failure on the body above.
       assert.ok(metricsRegister, "metricsRegister export should be defined");
       assert.equal(typeof metricsRegister.metrics, "function");
+    });
+
+    // ── MNT-001b — vision-heal metric-shape regression tests ──────────────────
+    // These pin the label cardinality and metric names so a future refactor
+    // can't silently drop the `operation` label (which would re-merge
+    // generation + vision_heal rows in dashboards) or rename the budget
+    // counter (which would break the VisionHealBudgetExhausted alert).
+
+    await runner.test("aiProviderTokensTotal accepts operation label and renders both surfaces", async () => {
+      aiProviderTokensTotal.inc({ provider: "anthropic", kind: "input", operation: "vision_heal" }, 100);
+      aiProviderTokensTotal.inc({ provider: "anthropic", kind: "input", operation: "generation" }, 200);
+      const body = await metricsRegister.metrics();
+      assert.match(body, /app_ai_provider_tokens_total\{[^}]*operation="vision_heal"[^}]*\}\s+100/);
+      assert.match(body, /app_ai_provider_tokens_total\{[^}]*operation="generation"[^}]*\}\s+200/);
+    });
+
+    await runner.test("aiProviderLatencySeconds renders operation label on histogram buckets", async () => {
+      aiProviderLatencySeconds.observe({ provider: "openai", outcome: "success", operation: "vision_heal" }, 1.2);
+      const body = await metricsRegister.metrics();
+      // Histogram exposition surfaces `_bucket{le="..."}`. Match the
+      // exposition shape rather than a specific bucket count so a future
+      // bucket-list tweak doesn't break the test.
+      // prom-client emits labels in insertion order (le first for histogram
+      // buckets, then the user labels), so we don't pin the order — just
+      // require both `operation="vision_heal"` and a non-empty `le=` to
+      // appear in the same `{...}` block.
+      assert.match(body, /app_ai_provider_latency_seconds_bucket\{[^}]*le="[^"]+"[^}]*operation="vision_heal"[^}]*\}/);
+    });
+
+    await runner.test("aiProviderErrorsTotal renders operation label", async () => {
+      aiProviderErrorsTotal.inc({ provider: "anthropic", reason: "rate_limit", operation: "vision_heal" });
+      const body = await metricsRegister.metrics();
+      assert.match(body, /app_ai_provider_errors_total\{[^}]*reason="rate_limit"[^}]*operation="vision_heal"[^}]*\}/);
+    });
+
+    await runner.test("aiProviderCostUsdTotal is registered and accepts vision_heal label", async () => {
+      aiProviderCostUsdTotal.inc({ provider: "openai", operation: "vision_heal" }, 0.0023);
+      const body = await metricsRegister.metrics();
+      // The metric name itself must be present so dashboards binding to it
+      // don't silently disappear after a rename.
+      assert.ok(body.includes("app_ai_cost_usd_total"), "metrics body missing app_ai_cost_usd_total");
+      assert.match(body, /app_ai_cost_usd_total\{[^}]*provider="openai"[^}]*operation="vision_heal"[^}]*\}/);
+    });
+
+    await runner.test("visionHealBudgetExhaustedTotal is registered and accepts projectId+reason", async () => {
+      visionHealBudgetExhaustedTotal.inc({ projectId: "PRJ-OBS-1", reason: "daily_calls" });
+      const body = await metricsRegister.metrics();
+      // Name match — pins the alert binding in alerts.yml.
+      assert.ok(
+        body.includes("app_vision_heal_budget_exhausted_total"),
+        "metrics body missing app_vision_heal_budget_exhausted_total (would break VisionHealBudgetExhausted alert)",
+      );
+      assert.match(body, /app_vision_heal_budget_exhausted_total\{[^}]*projectId="PRJ-OBS-1"[^}]*reason="daily_calls"[^}]*\}\s+1/);
     });
   } finally {
     env.restore();

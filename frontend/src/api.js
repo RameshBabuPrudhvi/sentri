@@ -626,6 +626,20 @@ export const api = {
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
 
+  /**
+   * AUTO-022 — read the per-case breakdown for one AI eval-harness run.
+   * Powers the Dashboard `EvalPanel` drill-down side panel.
+   *
+   * @param {string} runId - UUID minted by `persistEvalRun` when the harness
+   *                         ran with `--persist`.
+   * @returns {Promise<{runId: string, createdAt: string|null, cases: Array<{
+   *   caseId: string, category: string,
+   *   score: { aggregate: number, selectors: number, actions: number, assertions: number },
+   *   expected: string|null, actual: string|null
+   * }>}>}
+   */
+  getEvalRunDetail: (runId) => req("GET", `/dashboard/eval/${runId}`),
+
   // ── Healing Dashboard (CAP-004) ─────────────────────────────────────────────
   /**
    * Self-healing telemetry summary across the current workspace.
@@ -1060,6 +1074,17 @@ export const api = {
   // ── System info & data management ───────────────────────────────────────────
   /** @returns {Promise<Object>} Uptime, Node/Playwright versions, memory, DB counts. */
   getSystemInfo:   () => req("GET",    "/system"),
+  /**
+   * MNT-001 — vision-capable LLM provider availability check. Used by
+   * `VisionHealingPanel` on mount to disable the `pixelmatch_and_llm` radio
+   * (with a tooltip) when no vision-capable model is configured server-side,
+   * rather than waiting for a save-time `VISION_PROVIDER_NOT_CONFIGURED`
+   * error. Backend resolves via `aiProvider.hasVisionProvider()` /
+   * `resolveVisionModel()` (`backend/src/routes/system.js`).
+   *
+   * @returns {Promise<{available: boolean, model: string|null}>}
+   */
+  getVisionProviderStatus: () => req("GET", "/system/vision-provider-status"),
   /** @returns {Promise<{cleared: number}>} Clear all run history. */
   clearRuns:       () => req("DELETE", "/data/runs"),
   // NOTE: `getActivities` is defined once above (in the Test review actions

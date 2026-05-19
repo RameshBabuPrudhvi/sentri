@@ -412,9 +412,14 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
       // persist what we learned from earlier steps.
       if (__testError) {
         __testError.__healingEvents = __healingEvents;
+        // MNT-001 — surface value-intents map alongside healing events so the
+        // host-side vision-heal re-action knows what the test was trying to
+        // write to value-bearing fields (fill verb). See __valueIntents
+        // declaration in selfHealing.js#getSelfHealingHelperCode.
+        __testError.__valueIntents = __valueIntents;
         throw __testError;
       }
-      return { __healingEvents };
+      return { __healingEvents, __valueIntents };
     })();
   `;
 
@@ -424,9 +429,15 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
       { page, context, expect, __captureStep, __beginStep, __requestShim },
       "browser-test.js",
     );
-    return { passed: true, healingEvents: result?.__healingEvents || [], stepCaptures, stepTimings, stepStatuses };
+    return {
+      passed: true,
+      healingEvents: result?.__healingEvents || [],
+      valueIntents: result?.__valueIntents || {},
+      stepCaptures, stepTimings, stepStatuses,
+    };
   } catch (err) {
     err.__healingEvents = err.__healingEvents || [];
+    err.__valueIntents = err.__valueIntents || {};
     err.__stepCaptures = stepCaptures;
     err.__stepTimings = stepTimings;
     // Mark the in-flight step (if any) as failed and stamp its duration so

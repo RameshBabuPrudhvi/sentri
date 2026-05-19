@@ -20,6 +20,19 @@ import { classifyFailure } from "../pipeline/feedbackLoop.js";
 import { getTopFlakyTests } from "../utils/flakyDetector.js";
 import { getQueueStats, isQueueAvailable, runQueue } from "../queue.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { getEvalTrend, getEvalRunCases } from "../eval/evalPersistence.js";
+import { loadGoldens } from "../eval/pipelineEval.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// AUTO-022 — golden-set on-disk source-of-truth for `expected` Playwright
+// code. The drill-down route reads `actual` from `metric_samples` and layers
+// `expected` in from these JSON files so the file stays the canonical
+// definition (eval-baseline.json + the case JSONs are reviewed together in
+// PRs; the DB row only captures what the harness emitted at run time).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const EVAL_GOLDEN_DIR = path.resolve(__dirname, "..", "..", "tests", "fixtures", "eval-goldens");
 
 const router = Router();
 
@@ -382,6 +395,32 @@ router.get("/dashboard", async (req, res) => {
     }
   }
 
+  // ── AUTO-022: AI eval-harness trend (30-day, per-runId aggregation) ─────
+  // Best-effort — the eval harness writes via `--persist` flag which is
+  // opt-in. When no rows exist, `getEvalTrend()` returns `[]` and we surface
+  // `evalTrend: null` so the frontend renders an empty-state hint.
+  //
+  // EVAL_HARNESS_PROJECT_ID is a sentinel projectId — eval rows are NOT
+  // workspace-scoped because the harness runs against a frozen golden set
+  // shared across all tenants. Every workspace sees the same evalTrend.
+  // This is intentional: AUTO-022 measures the AI pipeline's quality, which
+  // is a deployment-wide concern, not a per-tenant one.
+  const EVAL_TREND_WINDOW_DAYS = 30;
+  let evalTrend = null;
+  try {
+    const runs30d = getEvalTrend({ windowDays: EVAL_TREND_WINDOW_DAYS });
+    if (runs30d.length > 0) {
+      evalTrend = {
+        runs: runs30d,
+        latestRunId: runs30d[runs30d.length - 1].runId,
+        windowDays: EVAL_TREND_WINDOW_DAYS,
+      };
+    }
+  } catch (err) {
+    // Best-effort — never let an eval-query failure dark the whole dashboard.
+    console.error(formatLogLine("warn", null, `[dashboard] evalTrend lookup failed: ${err?.message || err}`));
+  }
+
   res.json({
     totalProjects: projects.length,
     totalTests: tests.length,
@@ -408,10 +447,59 @@ router.get("/dashboard", async (req, res) => {
     testsByUrl,
     topAccessibilityOffenders,
     environmentPassRates, // DIF-012 — null when no envs configured
+    evalTrend,            // AUTO-022 — null when no eval rows persisted
   });
   } catch (err) {
     console.error(formatLogLine("error", null, `[dashboard] ${err?.stack || err?.message || err}`));
     return res.status(500).json({ error: "Dashboard data unavailable." });
+  }
+});
+
+/**
+ * AUTO-022 — per-run drill-down for the Dashboard `EvalPanel`.
+ *
+ * Returns the per-case breakdown for one eval run: every case's four
+ * dimension scores, the persisted `actual` Playwright code emitted by the
+ * harness at run time, and the matching `expected` lifted from the on-disk
+ * golden JSON. Cross-tenant by design (eval rows live under the
+ * `__eval_harness__` sentinel, not under any workspace).
+ *
+ * 404 when the runId has no rows in `metric_samples` (or when the harness
+ * ran without `--persist` so no rows were written).
+ */
+router.get("/dashboard/eval/:runId", (req, res) => {
+  try {
+    const detail = getEvalRunCases(req.params.runId);
+    if (!detail) {
+      return res.status(404).json({ error: "Eval run not found." });
+    }
+
+    // Layer `expected` onto each case from the golden JSON on disk. Goldens
+    // are loaded once and indexed so the lookup is O(1) per case.
+    let expectedByCaseId = {};
+    try {
+      const goldens = loadGoldens(EVAL_GOLDEN_DIR);
+      for (const g of goldens) {
+        expectedByCaseId[g.id] = g.expected;
+      }
+    } catch (err) {
+      // Goldens dir missing or unreadable — degrade gracefully. The UI will
+      // show `expected: null` and a hint that the fixtures aren't on this
+      // host (rare; would only happen on a stripped Docker image).
+      console.error(formatLogLine("warn", null, `[dashboard] eval goldens load failed: ${err?.message || err}`));
+    }
+
+    return res.json({
+      runId: detail.runId,
+      createdAt: detail.createdAt,
+      cases: detail.cases.map((c) => ({
+        ...c,
+        expected: expectedByCaseId[c.caseId] ?? null,
+      })),
+    });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[dashboard] eval/:runId ${err?.stack || err?.message || err}`));
+    return res.status(500).json({ error: "Eval run detail unavailable." });
   }
 });
 

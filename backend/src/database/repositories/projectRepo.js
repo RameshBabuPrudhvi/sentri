@@ -25,6 +25,9 @@ function rowToProject(row) {
     iterationCap: row.iterationCap,
     strictPiiFirewall: row.strictPiiFirewall === 1,
     piiAllowlist: row.piiAllowlist ? JSON.parse(row.piiAllowlist) : [],
+    visionHealing: row.visionHealing || 'off',
+    visionHealMaxCallsPerDay: row.visionHealMaxCallsPerDay ?? 100,
+    visionHealMaxCostUsdPerMonth: row.visionHealMaxCostUsdPerMonth ?? 50,
   };
 }
 
@@ -48,6 +51,9 @@ function projectToRow(p) {
     // migration's intent. Only an explicit `false` opts out.
     strictPiiFirewall: p.strictPiiFirewall === false ? 0 : 1,
     piiAllowlist: p.piiAllowlist ? JSON.stringify(p.piiAllowlist) : null,
+    visionHealing: p.visionHealing || 'off',
+    visionHealMaxCallsPerDay: p.visionHealMaxCallsPerDay ?? 100,
+    visionHealMaxCostUsdPerMonth: p.visionHealMaxCostUsdPerMonth ?? 50,
   };
 }
 
@@ -109,8 +115,8 @@ export function create(project) {
   const row = projectToRow(project);
   row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist)
-    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist)
+    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth)
+    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth)
   `).run(row);
 }
 
@@ -121,7 +127,7 @@ export function create(project) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist"];
+  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {

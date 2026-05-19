@@ -43,6 +43,7 @@ import {
   aiProviderLatencySeconds,
   aiProviderTokensTotal,
   aiProviderErrorsTotal,
+  aiProviderCostUsdTotal,
   classifyAiError,
 } from "./utils/metrics.js";
 
@@ -1035,13 +1036,17 @@ function getFallbackProviders(primaryProvider) {
  * `res.usage`, `result.response.usageMetadata`, etc).
  */
 async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat) {
+  // All call sites in this file are test-generation traffic. Vision-heal
+  // calls live in `callVisionModel` below and pass `operation: "vision_heal"`
+  // to the same metric counters directly.
+  const operation = "generation";
   const label = providerMetricLabel(provider);
   const startedAt = process.hrtime.bigint();
   try {
     const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat);
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      aiProviderLatencySeconds.observe({ provider: label, outcome: "success" }, seconds);
+      aiProviderLatencySeconds.observe({ provider: label, outcome: "success", operation }, seconds);
     } catch { /* best-effort */ }
     return result;
   } catch (err) {
@@ -1049,34 +1054,43 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: label, outcome }, seconds);
-      aiProviderErrorsTotal.inc({ provider: label, reason });
+      aiProviderLatencySeconds.observe({ provider: label, outcome, operation }, seconds);
+      aiProviderErrorsTotal.inc({ provider: label, reason, operation });
     } catch { /* best-effort */ }
     throw err;
   }
 }
 
 /**
- * Record token usage from a provider response, bucketed by `kind`. Each
- * provider's SDK exposes usage on a different shape; the caller passes the
- * normalised `{ input, output }` counts. Per-1k token cost varies by provider
- * and model, so the dashboard layer multiplies these counters by a pricing
- * lookup to compute spend.
+ * Record token usage from a provider response, bucketed by `kind` +
+ * `operation`. Each provider's SDK exposes usage on a different shape;
+ * the caller passes the normalised `{ input, output }` counts plus the
+ * surface that made the call:
+ *
+ *   - `"generation"` — test-generation pipeline (default for every
+ *     call site in this file's generateText / streamText paths).
+ *   - `"vision_heal"` — MNT-001 stage-8 vision-healing path. Bucketed
+ *     separately so SaaS unit-economics dashboards can attribute spend
+ *     to the healing surface vs. core test generation.
+ *
+ * Per-1k token cost varies by provider and model, so the dashboard layer
+ * multiplies these counters by a pricing lookup to compute spend.
  *
  * @param {string} provider - Detected provider id (used as label after normalisation).
  * @param {object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
+ * @param {"generation"|"vision_heal"} [operation="generation"] - Which surface initiated the call.
  */
-function recordAiTokens(provider, usage) {
+function recordAiTokens(provider, usage, operation = "generation") {
   if (!usage) return;
   const label = providerMetricLabel(provider);
   try {
     const inTokens = Number(usage.input);
     if (Number.isFinite(inTokens) && inTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, kind: "input" }, inTokens);
+      aiProviderTokensTotal.inc({ provider: label, kind: "input", operation }, inTokens);
     }
     const outTokens = Number(usage.output);
     if (Number.isFinite(outTokens) && outTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, kind: "output" }, outTokens);
+      aiProviderTokensTotal.inc({ provider: label, kind: "output", operation }, outTokens);
     }
   } catch { /* best-effort */ }
 }
@@ -1341,6 +1355,243 @@ export async function generateText(prompt, options) {
     // All fallbacks exhausted — throw the original error
     throw err;
   }
+}
+
+// ─── MNT-001 — Vision (multimodal) provider abstraction ─────────────────────
+// Whitelist of vision-capable model identifiers. An explicit VISION_MODEL
+// env var bypasses the whitelist (operator opt-in). Conservative on purpose:
+// sending an image payload to a non-vision model silently degrades to
+// ignoring the image, which would produce false-positive healing "matches"
+// against random page regions.
+const VISION_CAPABLE_MODELS = new Set([
+  "claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620",
+  "claude-3-opus-20240229", "claude-sonnet-4-20250514",
+  "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4-vision-preview",
+  "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-flash",
+]);
+
+/**
+ * Resolve which vision-capable model to use, or `null` when none is
+ * configured. Used by stage 8 of the MNT-001 healing waterfall and by
+ * `PATCH /projects/:id` to reject `pixelmatch_and_llm` mode with
+ * `VISION_PROVIDER_NOT_CONFIGURED` when no usable model exists.
+ *
+ * Resolution order:
+ *   1. `VISION_MODEL` env var (explicit override, no whitelist check).
+ *   2. `AI_MODEL` env var if it's in `VISION_CAPABLE_MODELS`.
+ *   3. The active provider's default model if vision-capable.
+ *   4. `null`.
+ *
+ * @returns {string|null}
+ */
+export function resolveVisionModel() {
+  if (process.env.VISION_MODEL) return process.env.VISION_MODEL;
+  if (process.env.AI_MODEL && VISION_CAPABLE_MODELS.has(process.env.AI_MODEL)) return process.env.AI_MODEL;
+  const provider = getProvider();
+  if (!provider) return null;
+  const meta = getProviderMeta();
+  if (meta?.model && VISION_CAPABLE_MODELS.has(meta.model)) return meta.model;
+  return null;
+}
+
+/**
+ * Whether a vision-capable provider is configured server-side. Used by
+ * the project route validator (MNT-001) to gate `pixelmatch_and_llm`.
+ *
+ * @returns {boolean}
+ */
+export function hasVisionProvider() {
+  return resolveVisionModel() !== null;
+}
+
+/**
+ * MNT-001 — multimodal LLM call for vision-based locator healing (stage 8).
+ *
+ * Sends a screenshot + intent prompt to a vision-capable LLM and expects
+ * strict JSON describing where the broken element is now located. On any
+ * failure (rate limit, provider error, non-JSON response, sub-threshold
+ * confidence) returns `null` so the caller falls through to "no heal".
+ *
+ * Per-provider multimodal request shapes:
+ *   - Anthropic: `content: [{type:"image", source:{...}}, {type:"text"}]`
+ *   - OpenAI / OpenRouter / compat: `content: [{type:"text"}, {type:"image_url"}]`
+ *   - Google Gemini: `parts: [{text}, {inlineData:{mimeType, data}}]`
+ *
+ * Cost is a rough estimate (input × $5/M + output × $15/M) — proper
+ * per-model pricing is MNT-001b territory. The budget circuit-breaker
+ * only needs *some* signal to enforce caps; it does not need accuracy.
+ *
+ * ### Cancellation (`signal`) caveat
+ * The `signal` parameter cancels in-flight Anthropic and OpenAI / OpenRouter /
+ * compat calls — both SDKs accept `{ signal }` as the second argument to
+ * `messages.create()` / `chat.completions.create()`.
+ *
+ * **Google Gemini calls are NOT cancellable.** The `@google/generative-ai`
+ * SDK's `generateContent()` does not accept an options bag with `signal` —
+ * the value passed at the Gemini branch below is silently ignored by the
+ * SDK. An aborted vision-heal request against Gemini will still wait for
+ * the full LLM response before resolving. The wider codebase has the same
+ * limitation on the non-vision Gemini path (`_callProviderUnsafe`'s Google
+ * branch) — fixing it consistently is tracked as a follow-up. Operators who
+ * need hard cancellation on Gemini should wrap the call site in a
+ * `Promise.race` against a signal-driven rejection.
+ *
+ * @param {Object} params
+ * @param {Buffer} params.screenshot     - PNG buffer of the failure viewport.
+ * @param {Object} params.intent         - `{ action, label }`.
+ * @param {string} [params.contextHtml]  - Last-known DOM context for the broken locator.
+ * @param {AbortSignal} [params.signal]  - Honoured on Anthropic + OpenAI shapes;
+ *   silently ignored on Google Gemini due to SDK limitation (see § Cancellation caveat).
+ * @returns {Promise<{confidence: number, box: ({x,y,width,height}|null), model: string, costUsd: number, reasoning: string|null}|null>}
+ */
+export async function callVisionModel({ screenshot, intent, contextHtml, signal } = {}) {
+  if (!screenshot || !intent?.label) return null;
+  const model = resolveVisionModel();
+  if (!model) return null;
+  const provider = getProvider();
+  if (!provider) return null;
+
+  // MNT-001b — observe latency + errors per AC #4. Histogram observation
+  // happens in both branches below (success after the parsed-confidence
+  // check, error in the catch). Lives outside the try/catch so the start
+  // timestamp is captured even if the prompt build throws.
+  const metricLabel = providerMetricLabel(provider);
+  const startedAt = process.hrtime.bigint();
+
+  const userPrompt =
+    `A web-test locator has broken. The target action was \`${intent.action}\` on the element ` +
+    `labelled "${intent.label}". The attached screenshot is the current page viewport. ` +
+    `Locate the element visually and respond with strict JSON only:\n\n` +
+    `{"x":number,"y":number,"width":number,"height":number,"confidence":number,"reasoning":string}\n\n` +
+    `Coordinates are viewport pixels. \`confidence\` is in [0, 1]. ` +
+    `If you cannot locate the element, return {"confidence":0,"reasoning":"<why>"}.` +
+    (contextHtml ? `\n\nLast-known DOM context:\n${String(contextHtml).slice(0, 800)}` : "");
+
+  const base64 = screenshot.toString("base64");
+  const dataUrl = `data:image/png;base64,${base64}`;
+
+  let raw = "";
+  let usage = null;
+  try {
+    if (provider === "anthropic") {
+      const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
+      const msg = await client.messages.create({
+        model, max_tokens: 512,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/png", data: base64 } },
+            { type: "text", text: userPrompt },
+          ],
+        }],
+      }, { signal });
+      raw = msg.content?.[0]?.text || "";
+      usage = { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens };
+    } else if (provider === "openai" || provider === "openrouter" || isCompatProvider(provider)) {
+      let client;
+      if (provider === "openai") {
+        client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
+      } else if (provider === "openrouter") {
+        client = new OpenAI({ apiKey: getKey("OPENROUTER_API_KEY"), baseURL: OPENROUTER_BASE_URL });
+      } else {
+        const compat = getCompatConfig(provider);
+        client = new OpenAI({ apiKey: compat?.apiKey, baseURL: compat?.baseUrl, fetch: createSsrfGuardedFetch() });
+      }
+      const res = await client.chat.completions.create({
+        model, max_tokens: 512,
+        response_format: { type: "json_object" },
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: userPrompt },
+            { type: "image_url", image_url: { url: dataUrl } },
+          ],
+        }],
+      }, { signal });
+      raw = res.choices?.[0]?.message?.content || "";
+      usage = { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens };
+    } else if (provider === "google") {
+      const genAI = new GoogleGenerativeAI(getKey("GOOGLE_API_KEY"));
+      const m = genAI.getGenerativeModel({
+        model,
+        generationConfig: { maxOutputTokens: 512, responseMimeType: "application/json" },
+      });
+      // NOTE: `signal` is intentionally NOT passed here — the
+      // @google/generative-ai SDK's `generateContent()` does not accept an
+      // options bag, so any second argument is silently ignored. Passing
+      // `{ signal }` would create the false impression of cancellation
+      // support. See the § Cancellation caveat in the function JSDoc above.
+      const result = await m.generateContent({
+        contents: [{
+          role: "user",
+          parts: [
+            { text: userPrompt },
+            { inlineData: { mimeType: "image/png", data: base64 } },
+          ],
+        }],
+      });
+      raw = result.response.text();
+      const um = result?.response?.usageMetadata;
+      usage = { input: um?.promptTokenCount, output: um?.candidatesTokenCount };
+    } else {
+      return null; // local / unknown provider — no multimodal support
+    }
+  } catch (err) {
+    // MNT-001b — emit error/latency telemetry on provider failure. We
+    // intentionally don't rethrow: the caller (`tryVisionHeal`) treats
+    // any failure as a "no heal" so the test stays broken instead of
+    // being caused to fail by the heal attempt itself.
+    try {
+      const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
+      const reason = classifyAiError(err);
+      const outcome = reason === "rate_limit" ? "rate_limited" : "error";
+      aiProviderLatencySeconds.observe({ provider: metricLabel, outcome, operation: "vision_heal" }, seconds);
+      aiProviderErrorsTotal.inc({ provider: metricLabel, reason, operation: "vision_heal" });
+    } catch { /* best-effort */ }
+    return null;
+  }
+
+  if (usage) {
+    try { recordAiTokens(provider, usage, "vision_heal"); } catch { /* best-effort */ }
+  }
+
+  let parsed;
+  try { parsed = parseJSON(raw); } catch { return null; }
+
+  const confidence = Number(parsed?.confidence);
+  if (!Number.isFinite(confidence) || confidence <= 0) return null;
+
+  const x = Number(parsed?.x), y = Number(parsed?.y);
+  const width = Number(parsed?.width), height = Number(parsed?.height);
+  const box = (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height))
+    ? { x, y, width, height }
+    : null;
+
+  const inK = (Number(usage?.input) || 0) / 1_000_000;
+  const outK = (Number(usage?.output) || 0) / 1_000_000;
+  const costUsd = inK * 5 + outK * 15;
+
+  // MNT-001b — success-path latency + cost telemetry. Cost is an estimate
+  // ($5/M input + $15/M output midpoint, matching the per-call estimate
+  // returned to the caller). Per-model accurate pricing is a future
+  // enhancement — the budget circuit-breaker only needs *some* signal,
+  // and the midpoint estimate errs conservative (caps fire slightly
+  // earlier than true spend would warrant).
+  try {
+    const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
+    aiProviderLatencySeconds.observe({ provider: metricLabel, outcome: "success", operation: "vision_heal" }, seconds);
+    if (Number.isFinite(costUsd) && costUsd > 0) {
+      aiProviderCostUsdTotal.inc({ provider: metricLabel, operation: "vision_heal" }, costUsd);
+    }
+  } catch { /* best-effort */ }
+
+  return {
+    confidence: Math.min(1, Math.max(0, confidence)),
+    box,
+    model,
+    costUsd,
+    reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null,
+  };
 }
 
 /**

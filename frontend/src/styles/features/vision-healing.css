@@ -1,0 +1,87 @@
+/**
+ * features/vision-healing.css — Vision Healing panel (MNT-001)
+ *
+ * Styles for `frontend/src/components/healing/VisionHealPanel.jsx`. All
+ * classes are namespaced under `.vh-*` per STANDARDS.md § Frontend Styling.
+ * The panel lives on the Healing dashboard and renders either a zero-state
+ * explainer card or a 3-up stat grid with audit-log deep-link.
+ *
+ * Per AGENT.md `:127`, the original component used inline `style={{...}}`
+ * objects — those have been extracted here so the component file stays
+ * JSX-only and theme tokens (`--text2`, `--amber`, `--border`) can be tuned
+ * without touching the React source.
+ *
+ * Note: the original inline styles referenced `var(--text-secondary)` which
+ * is **not** a defined token in `tokens.css` (the repo uses `--text2` for
+ * secondary text and `--text3` for tertiary / muted). The fallback was
+ * silently inheriting `currentColor`, so the muted labels rendered the
+ * same colour as their parent — a latent visual bug carried over from
+ * the original PR. Fixed here by switching to `var(--text2)`.
+ */
+
+.vh-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.vh-panel-title {
+  margin: 0;
+}
+
+.vh-icon {
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.vh-empty-hint {
+  color: var(--text2);
+  margin-top: 8px;
+}
+
+.vh-audit-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+}
+
+.vh-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.vh-stat-label {
+  color: var(--text2);
+}
+
+.vh-stat-value {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.vh-strategy-row {
+  font-size: 14px;
+  margin-top: 6px;
+}
+
+.vh-strategy-sep {
+  color: var(--text2);
+  margin: 0 6px;
+}
+
+.vh-strategy-warn {
+  margin-left: 6px;
+  vertical-align: middle;
+  color: var(--amber, #d97706);
+}
+
+/* Responsive — stack to 1 column under narrow viewports so the three stat
+ * tiles don't crush their labels. Matches the AAP pattern in dashboard.css. */
+@media (max-width: 640px) {
+  .vh-stat-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -13,6 +13,7 @@ import StatCard from "../components/shared/StatCard.jsx";
 import PassFailChart from "../components/charts/PassFailChart.jsx";
 import SparklineChart from "../components/charts/SparklineChart.jsx";
 import StackedBar from "../components/charts/StackedBar.jsx";
+import EvalPanel from "../components/dashboard/EvalPanel.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -374,6 +375,9 @@ export default function Dashboard() {
               </table>
             </div>
           )}
+
+          {/* ── AUTO-022: AI eval-harness trend + drill-down ── */}
+          <EvalPanel evalTrend={data?.evalTrend ?? null} />
 
           {(data?.topAccessibilityOffenders?.length ?? 0) > 0 && (
             <div className="card card-padded mb-md">
