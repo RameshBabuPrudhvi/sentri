@@ -42,6 +42,7 @@ import { finalizeRunIfNotAborted } from "../utils/abortHelper.js";
 import { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } from "../testRunner.js";
 import { clusterFailures } from "../pipeline/failureClusterer.js"; // AUTO-010 — sharded-run parity with single-process tail in testRunner.js
 import { finalizeCoverage } from "../pipeline/finalizeCoverage.js"; // AUTO-009f — sharded-run parity for coverage aggregation (previously every multi-shard run with coverageEnabled persisted coverageSummary: null).
+import { detectCoverageRegression, fireCoverageRegressionAlert } from "../pipeline/coverageRegressionDetector.js"; // AUTO-009i — sharded-run parity for coverage regression alerting.
 import { trackTelemetry } from "../utils/telemetry.js";
 import { safeFetch } from "../utils/ssrfGuard.js"; // CAP-002 Phase 2 — trigger-path callbackUrl POST from sharded finalizer.
 
@@ -731,6 +732,16 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
       }
     } catch { /* best-effort — null prior degrades cleanly */ }
   }
+
+  // AUTO-009i — coverage regression alerting on sharded runs (parity with
+  // the single-process path in testRunner.js). Fires AFTER priorRunCoverage
+  // is resolved and BEFORE gate evaluation. Best-effort — same contract as
+  // `fireNotifications`.
+  try {
+    const regression = detectCoverageRegression(run.coverageSummary, priorRunCoverage, project);
+    if (regression) await fireCoverageRegressionAlert(regression, run, project);
+  } catch { /* best-effort — regression alert failure must never block finalize */ }
+
   run.gateResult = __evaluateQualityGatesForTest(project.qualityGates, run, { priorRunCoverage });
 
   // Persist aggregates BEFORE the feedback loop so a feedback-loop crash

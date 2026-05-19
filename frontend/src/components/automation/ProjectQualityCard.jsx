@@ -58,11 +58,24 @@ const INNER_TABS = [
 function CoveragePanel({ project, canEdit, onToast }) {
   const [enabled, setEnabled] = useState(!!project.coverageEnabled);
   const [sourcemapBaseUrl, setSourcemapBaseUrl] = useState(project.sourcemapBaseUrl || "");
+  const [regressionThreshold, setRegressionThreshold] = useState(
+    project.coverageRegressionThresholdPct != null ? String(project.coverageRegressionThresholdPct) : "",
+  );
   const [saving, setSaving] = useState(false);
   const save = async () => {
+    const trimmedThreshold = regressionThreshold.trim();
+    const thresholdVal = trimmedThreshold === "" ? null : Number(trimmedThreshold);
+    if (thresholdVal !== null && (!Number.isFinite(thresholdVal) || thresholdVal < 0 || thresholdVal > 100)) {
+      onToast?.({ type: "error", message: "Regression alert threshold must be empty (disabled) or a number between 0 and 100." });
+      return;
+    }
     setSaving(true);
     try {
-      await api.updateProject(project.id, { coverageEnabled: enabled, sourcemapBaseUrl: sourcemapBaseUrl.trim() || null });
+      await api.updateProject(project.id, {
+        coverageEnabled: enabled,
+        sourcemapBaseUrl: sourcemapBaseUrl.trim() || null,
+        coverageRegressionThresholdPct: thresholdVal,
+      });
       onToast?.({ type: "success", message: "Coverage settings saved." });
     } catch (err) {
       onToast?.({ type: "error", message: err?.message || "Failed to save coverage settings." });
@@ -77,6 +90,27 @@ function CoveragePanel({ project, canEdit, onToast }) {
         {" "}Enable browser JS coverage capture
       </label>
       <input className="aap-input" placeholder="Optional source-map base URL" value={sourcemapBaseUrl} onChange={(e) => setSourcemapBaseUrl(e.target.value)} disabled={!canEdit || saving} />
+      <div className="aap-section">
+        <label className="aap-field-label">
+          Regression alert threshold (%) — leave empty to disable
+        </label>
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="0.1"
+          className="aap-input"
+          placeholder="e.g. 5"
+          value={regressionThreshold}
+          onChange={(e) => setRegressionThreshold(e.target.value)}
+          disabled={!canEdit || saving}
+        />
+        <div className="aap-stats aap-stats--hint">
+          Fires a Teams / email / webhook notification when coverage drops more than
+          this percentage vs. the prior run. Does NOT fail the run — use Quality Gates
+          → Max coverage regression for that. Example: 5 alerts on any drop &gt; 5%.
+        </div>
+      </div>
       <button className="btn btn-primary btn-sm" onClick={save} disabled={!canEdit || saving}>{saving ? "Saving…" : "Save"}</button>
     </div>
   );
