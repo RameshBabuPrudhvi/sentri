@@ -1218,6 +1218,35 @@ export function restore(id) {
  * @param {string} deletedAfter — ISO timestamp (inclusive lower bound).
  * @returns {number} Number of runs restored.
  */
+/**
+ * AUTO-009j — Retention sweep: null out `coverageSummary` and
+ * `prCoverageDiff` on runs older than `days` days. Preserves the
+ * lightweight `coveragePct` in the dashboard trend via
+ * `getRunsWithCoverage` (which reads the column before this sweep
+ * clears it — the trend query's `IS NOT NULL` filter means cleared
+ * rows drop out of the trend naturally on the next dashboard load).
+ *
+ * Returns the number of rows cleared. Best-effort — a failure must
+ * never block the scheduler.
+ *
+ * @param {number} days
+ * @returns {number}
+ */
+export function purgeCoverageSummaryOlderThan(days) {
+  if (!Number.isFinite(days) || days <= 0) return 0;
+  const db = getDatabase();
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const info = db.prepare(
+    `UPDATE runs
+        SET coverageSummary = NULL,
+            prCoverageDiff = NULL
+      WHERE coverageSummary IS NOT NULL
+        AND startedAt < ?
+        AND deletedAt IS NULL`
+  ).run(cutoff);
+  return info.changes || 0;
+}
+
 export function restoreByProjectIdAfter(projectId, deletedAfter) {
   const db = getDatabase();
   const info = db.prepare(
