@@ -192,7 +192,7 @@ export function computePrCoverage({
  */
 export function renderPrCoverageMd(prDiff) {
   if (!prDiff || typeof prDiff !== "object") return "";
-  if (prDiff.filesAnalyzed === 0 && prDiff.prTotalLines === 0) return "";
+  if (!prDiff.filesAnalyzed && !prDiff.prTotalLines) return "";
 
   const pct = Math.round((prDiff.prCoveragePct || 0) * 100);
   const out = [
