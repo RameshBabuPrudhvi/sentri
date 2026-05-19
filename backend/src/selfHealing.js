@@ -308,6 +308,13 @@ export function getSelfHealingHelperCode(healingHints) {
     const __healingHints = ${hintsJSON};
     // Accumulates healing events during this run for the runner to persist.
     const __healingEvents = [];
+    // MNT-001 — value-intent map keyed by "<action>::<label>". When a vision
+    // heal succeeds on a value-bearing verb (fill / check / uncheck / select),
+    // the host-side coordinate re-action needs to know WHAT the test was
+    // trying to write. The sandboxed safe* helpers populate this on entry so
+    // the value survives the test throwing later in the same retry attempt.
+    // The host reads it via `err.__valueIntents` in executeTest.js.
+    const __valueIntents = {};
 
     // pierce: selector prefix — used for elements discovered inside shadow roots.
     // Playwright's CSS engine supports ">>" to pierce shadow DOM, and its built-in
@@ -671,6 +678,12 @@ export function getSelfHealingHelperCode(healingHints) {
         ];
 
       const healingKey = 'fill::' + labelOrPlaceholder;
+      // MNT-001 — record the intended value BEFORE attempting the fill so a
+      // throw inside the retry loop still leaves the value reachable by the
+      // host-side vision-heal re-action path. Last-write-wins is fine: if the
+      // test re-fills the same field with a different value, the later
+      // intent reflects what the test actually wanted at failure time.
+      __valueIntents[healingKey] = { value: strValue };
 
       await retry(async () => {
         // Re-resolve on every attempt so a DOM re-render (common in SPAs)
