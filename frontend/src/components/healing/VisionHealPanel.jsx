@@ -43,10 +43,10 @@ export default function VisionHealPanel({
     return (
       <div className="card card-padded mb-lg" data-testid="vision-heal-panel-empty">
         <h2 className="section-title">
-          <Eye size={14} style={{ verticalAlign: "middle", marginRight: 6 }} aria-hidden />
+          <Eye size={14} className="vh-icon" aria-hidden />
           Vision-based healing
         </h2>
-        <p className="text-sm" style={{ color: "var(--text-secondary)", marginTop: 8 }}>
+        <p className="text-sm vh-empty-hint">
           No vision heals recorded yet. Vision healing fires only when every
           DOM-based selector strategy fails — a sign of major UI redesigns
           or selector breakage. Configure per-project in{" "}
@@ -72,50 +72,42 @@ export default function VisionHealPanel({
 
   return (
     <div className="card card-padded mb-lg" data-testid="vision-heal-panel">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h2 className="section-title" style={{ margin: 0 }}>
-          <Eye size={14} style={{ verticalAlign: "middle", marginRight: 6 }} aria-hidden />
+      <div className="vh-panel-header">
+        <h2 className="section-title vh-panel-title">
+          <Eye size={14} className="vh-icon" aria-hidden />
           Vision-based healing
         </h2>
         <a
           href={auditHref}
-          className="text-sm"
-          style={{ display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "none" }}
+          className="text-sm vh-audit-link"
           title="Open the audit log filtered to vision-heal events"
         >
           Audit log <ExternalLink size={12} aria-hidden />
         </a>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 16,
-          marginTop: 16,
-        }}
-      >
+      <div className="vh-stat-grid">
         <div>
-          <div className="text-xs" style={{ color: "var(--text-secondary)" }}>Total heals</div>
-          <div style={{ fontSize: 24, fontWeight: 600 }}>{count}</div>
+          <div className="text-xs vh-stat-label">Total heals</div>
+          <div className="vh-stat-value">{count}</div>
         </div>
         <div>
-          <div className="text-xs" style={{ color: "var(--text-secondary)" }}>LLM spend</div>
-          <div style={{ fontSize: 24, fontWeight: 600 }}>
+          <div className="text-xs vh-stat-label">LLM spend</div>
+          <div className="vh-stat-value">
             ${Number(costUsd || 0).toFixed(2)}
           </div>
         </div>
         <div>
-          <div className="text-xs" style={{ color: "var(--text-secondary)" }}>Strategy split</div>
-          <div style={{ fontSize: 14, marginTop: 6 }}>
+          <div className="text-xs vh-stat-label">Strategy split</div>
+          <div className="vh-strategy-row">
             <span title="Free CV-based heals (stage 7)">{pixelmatchCount} pixelmatch</span>
-            <span style={{ color: "var(--text-secondary)", margin: "0 6px" }}>·</span>
+            <span className="vh-strategy-sep">·</span>
             <span title="Paid LLM-vision heals (stage 8)">{llmCount} LLM</span>
             {showLlmShareWarning && (
               <AlertTriangle
                 size={14}
                 aria-label="LLM share over 50% — consider raising the pixelmatch confidence threshold or capturing more baselines"
-                style={{ marginLeft: 6, verticalAlign: "middle", color: "var(--amber, #d97706)" }}
+                className="vh-strategy-warn"
               />
             )}
           </div>

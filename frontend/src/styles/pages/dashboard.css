@@ -45,6 +45,13 @@
 /* AI Eval panel (AUTO-022) — 4-column trend grid + drill-down side panel.
    The trend cards themselves come from <TrendChart>; these rules only style
    the layout grid and the latest-run / drill-down rows. */
+/* Inline title used inside `.flex-center` — `.section-title`'s default
+ * margin-bottom would push the trailing meta-chip below the icon, so we
+ * zero it out only when the title appears alongside the eval icon. */
+.dash-eval-title {
+  margin-bottom: 0;
+}
+
 .dash-eval-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

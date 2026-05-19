@@ -75,7 +75,7 @@ export default function EvalPanel({ evalTrend }) {
       <div className="flex-between mb-md">
         <div className="flex-center gap-sm">
           <Activity size={14} color="var(--accent)" />
-          <span className="section-title" style={{ marginBottom: 0 }}>AI Eval Quality</span>
+          <span className="section-title dash-eval-title">AI Eval Quality</span>
         </div>
         <span className="text-xs text-muted">
           {runs.length} run{runs.length !== 1 ? "s" : ""} · last {evalTrend.windowDays} days

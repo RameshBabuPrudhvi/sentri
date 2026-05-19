@@ -486,7 +486,7 @@ function VisionHealingPanel({ project, canEdit, onToast }) {
           Stage 7 (pixelmatch) is deterministic and free. Stage 8 (LLM vision)
           is paid; both per-project caps below soft-disable it when exceeded.
         </div>
-        <div className="aap-field-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+        <div className="aap-field-row aap-field-row--column">
           <label className="aap-toggle-label">
             <input
               type="radio"
@@ -519,7 +519,7 @@ function VisionHealingPanel({ project, canEdit, onToast }) {
               disabled={!canEdit || saving || !llmAvailable}
             />
             Pixelmatch + LLM — paid; bounded by caps below
-            {!llmAvailable && <span className="aap-stats" style={{ marginLeft: 6, opacity: 0.7 }}>(provider not configured)</span>}
+            {!llmAvailable && <span className="aap-stats aap-stats--muted">(provider not configured)</span>}
           </label>
         </div>
       </div>
