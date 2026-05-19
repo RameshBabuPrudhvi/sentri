@@ -3,9 +3,9 @@
  * @description MNT-001b — per-project budget counters enforced by
  * `tryVisionHeal` stage 8.
  *
- * Two windows per project:
- *   - day   — `calls`   vs `project.visionHealMaxCallsPerDay`
- *   - month — `costUsd` vs `project.visionHealMaxCostUsdPerMonth`
+ * Two windows per project (LLM-only — pixelmatch heals are free and NOT counted):
+ *   - day   — LLM `calls`   vs `project.visionHealMaxCallsPerDay`
+ *   - month — LLM `costUsd` vs `project.visionHealMaxCostUsdPerMonth`
  *
  * Schema (`vision_budget_counters`): one row per (projectId, windowKind,
  * windowKey). The `windowKind` column is the discriminator ('day' | 'month')
@@ -50,17 +50,23 @@ export function monthKey(now = new Date()) {
 }
 
 /**
- * Record a single vision-heal LLM call against the project's budget.
+ * Record a single vision-heal **LLM** call against the project's budget.
  * Increments both the daily call counter and the monthly cost counter
  * in one transaction so the two buckets stay consistent.
  *
- * Stage-7 (pixelmatch) heals pass `costUsd=0` — the daily-call counter
- * still ticks (so "how many heal attempts hit the LLM path" stays
- * accurate for telemetry) but the monthly-cost counter stays put. Stage-8
- * (LLM) passes the per-call cost estimate from `callVisionModel`.
+ * **Scope:** only stage-8 (LLM vision) calls. Stage-7 (pixelmatch) heals
+ * are free CPU and not counted — the per-project caps
+ * (`visionHealMaxCallsPerDay`, `visionHealMaxCostUsdPerMonth`) exist solely
+ * to bound LLM provider spend, so counting pixelmatch attempts would
+ * inflate the gauge without improving cost control. The only caller is the
+ * `if (heal.kind === "vision_llm")` branch in `executeTest.js`.
+ *
+ * If a future feature needs total-attempt telemetry (vs LLM-only spend
+ * tracking), expose a separate counter or a new repo method — do not
+ * widen this one without auditing every dashboard that reads `dailyCalls`.
  *
  * @param {string} projectId
- * @param {number} [costUsd=0]  Cost of this single call.
+ * @param {number} [costUsd=0]  Cost of this single call (USD).
  * @param {Date}   [now]        Override for tests; default `new Date()`.
  */
 export function record(projectId, costUsd = 0, now = new Date()) {

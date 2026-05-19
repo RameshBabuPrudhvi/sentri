@@ -1421,11 +1421,27 @@ export function hasVisionProvider() {
  * per-model pricing is MNT-001b territory. The budget circuit-breaker
  * only needs *some* signal to enforce caps; it does not need accuracy.
  *
+ * ### Cancellation (`signal`) caveat
+ * The `signal` parameter cancels in-flight Anthropic and OpenAI / OpenRouter /
+ * compat calls — both SDKs accept `{ signal }` as the second argument to
+ * `messages.create()` / `chat.completions.create()`.
+ *
+ * **Google Gemini calls are NOT cancellable.** The `@google/generative-ai`
+ * SDK's `generateContent()` does not accept an options bag with `signal` —
+ * the value passed at the Gemini branch below is silently ignored by the
+ * SDK. An aborted vision-heal request against Gemini will still wait for
+ * the full LLM response before resolving. The wider codebase has the same
+ * limitation on the non-vision Gemini path (`_callProviderUnsafe`'s Google
+ * branch) — fixing it consistently is tracked as a follow-up. Operators who
+ * need hard cancellation on Gemini should wrap the call site in a
+ * `Promise.race` against a signal-driven rejection.
+ *
  * @param {Object} params
  * @param {Buffer} params.screenshot     - PNG buffer of the failure viewport.
  * @param {Object} params.intent         - `{ action, label }`.
  * @param {string} [params.contextHtml]  - Last-known DOM context for the broken locator.
- * @param {AbortSignal} [params.signal]
+ * @param {AbortSignal} [params.signal]  - Honoured on Anthropic + OpenAI shapes;
+ *   silently ignored on Google Gemini due to SDK limitation (see § Cancellation caveat).
  * @returns {Promise<{confidence: number, box: ({x,y,width,height}|null), model: string, costUsd: number, reasoning: string|null}|null>}
  */
 export async function callVisionModel({ screenshot, intent, contextHtml, signal } = {}) {
@@ -1500,6 +1516,11 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal 
         model,
         generationConfig: { maxOutputTokens: 512, responseMimeType: "application/json" },
       });
+      // NOTE: `signal` is intentionally NOT passed here — the
+      // @google/generative-ai SDK's `generateContent()` does not accept an
+      // options bag, so any second argument is silently ignored. Passing
+      // `{ signal }` would create the false impression of cancellation
+      // support. See the § Cancellation caveat in the function JSDoc above.
       const result = await m.generateContent({
         contents: [{
           role: "user",
@@ -1508,7 +1529,7 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal 
             { inlineData: { mimeType: "image/png", data: base64 } },
           ],
         }],
-      }, { signal });
+      });
       raw = result.response.text();
       const um = result?.response?.usageMetadata;
       usage = { input: um?.promptTokenCount, output: um?.candidatesTokenCount };
