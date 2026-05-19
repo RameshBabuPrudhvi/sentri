@@ -14,12 +14,19 @@
  * Follows REVIEW.md house style: direct `node:assert/strict`, no
  * `node:test` framework import.
  */
+import assert from "node:assert/strict";
+
+// ESM `import` statements are hoisted above top-level code, so
+// `process.env.COVERAGE_MEMORY_CEILING_MB = "1"` at module scope would
+// happen AFTER `finalizeCoverage.js` had already captured the default
+// 500MB. Use dynamic `await import()` inside main() after the env is set
+// so the module's module-level const reads the test override.
 process.env.COVERAGE_MEMORY_CEILING_MB = "1";
 
-import assert from "node:assert/strict";
-import { finalizeCoverage, __COVERAGE_MEMORY_CEILING_BYTES_FOR_TEST } from "../src/pipeline/finalizeCoverage.js";
-
 async function main() {
+  const { finalizeCoverage, __COVERAGE_MEMORY_CEILING_BYTES_FOR_TEST } =
+    await import("../src/pipeline/finalizeCoverage.js");
+
   // Sanity-check that the env-tunable ceiling actually took effect at
   // module load time. If it didn't, the rest of the assertions could
   // false-positive against the default 500MB.
