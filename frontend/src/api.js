@@ -1074,6 +1074,17 @@ export const api = {
   // ── System info & data management ───────────────────────────────────────────
   /** @returns {Promise<Object>} Uptime, Node/Playwright versions, memory, DB counts. */
   getSystemInfo:   () => req("GET",    "/system"),
+  /**
+   * MNT-001 — vision-capable LLM provider availability check. Used by
+   * `VisionHealingPanel` on mount to disable the `pixelmatch_and_llm` radio
+   * (with a tooltip) when no vision-capable model is configured server-side,
+   * rather than waiting for a save-time `VISION_PROVIDER_NOT_CONFIGURED`
+   * error. Backend resolves via `aiProvider.hasVisionProvider()` /
+   * `resolveVisionModel()` (`backend/src/routes/system.js`).
+   *
+   * @returns {Promise<{available: boolean, model: string|null}>}
+   */
+  getVisionProviderStatus: () => req("GET", "/system/vision-provider-status"),
   /** @returns {Promise<{cleared: number}>} Clear all run history. */
   clearRuns:       () => req("DELETE", "/data/runs"),
   // NOTE: `getActivities` is defined once above (in the Test review actions

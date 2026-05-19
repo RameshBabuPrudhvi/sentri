@@ -427,11 +427,25 @@ function VisionHealingPanel({ project, canEdit, onToast }) {
   const [callsCap, setCallsCap] = useState(String(initialCalls));
   const [costCap, setCostCap] = useState(String(initialCost));
   const [saving, setSaving] = useState(false);
-  // Server-side LLM-provider availability — fetched lazily on save error
-  // (rather than on every render) so the panel doesn't add a request to
-  // the project page's load. When the save returns VISION_PROVIDER_NOT_CONFIGURED
-  // we flip this to false and disable the third radio with a tooltip.
+  // Server-side LLM-provider availability — fetched on mount via
+  // `GET /api/v1/system/vision-provider-status` so the `pixelmatch_and_llm`
+  // radio renders disabled (with the tooltip) BEFORE the user tries to save,
+  // fulfilling the QA.md MNT-001 acceptance criterion. The save-time
+  // VISION_PROVIDER_NOT_CONFIGURED fallback below is a defence-in-depth path
+  // for the case where the provider config changes between mount and save.
+  //
+  // Default `true` (optimistic) so the radio isn't briefly disabled during
+  // the first paint before the status fetch resolves — the worst case if
+  // the fetch fails is the previous behaviour (save-time error).
   const [llmAvailable, setLlmAvailable] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getVisionProviderStatus()
+      .then((s) => { if (!cancelled) setLlmAvailable(Boolean(s?.available)); })
+      .catch(() => { /* keep optimistic default — save-time error path catches it */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const dirty = mode !== initialMode
     || String(initialCalls) !== callsCap
