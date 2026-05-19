@@ -421,6 +421,19 @@ router.get("/dashboard", async (req, res) => {
     console.error(formatLogLine("warn", null, `[dashboard] evalTrend lookup failed: ${err?.message || err}`));
   }
 
+  const coverageTrend = (() => {
+    const series = runs
+      .filter((r) => (r.type === "test_run" || r.type === "run") && r.coverageSummary?.coveragePct != null && r.startedAt)
+      .sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt))
+      .slice(-30)
+      .map((r) => ({
+        date: r.startedAt,
+        projectId: r.projectId,
+        coveragePct: r.coverageSummary.coveragePct,
+      }));
+    return series.length > 0 ? { windowDays: 30, series } : null;
+  })();
+
   res.json({
     totalProjects: projects.length,
     totalTests: tests.length,
@@ -448,6 +461,7 @@ router.get("/dashboard", async (req, res) => {
     topAccessibilityOffenders,
     environmentPassRates, // DIF-012 — null when no envs configured
     evalTrend,            // AUTO-022 — null when no eval rows persisted
+    coverageTrend,        // AUTO-009 — null when no coverage-enabled runs persisted
   });
   } catch (err) {
     console.error(formatLogLine("error", null, `[dashboard] ${err?.stack || err?.message || err}`));

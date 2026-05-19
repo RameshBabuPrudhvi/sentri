@@ -41,6 +41,7 @@ const JSON_FIELDS = [
   "githubCheck", // INT-002: GitHub Check Run metadata
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
+  "coverageSummary", // AUTO-009: aggregated per-run JS coverage summary (migration 038)
 ];
 
 // Fields whose canonical empty shape is an array, not null. Keeping them as
@@ -108,6 +109,7 @@ const INSERT_COLS = [
   "shardCount", "shardsCompleted", // CAP-002: distributed shard telemetry (migration 025)
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
+  "coverageSummary", // AUTO-009: aggregated per-run JS coverage summary (migration 038)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

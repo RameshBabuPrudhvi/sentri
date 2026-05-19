@@ -234,7 +234,7 @@ router.get("/:id", (req, res) => {
  *     the edit form round-trip without requiring the user to re-type secrets
  *     (which the server never sends back — see `projectSanitiser.js`).
  */
-router.patch("/:id", requireRole("qa_lead"), (req, res) => {
+router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
   const existing = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!existing) return res.status(404).json({ error: "not found" });
 
@@ -248,7 +248,7 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
   // injection still falls through to the full `validateProjectPayload` +
   // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl"]);
   const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
@@ -342,6 +342,25 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
     const cap = req.body.visionHealMaxCostUsdPerMonth;
     if (!Number.isFinite(cap) || cap < 0 || cap > 100000) return res.status(400).json({ error: "visionHealMaxCostUsdPerMonth must be a number between 0 and 100000." });
     fields.visionHealMaxCostUsdPerMonth = cap;
+  }
+  if (Object.hasOwn(req.body, "coverageEnabled")) {
+    if (typeof req.body.coverageEnabled !== "boolean") {
+      return res.status(400).json({ error: "coverageEnabled must be a boolean." });
+    }
+    fields.coverageEnabled = req.body.coverageEnabled;
+  }
+  if (Object.hasOwn(req.body, "sourcemapBaseUrl")) {
+    const value = req.body.sourcemapBaseUrl;
+    if (value === null || value === "") {
+      fields.sourcemapBaseUrl = null;
+    } else if (typeof value !== "string") {
+      return res.status(400).json({ error: "sourcemapBaseUrl must be a string URL or null." });
+    } else {
+      const trimmed = value.trim();
+      const urlErr = await validateUrl(trimmed);
+      if (urlErr) return res.status(400).json({ error: `sourcemapBaseUrl: ${urlErr}` });
+      fields.sourcemapBaseUrl = trimmed;
+    }
   }
 
   if (req.body.credentials === null) {

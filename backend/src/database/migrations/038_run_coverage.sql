@@ -1,0 +1,3 @@
+ALTER TABLE runs ADD COLUMN coverageSummary TEXT;
+ALTER TABLE projects ADD COLUMN coverageEnabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE projects ADD COLUMN sourcemapBaseUrl TEXT;
