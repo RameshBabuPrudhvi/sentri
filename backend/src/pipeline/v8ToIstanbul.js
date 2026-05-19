@@ -60,13 +60,22 @@ async function loadV8ToIstanbul() {
  * Convert one Playwright V8 coverage entry into an Istanbul `FileCoverage`
  * object.
  *
- * Playwright's entries carry the script body in `entry.text` plus
- * `{ ranges: [{ start, end, count? }] }` rather than V8's native
+ * Playwright's entries carry the script body in `entry.text` plus a flat
+ * `ranges` array of `{ start, end, count }` triples (where `count` is
+ * optional and defaults to 1 when omitted), rather than V8's native
  * `{ functions: [{ ranges, isBlockCoverage }] }`. We synthesize a single
  * top-level function whose ranges mirror Playwright's `ranges[]` so
  * `v8-to-istanbul.applyCoverage()` sees a complete-ish V8 payload.
  *
- * @param {{ url: string, text: string, ranges: Array<{ start: number, end: number, count?: number }> }} entry
+ * AGENT.md bans TS-style optional-property JSDoc (`count?: number`).
+ * The `entry` shape is documented in prose above rather than as a
+ * structural type literal — `jsdoc` chokes on `?:` inside `{}` and the
+ * `Backend — Docs` CI step fails. Use `@typedef` + `@property [name]`
+ * if a structural definition becomes necessary.
+ *
+ * @param {Object} entry Playwright V8 coverage entry. Required fields:
+ *   `url` (string), `text` (string), `ranges` (array of
+ *   `{ start, end, count? }` triples; `count` defaults to 1).
  * @returns {Promise<Object|null>} Istanbul FileCoverage or null on failure.
  */
 export async function convertV8ToIstanbul(entry) {

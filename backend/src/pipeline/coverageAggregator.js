@@ -87,15 +87,25 @@ export function summarizeCoverageForTest(jsCoverage = [], { sutOrigin } = {}) {
 /**
  * Aggregate per-test V8 coverage into a single run summary.
  *
+ * AGENT.md bans TS-style JSDoc (`prop?: type`, fat-arrow type expressions
+ * inside `{}`). The resolver shape is documented in prose below rather
+ * than inlined as a structural JSDoc type — `jsdoc` chokes on the
+ * embedded fat-arrow signatures, fails the `Backend — Docs` CI step, and
+ * blocks every PR after AUTO-009.
+ *
+ * Resolver contract (when supplied):
+ *   - `resolve(bundleUrl)` — async, returns a `SourceMapConsumer`-shaped
+ *     object or `null`. Failures must not throw.
+ *   - `mapLine(consumer, line)` — sync, returns
+ *     `{ source: string, line: number }` for a mapped line, or `null` for
+ *     an unmappable one.
+ *
  * @param {Object[]} results
  * @param {Object}   [opts]
  * @param {string}   [opts.sutOrigin]
- * @param {{
- *   resolve: (bundleUrl: string) => Promise<any|null>,
- *   mapLine: (consumer: any, line: number) => ({ source: string, line: number }|null),
- * }} [opts.resolver] — AUTO-009b source-map resolver. Optional; when omitted
- *   the aggregator returns bundle-coordinate file labels and
- *   `sourceMapStatus: "fallback"`.
+ * @param {Object}   [opts.resolver] AUTO-009b source-map resolver — see prose
+ *   above. Optional; when omitted the aggregator returns bundle-coordinate
+ *   file labels and `sourceMapStatus: "fallback"`.
  * @returns {Promise<Object>} `run.coverageSummary` shape.
  */
 export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, convertV8ToIstanbul = defaultConvertV8ToIstanbul } = {}) {
