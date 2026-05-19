@@ -382,7 +382,14 @@ export async function getChangedFileRangesForPr({ repo, prNumber, installationId
   // are decimal integers; `count` defaults to 1 when omitted (single-line
   // hunk shorthand, e.g. `@@ -10 +20 @@`).
   const hunkHeaderRe = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@/gm;
-  /** @type {Object<string, Array<[number, number]>>} */
+  // `rangesByFile` shape: `{ [filename]: Array<number[2]> }` where each
+  // inner `[startLine, endLine]` pair is an inclusive head-side line
+  // range. JSDoc `@type` is intentionally omitted — the nested tuple
+  // syntax `Array<[number, number]>` is TypeScript-only and fails the
+  // `Backend — Docs` CI step (jsdoc parser rejects `[`), per AGENT.md
+  // § "Do not use TypeScript syntax in JSDoc comments." See the
+  // `@returns` tag above for the prose-form type contract that
+  // consumers should rely on.
   const rangesByFile = {};
   let page = 1;
   while (page <= 10) {
