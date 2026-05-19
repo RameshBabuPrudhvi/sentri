@@ -31,6 +31,7 @@
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest, executeTestIterations } from "./runner/executeTest.js";
 import { finalizeCoverage } from "./pipeline/finalizeCoverage.js";
+import { detectCoverageRegression, fireCoverageRegressionAlert } from "./pipeline/coverageRegressionDetector.js"; // AUTO-009i
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { clusterFailures } from "./pipeline/failureClusterer.js";
@@ -966,6 +967,17 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       }
     } catch { /* best-effort — null prior degrades cleanly */ }
   }
+
+  // AUTO-009i — coverage regression alerting. Fires AFTER priorRunCoverage
+  // is resolved and BEFORE gate evaluation so the audit row + notification
+  // land even when the gate itself doesn't include a regression threshold.
+  // The detector is a pure function; the alert dispatcher is best-effort
+  // (same contract as `fireNotifications`).
+  try {
+    const regression = detectCoverageRegression(run.coverageSummary, priorRunCoverage, project);
+    if (regression) await fireCoverageRegressionAlert(regression, run, project);
+  } catch { /* best-effort — regression alert failure must never block finalize */ }
+
   run.gateResult = evaluateQualityGates(project.qualityGates, run, { priorRunCoverage });
 
   // AUTO-009f — raw `jsCoverage` payloads are already stripped by

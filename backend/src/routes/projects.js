@@ -279,7 +279,7 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
   // injection still falls through to the full `validateProjectPayload` +
   // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct"]);
   const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
@@ -423,6 +423,21 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
         if (urlErr) return res.status(400).json({ error: `serverCoverageEndpoint: ${urlErr}` });
         fields.serverCoverageEndpoint = trimmed;
       }
+    }
+  }
+
+  // AUTO-009i — per-project coverage regression alerting threshold.
+  // Accepts null (disable) or a number in (0, 100]. Zero disables because
+  // "alert on any drop > 0%" is too noisy; operators who want that should
+  // use the quality-gate `maxCoverageRegressionPct: 0` which FAILS the run.
+  if (Object.hasOwn(req.body, "coverageRegressionThresholdPct")) {
+    const v = req.body.coverageRegressionThresholdPct;
+    if (v === null || v === 0) {
+      fields.coverageRegressionThresholdPct = null;
+    } else if (!Number.isFinite(v) || v < 0 || v > 100) {
+      return res.status(400).json({ error: "coverageRegressionThresholdPct must be null, 0 (disable), or a number between 0 and 100." });
+    } else {
+      fields.coverageRegressionThresholdPct = v;
     }
   }
 
