@@ -189,6 +189,16 @@ export const VISION_STRATEGY_INDICES = Object.freeze([
  */
 export async function tryVisionHeal(ctx, deps = {}) {
   if (!ctx || !ctx.project) return null;
+  // MNT-001 — emergency global kill switch documented in `QA.md` § Vision
+  // healing release-verification checklist + `docs/guide/vision-healing.md`
+  // § Incident disable. Operators set `VISION_HEAL_DISABLED=1` (e.g. via
+  // `kubectl set env deployment/sentri-backend VISION_HEAL_DISABLED=1`) to
+  // turn off both stages 7 and 8 deployment-wide without changing any
+  // per-project `visionHealing` value. Per-project flags re-take effect
+  // immediately when the env var is removed. Treated as `"1"` only — any
+  // other truthy value (including `"true"`, `"yes"`) is intentionally
+  // ignored so operators can't disable by mistake with a typo.
+  if (process.env.VISION_HEAL_DISABLED === "1") return null;
   const mode = ctx.project.visionHealing || "off";
   if (mode === "off") return null;
   if (!ctx.failureScreenshot) return null;
