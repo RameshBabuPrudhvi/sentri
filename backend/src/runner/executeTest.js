@@ -37,6 +37,7 @@ import { injectCursorOverlay } from "./cursorOverlay.js";
 import { diffScreenshot } from "./visualDiff.js";
 import { applyNetworkCondition } from "./networkConditions.js";
 import { writeArtifactBuffer } from "../utils/objectStorage.js";
+import { snapshotServerCoverage, diffServerCoverage } from "../pipeline/serverCoverageProxy.js"; // AUTO-009h — opt-in server-side coverage capture for API tests.
 
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
@@ -1016,10 +1017,31 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
     boundingBoxes: [],
     url: test.sourceUrl || "",
     isApiTest: true,
+    // AUTO-009h — server-side coverage diff captured from the SUT's
+    // Istanbul / NYC `__coverage__` endpoint. Null when the project hasn't
+    // configured `serverCoverageEndpoint` or the snapshot failed.
+    serverCoverage: null,
   };
 
   const start = Date.now();
   result.startedAt = start;
+
+  // AUTO-009h — snapshot the SUT's coverage BEFORE the API test fires so
+  // the post-test diff isolates exactly what this test exercised. Opt-in
+  // per project; failures are best-effort and never flip a passing test
+  // (the snapshot can timeout, the SUT can be down, the endpoint can
+  // return non-JSON — all degrade silently to `serverCoverage: null`).
+  let serverCoverageEndpoint = null;
+  let serverCoverageBefore = null;
+  if (test.projectId) {
+    try {
+      const p = projectRepo.getById(test.projectId);
+      if (p?.serverCoverageEndpoint) {
+        serverCoverageEndpoint = p.serverCoverageEndpoint;
+        serverCoverageBefore = await snapshotServerCoverage(serverCoverageEndpoint);
+      }
+    } catch { /* best-effort */ }
+  }
 
   // AbortController lets us forcibly dispose Playwright request contexts
   // inside runApiTestCode when the timeout fires, preventing lingering
@@ -1051,6 +1073,28 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
     result.network = err.__apiLogs || [];
   } finally {
     clearTimeout(timeoutHandle);
+
+    // AUTO-009h — snapshot the SUT's coverage AFTER the API test and diff
+    // against the pre-snapshot so `result.serverCoverage` carries exactly
+    // the statements / branches / functions this test newly exercised.
+    // Best-effort: any snapshot failure leaves `result.serverCoverage` as
+    // whatever the pre-snapshot logic set it to (typically null), so a
+    // SUT outage mid-test doesn't fail an otherwise-passing run.
+    if (serverCoverageEndpoint) {
+      try {
+        const after = await snapshotServerCoverage(serverCoverageEndpoint);
+        if (after) {
+          const delta = diffServerCoverage(serverCoverageBefore, after);
+          // Only attach when the diff has data — otherwise `null` keeps the
+          // aggregator's "no server-side coverage for this test" branch
+          // identical to the opt-out path.
+          if (delta && Object.keys(delta).length > 0) {
+            result.serverCoverage = delta;
+          }
+        }
+      } catch { /* best-effort */ }
+    }
+
     result.durationMs = Date.now() - start;
     result.runTimestamp = start - runStart;
   }

@@ -73,6 +73,23 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
   // granularity field — otherwise the tabs would all read 0% on a pre-009c
   // backend or a SUT where v8-to-istanbul never produced output.
   const granularityAvailable = series.some((p) => p.branchPct != null || p.functionPct != null);
+
+  // AUTO-009h — Browser / Server / Combined tab toggle. Only renders when
+  // at least one project has surfaced server-side coverage data
+  // (`latestSummaryByProject` entry with `serverLayer: true` OR a
+  // `topUncoveredFiles[]` row carrying `layer: "server"`); otherwise we
+  // default to browser-only and hide the tabs so pre-AUTO-009h SUTs look
+  // identical to before.
+  const [layerKey, setLayerKey] = useState("browser");
+  const serverLayerAvailable = Array.from(latestSummaryByProject.values()).some((s) =>
+    s?.serverLayer === true ||
+    (Array.isArray(s?.topUncoveredFiles) && s.topUncoveredFiles.some((f) => f.layer === "server"))
+  );
+  const LAYER_TABS = [
+    { key: "browser",  label: "Browser"  },
+    { key: "server",   label: "Server"   },
+    { key: "combined", label: "Combined" },
+  ];
   const metric = COVERAGE_METRICS.find((m) => m.key === metricKey) || COVERAGE_METRICS[0];
 
   return (
@@ -83,6 +100,31 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
           <span className="section-title" style={{ marginBottom: 0 }}>Coverage</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {serverLayerAvailable && (
+            // AUTO-009h — Browser / Server / Combined layer toggle. Only
+            // rendered when at least one project's coverage summary
+            // carries server-side data; otherwise pre-AUTO-009h SUTs see
+            // no UI delta. Mirrors the metric-tab style below.
+            <div role="tablist" aria-label="Coverage layer" style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
+              {LAYER_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  role="tab"
+                  aria-selected={layerKey === t.key}
+                  onClick={() => setLayerKey(t.key)}
+                  style={{
+                    fontSize: "0.68rem", padding: "3px 9px", border: "none",
+                    cursor: "pointer",
+                    background: layerKey === t.key ? "var(--accent-bg)" : "transparent",
+                    color: layerKey === t.key ? "var(--accent)" : "var(--text3)",
+                    fontWeight: layerKey === t.key ? 600 : 400,
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
           {granularityAvailable && (
             // AUTO-009c — three-way toggle. Mirrors the eval-panel tab style
             // to stay visually consistent. Uses `role="tablist"` so the
@@ -134,7 +176,15 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
             const latestPct = (latestPoint && getValue(latestPoint)) || 0;
             const projectName = (data?.recentRuns || []).find((r) => r.projectId === projectId)?.projectName || projectId.slice(0, 8);
             const summary = latestSummaryByProject.get(projectId);
-            const topUncovered = Array.isArray(summary?.topUncoveredFiles) ? summary.topUncoveredFiles.slice(0, 5) : [];
+            // AUTO-009h — filter topUncoveredFiles by the selected layer
+            // tab. `layer` is `"browser"` or `"server"`; rows without
+            // a `layer` key are pre-AUTO-009h browser rows and default to
+            // browser. The "combined" tab shows every row regardless.
+            const allTopUncovered = Array.isArray(summary?.topUncoveredFiles) ? summary.topUncoveredFiles : [];
+            const topUncovered = (layerKey === "combined"
+              ? allTopUncovered
+              : allTopUncovered.filter((f) => (f.layer || "browser") === layerKey)
+            ).slice(0, 5);
             // AUTO-009b — fallback / partial badge stays metric-independent.
             const sourceMapStatus = summary?.sourceMapStatus || "fallback";
             const isFallback = sourceMapStatus !== "resolved";

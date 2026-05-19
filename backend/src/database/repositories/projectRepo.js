@@ -30,6 +30,7 @@ function rowToProject(row) {
     visionHealMaxCostUsdPerMonth: row.visionHealMaxCostUsdPerMonth ?? 50,
     coverageEnabled: row.coverageEnabled === 1,
     sourcemapBaseUrl: row.sourcemapBaseUrl || null,
+    serverCoverageEndpoint: row.serverCoverageEndpoint || null,
   };
 }
 
@@ -58,6 +59,7 @@ function projectToRow(p) {
     visionHealMaxCostUsdPerMonth: p.visionHealMaxCostUsdPerMonth ?? 50,
     coverageEnabled: p.coverageEnabled ? 1 : 0,
     sourcemapBaseUrl: p.sourcemapBaseUrl || null,
+    serverCoverageEndpoint: p.serverCoverageEndpoint || null,
   };
 }
 
@@ -119,8 +121,8 @@ export function create(project) {
   const row = projectToRow(project);
   row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, coverageEnabled, sourcemapBaseUrl)
-    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @coverageEnabled, @sourcemapBaseUrl)
+    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, coverageEnabled, sourcemapBaseUrl, serverCoverageEndpoint)
+    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @coverageEnabled, @sourcemapBaseUrl, @serverCoverageEndpoint)
   `).run(row);
 }
 
@@ -131,7 +133,7 @@ export function create(project) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl"];
+  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {

@@ -279,7 +279,7 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
   // injection still falls through to the full `validateProjectPayload` +
   // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint"]);
   const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
@@ -391,6 +391,38 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
       const urlErr = await validateUrl(trimmed);
       if (urlErr) return res.status(400).json({ error: `sourcemapBaseUrl: ${urlErr}` });
       fields.sourcemapBaseUrl = trimmed;
+    }
+  }
+
+  // AUTO-009h — server-side coverage capture for API tests. Accepts:
+  //   - `null` / "" → opt-out (default).
+  //   - `http://…` / `https://…` → SSRF-validated snapshot endpoint
+  //     (typical c8 / NYC `GET /__coverage__` pattern).
+  //   - `file:///…` → shared-FS path (file-watch mode). Skip SSRF (not a
+  //     URL the server fetches) but require an absolute path so a relative
+  //     `file://./cov.json` doesn't accidentally resolve against the
+  //     server's CWD. Documented in `docs/guide/coverage-server-side.md`.
+  if (Object.hasOwn(req.body, "serverCoverageEndpoint")) {
+    const value = req.body.serverCoverageEndpoint;
+    if (value === null || value === "") {
+      fields.serverCoverageEndpoint = null;
+    } else if (typeof value !== "string") {
+      return res.status(400).json({ error: "serverCoverageEndpoint must be a string URL or null." });
+    } else {
+      const trimmed = value.trim();
+      if (trimmed.startsWith("file://")) {
+        // File-watch mode. Validate the path is absolute so a typo can't
+        // surprise the operator with CWD-relative resolution at run time.
+        const path = trimmed.slice("file://".length);
+        if (!path.startsWith("/")) {
+          return res.status(400).json({ error: "serverCoverageEndpoint: file:// path must be absolute (e.g. file:///var/coverage/coverage.json)." });
+        }
+        fields.serverCoverageEndpoint = trimmed;
+      } else {
+        const urlErr = await validateUrl(trimmed);
+        if (urlErr) return res.status(400).json({ error: `serverCoverageEndpoint: ${urlErr}` });
+        fields.serverCoverageEndpoint = trimmed;
+      }
     }
   }
 

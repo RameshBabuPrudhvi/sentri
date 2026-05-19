@@ -23,6 +23,16 @@
  * per-file `uncoveredBranches / uncoveredFunctions`. Missing keys on
  * pre-AUTO-009c rows degrade gracefully — the frontend hides them.
  *
+ * AUTO-009h: when API tests carry `result.serverCoverage` (populated by
+ * `pipeline/serverCoverageProxy.js` against an opt-in
+ * `project.serverCoverageEndpoint`), the aggregator merges those server-
+ * side diffs into the same `topUncoveredFiles[]` array, tagging every
+ * entry with a `layer: "browser" | "server"` discriminator. Frontend
+ * consumers split the rows into Browser / Server / Combined tabs.
+ * `serverLayer` is set on the summary root when any server data was
+ * present, so a SUT without `serverCoverageEndpoint` configured produces
+ * a byte-identical summary shape to a pre-AUTO-009h run.
+ *
  * Best-effort: every resolver / converter call is wrapped in try/catch so
  * coverage capture never fails a run.
  */
@@ -288,11 +298,79 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
     const extras = meta.bundleUrl ? uncoveredExtrasByBundle.get(meta.bundleUrl) : null;
     topUncoveredFiles.push({
       file,
+      // AUTO-009h — every row carries a `layer` discriminator. Browser
+      // rows (from V8 `page.coverage`) get `"browser"`; server rows
+      // (from `result.serverCoverage`) get `"server"` below. The
+      // Dashboard CoveragePanel splits on this field for its Browser /
+      // Server / Combined tabs.
+      layer: "browser",
       uncoveredLines: Math.max(0, total - covered),
       totalLines: total,
       bundleUrl: meta.bundleUrl || null,
       uncoveredBranches:  extras?.uncoveredBranches  ?? 0,
       uncoveredFunctions: extras?.uncoveredFunctions ?? 0,
+    });
+  }
+
+  // ── AUTO-009h — merge server-side coverage diffs ──────────────────────────
+  // Walk every API-test result for `serverCoverage` (populated by
+  // `serverCoverageProxy.js`). The diff shape is
+  //   `{ [path]: { addedStatements, addedBranches, addedFunctions,
+  //                totalStatements, totalBranches, totalFunctions } }`
+  // and represents the SUT files this test newly exercised (statements /
+  // branches / functions present in `after` but not in `before`).
+  //
+  // We aggregate across all tests (union of added IDs is equivalent to
+  // sum-of-added because each test's "added" set is per-test-disjoint by
+  // construction of the diff). For each file we surface an entry with
+  // `layer: "server"`, `uncoveredLines = max(0, total - covered)` where
+  // "covered" is the union of `addedStatements` across tests (capped at
+  // `totalStatements` to defend against double-counting if two tests
+  // happen to exercise the same statement — diff semantics rule that
+  // out, but `Math.min` is cheap insurance).
+  /** @type {Map<string, { addedStatements: number, addedBranches: number, addedFunctions: number, totalStatements: number, totalBranches: number, totalFunctions: number }>} */
+  const serverFiles = new Map();
+  let serverLayer = false;
+  for (const r of results) {
+    const sc = r?.serverCoverage;
+    if (!sc || typeof sc !== "object") continue;
+    serverLayer = true;
+    for (const [path, delta] of Object.entries(sc)) {
+      if (!delta || typeof delta !== "object") continue;
+      const existing = serverFiles.get(path) || {
+        addedStatements: 0, addedBranches: 0, addedFunctions: 0,
+        totalStatements: 0, totalBranches: 0, totalFunctions: 0,
+      };
+      // Per-test diffs are disjoint by construction (a stmt id can move
+      // from `count === 0` to `count > 0` exactly once across a run's
+      // tests — the second test's diff would see prevS=already-covered).
+      // We still sum + cap to defend against snapshot drift.
+      existing.addedStatements += delta.addedStatements || 0;
+      existing.addedBranches   += delta.addedBranches   || 0;
+      existing.addedFunctions  += delta.addedFunctions  || 0;
+      existing.totalStatements = Math.max(existing.totalStatements, delta.totalStatements || 0);
+      existing.totalBranches   = Math.max(existing.totalBranches,   delta.totalBranches   || 0);
+      existing.totalFunctions  = Math.max(existing.totalFunctions,  delta.totalFunctions  || 0);
+      serverFiles.set(path, existing);
+    }
+  }
+  for (const [path, m] of serverFiles.entries()) {
+    const coveredStatements = Math.min(m.totalStatements, m.addedStatements);
+    const coveredBranches   = Math.min(m.totalBranches,   m.addedBranches);
+    const coveredFunctions  = Math.min(m.totalFunctions,  m.addedFunctions);
+    topUncoveredFiles.push({
+      file: path,
+      layer: "server",
+      // "uncoveredLines" semantics on the server side: we don't have line
+      // numbers in the Istanbul diff, but `totalStatements - covered` is
+      // the closest stable proxy — the Dashboard renders it under the
+      // same column as browser line counts so the operator sees an
+      // apples-to-apples uncovered count.
+      uncoveredLines: Math.max(0, m.totalStatements - coveredStatements),
+      totalLines: m.totalStatements,
+      bundleUrl: null, // no bundle URL for server-side files
+      uncoveredBranches:  Math.max(0, m.totalBranches  - coveredBranches),
+      uncoveredFunctions: Math.max(0, m.totalFunctions - coveredFunctions),
     });
   }
   topUncoveredFiles.sort((a, b) => b.uncoveredLines - a.uncoveredLines);
@@ -344,6 +422,11 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
     perTest,
     topUncoveredFiles: topUncoveredFiles.slice(0, 20),
     sourceMapStatus,
+    // AUTO-009h — `serverLayer: true` signals to the Dashboard
+    // CoveragePanel that it should render the Browser / Server / Combined
+    // tabs. Omitted entirely when no API test produced `serverCoverage`,
+    // so pre-AUTO-009h runs serialize byte-identically.
+    ...(serverLayer ? { serverLayer: true } : {}),
     ...(granularity || {}),
   };
 }
