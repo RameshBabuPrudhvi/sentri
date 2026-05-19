@@ -55,6 +55,12 @@ function statusBadgeClass(status) {
 // ─── Test Case Row ────────────────────────────────────────────────────────────
 
 function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown, coverageDelta }) {
+  // AUTO-009c — coverageDelta may be a number (legacy, lines only) OR an
+  // object `{ lines, statements, branches, functions }`. The badge below
+  // normalises both shapes so a v0 frontend on a v1 backend still works.
+  const deltaShape = typeof coverageDelta === "object" && coverageDelta !== null
+    ? coverageDelta
+    : (typeof coverageDelta === "number" ? { lines: coverageDelta } : null);
   const steps = result.steps || [];
 
   return (
@@ -103,17 +109,27 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown, cov
           <span className={`badge ${statusBadgeClass(result.status)}`} style={{ fontSize: "0.62rem" }}>
             {result.status}
           </span>
-          {/* AUTO-009 — per-test coverage delta: lines this test first exercised
-              in the run that no earlier test had already covered. Hidden when
-              coverage capture is disabled (coverageDelta == null) or the test
-              contributed zero new lines. */}
-          {coverageDelta != null && coverageDelta > 0 && (
+          {/* AUTO-009 — per-test coverage delta: lines / statements / branches
+              / functions this test first exercised in the run. AUTO-009c
+              extends the badge to render `+47L · +12B · +3F` so reviewers
+              can spot tests that hit new branches even when line counts
+              barely move. Hidden when coverage capture is disabled
+              (`coverageDelta == null`) or every category contributed zero. */}
+          {deltaShape && (deltaShape.lines > 0 || deltaShape.statements > 0 || deltaShape.branches > 0 || deltaShape.functions > 0) && (
             <span
               className="badge badge-blue"
-              style={{ fontSize: "0.62rem" }}
-              title={`Coverage delta: this test first exercised ${coverageDelta} line${coverageDelta !== 1 ? "s" : ""} not previously covered in this run`}
+              style={{ fontSize: "0.62rem", display: "inline-flex", gap: 4 }}
+              title={[
+                deltaShape.lines      > 0 ? `${deltaShape.lines} new line${deltaShape.lines !== 1 ? "s" : ""}` : null,
+                deltaShape.statements > 0 ? `${deltaShape.statements} new statement${deltaShape.statements !== 1 ? "s" : ""}` : null,
+                deltaShape.branches   > 0 ? `${deltaShape.branches} new branch${deltaShape.branches !== 1 ? "es" : ""}` : null,
+                deltaShape.functions  > 0 ? `${deltaShape.functions} new function${deltaShape.functions !== 1 ? "s" : ""}` : null,
+              ].filter(Boolean).join(" · ")
+                + " first exercised by this test in this run"}
             >
-              +{coverageDelta} lines
+              {deltaShape.lines      > 0 && <span>+{deltaShape.lines}L</span>}
+              {deltaShape.branches   > 0 && <span>·+{deltaShape.branches}B</span>}
+              {deltaShape.functions  > 0 && <span>·+{deltaShape.functions}F</span>}
             </span>
           )}
           <span style={{ fontSize: "0.67rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
@@ -524,11 +540,21 @@ export default function TestRunView({ run, frames = [] }) {
         <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
           {results.map((result, ci) => {
             // AUTO-009 — look up this test's per-test coverage delta from
-            // the run's aggregated coverageSummary (populated by
-            // pipeline/coverageAggregator.js when project.coverageEnabled).
+            // the run's aggregated coverageSummary. AUTO-009c extends this
+            // from a scalar (deltaLines) to an object so the badge can
+            // render `+47L · +12B · +3F`. Older runs without granularity
+            // surface only the `lines` field; everything else stays 0.
             const perTest = run?.coverageSummary?.perTest;
-            const delta = Array.isArray(perTest)
-              ? perTest.find((p) => p.testId === result.testId)?.deltaLines
+            const row = Array.isArray(perTest)
+              ? perTest.find((p) => p.testId === result.testId)
+              : null;
+            const delta = row
+              ? {
+                  lines:      row.deltaLines      || 0,
+                  statements: row.deltaStatements || 0,
+                  branches:   row.deltaBranches   || 0,
+                  functions:  row.deltaFunctions  || 0,
+                }
               : null;
             return (
               <TestCaseRow

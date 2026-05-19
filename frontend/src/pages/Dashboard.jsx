@@ -35,6 +35,179 @@ function RunningBadge() {
   );
 }
 
+// AUTO-009c — Coverage panel hoisted into its own component so it can own
+// the line/branch/function tab state via `useState`. The whole panel is
+// driven off the `coverageTrend` + `recentRuns` slices of the dashboard
+// payload — no extra fetches.
+const COVERAGE_METRICS = [
+  { key: "line",     label: "Lines",     seriesKey: "coveragePct",  summaryPctKey: "coveragePct",  summaryUncoveredKey: "uncoveredLines",     summaryTotalKey: "totalLines"     },
+  { key: "branch",   label: "Branches",  seriesKey: "branchPct",    summaryPctKey: "branchPct",    summaryUncoveredKey: "uncoveredBranches",  summaryTotalKey: "totalBranches"  },
+  { key: "function", label: "Functions", seriesKey: "functionPct",  summaryPctKey: "functionPct",  summaryUncoveredKey: "uncoveredFunctions", summaryTotalKey: "totalFunctions" },
+];
+
+function CoveragePanel({ data, Activity, SparklineChart }) {
+  // Default to "line" so behaviour matches the pre-AUTO-009c panel. The
+  // toggle is hidden when no run has branch/function data so the empty
+  // state for a line-only SUT looks identical to before.
+  const [metricKey, setMetricKey] = useState("line");
+  const series = data?.coverageTrend?.series || [];
+
+  // Per-project series grouping — same as before, but the y-value is now
+  // pulled from whichever metric is selected. Missing values (older
+  // backends, or runs that didn't generate granularity data) fall back to
+  // `coveragePct` so the sparkline never has a hole.
+  const byProject = new Map();
+  for (const point of series) {
+    if (!byProject.has(point.projectId)) byProject.set(point.projectId, []);
+    byProject.get(point.projectId).push(point);
+  }
+  const latestSummaryByProject = new Map();
+  for (const r of data?.recentRuns || []) {
+    if (!r.coverageSummary || latestSummaryByProject.has(r.projectId)) continue;
+    latestSummaryByProject.set(r.projectId, r.coverageSummary);
+  }
+
+  // Show the metric tabs only when at least one series point carries the
+  // granularity field — otherwise the tabs would all read 0% on a pre-009c
+  // backend or a SUT where v8-to-istanbul never produced output.
+  const granularityAvailable = series.some((p) => p.branchPct != null || p.functionPct != null);
+  const metric = COVERAGE_METRICS.find((m) => m.key === metricKey) || COVERAGE_METRICS[0];
+
+  return (
+    <div className="card card-padded mb-md">
+      <div className="flex-between" style={{ marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Activity size={14} color="var(--accent)" />
+          <span className="section-title" style={{ marginBottom: 0 }}>Coverage</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {granularityAvailable && (
+            // AUTO-009c — three-way toggle. Mirrors the eval-panel tab style
+            // to stay visually consistent. Uses `role="tablist"` so the
+            // segmented control is announced as a tabbed selector by screen
+            // readers.
+            <div role="tablist" aria-label="Coverage metric" style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
+              {COVERAGE_METRICS.map((m) => (
+                <button
+                  key={m.key}
+                  role="tab"
+                  aria-selected={metricKey === m.key}
+                  onClick={() => setMetricKey(m.key)}
+                  style={{
+                    fontSize: "0.68rem", padding: "3px 9px", border: "none",
+                    cursor: "pointer",
+                    background: metricKey === m.key ? "var(--accent-bg)" : "transparent",
+                    color: metricKey === m.key ? "var(--accent)" : "var(--text3)",
+                    fontWeight: metricKey === m.key ? 600 : 400,
+                  }}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {series.length > 0 && (
+            <span className="text-xs text-muted">{`30-day · ${series.length} run${series.length !== 1 ? "s" : ""}`}</span>
+          )}
+        </div>
+      </div>
+      {series.length === 0 ? (
+        <div className="text-sm text-muted">
+          Enable coverage on a project to start tracking. Go to <strong>Automation → Quality → Coverage</strong> and toggle <em>Enable browser JS coverage capture</em>.
+        </div>
+      ) : (
+        <div className="flex-col gap-sm">
+          {Array.from(byProject.entries()).map(([projectId, points]) => {
+            // Pull the metric value with a line-pct fallback so the
+            // sparkline never has a hole. `getValue()` returns a number in
+            // [0,1] or null when neither the selected metric nor coveragePct
+            // is present.
+            const getValue = (p) => {
+              const v = p[metric.seriesKey];
+              if (typeof v === "number") return v;
+              if (typeof p.coveragePct === "number") return p.coveragePct;
+              return null;
+            };
+            const latestPoint = points[points.length - 1];
+            const latestPct = (latestPoint && getValue(latestPoint)) || 0;
+            const projectName = (data?.recentRuns || []).find((r) => r.projectId === projectId)?.projectName || projectId.slice(0, 8);
+            const summary = latestSummaryByProject.get(projectId);
+            const topUncovered = Array.isArray(summary?.topUncoveredFiles) ? summary.topUncoveredFiles.slice(0, 5) : [];
+            // AUTO-009b — fallback / partial badge stays metric-independent.
+            const sourceMapStatus = summary?.sourceMapStatus || "fallback";
+            const isFallback = sourceMapStatus !== "resolved";
+            const statusBadgeColor = sourceMapStatus === "resolved" ? "var(--green)"
+              : sourceMapStatus === "partial" ? "var(--amber)"
+              : "var(--text3)";
+            return (
+              <div key={projectId} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+                <div className="flex-between" style={{ width: "100%" }}>
+                  <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{projectName}</div>
+                  <span
+                    className="badge"
+                    style={{
+                      fontSize: "0.72rem",
+                      background: latestPct >= 0.8 ? "var(--green-bg)" : latestPct >= 0.5 ? "var(--amber-bg)" : "var(--red-bg)",
+                      color: latestPct >= 0.8 ? "var(--green)" : latestPct >= 0.5 ? "var(--amber)" : "var(--red)",
+                    }}
+                    title={`${metric.label}: ${Math.round(latestPct * 100)}%`}
+                  >
+                    {`${Math.round(latestPct * 100)}%`}
+                  </span>
+                </div>
+                <SparklineChart
+                  data={points.map((p, i) => ({ name: `#${i + 1}`, value: Math.round(((getValue(p)) || 0) * 100) }))}
+                  height={40}
+                  color="var(--accent)"
+                  tooltipFn={(d) => `${d.name}: ${d.value}% ${metric.label.toLowerCase()}`}
+                />
+                {topUncovered.length > 0 && (
+                  <div style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
+                    <div style={{ fontWeight: 600, textTransform: "uppercase", marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>Top uncovered files</span>
+                      {isFallback && (
+                        <span
+                          className="badge"
+                          style={{ fontSize: "0.6rem", padding: "1px 6px", background: "var(--bg3)", color: statusBadgeColor }}
+                          title={sourceMapStatus === "partial"
+                            ? "Source maps partially resolved — some entries show original source paths, others show bundle URLs."
+                            : "Source maps unavailable — file labels are bundle URLs, not original source paths. Configure project.sourcemapBaseUrl to enable resolution."}
+                        >
+                          {sourceMapStatus === "partial" ? "partial maps" : "fallback mode"}
+                        </span>
+                      )}
+                    </div>
+                    {topUncovered.map((f) => {
+                      // AUTO-009c — per-file uncovered count follows the
+                      // selected metric. Backends without granularity
+                      // surface `uncoveredBranches`/`uncoveredFunctions` as
+                      // 0 (or undefined) so the row degrades cleanly to
+                      // line-only.
+                      const uncovered = metricKey === "line" ? f.uncoveredLines
+                        : metricKey === "branch" ? (f.uncoveredBranches ?? 0)
+                        : (f.uncoveredFunctions ?? 0);
+                      const unit = metricKey === "line" ? "lines"
+                        : metricKey === "branch" ? "branches"
+                        : "functions";
+                      return (
+                        <div key={`${f.file}::${f.bundleUrl || ""}`} className="truncate" title={f.bundleUrl ? `${f.file}\nbundle: ${f.bundleUrl}` : f.file}>
+                          <code style={{ fontSize: "0.7rem" }}>{f.file}</code>
+                          <span style={{ marginLeft: 6, color: "var(--red)" }}>{uncovered}</span>
+                          <span style={{ color: "var(--text3)" }}>{` uncovered ${unit}`}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PDF Export button component
 // (generateExecutivePDF is in frontend/src/utils/pdfReportGenerator.js)
@@ -175,110 +348,8 @@ export default function Dashboard() {
             <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<SquareCheckBig size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
           </div>
-          {/* ── AUTO-009: Browser JS coverage trend + top uncovered files ── */}
-          {(() => {
-            const series = data?.coverageTrend?.series || [];
-            // Group the 30-day series by project so each project gets its
-            // own sparkline. Recent runs win the "latest" badge.
-            const byProject = new Map();
-            for (const point of series) {
-              if (!byProject.has(point.projectId)) byProject.set(point.projectId, []);
-              byProject.get(point.projectId).push(point);
-            }
-            // Pull the latest coverageSummary per project off recentRuns
-            // so we can render `topUncoveredFiles` alongside the sparkline.
-            const latestSummaryByProject = new Map();
-            for (const r of data?.recentRuns || []) {
-              if (!r.coverageSummary || latestSummaryByProject.has(r.projectId)) continue;
-              latestSummaryByProject.set(r.projectId, r.coverageSummary);
-            }
-            return (
-              <div className="card card-padded mb-md">
-                <div className="flex-between" style={{ marginBottom: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Activity size={14} color="var(--accent)" />
-                    <span className="section-title" style={{ marginBottom: 0 }}>Coverage</span>
-                  </div>
-                  {series.length > 0 && (
-                    <span className="text-xs text-muted">{`30-day · ${series.length} run${series.length !== 1 ? "s" : ""}`}</span>
-                  )}
-                </div>
-                {series.length === 0 ? (
-                  <div className="text-sm text-muted">
-                    Enable coverage on a project to start tracking. Go to <strong>Automation → Quality → Coverage</strong> and toggle <em>Enable browser JS coverage capture</em>.
-                  </div>
-                ) : (
-                  <div className="flex-col gap-sm">
-                    {Array.from(byProject.entries()).map(([projectId, points]) => {
-                      const latestPct = points[points.length - 1]?.coveragePct || 0;
-                      const projectName = (data?.recentRuns || []).find((r) => r.projectId === projectId)?.projectName || projectId.slice(0, 8);
-                      const summary = latestSummaryByProject.get(projectId);
-                      const topUncovered = Array.isArray(summary?.topUncoveredFiles) ? summary.topUncoveredFiles.slice(0, 5) : [];
-                      // AUTO-009b — when source-map resolution succeeded the
-                      // aggregator persists `file` as an original source path
-                      // (`src/Cart.tsx`) and retains the bundle URL as
-                      // `bundleUrl`. When it fell back to raw bundle
-                      // coordinates we badge the panel so reviewers know the
-                      // file labels are bundle URLs, not source paths.
-                      const sourceMapStatus = summary?.sourceMapStatus || "fallback";
-                      const isFallback = sourceMapStatus !== "resolved";
-                      const statusBadgeColor = sourceMapStatus === "resolved" ? "var(--green)"
-                        : sourceMapStatus === "partial" ? "var(--amber)"
-                        : "var(--text3)";
-                      return (
-                        <div key={projectId} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
-                          <div className="flex-between" style={{ width: "100%" }}>
-                            <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{projectName}</div>
-                            <span
-                              className="badge"
-                              style={{
-                                fontSize: "0.72rem",
-                                background: latestPct >= 0.8 ? "var(--green-bg)" : latestPct >= 0.5 ? "var(--amber-bg)" : "var(--red-bg)",
-                                color: latestPct >= 0.8 ? "var(--green)" : latestPct >= 0.5 ? "var(--amber)" : "var(--red)",
-                              }}
-                            >
-                              {`${Math.round(latestPct * 100)}%`}
-                            </span>
-                          </div>
-                          <SparklineChart
-                            data={points.map((p, i) => ({ name: `#${i + 1}`, value: Math.round(p.coveragePct * 100) }))}
-                            height={40}
-                            color="var(--accent)"
-                            tooltipFn={(d) => `${d.name}: ${d.value}%`}
-                          />
-                          {topUncovered.length > 0 && (
-                            <div style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
-                              <div style={{ fontWeight: 600, textTransform: "uppercase", marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
-                                <span>Top uncovered files</span>
-                                {isFallback && (
-                                  <span
-                                    className="badge"
-                                    style={{ fontSize: "0.6rem", padding: "1px 6px", background: "var(--bg3)", color: statusBadgeColor }}
-                                    title={sourceMapStatus === "partial"
-                                      ? "Source maps partially resolved — some entries show original source paths, others show bundle URLs."
-                                      : "Source maps unavailable — file labels are bundle URLs, not original source paths. Configure project.sourcemapBaseUrl to enable resolution."}
-                                  >
-                                    {sourceMapStatus === "partial" ? "partial maps" : "fallback mode"}
-                                  </span>
-                                )}
-                              </div>
-                              {topUncovered.map((f) => (
-                                <div key={`${f.file}::${f.bundleUrl || ""}`} className="truncate" title={f.bundleUrl ? `${f.file}\nbundle: ${f.bundleUrl}` : f.file}>
-                                  <code style={{ fontSize: "0.7rem" }}>{f.file}</code>
-                                  <span style={{ marginLeft: 6, color: "var(--red)" }}>{f.uncoveredLines}</span>
-                                  <span style={{ color: "var(--text3)" }}>{` / ${f.totalLines} lines`}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          {/* ── AUTO-009 / AUTO-009b / AUTO-009c: Coverage panel with metric toggle ── */}
+          <CoveragePanel data={data} Activity={Activity} SparklineChart={SparklineChart} />
 
           {/* ── Row 2: Duration / Created / Fixed / Healing ── */}
           <div className="stat-grid">

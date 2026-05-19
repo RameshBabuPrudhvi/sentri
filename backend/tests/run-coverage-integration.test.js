@@ -120,6 +120,62 @@ test("AUTO-009b — sourceMapStatus = 'partial' when <80% of bundle lines map", 
   assert.equal(summary.sourceMapStatus, "partial");
 });
 
+test("AUTO-009c — branchPct < linePct when one branch arm never fires", async () => {
+  // Synthetic SUT with two if-arms — only one is taken. We inject a stub
+  // `convertV8ToIstanbul` so this test stays hermetic — no real
+  // v8-to-istanbul, no source-map round-trip. The injection point is the
+  // aggregator's `convertV8ToIstanbul` option.
+  const ifElseSrc =
+    "function pickPath(flag) {\n" +
+    "  if (flag) { return doA(); }\n" +     // arm 0 — covered
+    "  return doB();\n" +                     // arm 1 — never reached
+    "}\n";
+  const stubConvert = async () => ({
+    path: "https://app.example.com/main.js",
+    statementMap: { 0: {}, 1: {}, 2: {} },
+    s:            { 0: 1, 1: 1, 2: 0 },             // 2/3 statements covered
+    fnMap:        { 0: { name: "pickPath" } },
+    f:            { 0: 1 },                         // function covered
+    branchMap:    { 0: { type: "if" } },
+    b:            { 0: [1, 0] },                    // arm 0 hit, arm 1 not
+  });
+
+  const summary = await aggregateRunCoverage(
+    [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/main.js", text: ifElseSrc, ranges: [{ start: 0, end: 30 }] }] }],
+    { sutOrigin: "https://app.example.com", convertV8ToIstanbul: stubConvert },
+  );
+
+  assert.equal(summary.totalBranches,   2, "two branch arms recorded");
+  assert.equal(summary.coveredBranches, 1, "only arm 0 covered");
+  assert.equal(summary.branchPct,     0.5);
+  // Line pct should be ≥ branch pct because the line containing the
+  // taken-arm `return doA()` IS hit at least once. Acceptance criterion is
+  // strictly that branchPct surfaces the missed arm — assert branch ≤ line.
+  assert.ok(summary.branchPct <= summary.coveragePct + 1e-9, "branchPct ≤ linePct when one arm never fires");
+  assert.ok(summary.branchPct < 1, "branchPct < 100% because one arm never fires");
+
+  // Per-test delta should attribute the covered branch to T1.
+  const t1 = summary.perTest.find((p) => p.testId === "T1");
+  assert.ok(t1.deltaBranches > 0, "T1 first hit the taken branch arm");
+  assert.equal(typeof t1.deltaStatements, "number");
+  assert.equal(typeof t1.deltaFunctions,  "number");
+});
+
+test("AUTO-009c — granularity keys omitted when converter never produces data", async () => {
+  // Stub converter that returns null for every entry — mirrors the
+  // production behaviour when v8-to-istanbul is unavailable or the script
+  // can't be parsed. The returned summary should NOT carry `totalBranches`
+  // / `branchPct` so pre-009c and 009c-without-granularity runs look
+  // byte-identical on the wire.
+  const summary = await aggregateRunCoverage(
+    [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/x.js", text: "a\n", ranges: [{ start: 0, end: 1 }] }] }],
+    { sutOrigin: "https://app.example.com", convertV8ToIstanbul: async () => null },
+  );
+  assert.equal(summary.totalBranches,   undefined);
+  assert.equal(summary.coveredBranches, undefined);
+  assert.equal(summary.branchPct,       undefined);
+});
+
 test("AUTO-009b — resolver throw never fails the aggregator", async () => {
   const summary = await aggregateRunCoverage(
     [{ testId: "T1", jsCoverage: [{ url: "https://app.example.com/x.js", text: "a\nb\n", ranges: [{ start: 0, end: 1 }] }] }],

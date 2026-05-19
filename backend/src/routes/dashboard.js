@@ -430,6 +430,12 @@ router.get("/dashboard", async (req, res) => {
         date: r.startedAt,
         projectId: r.projectId,
         coveragePct: r.coverageSummary.coveragePct,
+        // AUTO-009c — per-metric series so the Dashboard can switch between
+        // line / branch / function sparklines without re-querying. Missing
+        // on pre-AUTO-009c runs; the frontend falls back to coveragePct.
+        statementPct: r.coverageSummary.statementPct ?? null,
+        branchPct:    r.coverageSummary.branchPct    ?? null,
+        functionPct:  r.coverageSummary.functionPct  ?? null,
       }));
     return series.length > 0 ? { windowDays: 30, series } : null;
   })();

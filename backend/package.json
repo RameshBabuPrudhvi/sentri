@@ -29,6 +29,7 @@
     "pngjs": "^7.0.0",
     "source-map": "^0.7.4",
     "uuid": "^11.0.5",
+    "v8-to-istanbul": "^9.3.0",
     "@axe-core/playwright": "^4.10.2",
     "web-vitals": "^4.2.4",
     "@opentelemetry/auto-instrumentations-node": "^0.53.0",
