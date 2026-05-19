@@ -61,11 +61,13 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
     if (!byProject.has(point.projectId)) byProject.set(point.projectId, []);
     byProject.get(point.projectId).push(point);
   }
-  const latestSummaryByProject = new Map();
-  for (const r of data?.recentRuns || []) {
-    if (!r.coverageSummary || latestSummaryByProject.has(r.projectId)) continue;
-    latestSummaryByProject.set(r.projectId, r.coverageSummary);
-  }
+  // AUTO-009 — `coverageSummary` is no longer denormalised onto `recentRuns`
+  // (it bloated the dashboard payload and required the LEAN_COLS bump that
+  // was missing in the original implementation). The backend now ships the
+  // per-project latest summary in a dedicated `latestCoverageByProject` map.
+  const latestSummaryByProject = new Map(
+    Object.entries(data?.latestCoverageByProject || {}),
+  );
 
   // Show the metric tabs only when at least one series point carries the
   // granularity field — otherwise the tabs would all read 0% on a pre-009c

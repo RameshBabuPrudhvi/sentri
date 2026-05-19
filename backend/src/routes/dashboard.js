@@ -88,7 +88,7 @@ router.get("/dashboard", async (req, res) => {
     .slice(0, 8)
     .map((r) => {
       const p = projectsById[r.projectId];
-      return { id: r.id, projectId: r.projectId, projectName: p?.name || null, type: r.type, status: r.status, startedAt: r.startedAt, passed: r.passed, failed: r.failed, total: r.total, coverageSummary: r.coverageSummary || null };
+      return { id: r.id, projectId: r.projectId, projectName: p?.name || null, type: r.type, status: r.status, startedAt: r.startedAt, passed: r.passed, failed: r.failed, total: r.total };
     });
 
   // ── Run status distribution ─────────────────────────────────────────────
@@ -421,10 +421,14 @@ router.get("/dashboard", async (req, res) => {
     console.error(formatLogLine("warn", null, `[dashboard] evalTrend lookup failed: ${err?.message || err}`));
   }
 
+  // AUTO-009 — dedicated lean read for coverage trend. `getRunsWithCoverage`
+  // selects only `id, projectId, startedAt, type, coverageSummary` so the
+  // potentially-multi-KB summary blob doesn't bloat `LEAN_COLS` for every
+  // dashboard read. Returns chronological order already.
+  const coverageRuns = runRepo.getRunsWithCoverage(projectIds);
   const coverageTrend = (() => {
-    const series = runs
-      .filter((r) => (r.type === "test_run" || r.type === "run") && r.coverageSummary?.coveragePct != null && r.startedAt)
-      .sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt))
+    const series = coverageRuns
+      .filter((r) => r.coverageSummary?.coveragePct != null && r.startedAt)
       .slice(-30)
       .map((r) => ({
         date: r.startedAt,
@@ -439,6 +443,17 @@ router.get("/dashboard", async (req, res) => {
       }));
     return series.length > 0 ? { windowDays: 30, series } : null;
   })();
+
+  // AUTO-009 — latest coverageSummary per project so the Dashboard's
+  // `topUncoveredFiles` block can render without re-querying. Sourced from
+  // the same coverage-only result set; we walk it newest-last and keep
+  // the most recent entry per projectId.
+  const latestCoverageByProject = {};
+  for (const r of coverageRuns) {
+    if (r?.projectId && r.coverageSummary) {
+      latestCoverageByProject[r.projectId] = r.coverageSummary;
+    }
+  }
 
   res.json({
     totalProjects: projects.length,
@@ -468,6 +483,7 @@ router.get("/dashboard", async (req, res) => {
     environmentPassRates, // DIF-012 — null when no envs configured
     evalTrend,            // AUTO-022 — null when no eval rows persisted
     coverageTrend,        // AUTO-009 — null when no coverage-enabled runs persisted
+    latestCoverageByProject, // AUTO-009 — { projectId: coverageSummary } for the Dashboard's `topUncoveredFiles` panel
   });
   } catch (err) {
     console.error(formatLogLine("error", null, `[dashboard] ${err?.stack || err?.message || err}`));

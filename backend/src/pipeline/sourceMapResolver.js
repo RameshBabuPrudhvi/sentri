@@ -44,12 +44,27 @@ function cacheKey(bundleUrl, etag) {
   return `${bundleUrl}::${etag || ""}`;
 }
 
+// Cache entries can be referenced under two keys (the etag-keyed canonical
+// entry and an alias under the etag-less probe key — see `resolveSourceMap`
+// below). `entry.aliasCount` tracks how many keys still point at this
+// entry so `bytes` are only deducted from `cacheBytes` once when the LAST
+// alias is removed, and `consumer.destroy()` is only invoked at the same
+// moment. Without this, an etag-published entry would double-count bytes
+// (forcing premature evictions) and a single eviction would destroy the
+// consumer while a sibling key still pointed at it.
+function disposeEntryRef(entry) {
+  entry.aliasCount = (entry.aliasCount || 1) - 1;
+  if (entry.aliasCount <= 0) {
+    try { entry.consumer.destroy?.(); } catch { /* best-effort */ }
+    cacheBytes -= entry.bytes;
+  }
+}
+
 function evictExpired() {
   const now = Date.now();
   for (const [key, entry] of cache) {
     if (entry.expiresAt <= now) {
-      try { entry.consumer.destroy?.(); } catch { /* best-effort */ }
-      cacheBytes -= entry.bytes;
+      disposeEntryRef(entry);
       cache.delete(key);
     }
   }
@@ -60,8 +75,7 @@ function evictToFit(targetBytes) {
   // (`touch()` re-inserts to move an entry to the tail).
   for (const [key, entry] of cache) {
     if (cacheBytes + targetBytes <= CACHE_MAX_BYTES) break;
-    try { entry.consumer.destroy?.(); } catch { /* best-effort */ }
-    cacheBytes -= entry.bytes;
+    disposeEntryRef(entry);
     cache.delete(key);
   }
 }
@@ -149,9 +163,28 @@ export async function resolveSourceMap(bundleUrl, { sourcemapBaseUrl } = {}) {
     }
 
     evictToFit(bytes);
-    const entry = { consumer, bytes, expiresAt: Date.now() + CACHE_TTL_MS, etag: etag || null };
+    const entry = {
+      consumer, bytes,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      etag: etag || null,
+      // Refcount — bumped to 2 below when we publish a second alias under
+      // the probe key. `disposeEntryRef` decrements per evicted key and
+      // only frees `bytes` / destroys the consumer when the last alias
+      // goes. See the rationale comment on `disposeEntryRef`.
+      aliasCount: 1,
+    };
     cacheBytes += bytes;
     cache.set(cacheKey(bundleUrl, etag), entry);
+    // Also publish under the etag-less probe key so the next call hits the
+    // fast-path lookup above (lines 115-120) without re-fetching. Without
+    // this, every CDN-served map (which nearly always carries an ETag)
+    // would be re-downloaded per call because the probe key is
+    // `bundleUrl::` while the storage key is `bundleUrl::W/"abc"` — the
+    // mismatch defeats the LRU cache's stated 1× fetch budget.
+    if (etag) {
+      entry.aliasCount += 1;
+      cache.set(cacheKey(bundleUrl, null), entry);
+    }
     return consumer;
   } catch (err) {
     console.warn(formatLogLine("warn", null, `[sourceMapResolver] ${bundleUrl}: ${err?.message || err}`));
@@ -178,9 +211,14 @@ export function mapBundleLine(consumer, line, column = 0) {
   }
 }
 
-/** Test-only cache reset. */
+/** Test-only cache reset. Walks unique entries (de-aliased) so a consumer
+ *  shared between the etag-keyed and etag-less probe keys is destroyed only
+ *  once. */
 export function __resetCacheForTest() {
+  const seen = new Set();
   for (const entry of cache.values()) {
+    if (seen.has(entry)) continue;
+    seen.add(entry);
     try { entry.consumer.destroy?.(); } catch { /* best-effort */ }
   }
   cache.clear();

@@ -546,6 +546,20 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     jsCoverage: null,
   };
 
+  // AUTO-009 — start V8 JS coverage BEFORE the test navigates so the first
+  // byte of the SUT bundle is instrumented. Opt-in per project; failures
+  // are best-effort and never flip a passing test.
+  let coverageStarted = false;
+  if (test.projectId) {
+    try {
+      const p = projectRepo.getById(test.projectId);
+      if (p?.coverageEnabled && page?.coverage?.startJSCoverage) {
+        await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: false });
+        coverageStarted = true;
+      }
+    } catch { /* best-effort */ }
+  }
+
   const start = Date.now();
   result.startedAt = start;
 
@@ -738,9 +752,6 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     // Swallow the losing promise to prevent unhandled rejection
     testExecution.catch(() => {});
     await Promise.race([testExecution, testTimeoutPromise]);
-    if (coverageStarted && page?.coverage?.stopJSCoverage) {
-      try { result.jsCoverage = await page.coverage.stopJSCoverage(); } catch { result.jsCoverage = null; }
-    }
 
   } catch (err) {
     result.status = "failed";
@@ -892,6 +903,15 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
   } finally {
     clearTimeout(testTimeoutHandle);
+
+    // AUTO-009 — stop V8 coverage before the page closes so the collector
+    // returns the script range list intact. Best-effort: a stop failure
+    // (page already closed, CDP detached) leaves `result.jsCoverage` at
+    // its initial null and the run-level aggregator degrades to "no
+    // coverage data for this test".
+    if (coverageStarted && page?.coverage?.stopJSCoverage) {
+      try { result.jsCoverage = await page.coverage.stopJSCoverage(); } catch { result.jsCoverage = null; }
+    }
 
     // Capture the final page URL for the frontend BrowserChrome
     try { result.url = page.url(); } catch { /* page already closed */ }
@@ -1079,18 +1099,3 @@ export async function executeTestIterations(test, fixtureRows, runSingle) {
   }
   return out;
 }
-    let coverageStarted = false;
-    if (test.projectId) {
-      try {
-        const p = projectRepo.getById(test.projectId);
-        if (p?.coverageEnabled && page?.coverage?.startJSCoverage) {
-          await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: false });
-          coverageStarted = true;
-        }
-      } catch { /* best-effort */ }
-    }
-    try {
-      if (page?.coverage?.stopJSCoverage) {
-        result.jsCoverage = await page.coverage.stopJSCoverage();
-      }
-    } catch { /* best-effort */ }

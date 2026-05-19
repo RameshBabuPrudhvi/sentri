@@ -427,6 +427,48 @@ export function getRecentCompletedWithResults(projectId, limit = 20) {
 }
 
 /**
+ * AUTO-009: Lean accessor for runs that carry a persisted `coverageSummary`
+ * JSON blob. Used by the dashboard's 30-day coverage trend (and the per-run
+ * granularity surface for AUTO-009c) so the trend can read `coveragePct`,
+ * `branchPct`, `functionPct` without bloating `LEAN_COLS` — `coverageSummary`
+ * is potentially multi-KB JSON and the rest of the dashboard payload doesn't
+ * need it. Filters `coverageSummary IS NOT NULL` at the SQL layer so projects
+ * that never enabled capture never round-trip an empty column.
+ *
+ * Selects only the columns the trend consumer reads:
+ *   - `id`, `projectId`, `startedAt`, `type` — windowing / grouping
+ *   - `coverageSummary` — parsed below
+ *
+ * Workspace-scoped via the same `projectIds` set the dashboard already
+ * resolves; never reads cross-workspace rows.
+ *
+ * @param {string[]} projectIds
+ * @returns {Object[]} Newest-last (chronological), `coverageSummary` parsed.
+ */
+export function getRunsWithCoverage(projectIds) {
+  if (!projectIds || projectIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  const rows = db.prepare(
+    `SELECT id, projectId, startedAt, type, coverageSummary FROM runs
+     WHERE projectId IN (${placeholders})
+       AND deletedAt IS NULL
+       AND coverageSummary IS NOT NULL
+       AND type IN ('test_run', 'run')
+     ORDER BY startedAt ASC`
+  ).all(...projectIds);
+  return rows.map((row) => {
+    if (row.coverageSummary) {
+      try { row.coverageSummary = JSON.parse(row.coverageSummary); }
+      catch { row.coverageSummary = null; }
+    } else {
+      row.coverageSummary = null;
+    }
+    return row;
+  });
+}
+
+/**
  * INT-002: Lean accessor for recent completed test runs that posted a GitHub
  * Check Run. Used by `concludeGithubCheck` to find a green base run for
  * regressed-test diff rendering without loading every project run's heavy
