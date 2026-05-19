@@ -48,6 +48,7 @@
 
 import { aggregateRunCoverage } from "./coverageAggregator.js";
 import { resolveSourceMap, mapBundleLine } from "./sourceMapResolver.js";
+import { computePrCoverage } from "./coveragePrDiff.js"; // AUTO-009d — PR-scoped coverage diff (the Codecov play)
 import { formatLogLine } from "../utils/logFormatter.js";
 
 /**
@@ -90,7 +91,7 @@ function approxEntryBytes(entry) {
  *   raw `jsCoverage` blobs after aggregation.
  * @returns {Promise<Object|null>} `coverageSummary` value to persist, or null.
  */
-export async function finalizeCoverage(project, results) {
+export async function finalizeCoverage(project, results, { changedFileRanges = null } = {}) {
   if (!project?.coverageEnabled) {
     // Strip any raw payloads regardless — defensive cleanup so a project
     // toggled OFF mid-run doesn't accidentally persist heavy in-memory blobs.
@@ -135,7 +136,26 @@ export async function finalizeCoverage(project, results) {
 
   let summary = null;
   try {
-    summary = await aggregateRunCoverage(results, { sutOrigin, resolver });
+    // AUTO-009d — when changedFileRanges is supplied (PR/trigger path), pass
+    // outRef so the aggregator surfaces per-source covered-line sets. We then
+    // hand those to `computePrCoverage` and stash the diff on
+    // `summary.prCoverageDiff` so a single caller integration point covers
+    // both single-process (testRunner.js) and sharded (runWorker.js) runs.
+    const outRef = changedFileRanges ? {} : null;
+    summary = await aggregateRunCoverage(results, { sutOrigin, resolver, outRef });
+    if (summary && outRef?.coveredLinesByFile && changedFileRanges) {
+      try {
+        const prDiff = computePrCoverage({
+          coveredLinesByFile: outRef.coveredLinesByFile,
+          totalLinesByFile: outRef.totalLinesByFile,
+          changedFileRanges,
+        });
+        if (prDiff) summary.prCoverageDiff = prDiff;
+      } catch (prErr) {
+        console.warn(formatLogLine("warn", null,
+          `[finalizeCoverage] computePrCoverage failed: ${prErr?.message || prErr}`));
+      }
+    }
     if (truncated && summary) summary.truncated = true;
   } catch (err) {
     console.warn(formatLogLine("warn", null,

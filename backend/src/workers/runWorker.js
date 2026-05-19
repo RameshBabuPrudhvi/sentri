@@ -702,7 +702,18 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
   // the AUTO-009j retention sweep (when shipped) to trim historical
   // payloads; for now, document the cost. Coverage size is bounded by
   // AUTO-009g's memory ceiling so a runaway shard can't OOM the finalizer.
-  run.coverageSummary = await finalizeCoverage(project, results);
+  // AUTO-009d — pass run.changedFileRanges (populated at trigger time by
+  // routes/trigger.js when launched from a GitHub PR webhook) so the
+  // sharded finalizer also produces a PR-scoped diff. Lift the diff onto
+  // `run.prCoverageDiff` for the dedicated column, then strip it from the
+  // summary so the persisted `coverageSummary` shape stays unchanged.
+  run.coverageSummary = await finalizeCoverage(project, results, {
+    changedFileRanges: run.changedFileRanges || null,
+  });
+  if (run.coverageSummary?.prCoverageDiff) {
+    run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
+    delete run.coverageSummary.prCoverageDiff;
+  }
 
   // Persist aggregates BEFORE the feedback loop so a feedback-loop crash
   // doesn't lose the gate verdict (CI consumers polling `/trigger/runs/:id`
@@ -714,6 +725,7 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     webVitalsResult: run.webVitalsResult,
     rootCauses: run.rootCauses, // AUTO-010
     coverageSummary: run.coverageSummary, // AUTO-009f
+    prCoverageDiff: run.prCoverageDiff || null, // AUTO-009d
   });
 
   // Re-read live status from the DB before the (expensive) feedback loop.

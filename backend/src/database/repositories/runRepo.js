@@ -43,6 +43,8 @@ const JSON_FIELDS = [
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
   "coverageSummary", // AUTO-009: aggregated per-run JS coverage summary (migration 038)
   "shardCoverageSummaries", // AUTO-009f: per-shard pre-aggregated coverage (migration 042) — sparse array indexed by shardIndex; merged into `coverageSummary` by the boundary-crossing finalizer.
+  "changedFileRanges", // AUTO-009d: per-file head-side line ranges from the PR diff (migration 044)
+  "prCoverageDiff", // AUTO-009d: PR-scoped coverage diff output from computePrCoverage (migration 044)
 ];
 
 // Fields whose canonical empty shape is an array, not null. Keeping them as
@@ -112,6 +114,8 @@ const INSERT_COLS = [
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
   "coverageSummary", // AUTO-009: aggregated per-run JS coverage summary (migration 038)
   "shardCoverageSummaries", // AUTO-009f: per-shard pre-aggregated coverage (migration 042)
+  "changedFileRanges", // AUTO-009d: PR diff hunk ranges (migration 044)
+  "prCoverageDiff", // AUTO-009d: PR-scoped coverage diff (migration 044)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

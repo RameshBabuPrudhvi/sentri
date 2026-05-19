@@ -156,15 +156,22 @@ function evaluateQualityGates(gates, run, { priorRunCoverage = null } = {}) {
         violations.push({ rule: "minBranchPct", threshold: gates.minBranchPct, actual: actualPct });
       }
     }
-    // PR coverage — currently aliases the overall `coveragePct` because we
-    // don't yet split PR-touched files from the full bundle. When DIF-008 /
-    // AUTO-009e lands a "PR-touched files only" filter, this branch will
-    // read a dedicated `cov.prCoveragePct`. Keeping the rule wired today
-    // means the gate UI is forward-compatible without a schema rev.
-    if (Number.isFinite(gates.minPrCoveragePct) && Number.isFinite(cov.coveragePct)) {
-      const actualPct = Number((cov.coveragePct * 100).toFixed(2));
-      if (actualPct < gates.minPrCoveragePct) {
-        violations.push({ rule: "minPrCoveragePct", threshold: gates.minPrCoveragePct, actual: actualPct });
+    // PR coverage — reads `run.prCoverageDiff.prCoveragePct` when the run
+    // was triggered from a GitHub PR and `finalizeCoverage` populated the
+    // PR-scoped diff (AUTO-009d). Falls back to overall `coveragePct` for
+    // non-PR runs (manual UI, scheduled) so the gate still fires — the
+    // operator's threshold applies to the best available signal.
+    {
+      const prDiff = run.prCoverageDiff;
+      const prPct = prDiff && typeof prDiff === "object" && Number.isFinite(prDiff.prCoveragePct)
+        ? prDiff.prCoveragePct
+        : null;
+      const effectivePct = prPct != null ? prPct : cov.coveragePct;
+      if (Number.isFinite(gates.minPrCoveragePct) && Number.isFinite(effectivePct)) {
+        const actualPct = Number((effectivePct * 100).toFixed(2));
+        if (actualPct < gates.minPrCoveragePct) {
+          violations.push({ rule: "minPrCoveragePct", threshold: gates.minPrCoveragePct, actual: actualPct });
+        }
       }
     }
     // Regression — drop relative to the previous coverage-enabled run.
@@ -921,7 +928,19 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // runs the aggregator + source-map resolver (AUTO-009b), enforces the
   // AUTO-009g memory ceiling, and strips raw `jsCoverage` payloads from
   // `run.results` AFTER aggregation so the persisted JSON column stays lean.
-  run.coverageSummary = await finalizeCoverage(project, run.results);
+  // AUTO-009d — pass changedFileRanges (populated at trigger time by
+  // routes/trigger.js when the run was launched from a GitHub PR webhook)
+  // so finalizeCoverage can compute the PR-scoped coverage diff. The diff
+  // lands as `summary.prCoverageDiff`; we lift it onto `run.prCoverageDiff`
+  // for the dedicated column, then strip it from the summary so the
+  // persisted `coverageSummary` shape stays unchanged.
+  run.coverageSummary = await finalizeCoverage(project, run.results, {
+    changedFileRanges: run.changedFileRanges || null,
+  });
+  if (run.coverageSummary?.prCoverageDiff) {
+    run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
+    delete run.coverageSummary.prCoverageDiff;
+  }
 
   // AUTO-009d — gate evaluation runs AFTER coverage aggregation so the
   // coverage rules see this run's freshly-computed `coverageSummary`. The

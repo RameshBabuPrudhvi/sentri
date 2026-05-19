@@ -108,7 +108,7 @@ export function summarizeCoverageForTest(jsCoverage = [], { sutOrigin } = {}) {
  *   file labels and `sourceMapStatus: "fallback"`.
  * @returns {Promise<Object>} `run.coverageSummary` shape.
  */
-export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, convertV8ToIstanbul = defaultConvertV8ToIstanbul } = {}) {
+export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, convertV8ToIstanbul = defaultConvertV8ToIstanbul, outRef = null } = {}) {
   const runCovered = new Map(); // bundleUrl -> Set(lines covered)
   const runTotals = new Map();  // bundleUrl -> total lines
   const perTest = [];
@@ -429,6 +429,20 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
     });
   }
   topUncoveredFiles.sort((a, b) => b.uncoveredLines - a.uncoveredLines);
+  // AUTO-009d — surface per-source covered-line sets via the optional
+  // `outRef` side channel so `coveragePrDiff.computePrCoverage` can filter
+  // covered lines by the PR's changed file ranges. We do NOT persist these
+  // sets on `coverageSummary` (Sets do not JSON-serialize, and the data
+  // would bloat the row by ~10x); the caller is expected to consume the
+  // sets in-process and discard them.
+  if (outRef && typeof outRef === "object") {
+    outRef.coveredLinesByFile = {};
+    outRef.totalLinesByFile = {};
+    for (const [file, meta] of groupedByOriginal.entries()) {
+      outRef.coveredLinesByFile[file] = meta.covered;
+      outRef.totalLinesByFile[file] = meta.total;
+    }
+  }
   const coveragePct = totalLines > 0 ? coveredLines / totalLines : 0;
   for (const row of perTest) row.deltaPct = totalLines > 0 ? row.deltaLines / totalLines : 0;
 
