@@ -270,25 +270,114 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
       continue;
     }
 
-    // Per-bundle-line mapping. We attempt every line 1..total so the
-    // resolution-rate stat reflects how much of the bundle is mappable, not
-    // just the uncovered tail.
-    let resolvedForThisBundle = 0;
-    for (let ln = 1; ln <= total; ln++) {
+    // Per-bundle-line mapping. Two passes with different precision budgets:
+    //
+    //   1. **Covered lines — always probed precisely.** Every covered line
+    //      MUST be mapped because the result feeds `topUncoveredFiles[]`
+    //      source-file grouping AND the `outRef.coveredLinesByFile` set
+    //      that AUTO-009d's PR-scoped diff intersects against PR hunks.
+    //      Skipping or sampling here would silently drop coverage for
+    //      whole source files in the PR-coverage gate. Bounded by the
+    //      covered-set size, which is the work the operator opted into.
+    //
+    //   2. **Uncovered lines — stride-sampled past a hard cap.** Uncovered
+    //      lines contribute only to (a) `sourceMapStatus` ratio math and
+    //      (b) inflating the `total` line count on the source-grouped
+    //      bucket. For bundles whose uncovered tail exceeds
+    //      `MAX_UNCOVERED_PROBES`, stride through evenly — the resolution
+    //      ratio is extrapolated from the sample, and each sampled
+    //      mapping is credited with its stride neighbourhood toward the
+    //      per-source `total`. Small bundles (uncovered ≤ cap) get
+    //      bit-for-bit identical behaviour to the pre-optimisation path,
+    //      so the existing unit-test contract holds.
+    //
+    // Industry baseline (Codecov, Coveralls, c8): all probe covered lines
+    // precisely and report resolution metrics from sampled / cached map
+    // traversals — never a full bundle scan per run. A 50k-line bundle ×
+    // 10 first-party scripts × N tests would otherwise dominate
+    // `aggregateRunCoverage` wall-clock on real SUTs.
+    const MAX_UNCOVERED_PROBES = 2000;
+
+    // Helper: probe one bundle line into the resolver and merge the result
+    // into `groupedByOriginal`. Returns 1 when the line mapped to an
+    // original source, 0 otherwise (used by the resolution-rate
+    // accumulator). `widthForTotal` lets the sampled-uncovered pass credit
+    // each probe with its stride width so the per-source `total` stays
+    // representative when we don't probe every line. Defaults to 1 for
+    // the precise covered-line pass — bit-for-bit identical to legacy.
+    const probeOne = (ln, isCovered, widthForTotal = 1) => {
       let mapped = null;
       try { mapped = resolver.mapLine ? resolver.mapLine(consumer, ln) : null; } catch { mapped = null; }
       const sourceKey = mapped?.source ? mapped.source : bundleUrl;
-      if (mapped?.source) resolvedForThisBundle++;
-      const isCovered = coveredSet.has(ln);
-      const existing = groupedByOriginal.get(sourceKey) || { covered: new Set(), total: 0, bundleUrl };
-      // Use the mapped line when available so per-source uncovered counts
-      // reference original-source coordinates.
       const targetLine = mapped?.line ?? ln;
-      existing.total = Math.max(existing.total, targetLine);
+      const existing = groupedByOriginal.get(sourceKey) || { covered: new Set(), total: 0, bundleUrl };
+      // widthForTotal === 1 → max(existing.total, targetLine), identical
+      // to the legacy path. Sampled uncovered probes (width = stride)
+      // contribute the sampled line + (stride - 1) trailing neighbours
+      // so per-source `total` reflects the unprobed gap.
+      existing.total = Math.max(existing.total, targetLine + Math.max(0, widthForTotal - 1));
       if (isCovered) existing.covered.add(targetLine);
       groupedByOriginal.set(sourceKey, existing);
+      return mapped?.source ? 1 : 0;
+    };
+
+    let resolvedForThisBundle = 0;
+    let probedForThisBundle = 0;
+
+    // ── Pass 1: precise probe of every covered line ────────────────────
+    // Iterate the actual covered set, not 1..total, so a bundle with N
+    // covered lines pays exactly N probes regardless of bundle size.
+    for (const ln of coveredSet) {
+      if (ln < 1 || ln > total) continue;
+      resolvedForThisBundle += probeOne(ln, true, 1);
+      probedForThisBundle++;
     }
-    bundleLinesResolved += resolvedForThisBundle;
+
+    // ── Pass 2: uncovered lines, stride-sampled when over the cap ──────
+    // Cheap uncovered count: total minus covered-in-range. Small bundles
+    // probe every line (preserves the pre-AUTO-009b semantics that the
+    // unit tests at backend/tests/run-coverage-integration.test.js assert
+    // against). Large bundles stride-sample.
+    let coveredInRange = 0;
+    for (const ln of coveredSet) if (ln >= 1 && ln <= total) coveredInRange++;
+    const uncoveredCount = Math.max(0, total - coveredInRange);
+
+    if (uncoveredCount === 0) {
+      // Fully covered bundle — nothing to sample.
+    } else if (uncoveredCount <= MAX_UNCOVERED_PROBES) {
+      // Small bundle — probe every uncovered line. Bit-for-bit identical
+      // to the legacy `for ln = 1..total` path on this size class.
+      for (let ln = 1; ln <= total; ln++) {
+        if (coveredSet.has(ln)) continue;
+        resolvedForThisBundle += probeOne(ln, false, 1);
+        probedForThisBundle++;
+      }
+    } else {
+      // Large bundle — stride-sample uncovered lines so the total probe
+      // count lands near the cap. The stride width is credited to the
+      // sampled line's source so `total` line counts stay representative.
+      const stride = Math.max(1, Math.ceil(uncoveredCount / MAX_UNCOVERED_PROBES));
+      let sampleCursor = 0;
+      for (let ln = 1; ln <= total; ln++) {
+        if (coveredSet.has(ln)) continue;
+        if (sampleCursor % stride === 0) {
+          resolvedForThisBundle += probeOne(ln, false, stride);
+          probedForThisBundle++;
+        }
+        sampleCursor++;
+      }
+    }
+
+    // Resolution-rate accumulator. When sampling was active,
+    // `probedForThisBundle < total` — extrapolate by attributing the
+    // sample's resolved ratio to the whole bundle so `sourceMapStatus`
+    // remains comparable across small (fully-probed) and large (sampled)
+    // bundles. `probedForThisBundle === 0` only happens for a `total === 0`
+    // bundle, which the outer guards already skipped.
+    if (probedForThisBundle > 0) {
+      const sampleRatio = resolvedForThisBundle / probedForThisBundle;
+      bundleLinesResolved += Math.round(sampleRatio * total);
+    }
   }
 
   let totalLines = 0;
