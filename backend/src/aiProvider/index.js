@@ -37,6 +37,7 @@ import * as anthropicAdapter from "./adapters/anthropic.js";
 import * as openaiAdapter from "./adapters/openai.js";
 import * as googleAdapter from "./adapters/google.js";
 import * as ollamaAdapter from "./adapters/ollama.js";
+import { withRetry, isRateLimitError, isTransientServerError, isRetryableError, composeSignal, MAX_RETRIES, BASE_DELAY_MS, MAX_BACKOFF_MS, CLOUD_TIMEOUT_MS } from "./retry.js";
 // INF-007: AI provider telemetry — latency histograms, token counters, and
 // error counters. The single most important metric surface for a SaaS QA
 // platform: it drives unit-economics (cost per workspace per day = tokens ×
@@ -652,9 +653,6 @@ export async function checkOllamaConnection() {
 
 const RATE_LIMIT_CODES = [429, 529];
 const RETRY_ERRORS     = ["rate_limit_error", "overloaded_error", "Too Many Requests"];
-const MAX_RETRIES      = parseInt(process.env.LLM_MAX_RETRIES, 10)  || 3;
-const BASE_DELAY_MS    = parseInt(process.env.LLM_BASE_DELAY_MS, 10) || 2000;
-const MAX_BACKOFF_MS   = parseInt(process.env.LLM_MAX_BACKOFF_MS, 10) || 30000;
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -668,21 +666,6 @@ async function sleep(ms) {
  * @param {Error} err
  * @returns {boolean}
  */
-export function isRateLimitError(err) {
-  const msg = (err?.message || "").toLowerCase();
-  const status = err?.status || err?.statusCode || 0;
-  if (RATE_LIMIT_CODES.includes(status)) return true;
-  // Use word-boundary-aware patterns to avoid false positives on port
-  // numbers (e.g. "localhost:4290"), disk quota errors, etc.
-  return /\brate.?limit/i.test(msg)
-    || /\brate_limit/i.test(msg)
-    || /\b429\b/.test(msg)
-    || /\bquota\s*(exceeded|exhausted|limit)/i.test(msg)
-    || /\btoo many requests\b/i.test(msg)
-    || /\bresource.?exhausted\b/i.test(msg)
-    || /\boverloaded/i.test(msg);
-}
-
 /**
  * Detect transient server-side failures that warrant retry + provider
  * fallback but aren't rate limits. Common examples:
@@ -699,59 +682,10 @@ export function isRateLimitError(err) {
  * @param {Error} err
  * @returns {boolean}
  */
-export function isTransientServerError(err) {
-  const msg = (err?.message || "").toLowerCase();
-  const status = err?.status || err?.statusCode || 0;
-  // HTTP 5xx except 501 (Not Implemented) — 500/502/503/504 are retriable
-  if (status >= 500 && status !== 501) return true;
-  return /\b50[0234]\b/.test(msg)
-    || /\bservice unavailable\b/i.test(msg)
-    || /\bhigh demand\b/i.test(msg)
-    || /\btry again later\b/i.test(msg)
-    || /\binternal server error\b/i.test(msg)
-    || /\bbad gateway\b/i.test(msg)
-    || /\bgateway timeout\b/i.test(msg);
-}
-
 /**
  * True if the error should be retried — either a rate limit (quota issue)
  * or a transient server error (provider outage).
  */
-function isRetryableError(err) {
-  return isRateLimitError(err) || isTransientServerError(err);
-}
-
-function extractRetryAfter(err) {
-  const match = (err?.message || "").match(/retry in (\d+(?:\.\d+)?)(s|ms)/i);
-  if (match) {
-    const val = parseFloat(match[1]);
-    return match[2].toLowerCase() === "ms" ? val : val * 1000;
-  }
-  return null;
-}
-
-async function withRetry(fn, label = "") {
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (attempt === MAX_RETRIES) throw err;
-      if (!isRetryableError(err)) throw err;
-      const retryAfter = extractRetryAfter(err);
-      // Honor server-requested Retry-After delays (cap at 2× MAX_BACKOFF_MS to
-      // prevent absurd waits). Only cap computed exponential backoff at MAX_BACKOFF_MS.
-      const delay = retryAfter
-        ? Math.min(retryAfter, MAX_BACKOFF_MS * 2)
-        : Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
-      // Distinguish quota issues (rate limit) from backend overload (5xx) in logs
-      // so operators can tell whether to add quota or wait out an outage.
-      const reason = isRateLimitError(err) ? "Rate limit" : "Transient server error (5xx)";
-      console.warn(formatLogLine("warn", null, `${reason} hit${label ? " for " + label : ""}: ${err.message?.slice(0, 120)}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
-      await sleep(delay);
-    }
-  }
-}
-
 // ── Core constants ────────────────────────────────────────────────────────────
 
 const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
@@ -760,151 +694,6 @@ const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 // Prevents a hung API call from blocking the pipeline indefinitely.
 // Ollama has its own timeout (OLLAMA_TIMEOUT_MS, default 120s) so this only
 // applies to Anthropic, OpenAI, and Google.  Override via LLM_TIMEOUT_MS.
-const CLOUD_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 120_000;
-
-/**
- * Compose an AbortSignal that fires on EITHER the external signal (user abort)
- * OR a per-call timeout — whichever comes first.  Returns the composite signal
- * and a cleanup function that MUST be called in a finally block to prevent the
- * timeout from leaking if the call completes before the deadline.
- *
- * @param {AbortSignal|undefined} external - Signal from runWithAbort (user abort).
- * @param {number}                timeoutMs - Per-call deadline.
- * @returns {Object} `{ signal: AbortSignal, cleanup: Function }`
- */
-function composeSignal(external, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("AI call timed out")), timeoutMs);
-
-  // Forward external abort
-  let onExternal = null;
-  if (external) {
-    if (external.aborted) {
-      clearTimeout(timer);
-      controller.abort(external.reason);
-    } else {
-      onExternal = () => { clearTimeout(timer); controller.abort(external.reason); };
-      external.addEventListener("abort", onExternal, { once: true });
-    }
-  }
-
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      clearTimeout(timer);
-      if (onExternal && external) external.removeEventListener("abort", onExternal);
-    },
-  };
-}
-
-// ── Ollama caller ─────────────────────────────────────────────────────────────
-
-async function callOllama(prompt, maxTokens, externalSignal, useJson = true) {
-  const base  = getOllamaBaseUrl();
-  const model = getOllamaModel();
-
-  // Local models (especially 7B) have much smaller effective context windows.
-  // Cap num_predict so the prompt + output don't exceed the model's limits.
-  // Ollama returns HTTP 500 when the combined size overflows.
-  const OLLAMA_MAX_PREDICT = parseInt(process.env.OLLAMA_MAX_PREDICT, 10) || 4096;
-  const effectiveTokens = Math.min(maxTokens || DEFAULT_MAX_TOKENS, OLLAMA_MAX_PREDICT);
-
-  const body = {
-    model,
-    prompt,
-    stream: false,
-    options: {
-      // Ollama uses num_predict for max tokens
-      num_predict: effectiveTokens,
-      temperature: 0.2,
-    },
-  };
-  // Only ask for JSON format when the caller needs structured output (pipeline).
-  // Chat needs free-form text.
-  if (useJson) body.format = "json";
-
-  const controller = new AbortController();
-  // Ollama can be slow for large prompts — give it generous time
-  const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120_000;
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  // If an external abort signal is provided (e.g. user clicked "Stop Task"),
-  // forward it to our internal controller so the fetch is cancelled immediately.
-  // We keep a reference to the handler so we can remove it in `finally` —
-  // without cleanup, 60+ sequential AI calls sharing one signal would trigger
-  // a MaxListenersExceededWarning.
-  let onExternalAbort = null;
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      clearTimeout(timeoutId);
-      throw new DOMException("Aborted", "AbortError");
-    } else {
-      onExternalAbort = () => controller.abort();
-      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
-    }
-  }
-
-  try {
-    const res = await fetch(`${base}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Ollama HTTP ${res.status}: ${text.slice(0, 300)}`);
-    }
-
-    // Ollama with stream:false should return a single JSON object, but some
-    // versions return NDJSON (one JSON object per line). We read as text and
-    // handle both formats.
-    const raw = await res.text();
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      // NDJSON fallback — each line is a JSON object with a partial "response"
-      // field (one token per line). Concatenate all response fields to
-      // reconstruct the full output, since the final done:true line typically
-      // has an empty response.
-      const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
-      let fullResponse = "";
-      let foundAny = false;
-      for (const line of lines) {
-        try {
-          const candidate = JSON.parse(line);
-          if (candidate.response !== undefined) {
-            fullResponse += candidate.response;
-            foundAny = true;
-          }
-        } catch { /* skip unparseable lines */ }
-      }
-      if (!foundAny) throw new Error(`Ollama returned unparseable response: ${raw.slice(0, 300)}`);
-      data = { response: fullResponse };
-    }
-
-    // Ollama returns { response: "..." } for non-streaming generate
-    if (!data.response) throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data).slice(0, 200)}`);
-    return data.response;
-  } catch (err) {
-    if (err.name === "AbortError") {
-      // Distinguish user-initiated abort from internal timeout
-      if (externalSignal?.aborted) {
-        throw new DOMException("Aborted", "AbortError");
-      }
-      throw new Error(`Ollama request timed out after ${timeoutMs / 1000}s. Try a smaller/faster model or increase OLLAMA_TIMEOUT_MS.`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
-    if (onExternalAbort && externalSignal) {
-      externalSignal.removeEventListener("abort", onExternalAbort);
-    }
-  }
-}
-
 // ─── Structured message helpers ───────────────────────────────────────────────
 // Prompt builders can pass either a plain string or { system, user } to
 // generateText / streamText. These helpers normalise both shapes into the
