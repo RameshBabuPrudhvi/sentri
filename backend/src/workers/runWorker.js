@@ -741,35 +741,45 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     let bundleLinesResolved = 0;
     let resolverConfigured = false;
 
-    // AUTO-009d / merge-path PR diff — `run.coverageSummary` is populated
-    // further down after the resolver loop so the merged summary can carry
-    // the observed `sourceMapStatus`. Until then, the resolver-loop guard
-    // below depends only on `run.changedFileRanges` (the PR context flag),
-    // NOT on `run.coverageSummary` — non-PR runs skip the loop entirely and
-    // the merged status remains the default "fallback".
+    // AUTO-009d — merge-path resolver probe + PR-scoped coverage diff.
     //
-    // AUTO-009d — PR-scoped diff over merged per-source line sets. Each
-    // shard's `perSource` slot carries per-bundle covered-line ARRAYS keyed
-    // by **bundle URL** (e.g. `https://app.example.com/main.js`) because
+    // Two concerns intentionally decoupled inside this block (BUG-0001 fix):
+    //
+    // 1. **`sourceMapStatus` accuracy** — needs the resolver to probe SOME
+    //    covered lines so the merged summary reports `resolved` / `partial`
+    //    / `fallback` honestly. Independent of PR context. The probe ALWAYS
+    //    runs when `sourcemapBaseUrl` is configured, regardless of whether
+    //    the run came from a PR.
+    //
+    // 2. **PR-coverage diff** — needs `changedFileRanges` to intersect
+    //    against. Only fires on PR-triggered runs, gated separately inside
+    //    the probe block below so the resolver work above populates the
+    //    resolution counters whether or not PR context exists.
+    //
+    // Why per-bundle resolution at the merge stage: each shard's `perSource`
+    // slot carries per-bundle covered-line ARRAYS keyed by **bundle URL**
+    // (e.g. `https://app.example.com/main.js`) because
     // `aggregateShardCoverage` deliberately runs without a source-map
     // resolver to keep per-shard payloads compact. `changedFileRanges` is
     // keyed by **source path** from the PR (e.g. `src/Cart.tsx`), so a
     // naive intersection would silently match zero files on every sharded
-    // PR run → `minPrCoveragePct` gate becomes dormant.
-    //
-    // Fix: resolve every per-bundle covered line through the project's
-    // `sourcemapBaseUrl` resolver at the merge stage, exactly once per
-    // shard (NOT once per shard × per-test — the work was already done
-    // per-bundle in each shard, we just translate bundle→source coordinates
-    // here). When no resolver is configured / available, the per-source
-    // line set still gets the original bundle URL as its key — same
-    // degradation as the single-process path when the operator has no
-    // sourcemapBaseUrl. AUTO-009k.2 follow-up if we ever want to skip the
-    // resolver call entirely when changedFileRanges is empty.
-    if (run.changedFileRanges) {
+    // PR run → `minPrCoveragePct` gate becomes dormant. The consumer cache
+    // (`consumerCache` below) ensures N shards covering the same bundle
+    // only fetch + parse the `.map` file once per merge. When no resolver
+    // is configured the per-source line set still gets the original bundle
+    // URL as its key — same degradation as the single-process path.
+    // BUG-0001 fix (AGENT.md §148 "default: fix it" — no follow-up entry).
+    // Decoupled from `run.changedFileRanges` so the resolver probe ALWAYS
+    // runs when `sourcemapBaseUrl` is configured. The pre-fix guard tied
+    // `sourceMapStatus` accuracy to PR context, so non-PR sharded runs
+    // always reported `"fallback"` even when source maps were resolving
+    // correctly — confusing operators who saw `"resolved"` on the same SUT
+    // with `shardCount: 1`. The PR-diff `computePrCoverage` call below is
+    // still PR-gated; only the resolver probing is unconditional.
+    const sourcemapBaseUrl = project?.sourcemapBaseUrl || null;
+    resolverConfigured = !!sourcemapBaseUrl;
+    if (resolverConfigured) {
       try {
-        const sourcemapBaseUrl = project?.sourcemapBaseUrl || null;
-        resolverConfigured = !!sourcemapBaseUrl;
         const coveredLinesByFile = {};
         const totalLinesByFile = {};
         // Cache consumers per-bundle so N shards covering the same bundle
@@ -815,17 +825,23 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
             }
           }
         }
-        const prDiff = computePrCoverage({
-          coveredLinesByFile,
-          totalLinesByFile,
-          changedFileRanges: run.changedFileRanges,
-        });
-        if (prDiff) {
-          run.prCoverageDiff = prDiff;
+        // BUG-0001 fix continuation — only compute the PR-coverage diff
+        // when PR context exists. The resolver work above also populates
+        // `bundleLinesTotal` / `bundleLinesResolved` for non-PR runs so
+        // `sourceMapStatus` reports accurately regardless of PR context.
+        if (run.changedFileRanges) {
+          const prDiff = computePrCoverage({
+            coveredLinesByFile,
+            totalLinesByFile,
+            changedFileRanges: run.changedFileRanges,
+          });
+          if (prDiff) {
+            run.prCoverageDiff = prDiff;
+          }
         }
       } catch (prErr) {
         console.warn(formatLogLine("warn", runId,
-          `[runWorker] AUTO-009k PR diff over merged summaries failed: ${prErr?.message || prErr}`));
+          `[runWorker] AUTO-009k resolver probe / PR diff over merged summaries failed: ${prErr?.message || prErr}`));
       }
     }
 
@@ -834,13 +850,16 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     // (`backend/src/pipeline/coverageAggregator.js`):
     //   - "resolved" — ≥80% of probed bundle lines mapped to source paths
     //   - "partial"  — some mapped (>0%, <80%)
-    //   - "fallback" — none / no resolver / not probed (e.g. non-PR run
-    //     never enters the resolver loop above)
-    // Without this, the merge path always emitted "fallback" and the
-    // Dashboard CoveragePanel rendered the "fallback mode" warning badge
-    // on sharded runs even when source maps were resolving correctly —
-    // confusing operators who saw "resolved" on the same SUT with
-    // `shardCount: 1`.
+    //   - "fallback" — `sourcemapBaseUrl` unset, or resolver was configured
+    //     but every `.map` fetch / probe failed
+    //
+    // BUG-0001 fix: the resolver probe now runs for every run with
+    // `sourcemapBaseUrl` configured (PR or non-PR), so `bundleLinesTotal`
+    // is populated whenever the operator has wired up source maps. Pre-fix
+    // the probe was gated on `run.changedFileRanges`, causing every non-PR
+    // sharded run to fall through to "fallback" even when source maps
+    // resolved correctly — confusing operators who saw "resolved" on the
+    // same SUT with `shardCount: 1`.
     let mergedSourceMapStatus = "fallback";
     if (resolverConfigured && bundleLinesTotal > 0) {
       const ratio = bundleLinesResolved / bundleLinesTotal;
