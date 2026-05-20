@@ -822,6 +822,16 @@ function recordAiTokens(provider, usage, operation = "generation") {
     if (Number.isFinite(outTokens) && outTokens > 0) {
       aiProviderTokensTotal.inc({ provider: label, kind: "output", operation }, outTokens);
     }
+    // AI-003 — generalised cost counter. Adapters compute `costUsd` from the
+    // catalog (see modelCatalog.js#computeCostUsd) and attach it to the
+    // usage block. `null` means the model isn't in the catalog → skip the
+    // increment so the counter shows "no data" rather than a fake zero.
+    // A literal `0` (catalog-known free model like Ollama) is also skipped
+    // because incrementing by 0 is a no-op anyway.
+    const costUsd = Number(usage.costUsd);
+    if (Number.isFinite(costUsd) && costUsd > 0) {
+      aiProviderCostUsdTotal.inc({ provider: label, operation }, costUsd);
+    }
   } catch { /* best-effort */ }
 }
 
@@ -1140,6 +1150,10 @@ ${String(contextHtml).slice(0, 800)}` : "");
     return null;
   }
 
+  // AI-003 — recordAiTokens() now bumps the cost counter from
+  // `usage.costUsd` (catalog-derived) for every adapter call, including
+  // vision-heal. We let it run for tokens, but the cost increment here is
+  // gated below so we don't double-count when the catalog has pricing.
   if (usage) recordAiTokens(provider, usage, "vision_heal");
   let parsed;
   try { parsed = parseJSON(raw); } catch { return null; }
@@ -1147,13 +1161,30 @@ ${String(contextHtml).slice(0, 800)}` : "");
   if (!Number.isFinite(confidence) || confidence <= 0) return null;
   const x = Number(parsed?.x), y = Number(parsed?.y), width = Number(parsed?.width), height = Number(parsed?.height);
   const box = (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height)) ? { x, y, width, height } : null;
-  const inK = (Number(usage?.input) || 0) / 1_000_000;
-  const outK = (Number(usage?.output) || 0) / 1_000_000;
-  const costUsd = inK * 5 + outK * 15;
+  // Prefer the catalog-derived cost when available so vision-heal spend
+  // tracks the same per-model pricing as test generation. Fall back to the
+  // MNT-001 $5/M input + $15/M output midpoint estimate when the model
+  // isn't in the catalog — the budget circuit-breaker still needs *some*
+  // signal to enforce caps, and the midpoint estimate is the documented
+  // pre-AI-003 behaviour. Already-counted via `recordAiTokens()` when
+  // catalog-derived; we increment the counter ourselves only on fallback.
+  const catalogCost = Number(usage?.costUsd);
+  let costUsd;
+  if (Number.isFinite(catalogCost)) {
+    costUsd = catalogCost;
+  } else {
+    const inK = (Number(usage?.input) || 0) / 1_000_000;
+    const outK = (Number(usage?.output) || 0) / 1_000_000;
+    costUsd = inK * 5 + outK * 15;
+    try {
+      if (Number.isFinite(costUsd) && costUsd > 0) {
+        aiProviderCostUsdTotal.inc({ provider: metricLabel, operation: "vision_heal" }, costUsd);
+      }
+    } catch {}
+  }
   try {
     const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
     aiProviderLatencySeconds.observe({ provider: metricLabel, outcome: "success", operation: "vision_heal" }, seconds);
-    if (Number.isFinite(costUsd) && costUsd > 0) aiProviderCostUsdTotal.inc({ provider: metricLabel, operation: "vision_heal" }, costUsd);
   } catch {}
   return { confidence: Math.min(1, Math.max(0, confidence)), box, model, costUsd, reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null };
 }

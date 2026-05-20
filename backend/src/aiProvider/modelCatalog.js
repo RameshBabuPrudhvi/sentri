@@ -73,6 +73,106 @@ export function capabilitiesFor(provider) {
   return { supportsVision: false, supportsJsonMode: false, contextWindow: null };
 }
 
+// ── AI-003 — Per-(provider, model) pricing table ─────────────────────────────
+// Maintainer-owned. When a vendor publishes new prices: edit the entry,
+// bump `asOf` to today's date. PR title: `chore(pricing): refresh <provider>
+// rates`. See docs/guide/ai-cost-tracking.md for the full update workflow.
+//
+// Pricing is per 1k tokens (NOT per 1M) so a single multiplication against
+// the `usage.input` / `usage.output` token counts (divided by 1000) yields
+// USD. Per-1k matches the convention used by every cloud LLM vendor's
+// public pricing page.
+//
+// `asOf` is informational — it lets the planner agent (AI-005) and the SaaS
+// unit-economics dashboards flag pricing entries that haven't been refreshed
+// in N months as stale. The cost counter still emits using the recorded
+// values; staleness is a UI / alert concern, not a runtime gate.
+//
+// Models not in this table emit `costUsd: null` from adapters (no fake
+// zeros — see computeCostUsd() below). Ollama models are explicitly priced
+// at 0/0 because they ARE free at the call site — distinguishing "free"
+// from "unknown" is a dashboard requirement.
+export const MODEL_PRICING = {
+  // Anthropic — https://www.anthropic.com/pricing#anthropic-api
+  "claude-sonnet-4-20250514":     { provider: "anthropic", inputPer1k: 0.003,  outputPer1k: 0.015,  asOf: "2026-04-01" },
+  "claude-3-5-sonnet-20241022":   { provider: "anthropic", inputPer1k: 0.003,  outputPer1k: 0.015,  asOf: "2026-04-01" },
+  "claude-3-5-sonnet-20240620":   { provider: "anthropic", inputPer1k: 0.003,  outputPer1k: 0.015,  asOf: "2026-04-01" },
+  "claude-3-opus-20240229":       { provider: "anthropic", inputPer1k: 0.015,  outputPer1k: 0.075,  asOf: "2026-04-01" },
+
+  // OpenAI — https://openai.com/api/pricing/
+  "gpt-4o":                       { provider: "openai",    inputPer1k: 0.0025, outputPer1k: 0.010,  asOf: "2026-04-01" },
+  "gpt-4o-mini":                  { provider: "openai",    inputPer1k: 0.00015,outputPer1k: 0.0006, asOf: "2026-04-01" },
+  "gpt-4-turbo":                  { provider: "openai",    inputPer1k: 0.010,  outputPer1k: 0.030,  asOf: "2026-04-01" },
+  "gpt-4-vision-preview":         { provider: "openai",    inputPer1k: 0.010,  outputPer1k: 0.030,  asOf: "2026-04-01" },
+
+  // Google — https://ai.google.dev/pricing
+  "gemini-2.5-flash":             { provider: "google",    inputPer1k: 0.000075,outputPer1k: 0.0003, asOf: "2026-04-01" },
+  "gemini-1.5-flash":             { provider: "google",    inputPer1k: 0.000075,outputPer1k: 0.0003, asOf: "2026-04-01" },
+  "gemini-1.5-pro":               { provider: "google",    inputPer1k: 0.00125, outputPer1k: 0.005,  asOf: "2026-04-01" },
+
+  // OpenRouter — auto-routing model. Cost is set by the underlying model,
+  // which OpenRouter reports per-call via `res.usage.cost`. We don't pin a
+  // rate here — adapters that see a vendor-reported cost field should use
+  // it directly; otherwise `costUsd: null` (catalog miss is correct).
+  "openrouter/auto":              { provider: "openrouter", inputPer1k: null,  outputPer1k: null,   asOf: "2026-04-01" },
+
+  // Ollama — local models, zero per-call cost. Listed explicitly so the
+  // dashboard can render "$0.00" instead of "no data" for these models.
+  "mistral:7b":                   { provider: "local",     inputPer1k: 0,      outputPer1k: 0,      asOf: "2026-04-01" },
+  "llama3:8b":                    { provider: "local",     inputPer1k: 0,      outputPer1k: 0,      asOf: "2026-04-01" },
+  "llama3.1:8b":                  { provider: "local",     inputPer1k: 0,      outputPer1k: 0,      asOf: "2026-04-01" },
+  "llama3.2:3b":                  { provider: "local",     inputPer1k: 0,      outputPer1k: 0,      asOf: "2026-04-01" },
+  "qwen2.5:7b":                   { provider: "local",     inputPer1k: 0,      outputPer1k: 0,      asOf: "2026-04-01" },
+  "phi3:mini":                    { provider: "local",     inputPer1k: 0,      outputPer1k: 0,      asOf: "2026-04-01" },
+  "gemma2:9b":                    { provider: "local",     inputPer1k: 0,      outputPer1k: 0,      asOf: "2026-04-01" },
+};
+
+/**
+ * Look up pricing for a model. Returns `null` (NOT a zero-cost entry) when
+ * the model is not in the catalog — `null` is the dashboard's signal for
+ * "no data", distinct from a known-free model (Ollama) which is `0/0`.
+ *
+ * @param {string} model
+ * @returns {{provider: string, inputPer1k: number|null, outputPer1k: number|null, asOf: string}|null}
+ */
+export function pricingFor(model) {
+  if (!model) return null;
+  return MODEL_PRICING[model] || null;
+}
+
+/**
+ * AI-003 — Compute the USD cost for a single LLM call from the catalog. The
+ * shared formula sits here so adapters and the orchestrator never disagree
+ * on rounding / unit conventions, and the planner (AI-005) plus the budget
+ * circuit-breaker (AI-007) read the same number the dashboard does.
+ *
+ * Returns `null` when:
+ *   - `model` isn't in the catalog (catalog miss → "no data", not "$0")
+ *   - both `inputPer1k` and `outputPer1k` are `null` (e.g. openrouter/auto
+ *     where the underlying model varies per call)
+ *   - `usage` is missing or has no usable token counts
+ *
+ * Returns `0` when the model is in the catalog at `0/0` (Ollama) — known
+ * free, distinct from null.
+ *
+ * @param {string} model - Resolved model id used for the call.
+ * @param {{input?: number, output?: number}} usage - Token counts from the SDK response.
+ * @returns {number|null} USD cost, or `null` for unknown pricing.
+ */
+export function computeCostUsd(model, usage) {
+  const pricing = pricingFor(model);
+  if (!pricing) return null;
+  if (pricing.inputPer1k == null && pricing.outputPer1k == null) return null;
+  if (!usage) return null;
+  const inTokens = Number(usage.input) || 0;
+  const outTokens = Number(usage.output) || 0;
+  if (inTokens <= 0 && outTokens <= 0) return null;
+  const inCost = (pricing.inputPer1k || 0) * (inTokens / 1000);
+  const outCost = (pricing.outputPer1k || 0) * (outTokens / 1000);
+  const total = inCost + outCost;
+  return Number.isFinite(total) ? total : null;
+}
+
 export function getCloudModel(provider) {
   const cfg = CLOUD_DEFAULT_MODELS[provider];
   if (!cfg) return "";

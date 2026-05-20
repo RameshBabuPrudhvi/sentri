@@ -148,16 +148,22 @@ export const aiProviderErrorsTotal = new client.Counter({
   registers: [register],
 });
 
-// MNT-001b — cumulative LLM spend in USD, bucketed by provider + operation.
-// Stage 8 vision heals increment this with the per-call cost estimate from
-// `callVisionModel` ($5/M input + $15/M output midpoint). Generation calls
-// don't yet emit cost (pricing-lookup table is a future enhancement). The SaaS unit-
-// economics dashboard divides by workspace_active_count to get cost-per-
-// customer; alerting on `increase(...[1h])` per project surfaces runaway
-// spend before the monthly cap trips the budget circuit-breaker.
+// AI-003 — cumulative LLM spend in USD, bucketed by provider + operation.
+// Every adapter call (generation + vision_heal) increments this from the
+// per-(provider, model) catalog in `aiProvider/modelCatalog.js`. Models
+// missing pricing emit `costUsd: null` from adapters and are SKIPPED on
+// the counter — distinguishing "no data" from "$0" matters for accuracy:
+// dashboards that divide by workspace_active_count must not be biased by
+// fake zeros. Vision-heal falls back to the MNT-001 $5/M-input + $15/M-
+// output midpoint estimate when the resolved vision model isn't in the
+// catalog so the budget circuit-breaker still has *some* signal.
+//
+// Pricing data is maintainer-owned in modelCatalog.js#MODEL_PRICING with an
+// `asOf` field per entry — see docs/guide/ai-cost-tracking.md for the
+// vendor-price refresh workflow.
 export const aiProviderCostUsdTotal = new client.Counter({
   name: "app_ai_cost_usd_total",
-  help: "Cumulative LLM spend in USD, bucketed by provider + operation. Vision-heal cost uses $5/M input + $15/M output midpoint estimate; generation cost tracking is a future enhancement (needs per-model pricing-lookup table). SaaS unit-economics dashboard divides by workspace count to get cost-per-customer.",
+  help: "Cumulative LLM spend in USD, bucketed by provider + operation. Computed per call from the per-(provider, model) catalog at aiProvider/modelCatalog.js#MODEL_PRICING. Catalog misses emit no increment (no fake zeros); known-free models (Ollama) emit increment of 0. Vision-heal uses the MNT-001 $5/M input + $15/M output midpoint when the model isn't in the catalog. SaaS unit-economics dashboard divides by workspace count to get cost-per-customer.",
   labelNames: ["provider", "operation"],
   registers: [register],
 });

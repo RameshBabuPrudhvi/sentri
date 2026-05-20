@@ -11,6 +11,16 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 import { throwIfAborted } from "../../utils/abortHelper.js";
+import { computeCostUsd } from "../modelCatalog.js";
+
+// AI-003 — adapters attach a `costUsd` field on the usage block when the
+// resolved model is in the pricing catalog. `null` for catalog misses (no
+// fake zeros — see modelCatalog.js#computeCostUsd). Existing consumers
+// reading `usage.input` / `usage.output` are unaffected.
+function withCost(model, usage) {
+  if (!usage) return usage;
+  return { ...usage, costUsd: computeCostUsd(model, usage) };
+}
 
 export async function generate({ messages, maxTokens, signal, model, apiKey }) {
   const client = new Anthropic({ apiKey });
@@ -22,7 +32,7 @@ export async function generate({ messages, maxTokens, signal, model, apiKey }) {
       const msg = await client.messages.create(params, { signal: composedSignal });
       return {
         text: msg.content?.[0]?.text || "",
-        usage: { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens },
+        usage: withCost(model, { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens }),
       };
     } finally { cleanup(); }
   }, "Anthropic");
@@ -40,7 +50,7 @@ export async function stream({ messages, maxTokens, signal, model, apiKey }, onT
   const final = await s.finalMessage();
   return {
     text: final?.content?.[0]?.text || "",
-    usage: { input: final?.usage?.input_tokens, output: final?.usage?.output_tokens },
+    usage: withCost(model, { input: final?.usage?.input_tokens, output: final?.usage?.output_tokens }),
   };
 }
 
@@ -56,6 +66,6 @@ export async function generateVision({ model, apiKey, base64, userPrompt, signal
   }, { signal });
   return {
     text: msg.content?.[0]?.text || "",
-    usage: { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens },
+    usage: withCost(model, { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens }),
   };
 }

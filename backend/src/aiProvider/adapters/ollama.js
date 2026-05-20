@@ -1,5 +1,6 @@
 import { MAX_RETRIES, BASE_DELAY_MS, MAX_BACKOFF_MS, sleep } from "../retry.js";
 import { formatLogLine } from "../../utils/logFormatter.js";
+import { computeCostUsd, pricingFor } from "../modelCatalog.js";
 
 const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 
@@ -110,7 +111,16 @@ export async function generate({ messages, maxTokens, signal, useJson, model, ba
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const text = await callOllama(messages.combined, maxTokens, signal, useJson, baseUrl, model);
-      return { text, usage: null };
+      // AI-003 — Ollama's /api/generate doesn't return token counts in
+      // non-streaming mode. We still emit a usage block so consumers see
+      // `costUsd: 0` for catalog-known local models (free) and
+      // `costUsd: null` for unknown models — distinguishing "free" from
+      // "no data" matches the dashboard contract from modelCatalog.js.
+      const known = pricingFor(model);
+      const usage = known
+        ? { input: 0, output: 0, costUsd: known.inputPer1k === 0 && known.outputPer1k === 0 ? 0 : computeCostUsd(model, { input: 0, output: 0 }) }
+        : null;
+      return { text, usage };
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;
       const isRetryable = err.message.includes("ECONNREFUSED") || err.message.includes("fetch failed") || err.message.includes("Ollama HTTP 500");
