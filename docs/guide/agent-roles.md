@@ -27,7 +27,7 @@ Each workspace/role config can define:
 
 - `provider` (nullable): null = workspace default provider
 - `model` (nullable): null = provider default model
-- `systemPromptOverride` (nullable): null = pipeline default prompt
+- `systemPromptOverride` (nullable, ≤ 32 000 chars): null = pipeline default prompt
 - `temperature` (default `0.2`)
 - `maxTokens` (nullable)
 - `fallbackRole` (nullable)

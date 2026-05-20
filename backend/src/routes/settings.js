@@ -241,6 +241,12 @@ router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
 
 const AGENT_ROLES = ["explorer", "planner", "author", "oracle", "executor", "healer", "reviewer", "triager"];
 
+// Cap on systemPromptOverride length. Even though this is admin-only, an
+// unbounded TEXT column gets serialised on every GET and bloats list
+// responses; 32 KB is generous for a system prompt and matches the order of
+// magnitude used elsewhere in the codebase for user-supplied free-text.
+const MAX_SYSTEM_PROMPT_LEN = 32_000;
+
 function hasFallbackCycle(workspaceId, role, fallbackRole) {
   if (!fallbackRole) return false;
   const byRole = new Map(agentConfigRepo.listByWorkspace(workspaceId).map((r) => [r.role, r.fallbackRole]));
@@ -264,6 +270,9 @@ router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
   if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
   if (fallbackRole && !AGENT_ROLES.includes(fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
   if (fallbackRole && hasFallbackCycle(req.workspaceId, role, fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
+  if (typeof systemPromptOverride === "string" && systemPromptOverride.length > MAX_SYSTEM_PROMPT_LEN) {
+    return res.status(400).json({ error: `systemPromptOverride must be ${MAX_SYSTEM_PROMPT_LEN} chars or fewer` });
+  }
   const now = new Date().toISOString();
   const existing = agentConfigRepo.getByRole(req.workspaceId, role);
   const saved = agentConfigRepo.upsert({
@@ -293,6 +302,9 @@ router.patch("/settings/agent-roles/:role", requireRole("admin"), (req, res) => 
   payload.workspaceId = req.workspaceId;
   if (payload.fallbackRole && !AGENT_ROLES.includes(payload.fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
   if (payload.fallbackRole && hasFallbackCycle(req.workspaceId, role, payload.fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
+  if (typeof payload.systemPromptOverride === "string" && payload.systemPromptOverride.length > MAX_SYSTEM_PROMPT_LEN) {
+    return res.status(400).json({ error: `systemPromptOverride must be ${MAX_SYSTEM_PROMPT_LEN} chars or fewer` });
+  }
   // Mirror POST's numeric coercion so direct API callers can't smuggle
   // non-numeric strings past SQLite's flexible typing into REAL/INTEGER columns.
   payload.temperature = Number.isFinite(Number(payload.temperature)) ? Number(payload.temperature) : existing.temperature;

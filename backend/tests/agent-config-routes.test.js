@@ -63,6 +63,29 @@ async function main() {
       assert.equal(out.json.maxTokens, 256);
     });
 
+    await test("rejects oversized systemPromptOverride", async () => {
+      const huge = "x".repeat(32_001);
+      let out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "triager", systemPromptOverride: huge } });
+      assert.equal(out.res.status, 400);
+      // PATCH path too — establish the row first with a small prompt, then attempt to balloon it.
+      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "triager", systemPromptOverride: "small" } });
+      out = await apiReq(base, "/api/settings/agent-roles/triager", { method: "PATCH", cookie: cookieA, body: { systemPromptOverride: huge } });
+      assert.equal(out.res.status, 400);
+    });
+
+    await test("deleting a role clears dangling fallbackRole refs in siblings", async () => {
+      // planner → healer; deleting healer should null planner.fallbackRole
+      // so AI-005 dispatch never resolves a dangling reference.
+      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "healer" } });
+      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "healer" } });
+      let out = await apiReq(base, "/api/settings/agent-roles/healer", { method: "DELETE", cookie: cookieA });
+      assert.equal(out.res.status, 200);
+      out = await apiReq(base, "/api/settings/agent-roles", { cookie: cookieA });
+      const planner = (out.json.roles || []).find((r) => r.role === "planner");
+      assert.ok(planner, "planner row should still exist");
+      assert.equal(planner.fallbackRole, null, "planner.fallbackRole should be nulled after healer delete");
+    });
+
     await test("fallback cycle detection", async () => {
       await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "reviewer" } });
       await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "reviewer", fallbackRole: "author" } });

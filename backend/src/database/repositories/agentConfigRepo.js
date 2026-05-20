@@ -55,12 +55,25 @@ export function upsert(config) {
 }
 
 /**
- * Delete a role config. No-op when the row doesn't exist.
+ * Delete a role config and null out any sibling `fallbackRole` references
+ * to the deleted role in the same workspace. The two writes run in a single
+ * transaction so dispatch (AI-005) can rely on the invariant that every
+ * non-null `fallbackRole` points at an existing config.
  *
  * @param {string} workspaceId
  * @param {string} role
- * @returns {Object} better-sqlite3 RunResult ({ changes, lastInsertRowid }).
+ * @returns {Object} { deleted, fallbacksCleared } — better-sqlite3 changes counts.
  */
 export function remove(workspaceId, role) {
-  return getDatabase().prepare("DELETE FROM agent_configs WHERE workspaceId = ? AND role = ?").run(workspaceId, role);
+  const db = getDatabase();
+  const tx = db.transaction(() => {
+    const cleared = db.prepare(
+      "UPDATE agent_configs SET fallbackRole = NULL, updatedAt = ? WHERE workspaceId = ? AND fallbackRole = ?"
+    ).run(new Date().toISOString(), workspaceId, role);
+    const deleted = db.prepare(
+      "DELETE FROM agent_configs WHERE workspaceId = ? AND role = ?"
+    ).run(workspaceId, role);
+    return { deleted: deleted.changes, fallbacksCleared: cleared.changes };
+  });
+  return tx();
 }
