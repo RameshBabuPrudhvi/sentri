@@ -22,6 +22,7 @@ import { validateUrl } from "../utils/ssrfGuard.js";
 import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
+import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 
 const router = Router();
 
@@ -236,6 +237,72 @@ router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
   res.json({ ok: true });
 });
 
+
+
+const AGENT_ROLES = ["planner", "codegen", "critic", "selfheal", "crawl_classify", "scenario_plan", "assertion_enhance", "state_explorer"];
+
+function hasFallbackCycle(workspaceId, role, fallbackRole) {
+  if (!fallbackRole) return false;
+  const byRole = new Map(agentConfigRepo.listByWorkspace(workspaceId).map((r) => [r.role, r.fallbackRole]));
+  byRole.set(role, fallbackRole);
+  let cur = fallbackRole;
+  const seen = new Set([role]);
+  while (cur) {
+    if (seen.has(cur)) return true;
+    seen.add(cur);
+    cur = byRole.get(cur) || null;
+  }
+  return false;
+}
+
+router.get("/settings/agent-roles", requireRole("admin"), (req, res) => {
+  res.json({ roles: agentConfigRepo.listByWorkspace(req.workspaceId) });
+});
+
+router.get("/settings/agent-roles/:role", requireRole("admin"), (req, res) => {
+  const role = req.params.role;
+  if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
+  const row = agentConfigRepo.getByRole(req.workspaceId, role);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  res.json(row);
+});
+
+router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
+  const { role, provider = null, model = null, systemPromptOverride = null, temperature = 0.2, maxTokens = null, fallbackRole = null } = req.body || {};
+  if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
+  if (fallbackRole && !AGENT_ROLES.includes(fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
+  if (fallbackRole && hasFallbackCycle(req.workspaceId, role, fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
+  const now = new Date().toISOString();
+  const existing = agentConfigRepo.getByRole(req.workspaceId, role);
+  const saved = agentConfigRepo.upsert({
+    id: existing?.id || `AGC-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,
+    workspaceId: req.workspaceId, role, provider, model, systemPromptOverride,
+    temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
+    maxTokens: maxTokens == null ? null : Number(maxTokens), fallbackRole,
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  });
+  res.status(existing ? 200 : 201).json(saved);
+});
+
+router.patch("/settings/agent-roles/:role", requireRole("admin"), (req, res) => {
+  const role = req.params.role;
+  if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
+  const existing = agentConfigRepo.getByRole(req.workspaceId, role);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const payload = { ...existing, ...req.body, role, workspaceId: req.workspaceId };
+  if (payload.fallbackRole && !AGENT_ROLES.includes(payload.fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
+  if (payload.fallbackRole && hasFallbackCycle(req.workspaceId, role, payload.fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
+  payload.updatedAt = new Date().toISOString();
+  const saved = agentConfigRepo.upsert(payload);
+  res.json(saved);
+});
+
+router.delete("/settings/agent-roles/:role", requireRole("admin"), (req, res) => {
+  const role = req.params.role;
+  if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
+  agentConfigRepo.remove(req.workspaceId, role);
+  res.json({ ok: true });
+});
 
 // GET /api/settings/github-checks — per-project PR check settings.
 router.get("/settings/github-checks", requireRole("qa_lead"), (req, res) => {

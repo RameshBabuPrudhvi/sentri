@@ -75,6 +75,7 @@ const files = [
   "tests/aiProvider-adapter-contract.test.js",
   "tests/ai-provider-cost-tracking.test.js",
   "tests/compat-config-cache.test.js",
+  "tests/agent-config-routes.test.js",
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",
   "tests/openapi.test.js",

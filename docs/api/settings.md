@@ -184,3 +184,11 @@ Deleted projects, tests, and runs are soft-deleted (moved to the Recycle Bin) ra
 - Restoring a **test** or **run** whose parent project is deleted returns `409` — restore the project first.
 
 **Note:** The recycle bin endpoint returns all soft-deleted items (capped at 200 per type) without pagination. For paginated listing of live entities, see the [Tests](/api/tests) and [Runs](/api/runs) API docs.
+
+
+## Agent Roles
+- `GET /api/v1/settings/agent-roles`
+- `GET /api/v1/settings/agent-roles/:role`
+- `POST /api/v1/settings/agent-roles`
+- `PATCH /api/v1/settings/agent-roles/:role`
+- `DELETE /api/v1/settings/agent-roles/:role`
