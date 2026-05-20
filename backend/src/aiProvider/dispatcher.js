@@ -20,7 +20,7 @@ import {
   classifyAiError,
 } from "../utils/metrics.js";
 import { buildProviderMeta } from "./providerInfo.js";
-import { getCurrentTraceId } from "../utils/observability.js";
+import { getCurrentTraceId, annotateAiCallSpan } from "../utils/observability.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -246,11 +246,17 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
   const operation = "generation";
   const label = providerMetricLabel(provider);
   const agentRole = callOptions.agentRole || "default";
-  // AI-005 trace-correlation: emit the per-call traceId at debug level only.
+  // AI-005 tripwire #3 — attach `ai.agent_role` + `ai.provider` +
+  // `ai.operation` attributes to the active OTel span so distributed traces
+  // line up with the Prometheus labels for per-role debugging. No-op when
+  // OTel is unconfigured (single helper, single owner: observability.js).
+  annotateAiCallSpan({ provider, agentRole, operation });
+  // Trace-correlation: emit the per-call traceId at debug level only.
   // Every AI call inside an OTel-instrumented request has a traceId, so an
   // unconditional info-level line would flood logs (~hundreds per crawl).
-  // The traceId is already attached to the OTel span by INF-007 — this log
-  // line is a developer aid for non-OTel deployments, gated by LOG_LEVEL.
+  // The traceId is already attached to the OTel span by INF-007 +
+  // `annotateAiCallSpan` above — this log line is a developer aid for
+  // non-OTel deployments, gated by LOG_LEVEL.
   const traceId = getCurrentTraceId();
   if (traceId && process.env.LOG_LEVEL === "debug") {
     console.log(formatLogLine("debug", null, `[aiProvider] traceId=${traceId} provider=${provider} role=${agentRole}`));

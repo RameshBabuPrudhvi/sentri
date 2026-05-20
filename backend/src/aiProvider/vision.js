@@ -21,6 +21,7 @@ import {
   aiProviderCostUsdTotal,
   classifyAiError,
 } from "../utils/metrics.js";
+import { annotateAiCallSpan } from "../utils/observability.js";
 import { parseJSON } from "./index.js";
 
 // ── Vision model resolution ───────────────────────────────────────────────────
@@ -140,6 +141,13 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // null from generateVision). Bail before the adapter call to keep the
   // metric label clean.
   if (provider === "local") return null;
+
+  // AI-005 tripwire #3 — annotate the active OTel span with vision-heal
+  // attributes so distributed traces split by `ai.operation=vision_heal`.
+  // `agentRole` is `"default"` here matching the metric labels; future
+  // AI-005b will route this through `resolveProvider({ agentRole: "healer" })`
+  // and the attribute will follow.
+  annotateAiCallSpan({ provider, agentRole: "default", operation: "vision_heal" });
 
   // Build a vision-specific opts bag. We reuse buildAdapterOpts() shape
   // for the auth/baseUrl/SSRF fields, then layer the image fields on top.
