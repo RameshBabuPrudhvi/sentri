@@ -5,7 +5,7 @@ export const BASE_DELAY_MS = parseInt(process.env.LLM_BASE_DELAY_MS, 10) || 2000
 export const MAX_BACKOFF_MS = parseInt(process.env.LLM_MAX_BACKOFF_MS, 10) || 30000;
 export const CLOUD_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 120_000;
 
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+export function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 export function isRateLimitError(err) {
   const msg = (err?.message || "").toLowerCase();

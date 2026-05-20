@@ -853,7 +853,7 @@ async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal
   const tokens = maxTokens || DEFAULT_MAX_TOKENS;
   const messages = normaliseMessages(promptOrMessages);
   const useJson = responseFormat !== "text";
-  const deps = { withRetry, composeSignal, CLOUD_TIMEOUT_MS, recordAiTokens, MAX_RETRIES, BASE_DELAY_MS, MAX_BACKOFF_MS, callOllama, sleep, formatLogLine };
+  const deps = { withRetry, composeSignal, CLOUD_TIMEOUT_MS, recordAiTokens };
   if (provider === "anthropic") return (await anthropicAdapter.generate({ provider, messages, maxTokens: tokens, signal, model: buildProviderMeta().anthropic.model, apiKey: getKey("ANTHROPIC_API_KEY") }, deps)).text;
   if (isCompatProvider(provider)) {
     const compat = getCompatConfig(provider);
@@ -869,7 +869,7 @@ async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal
     return (await openaiAdapter.generate({ provider, model: provider === "openai" ? buildProviderMeta().openai.model : buildProviderMeta().openrouter.model, apiKey: provider === "openai" ? getKey("OPENAI_API_KEY") : getKey("OPENROUTER_API_KEY"), baseUrl: provider === "openrouter" ? OPENROUTER_BASE_URL : undefined, defaultHeaders: provider === "openrouter" ? {"HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev", "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri"} : undefined, maxTokens: tokens, signal, useJson, openAiMessages }, deps)).text;
   }
   if (provider === "google") return (await googleAdapter.generate({ provider, messages, maxTokens: tokens, signal, useJson, model: buildProviderMeta().google.model, apiKey: getKey("GOOGLE_API_KEY") }, deps)).text;
-  if (provider === "local") return (await ollamaAdapter.generate({ provider, messages, maxTokens: tokens, signal, useJson }, deps)).text;
+  if (provider === "local") return (await ollamaAdapter.generate({ provider, messages, maxTokens: tokens, signal, useJson, baseUrl: getOllamaBaseUrl(), model: getOllamaModel() })).text;
   throw new Error(`Unknown provider: ${provider}`);
 }
 
