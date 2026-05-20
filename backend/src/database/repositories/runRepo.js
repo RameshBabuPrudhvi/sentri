@@ -433,13 +433,12 @@ export function getRecentCompletedWithResults(projectId, limit = 20) {
 }
 
 /**
- * AUTO-009: Lean accessor for runs that carry a persisted `coverageSummary`
- * JSON blob. Used by the dashboard's 30-day coverage trend (and the per-run
- * granularity surface for AUTO-009c) so the trend can read `coveragePct`,
- * `branchPct`, `functionPct` without bloating `LEAN_COLS` — `coverageSummary`
- * is potentially multi-KB JSON and the rest of the dashboard payload doesn't
- * need it. Filters `coverageSummary IS NOT NULL` at the SQL layer so projects
- * that never enabled capture never round-trip an empty column.
+ * AUTO-009 / AUTO-009k: Lean accessor for runs that carry a persisted
+ * `coverageSummary` JSON blob. Used by the dashboard's 30-day coverage
+ * trend (and the per-run granularity surface for AUTO-009c) so the trend
+ * can read `coveragePct`, `branchPct`, `functionPct` without bloating
+ * `LEAN_COLS` — `coverageSummary` is potentially multi-KB JSON and the
+ * rest of the dashboard payload doesn't need it.
  *
  * Selects only the columns the trend consumer reads:
  *   - `id`, `projectId`, `startedAt`, `type` — windowing / grouping
@@ -448,21 +447,61 @@ export function getRecentCompletedWithResults(projectId, limit = 20) {
  * Workspace-scoped via the same `projectIds` set the dashboard already
  * resolves; never reads cross-workspace rows.
  *
+ * **SQL-side bounds** (added per Lifeguard ANALYSIS-0011):
+ *   - `windowDays` (default 60) applies a `startedAt >= cutoff` filter so
+ *     long-lived projects don't load every historical coverage row —
+ *     previously we read every non-deleted coverage row and the JS layer
+ *     sliced to the last 30, paying full O(n) JSON.parse cost on each.
+ *     60d is wider than the dashboard's 30d trend window so the same
+ *     accessor can serve callers that need additional headroom (e.g.
+ *     the regression detector at `testRunner.js:957` walks history newest-
+ *     last looking for the most recent prior coverage run — bounded by
+ *     60d still gives ~2 months of priors before the lookup returns null).
+ *   - `limit` (default 200) caps the absolute row count at the SQL layer
+ *     too, defending against a SUT that emits hundreds of coverage-
+ *     enabled runs per day within the window. Bound is per-query, not
+ *     per-project, but since the dashboard's per-project slice in
+ *     `routes/dashboard.js#coverageTrend` then caps at 30 per project,
+ *     the practical visible payload stays bounded.
+ *
+ * Filters `coverageSummary IS NOT NULL` at the SQL layer so projects that
+ * never enabled capture never round-trip an empty column.
+ *
  * @param {string[]} projectIds
+ * @param {Object}   [opts]
+ * @param {number}   [opts.windowDays=60] - SQL-side `startedAt >= now-N days` cutoff.
+ *   Set to `0` to disable the time filter (use sparingly — only when a caller
+ *   genuinely needs the full history).
+ * @param {number}   [opts.limit=200]     - Absolute row-count cap at the SQL layer.
  * @returns {Object[]} Newest-last (chronological), `coverageSummary` parsed.
  */
-export function getRunsWithCoverage(projectIds) {
+export function getRunsWithCoverage(projectIds, { windowDays = 60, limit = 200 } = {}) {
   if (!projectIds || projectIds.length === 0) return [];
   const db = getDatabase();
   const placeholders = projectIds.map(() => "?").join(", ");
+  const params = [...projectIds];
+  let dateFilter = "";
+  if (Number.isFinite(windowDays) && windowDays > 0) {
+    const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+    dateFilter = " AND startedAt >= ?";
+    params.push(cutoff);
+  }
+  // ORDER BY DESC + LIMIT is portable; reverse client-side to preserve
+  // the documented "newest-last (chronological)" contract callers depend on
+  // (dashboard's per-project bucketing relies on chronological-asc order so
+  // `slice(-N)` keeps the most recent N points per project).
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 200;
+  params.push(safeLimit);
   const rows = db.prepare(
     `SELECT id, projectId, startedAt, type, coverageSummary FROM runs
      WHERE projectId IN (${placeholders})
        AND deletedAt IS NULL
        AND coverageSummary IS NOT NULL
-       AND type IN ('test_run', 'run')
-     ORDER BY startedAt ASC`
-  ).all(...projectIds);
+       AND type IN ('test_run', 'run')${dateFilter}
+     ORDER BY startedAt DESC LIMIT ?`
+  ).all(...params);
+  // SELECT was DESC for LIMIT correctness; reverse to chronological asc here.
+  rows.reverse();
   return rows.map((row) => {
     if (row.coverageSummary) {
       try { row.coverageSummary = JSON.parse(row.coverageSummary); }

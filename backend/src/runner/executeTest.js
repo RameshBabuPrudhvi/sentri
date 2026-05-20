@@ -415,6 +415,16 @@ function formatTestError(err) {
  * @param {string}  [opts.timezoneId] - AUTO-007: IANA timezone (e.g. `"Europe/Paris"`).
  * @param {Object}  [opts.geolocation] - AUTO-007: `{ latitude, longitude }`.
  * @param {string}  [opts.networkCondition] - AUTO-006: `fast|slow3g|offline`.
+ * @param {boolean} [opts.coverageEnabled] - AUTO-009 / AUTO-009k: project's
+ *   coverage capture toggle, forwarded from `testRunner.js` so the per-test
+ *   path doesn't re-issue `projectRepo.getById()` once per test (N+1 SQLite
+ *   read on parallel runs). When omitted, falls back to a per-test repo
+ *   lookup for backward compatibility with callers that bypass the runner
+ *   (legacy tests, future direct callsites). Treat `undefined` as "not
+ *   supplied" so the fallback path engages; `false` means "explicitly off".
+ * @param {string}  [opts.serverCoverageEndpoint] - AUTO-009h: per-project
+ *   endpoint for server-side coverage capture, same forwarding pattern as
+ *   `coverageEnabled`. Only consumed by `executeApiTest`.
  */
 export async function executeTest(test, browser, runId, stepIndex, runStart, opts = {}) {
   // ── API-only test path: no browser context needed ──────────────────────
@@ -422,7 +432,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   // Fall back to isApiTest() for callers that bypass the runner (e.g. tests).
   const isApi = test._isApi ?? (test.playwrightCode && isApiTest(test.playwrightCode));
   if (isApi) {
-    return executeApiTest(test, runId, stepIndex, runStart);
+    return executeApiTest(test, runId, stepIndex, runStart, opts);
   }
 
   // ── Browser-based test path — browser must be available ────────────────
@@ -550,16 +560,21 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   // AUTO-009 — start V8 JS coverage BEFORE the test navigates so the first
   // byte of the SUT bundle is instrumented. Opt-in per project; failures
   // are best-effort and never flip a passing test.
+  //
+  // Prefer `opts.coverageEnabled` (forwarded from testRunner.js once per
+  // run) to avoid a per-test `projectRepo.getById()` round-trip — on a
+  // 200-test parallel run that's 200 SQLite reads saved. Falls back to
+  // the repo lookup for callers that don't forward (backward compat).
   let coverageStarted = false;
-  if (test.projectId) {
-    try {
-      const p = projectRepo.getById(test.projectId);
-      if (p?.coverageEnabled && page?.coverage?.startJSCoverage) {
-        await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: false });
-        coverageStarted = true;
-      }
-    } catch { /* best-effort */ }
-  }
+  try {
+    const covEnabled = opts.coverageEnabled !== undefined
+      ? opts.coverageEnabled
+      : (() => { try { return projectRepo.getById(test.projectId)?.coverageEnabled; } catch { return false; } })();
+    if (covEnabled && page?.coverage?.startJSCoverage) {
+      await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: false });
+      coverageStarted = true;
+    }
+  } catch { /* best-effort */ }
 
   const start = Date.now();
   result.startedAt = start;
@@ -999,7 +1014,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
  * spinning up a browser page. Skips screenshots, video, DOM snapshots,
  * and screencast — none of which apply to API tests.
  */
-async function executeApiTest(test, runId, stepIndex, runStart) {
+async function executeApiTest(test, runId, stepIndex, runStart, opts = {}) {
   const result = {
     testId: test.id,
     testName: test.name,
@@ -1031,17 +1046,20 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
   // per project; failures are best-effort and never flip a passing test
   // (the snapshot can timeout, the SUT can be down, the endpoint can
   // return non-JSON — all degrade silently to `serverCoverage: null`).
+  //
+  // Prefer `opts.serverCoverageEndpoint` (forwarded from testRunner.js
+  // once per run) to avoid a per-test `projectRepo.getById()` round-trip.
+  // Falls back to the repo lookup for callers that don't forward.
   let serverCoverageEndpoint = null;
   let serverCoverageBefore = null;
-  if (test.projectId) {
-    try {
-      const p = projectRepo.getById(test.projectId);
-      if (p?.serverCoverageEndpoint) {
-        serverCoverageEndpoint = p.serverCoverageEndpoint;
-        serverCoverageBefore = await snapshotServerCoverage(serverCoverageEndpoint);
-      }
-    } catch { /* best-effort */ }
-  }
+  try {
+    serverCoverageEndpoint = opts.serverCoverageEndpoint !== undefined
+      ? (opts.serverCoverageEndpoint || null)
+      : (() => { try { return projectRepo.getById(test.projectId)?.serverCoverageEndpoint || null; } catch { return null; } })();
+    if (serverCoverageEndpoint) {
+      serverCoverageBefore = await snapshotServerCoverage(serverCoverageEndpoint);
+    }
+  } catch { /* best-effort */ }
 
   // AbortController lets us forcibly dispose Playwright request contexts
   // inside runApiTestCode when the timeout fires, preventing lingering

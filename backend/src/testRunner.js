@@ -159,17 +159,27 @@ function evaluateQualityGates(gates, run, { priorRunCoverage = null } = {}) {
     }
     // PR coverage — reads `run.prCoverageDiff.prCoveragePct` when the run
     // was triggered from a GitHub PR and `finalizeCoverage` populated the
-    // PR-scoped diff (AUTO-009d). Falls back to overall `coveragePct` for
-    // non-PR runs (manual UI, scheduled) so the gate still fires — the
-    // operator's threshold applies to the best available signal.
+    // PR-scoped diff (AUTO-009d). **Skipped entirely on non-PR runs**
+    // (manual UI, scheduled, crawl-only) — the gate is semantically "PR
+    // coverage", so firing it on runs that have no PR context would
+    // surprise operators who set `minCoveragePct: 60` (overall) and
+    // `minPrCoveragePct: 80` (PR-only) expecting the second gate to be
+    // dormant on scheduled runs. Matches the "first run" regression-rule
+    // pattern at the `maxCoverageRegressionPct` block below, which also
+    // short-circuits when the comparison data is unavailable.
+    //
+    // When `prCoverageDiff` is present but `prTotalLines === 0` (the PR
+    // touched only files outside the test suite's coverage scope),
+    // `prCoveragePct` is the structured-zero `0` from `computePrCoverage`.
+    // We additionally guard `prTotalLines > 0` so the gate doesn't fire
+    // a false-positive "0% vs 80%" on a PR that had zero analyzable lines.
     {
       const prDiff = run.prCoverageDiff;
-      const prPct = prDiff && typeof prDiff === "object" && Number.isFinite(prDiff.prCoveragePct)
-        ? prDiff.prCoveragePct
-        : null;
-      const effectivePct = prPct != null ? prPct : cov.coveragePct;
-      if (Number.isFinite(gates.minPrCoveragePct) && Number.isFinite(effectivePct)) {
-        const actualPct = Number((effectivePct * 100).toFixed(2));
+      const hasPrData = prDiff && typeof prDiff === "object"
+        && Number.isFinite(prDiff.prCoveragePct)
+        && (prDiff.prTotalLines || 0) > 0;
+      if (Number.isFinite(gates.minPrCoveragePct) && hasPrData) {
+        const actualPct = Number((prDiff.prCoveragePct * 100).toFixed(2));
         if (actualPct < gates.minPrCoveragePct) {
           violations.push({ rule: "minPrCoveragePct", threshold: gates.minPrCoveragePct, actual: actualPct });
         }
@@ -727,7 +737,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           const attemptResults = await executeTestIterations(
             test,
             fixtureRows,
-            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition }),
+            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition, coverageEnabled: !!project.coverageEnabled, serverCoverageEndpoint: project.serverCoverageEndpoint || null }),
           );
           const lastResult = attemptResults[attemptResults.length - 1] || null;
           // Retry semantics:
