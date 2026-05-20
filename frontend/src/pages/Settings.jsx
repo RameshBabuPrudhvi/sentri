@@ -578,25 +578,42 @@ function AdminLockedSection({ feature, role }) {
 
 
 function AgentRolesTab() {
+  const empty = { role: AGENT_ROLES[0], provider: "", model: "", systemPromptOverride: "", temperature: 0.2, maxTokens: "", fallbackRole: "" };
   const [rows, setRows] = useState([]);
-  const [form, setForm] = useState({ role: AGENT_ROLES[0], provider: "", model: "", systemPromptOverride: "", temperature: 0.2, maxTokens: "", fallbackRole: "" });
+  const [form, setForm] = useState(empty);
+  const [editingRole, setEditingRole] = useState("");
   const load = useCallback(async () => { const r = await api.getAgentRoles(); setRows(r.roles || []); }, []);
   useEffect(() => { load(); }, [load]);
-  async function save(e) { e.preventDefault(); await api.createAgentRole({ ...form, provider: form.provider || null, model: form.model || null, systemPromptOverride: form.systemPromptOverride || null, maxTokens: form.maxTokens ? Number(form.maxTokens) : null, fallbackRole: form.fallbackRole || null }); await load(); }
-  async function del(role) { await api.deleteAgentRole(role); await load(); }
+  async function save(e) {
+    e.preventDefault();
+    const payload = { ...form, provider: form.provider || null, model: form.model || null, systemPromptOverride: form.systemPromptOverride || null, maxTokens: form.maxTokens ? Number(form.maxTokens) : null, fallbackRole: form.fallbackRole || null };
+    if (editingRole) await api.updateAgentRole(editingRole, payload);
+    else await api.createAgentRole(payload);
+    setEditingRole("");
+    setForm(empty);
+    await load();
+  }
+  function edit(row) {
+    setEditingRole(row.role);
+    setForm({ role: row.role, provider: row.provider || "", model: row.model || "", systemPromptOverride: row.systemPromptOverride || "", temperature: row.temperature ?? 0.2, maxTokens: row.maxTokens ?? "", fallbackRole: row.fallbackRole || "" });
+  }
+  async function del(role) { await api.deleteAgentRole(role); if (editingRole === role) { setEditingRole(""); setForm(empty); } await load(); }
   return <div className="card card-padded">
     <h3>Agent Roles</h3>
     <form onSubmit={save} style={{ display: "grid", gap: 8, marginBottom: 12 }}>
-      <select className="input" value={form.role} onChange={(e)=>setForm((s)=>({...s, role:e.target.value}))}>{AGENT_ROLES.map((r)=><option key={r} value={r}>{r}</option>)}</select>
+      <select className="input" value={form.role} onChange={(e)=>setForm((s)=>({...s, role:e.target.value}))} disabled={!!editingRole}>{AGENT_ROLES.map((r)=><option key={r} value={r}>{r}</option>)}</select>
       <input className="input" placeholder="provider (optional)" value={form.provider} onChange={(e)=>setForm((s)=>({...s, provider:e.target.value}))} />
       <input className="input" placeholder="model (optional)" value={form.model} onChange={(e)=>setForm((s)=>({...s, model:e.target.value}))} />
       <textarea className="input" placeholder="system prompt override" value={form.systemPromptOverride} onChange={(e)=>setForm((s)=>({...s, systemPromptOverride:e.target.value}))} />
       <input className="input" type="number" step="0.1" value={form.temperature} onChange={(e)=>setForm((s)=>({...s, temperature:Number(e.target.value)}))} />
       <input className="input" type="number" placeholder="max tokens" value={form.maxTokens} onChange={(e)=>setForm((s)=>({...s, maxTokens:e.target.value}))} />
       <select className="input" value={form.fallbackRole} onChange={(e)=>setForm((s)=>({...s, fallbackRole:e.target.value}))}><option value="">No fallback</option>{AGENT_ROLES.map((r)=><option key={r} value={r}>{r}</option>)}</select>
-      <button className="btn btn-primary btn-sm">Save role config</button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn btn-primary btn-sm">{editingRole ? "Update role config" : "Save role config"}</button>
+        {editingRole && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditingRole(""); setForm(empty); }}>Cancel edit</button>}
+      </div>
     </form>
-    <div style={{ display: "grid", gap: 8 }}>{rows.map((r)=><div key={r.role} className="card-padded-sm" style={{display:"flex",justifyContent:"space-between"}}><span className="text-mono">{r.role} · {r.provider || "workspace-default"} · {r.model || "provider-default"} · temp {r.temperature}</span><button className="btn btn-danger btn-xs" onClick={()=>del(r.role)}>Delete</button></div>)}</div>
+    <div style={{ display: "grid", gap: 8 }}>{rows.map((r)=><div key={r.role} className="card-padded-sm" style={{display:"flex",justifyContent:"space-between",gap:8}}><span className="text-mono">{r.role} · {r.provider || "workspace-default"} · {r.model || "provider-default"} · temp {r.temperature}</span><div style={{display:"flex",gap:6}}><button className="btn btn-ghost btn-xs" onClick={()=>edit(r)}>Edit</button><button className="btn btn-danger btn-xs" onClick={()=>del(r.role)}>Delete</button></div></div>)}</div>
   </div>;
 }
 

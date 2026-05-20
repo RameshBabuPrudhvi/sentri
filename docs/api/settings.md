@@ -187,8 +187,16 @@ Deleted projects, tests, and runs are soft-deleted (moved to the Recycle Bin) ra
 
 
 ## Agent Roles
-- `GET /api/v1/settings/agent-roles`
-- `GET /api/v1/settings/agent-roles/:role`
-- `POST /api/v1/settings/agent-roles`
-- `PATCH /api/v1/settings/agent-roles/:role`
-- `DELETE /api/v1/settings/agent-roles/:role`
+
+Admin-only endpoints for workspace-scoped, dormant role config.
+
+- `GET /api/v1/settings/agent-roles` — list all role configs in current workspace.
+- `GET /api/v1/settings/agent-roles/:role` — get one role config.
+- `POST /api/v1/settings/agent-roles` — create/upsert a role config.
+- `PATCH /api/v1/settings/agent-roles/:role` — partially update a role config.
+- `DELETE /api/v1/settings/agent-roles/:role` — delete one role config.
+
+Validation:
+- `role` and `fallbackRole` must match the canonical role allowlist.
+- `fallbackRole` cycle detection is enforced server-side.
+- Responses are always scoped to the authenticated workspace.
