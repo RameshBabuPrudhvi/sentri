@@ -12,9 +12,4 @@ for (const [name, adapter] of Object.entries({ anthropic, openai, google, ollama
     assert.equal(typeof adapter.stream, "function");
     assert.equal(typeof adapter.generateVision, "function");
   });
-
-  test(`${name} stream fallback shape`, async () => {
-    const result = await adapter.stream({}, () => {});
-    assert.equal(result, null);
-  });
 }

@@ -7,7 +7,7 @@ export function getModelCatalog() {
       model: value.model,
       name: value.name,
       supportsVision: provider === "openai" || provider === "google" || provider === "anthropic" || provider.startsWith("compat:"),
-      supportsJsonMode: provider !== "ollama",
+      supportsJsonMode: provider !== "local",
       contextWindow: null,
     };
     return acc;

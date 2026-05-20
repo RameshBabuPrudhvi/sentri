@@ -1312,22 +1312,23 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal 
   const provider = getProvider();
   if (!provider) return null;
 
-  // MNT-001b — observe latency + errors per AC #4. Histogram observation
-  // happens in both branches below (success after the parsed-confidence
-  // check, error in the catch). Lives outside the try/catch so the start
-  // timestamp is captured even if the prompt build throws.
   const metricLabel = providerMetricLabel(provider);
   const startedAt = process.hrtime.bigint();
-
   const userPrompt =
     `A web-test locator has broken. The target action was \`${intent.action}\` on the element ` +
     `labelled "${intent.label}". The attached screenshot is the current page viewport. ` +
-    `Locate the element visually and respond with strict JSON only:\n\n` +
-    `{"x":number,"y":number,"width":number,"height":number,"confidence":number,"reasoning":string}\n\n` +
+    `Locate the element visually and respond with strict JSON only:
+
+` +
+    `{"x":number,"y":number,"width":number,"height":number,"confidence":number,"reasoning":string}
+
+` +
     `Coordinates are viewport pixels. \`confidence\` is in [0, 1]. ` +
     `If you cannot locate the element, return {"confidence":0,"reasoning":"<why>"}.` +
-    (contextHtml ? `\n\nLast-known DOM context:\n${String(contextHtml).slice(0, 800)}` : "");
+    (contextHtml ? `
 
+Last-known DOM context:
+${String(contextHtml).slice(0, 800)}` : "");
   const base64 = screenshot.toString("base64");
   const dataUrl = `data:image/png;base64,${base64}`;
 
@@ -1335,124 +1336,52 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal 
   let usage = null;
   try {
     if (provider === "anthropic") {
-      const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
-      const msg = await client.messages.create({
-        model, max_tokens: 512,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: "image/png", data: base64 } },
-            { type: "text", text: userPrompt },
-          ],
-        }],
-      }, { signal });
-      raw = msg.content?.[0]?.text || "";
-      usage = { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens };
-    } else if (provider === "openai" || provider === "openrouter" || isCompatProvider(provider)) {
-      let client;
-      if (provider === "openai") {
-        client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
-      } else if (provider === "openrouter") {
-        client = new OpenAI({ apiKey: getKey("OPENROUTER_API_KEY"), baseURL: OPENROUTER_BASE_URL });
-      } else {
-        const compat = getCompatConfig(provider);
-        client = new OpenAI({ apiKey: compat?.apiKey, baseURL: compat?.baseUrl, fetch: createSsrfGuardedFetch() });
-      }
-      const res = await client.chat.completions.create({
-        model, max_tokens: 512,
-        response_format: { type: "json_object" },
-        messages: [{
-          role: "user",
-          content: [
-            { type: "text", text: userPrompt },
-            { type: "image_url", image_url: { url: dataUrl } },
-          ],
-        }],
-      }, { signal });
-      raw = res.choices?.[0]?.message?.content || "";
-      usage = { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens };
+      ({ text: raw, usage } = await anthropicAdapter.generateVision({ provider, model, apiKey: getKey("ANTHROPIC_API_KEY"), base64, userPrompt, signal }));
     } else if (provider === "google") {
-      const genAI = new GoogleGenerativeAI(getKey("GOOGLE_API_KEY"));
-      const m = genAI.getGenerativeModel({
-        model,
-        generationConfig: { maxOutputTokens: 512, responseMimeType: "application/json" },
-      });
-      // NOTE: `signal` is intentionally NOT passed here — the
-      // @google/generative-ai SDK's `generateContent()` does not accept an
-      // options bag, so any second argument is silently ignored. Passing
-      // `{ signal }` would create the false impression of cancellation
-      // support. See the § Cancellation caveat in the function JSDoc above.
-      const result = await m.generateContent({
-        contents: [{
-          role: "user",
-          parts: [
-            { text: userPrompt },
-            { inlineData: { mimeType: "image/png", data: base64 } },
-          ],
-        }],
-      });
-      raw = result.response.text();
-      const um = result?.response?.usageMetadata;
-      usage = { input: um?.promptTokenCount, output: um?.candidatesTokenCount };
+      ({ text: raw, usage } = await googleAdapter.generateVision({ provider, model, apiKey: getKey("GOOGLE_API_KEY"), base64, userPrompt }));
+    } else if (provider === "openai" || provider === "openrouter" || isCompatProvider(provider)) {
+      let apiKey = getKey("OPENAI_API_KEY"), baseUrl, defaultHeaders, guardedFetch;
+      if (provider === "openrouter") {
+        apiKey = getKey("OPENROUTER_API_KEY");
+        baseUrl = OPENROUTER_BASE_URL;
+        defaultHeaders = { "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev", "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri" };
+      } else if (isCompatProvider(provider)) {
+        const compat = getCompatConfig(provider);
+        apiKey = compat?.apiKey;
+        baseUrl = compat?.baseUrl;
+        guardedFetch = createSsrfGuardedFetch();
+      }
+      ({ text: raw, usage } = await openaiAdapter.generateVision({ provider, model, apiKey, baseUrl, defaultHeaders, guardedFetch, dataUrl, userPrompt, signal }));
     } else {
-      return null; // local / unknown provider — no multimodal support
+      return null;
     }
   } catch (err) {
-    // MNT-001b — emit error/latency telemetry on provider failure. We
-    // intentionally don't rethrow: the caller (`tryVisionHeal`) treats
-    // any failure as a "no heal" so the test stays broken instead of
-    // being caused to fail by the heal attempt itself.
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
       aiProviderLatencySeconds.observe({ provider: metricLabel, outcome, operation: "vision_heal" }, seconds);
       aiProviderErrorsTotal.inc({ provider: metricLabel, reason, operation: "vision_heal" });
-    } catch { /* best-effort */ }
+    } catch {}
     return null;
   }
 
-  if (usage) {
-    try { recordAiTokens(provider, usage, "vision_heal"); } catch { /* best-effort */ }
-  }
-
+  if (usage) recordAiTokens(provider, usage, "vision_heal");
   let parsed;
   try { parsed = parseJSON(raw); } catch { return null; }
-
   const confidence = Number(parsed?.confidence);
   if (!Number.isFinite(confidence) || confidence <= 0) return null;
-
-  const x = Number(parsed?.x), y = Number(parsed?.y);
-  const width = Number(parsed?.width), height = Number(parsed?.height);
-  const box = (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height))
-    ? { x, y, width, height }
-    : null;
-
+  const x = Number(parsed?.x), y = Number(parsed?.y), width = Number(parsed?.width), height = Number(parsed?.height);
+  const box = (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height)) ? { x, y, width, height } : null;
   const inK = (Number(usage?.input) || 0) / 1_000_000;
   const outK = (Number(usage?.output) || 0) / 1_000_000;
   const costUsd = inK * 5 + outK * 15;
-
-  // MNT-001b — success-path latency + cost telemetry. Cost is an estimate
-  // ($5/M input + $15/M output midpoint, matching the per-call estimate
-  // returned to the caller). Per-model accurate pricing is a future
-  // enhancement — the budget circuit-breaker only needs *some* signal,
-  // and the midpoint estimate errs conservative (caps fire slightly
-  // earlier than true spend would warrant).
   try {
     const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
     aiProviderLatencySeconds.observe({ provider: metricLabel, outcome: "success", operation: "vision_heal" }, seconds);
-    if (Number.isFinite(costUsd) && costUsd > 0) {
-      aiProviderCostUsdTotal.inc({ provider: metricLabel, operation: "vision_heal" }, costUsd);
-    }
-  } catch { /* best-effort */ }
-
-  return {
-    confidence: Math.min(1, Math.max(0, confidence)),
-    box,
-    model,
-    costUsd,
-    reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null,
-  };
+    if (Number.isFinite(costUsd) && costUsd > 0) aiProviderCostUsdTotal.inc({ provider: metricLabel, operation: "vision_heal" }, costUsd);
+  } catch {}
+  return { confidence: Math.min(1, Math.max(0, confidence)), box, model, costUsd, reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null };
 }
 
 /**
@@ -1500,15 +1429,10 @@ export function parseJSON(text) {
 export async function streamText(promptOrMessages, onToken, options = {}) {
   const provider = detectProvider();
   if (!provider) throw new Error("No AI provider configured.");
-
   const { signal, responseFormat } = options;
-  const { system, user } = normaliseMessages(promptOrMessages);
+  const messages = normaliseMessages(promptOrMessages);
   const useJson = responseFormat !== "text";
 
-  // Helper — when a streaming call fails BEFORE any tokens have been emitted,
-  // fall back to non-streaming generateText() which has full FEA-003 retry
-  // + multi-provider fallback support. The result is delivered as one
-  // synthetic "token" (same pattern as Google/Ollama below).
   async function fallbackToNonStreaming(err) {
     console.warn(formatLogLine("warn", null, `[aiProvider] streamText ${provider} failed before any tokens (${err.message?.slice(0, 120)}) — retrying via non-streaming path with provider fallback.`));
     const text = await generateText(promptOrMessages, { ...options, responseFormat });
@@ -1516,140 +1440,27 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
     return text;
   }
 
-  if (provider === "anthropic") {
-    let tokensEmitted = 0;
-    try {
-      const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
-      const params = {
-        model: buildProviderMeta().anthropic.model,
-        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-        messages: [{ role: "user", content: user }],
-      };
-      if (system) params.system = system;
-      const stream = client.messages.stream(params, { signal });
-      for await (const chunk of stream) {
-        throwIfAborted(signal);
-        if (chunk.type === "content_block_delta" && chunk.delta?.text) {
-          onToken(chunk.delta.text);
-          tokensEmitted++;
-        }
-      }
-      return (await stream.finalMessage()).content[0].text;
-    } catch (err) {
-      if (err.name === "AbortError" || signal?.aborted) throw err;
-      // Only fall back if no tokens were emitted — otherwise the user would see two partial responses.
-      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
-      throw err;
+  try {
+    if (provider === "anthropic") {
+      const res = await anthropicAdapter.stream({ provider, model: buildProviderMeta().anthropic.model, apiKey: getKey("ANTHROPIC_API_KEY"), maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, messages }, onToken);
+      return res?.text ?? "";
     }
+    if (provider === "openai" || provider === "openrouter" || isCompatProvider(provider)) {
+      let apiKey = getKey("OPENAI_API_KEY"), baseUrl, defaultHeaders, guardedFetch, model = buildProviderMeta().openai.model;
+      if (provider === "openrouter") { apiKey = getKey("OPENROUTER_API_KEY"); baseUrl = OPENROUTER_BASE_URL; model = buildProviderMeta().openrouter.model; defaultHeaders = { "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev", "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri" }; }
+      if (isCompatProvider(provider)) { const compat = getCompatConfig(provider); apiKey = compat?.apiKey; baseUrl = compat?.baseUrl; model = compat?.model; guardedFetch = createSsrfGuardedFetch(); }
+      const openAiMessages = [];
+      if (messages.system) openAiMessages.push({ role: "system", content: messages.system });
+      openAiMessages.push({ role: "user", content: messages.user });
+      const res = await openaiAdapter.stream({ provider, apiKey, baseUrl, defaultHeaders, guardedFetch, model, maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, useJson, openAiMessages }, onToken);
+      return res?.text ?? "";
+    }
+  } catch (err) {
+    if (err.name === "AbortError" || signal?.aborted) throw err;
+    if (isRetryableError(err)) return fallbackToNonStreaming(err);
+    throw err;
   }
 
-
-  if (isCompatProvider(provider)) {
-    // Stream via the OpenAI SDK against the compat baseURL. On any retryable
-    // error before tokens emit, fall back to non-streaming generateText().
-    let tokensEmitted = 0;
-    try {
-      const compat = getCompatConfig(provider);
-      const apiKey = compat?.apiKey;
-      const baseURL = compat?.baseUrl;
-      const model = compat?.model;
-      // SSRF-validated at config-save time in routes/settings.js AND
-      // re-validated per-call via createSsrfGuardedFetch() (DNS-rebinding
-      // mitigation — see callProvider compat branch for the rationale).
-      const client = new OpenAI({ apiKey, fetch: createSsrfGuardedFetch(), ...(baseURL ? { baseURL } : {}) });
-      const messages = [];
-      if (system) messages.push({ role: "system", content: system });
-      messages.push({ role: "user", content: user });
-      const params = {
-        model,
-        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-        stream: true,
-        messages,
-      };
-      if (useJson) params.response_format = { type: "json_object" };
-      const stream = await client.chat.completions.create(params, { signal });
-      let full = "";
-      for await (const chunk of stream) {
-        throwIfAborted(signal);
-        const token = chunk.choices[0]?.delta?.content ?? "";
-        if (token) { full += token; onToken(token); tokensEmitted++; }
-      }
-      return full;
-    } catch (err) {
-      if (err.name === "AbortError" || signal?.aborted) throw err;
-      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
-      throw err;
-    }
-  }
-
-  if (provider === "openai") {
-    let tokensEmitted = 0;
-    try {
-      const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
-      const messages = [];
-      if (system) messages.push({ role: "system", content: system });
-      messages.push({ role: "user", content: user });
-      const params = {
-        model: buildProviderMeta().openai.model,
-        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-        stream: true,
-        messages,
-      };
-      if (useJson) params.response_format = { type: "json_object" };
-      const stream = await client.chat.completions.create(params, { signal });
-      let full = "";
-      for await (const chunk of stream) {
-        throwIfAborted(signal);
-        const token = chunk.choices[0]?.delta?.content ?? "";
-        if (token) { full += token; onToken(token); tokensEmitted++; }
-      }
-      return full;
-    } catch (err) {
-      if (err.name === "AbortError" || signal?.aborted) throw err;
-      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
-      throw err;
-    }
-  }
-
-  if (provider === "openrouter") {
-    let tokensEmitted = 0;
-    try {
-      const client = new OpenAI({
-        apiKey: getKey("OPENROUTER_API_KEY"),
-        baseURL: OPENROUTER_BASE_URL,
-        defaultHeaders: {
-          "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev",
-          "X-Title":      process.env.OPENROUTER_APP_TITLE || "Sentri",
-        },
-      });
-      const messages = [];
-      if (system) messages.push({ role: "system", content: system });
-      messages.push({ role: "user", content: user });
-      const params = {
-        model: buildProviderMeta().openrouter.model,
-        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-        stream: true,
-        messages,
-      };
-      if (useJson) params.response_format = { type: "json_object" };
-      const stream = await client.chat.completions.create(params, { signal });
-      let full = "";
-      for await (const chunk of stream) {
-        throwIfAborted(signal);
-        const token = chunk.choices[0]?.delta?.content ?? "";
-        if (token) { full += token; onToken(token); tokensEmitted++; }
-      }
-      return full;
-    } catch (err) {
-      if (err.name === "AbortError" || signal?.aborted) throw err;
-      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
-      throw err;
-    }
-  }
-
-  // Google / Ollama — no streaming SDK; deliver whole response as one token.
-  // generateText() handles retry + fallback internally so these providers
-  // get FEA-003 coverage for free.
   const text = await generateText(promptOrMessages, { ...options, responseFormat });
   onToken(text);
   return text;
