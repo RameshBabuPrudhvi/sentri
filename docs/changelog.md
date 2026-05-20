@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **INF-007 metric labels** — `app_ai_provider_tokens_total`, `app_ai_provider_latency_seconds`, and `app_ai_provider_errors_total` gained a new `operation` label (default value `"generation"` for legacy call sites; `"vision_heal"` for MNT-001 stage-8 calls). Existing Grafana queries that don't filter on `operation` continue to work but will sum across both surfaces — split panels into two series or add an `{operation="generation"}` filter to recover the pre-MNT-001 shape. (MNT-001)
+- **AI-002** — Refactored `backend/src/aiProvider.js` into a new `backend/src/aiProvider/` module layout (index/registry/retry/modelCatalog + provider adapters) and left `backend/src/aiProvider.js` as a thin re-export shim. **No behavior change intended**; this is a maintainability/internal-structure update preparing future adapter-first provider work.
 
 ### Fixed
 - **AUTO-009j retention sweep** — `purgeCoverageSummaryOlderThan` now also nulls `shardCoverageSummaries` (migration 042) and `changedFileRanges` (migration 044) on rows older than the retention window, not just `coverageSummary` and `prCoverageDiff`. The two missed columns can carry tens of MB on large-bundle SUTs × N shards and were never read again after run finalization — unbounded storage leak surfaced by Lifeguard ANALYSIS-0001 (`backend/src/database/repositories/runRepo.js:1293`). Single-statement update; no migration needed.

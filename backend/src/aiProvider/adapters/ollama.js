@@ -1,0 +1,11 @@
+export async function generate() {
+  throw new Error("Adapter wiring pending: ollama");
+}
+
+export async function stream() {
+  return null;
+}
+
+export async function generateVision() {
+  throw new Error("Adapter wiring pending: ollama");
+}
