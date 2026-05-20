@@ -27,25 +27,51 @@
 
 import { formatLogLine } from "../utils/logFormatter.js";
 import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
-import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { validateUrl } from "../utils/ssrfGuard.js";
 import * as anthropicAdapter from "./adapters/anthropic.js";
 import * as openaiAdapter from "./adapters/openai.js";
 import * as googleAdapter from "./adapters/google.js";
 import * as ollamaAdapter from "./adapters/ollama.js";
 import { isRateLimitError, isTransientServerError, isRetryableError, MAX_RETRIES } from "./retry.js";
-// AI-002: catalog data + capability flags moved to modelCatalog.js (per spec).
-// Importing the constants here means the orchestrator does not duplicate the
-// "single source of truth" for env-var names, detect order, vision support, etc.
+// AI-002: catalog data + capability flags live in modelCatalog.js.
 import {
   CLOUD_KEY_MAP,
-  CLOUD_DETECT_ORDER,
-  CLOUD_DEFAULT_MODELS,
   PROVIDER_DOCS,
   VISION_CAPABLE_MODELS,
   getCloudModel,
   getCloudName,
 } from "./modelCatalog.js";
+// AI-002: mutable provider state owned by registry.js (state owner per spec).
+// All runtime keys, sticky fallback, circuit breakers, and detection live there.
+import {
+  // Compat helpers
+  isCompatProvider,
+  getCompatConfig,
+  // Key resolution
+  getKey,
+  getUserConfiguredKey,
+  getOllamaBaseUrl,
+  getOllamaModel,
+  hasOllamaConfig,
+  isOllamaDisabled,
+  // Mutators (re-exported as the public API)
+  setRuntimeKey,
+  setRuntimeOllama,
+  setActiveProvider,
+  // Sticky fallback (orchestrator pins after a successful fallback call)
+  setStickyFallback,
+  stickyFallbackActive,
+  // Circuit breaker (FEA-003)
+  recordProviderFailure,
+  recordProviderSuccess,
+  isCircuitBreakerOpen,
+  // Detection
+  detectProvider,
+  getFallbackProviders,
+  // Boot
+  loadKeysFromDatabase,
+  STICKY_FALLBACK_TTL_MS,
+} from "./registry.js";
 // INF-007: AI provider telemetry — latency histograms, token counters, and
 // error counters. The single most important metric surface for a SaaS QA
 // platform: it drives unit-economics (cost per workspace per day = tokens ×
@@ -109,178 +135,23 @@ function createSsrfGuardedFetch() {
   };
 }
 
-// ── Runtime key store ────────────────────────────────────────────────────────
-// In-memory cache populated at startup from the DB (via loadKeysFromDatabase)
-// and updated whenever /api/settings writes a new key. Keys are also persisted
-// to the `api_keys` DB table, so they survive server restarts.
-const runtimeKeys = {};
-
-// Ollama runtime config (settable via /api/settings for the local provider)
-let runtimeOllamaBaseUrl = "";
-let runtimeOllamaModel   = "";
-// Explicit deactivation flag — when true, Ollama is disabled even if env vars are set.
-// Set to true by DELETE /api/settings/local; cleared by POST /api/settings with local provider.
-let runtimeOllamaDisabled = false;
-
-// ── Active provider override ──────────────────────────────────────────────────
-// When set, this provider is used instead of auto-detection order.
-// Allows the header dropdown to switch between already-configured providers
-// without re-entering keys. Cleared when the selected provider loses its key.
-let runtimeActiveProvider = null;
-
-// ── Sticky fallback override ──────────────────────────────────────────────────
-// When a rate-limit fallback succeeds, this is set to the fallback provider so
-// all subsequent generateText() calls in the same pipeline skip the rate-limited
-// primary and go directly to the working fallback.  Auto-expires after
-// STICKY_FALLBACK_TTL_MS so normal provider selection resumes once the rate
-// limit window resets.  Cleared by setActiveProvider() (user explicitly picks
-// a provider via the dropdown) and by setRuntimeKey() (user enters a new key).
-let _stickyFallbackProvider = null;
-let _stickyFallbackExpiry   = 0;
-
-const STICKY_FALLBACK_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-/**
- * Override the active provider selection (used by the quick-switch dropdown).
- * The provider must already have a valid key/config — this does not set any key.
- * @param {string|null} provider - Provider ID to pin, or null to resume auto-detect.
- */
-export function setActiveProvider(provider) {
-  runtimeActiveProvider = provider || null;
-  // User explicitly chose a provider — clear any sticky fallback
-  _stickyFallbackProvider = null;
-  _stickyFallbackExpiry   = 0;
-}
-
-// OpenRouter base URL — overridable for self-hosted proxies. Stays here
-// rather than in modelCatalog.js because it's instance-specific configuration
-// (per-deployment override), not catalog metadata.
+// OpenRouter base URL — overridable for self-hosted proxies. Stays in the
+// orchestrator (not modelCatalog.js) because it's instance-specific runtime
+// config used by buildAdapterOpts(), not catalog metadata.
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
-// Re-export retry helpers so external callers (e.g. crawler, pipeline) that
-// import `isRateLimitError` / `isTransientServerError` from `aiProvider.js`
-// continue to work after the refactor.
-export { isRateLimitError, isTransientServerError };
-
-function isCompatProvider(provider) {
-  // Match apiKeyRepo.isCompatProvider() — require a non-empty slot id after
-  // the "compat:" prefix so a malformed `provider: "compat:"` doesn't
-  // reach the DB layer (which would 500 on the empty key) or get treated
-  // as a usable provider by isProviderUsable() / detectProvider().
-  return typeof provider === "string" && provider.startsWith("compat:") && provider.length > "compat:".length;
-}
-
-function getCompatConfig(provider) {
-  if (!isCompatProvider(provider)) return null;
-  // Read through the TTL cache to avoid hitting SQLite (decrypt + JSON.parse)
-  // on every AI call.  Cache is write-through invalidated in apiKeyRepo and
-  // coherent across processes via Redis pub/sub (utils/compatConfigCache.js).
-  //
-  // Loader uses `getCompatSlot()` (not the generic `apiKeyRepo.get()`) so the
-  // compat-specific type guard runs — protects against a corrupted row
-  // returning a non-object (string / null / number) which would otherwise
-  // poison the cache and make `compat?.apiKey` lookups crash with a
-  // "cannot read properties of string" error far from the actual root cause.
-  return compatConfigCache.get(provider, () => apiKeyRepo.getCompatSlot(provider));
-}
-
-/**
- * Set an AI provider API key at runtime (via Settings page).
- * Persists the key to the database so it survives server restarts.
- * Pass an empty string to clear the key both in-memory and in the DB.
- *
- * @param {string} provider - `"anthropic"` | `"openai"` | `"google"` | `"openrouter"`.
- * @param {string} key      - The API key string, or `""` to deactivate.
- */
-export function setRuntimeKey(provider, key) {
-  // Compat providers are managed via apiKeyRepo.setCompatSlot() in settings.js
-  // (they need {baseUrl, model, apiKey, displayName}, not just a key string).
-  // Reset their circuit breaker so the new config is retried immediately.
-  if (isCompatProvider(provider)) {
-    if (circuitBreakers[provider]) {
-      circuitBreakers[provider].failures = 0;
-      circuitBreakers[provider].disabledUntil = 0;
-    }
-    _stickyFallbackProvider = null;
-    _stickyFallbackExpiry   = 0;
-    return;
-  }
-  const envName = CLOUD_KEY_MAP[provider];
-  if (!envName) return;
-  runtimeKeys[envName] = key;
-  // FEA-003: Reset circuit breaker when the key changes so the provider is
-  // immediately retried with the new credentials instead of waiting out the
-  // cooldown from the old key's rate-limit failures.
-  if (circuitBreakers[provider]) {
-    circuitBreakers[provider].failures = 0;
-    circuitBreakers[provider].disabledUntil = 0;
-  }
-  // Clear sticky fallback — user is configuring a provider, let detection re-evaluate
-  _stickyFallbackProvider = null;
-  _stickyFallbackExpiry   = 0;
-  try {
-    if (key) {
-      apiKeyRepo.set(provider, key);
-    } else {
-      apiKeyRepo.remove(provider);
-    }
-  } catch (err) {
-    // DB unavailable during tests or before init — safe to ignore, in-memory cache still works.
-    console.error(formatLogLine("error", null, `[aiProvider] Failed to persist key for ${provider}: ${err.message}`));
-  }
-}
-
-/**
- * Configure Ollama runtime settings (via Settings page).
- * Persists the config to the database so it survives server restarts.
- *
- * @param {Object}  [opts]
- * @param {string}  [opts.baseUrl]  - Ollama server URL.
- * @param {string}  [opts.model]    - Model name (e.g. `"mistral:7b"`).
- * @param {boolean} [opts.disabled] - Set `true` to deactivate Ollama.
- */
-export function setRuntimeOllama({ baseUrl, model, disabled } = {}) {
-  if (baseUrl  !== undefined) runtimeOllamaBaseUrl  = baseUrl;
-  if (model    !== undefined) runtimeOllamaModel    = model;
-  if (disabled !== undefined) runtimeOllamaDisabled = disabled;
-  try {
-    if (disabled) {
-      apiKeyRepo.remove("local");
-    } else if (runtimeOllamaBaseUrl || runtimeOllamaModel) {
-      apiKeyRepo.set("local", { baseUrl: runtimeOllamaBaseUrl, model: runtimeOllamaModel });
-    }
-  } catch (err) {
-    console.error(formatLogLine("error", null, `[aiProvider] Failed to persist Ollama config: ${err.message}`));
-  }
-}
-
-function getKey(envName) {
-  // Use `in` + explicit check so that setting a runtime key to "" (deactivation)
-  // takes precedence over the env var. Previously `||` made "" falsy, falling
-  // through to process.env and making runtime deactivation impossible.
-  if (envName in runtimeKeys) return runtimeKeys[envName];
-  const envVal = process.env[envName] || "";
-  if (envVal) return envVal;
-  // DEMO-MODE: Fall back to the platform-owned demo key for Google when no
-  // user key is configured. This lets users try Sentri without bringing their
-  // own API key. The demo key is rate-limited per-user by demoQuota middleware.
-  if (envName === "GOOGLE_API_KEY" && process.env.DEMO_GOOGLE_API_KEY) {
-    return process.env.DEMO_GOOGLE_API_KEY;
-  }
-  return "";
-}
-
-function getOllamaBaseUrl() {
-  return runtimeOllamaBaseUrl
-    || process.env.OLLAMA_BASE_URL
-    || "http://localhost:11434";
-}
-
-function getOllamaModel() {
-  return runtimeOllamaModel
-    || process.env.OLLAMA_MODEL
-    || "mistral:7b";
-}
+// Re-export retry helpers + state-management API so external callers that
+// import these from `aiProvider.js` continue to work after the refactor.
+// `setActiveProvider`, `setRuntimeKey`, etc. live in registry.js but are
+// re-exported here so consumers don't need to know about the internal layout.
+export {
+  isRateLimitError,
+  isTransientServerError,
+  setActiveProvider,
+  setRuntimeKey,
+  setRuntimeOllama,
+  loadKeysFromDatabase,
+};
 
 // ── Provider metadata ─────────────────────────────────────────────────────────
 
@@ -333,102 +204,9 @@ export function getSupportedProviders() {
   }));
 }
 
-// ── Provider detection ────────────────────────────────────────────────────────
+// ── Provider detection (delegates to registry.js) ───────────────────────────
 
-/**
- * Check whether a provider is usable right now (has a key or, for Ollama, is not disabled).
- * Single source of truth — used by detectProvider, the quick-switch override, and the forced-env path.
- * @param {string} provider
- * @returns {boolean}
- */
-function isProviderUsable(provider) {
-  if (provider === "local") {
-    return !runtimeOllamaDisabled;
-  }
-  if (isCompatProvider(provider)) {
-    // Wrap the cache loader / DB read so a transient DB failure during a
-    // cache miss (TTL expired) doesn't propagate through detectProvider() →
-    // generateText() / streamText(). Mirrors the try/catch around the
-    // `listCompatSlots()` sweep below — without it, a sticky-fallback or
-    // active-provider pointing at a compat slot would crash hot paths the
-    // moment the cache TTL elapses while the DB is briefly unavailable.
-    try {
-      const compat = getCompatConfig(provider);
-      return !!(compat?.apiKey && compat?.baseUrl && compat?.model);
-    } catch {
-      return false;
-    }
-  }
-  const envName = CLOUD_KEY_MAP[provider];
-  if (!envName) return false;
-  // Runtime key of "" means explicitly cleared — respect that
-  if (envName in runtimeKeys) return runtimeKeys[envName].length > 0;
-  if (process.env[envName]) return true;
-  // DEMO-MODE: Google is usable when the demo key is set
-  if (envName === "GOOGLE_API_KEY" && process.env.DEMO_GOOGLE_API_KEY) return true;
-  return false;
-}
-
-/** True if Ollama has any config (runtime or env) hinting it should be auto-detected. */
-function hasOllamaConfig() {
-  return !!(runtimeOllamaBaseUrl || runtimeOllamaModel || process.env.OLLAMA_BASE_URL || process.env.OLLAMA_MODEL);
-}
-
-function detectProvider() {
-  // ── Sticky fallback from a previous rate-limit event ─────────────────────
-  // Checked FIRST — when a rate-limit fallback succeeded, all subsequent
-  // calls must use the fallback provider, even if the user explicitly
-  // selected the (now rate-limited) primary via the dropdown.  Without this
-  // priority, every call would re-try the broken provider for ~3 min before
-  // falling back again.  Auto-expires after STICKY_FALLBACK_TTL_MS so normal
-  // provider selection resumes once the rate limit window resets.
-  if (_stickyFallbackProvider && Date.now() < _stickyFallbackExpiry) {
-    if (isProviderUsable(_stickyFallbackProvider)) return _stickyFallbackProvider;
-    // Fallback no longer usable — clear and fall through
-    _stickyFallbackProvider = null;
-    _stickyFallbackExpiry   = 0;
-  } else if (_stickyFallbackProvider) {
-    // Expired — clear
-    _stickyFallbackProvider = null;
-    _stickyFallbackExpiry   = 0;
-  }
-
-  // ── Quick-switch override from the header dropdown ────────────────────────
-  // Checked AFTER the sticky fallback so a rate-limited provider is not
-  // retried just because the user had it selected in the dropdown.
-  if (runtimeActiveProvider) {
-    if (isProviderUsable(runtimeActiveProvider)) return runtimeActiveProvider;
-    // Key gone — clear the override and fall through
-    runtimeActiveProvider = null;
-  }
-
-  // ── AI_PROVIDER env var (explicit static config) ─────────────────────────
-  const forced = process.env.AI_PROVIDER?.toLowerCase();
-  if (forced) {
-    if (forced === "local") return "local";
-    if (!CLOUD_KEY_MAP[forced]) throw new Error(`Unknown AI_PROVIDER="${forced}". Valid: anthropic, openai, google, openrouter, local`);
-    if (!getKey(CLOUD_KEY_MAP[forced])) throw new Error(`AI_PROVIDER="${forced}" but ${CLOUD_KEY_MAP[forced]} is not set`);
-    return forced;
-  }
-
-  // ── Auto-detect: first cloud provider with a key, then any configured
-  // compat:<id> slot, then Ollama as final fallback. Without the compat
-  // sweep, a server restart with ONLY compat slots configured would leave
-  // detectProvider() returning null until an admin manually re-selects.
-  const detected = CLOUD_DETECT_ORDER.find(id => isProviderUsable(id));
-  if (detected) return detected;
-
-  try {
-    const compatSlot = apiKeyRepo.listCompatSlots().find(id => isProviderUsable(id));
-    if (compatSlot) return compatSlot;
-  } catch { /* DB unavailable — fall through to Ollama */ }
-
-  if (isProviderUsable("local") && hasOllamaConfig()) return "local";
-
-  return null;
-}
-
-/** @returns {string|null} Current provider ID (`"anthropic"`, `"openai"`, `"google"`, `"openrouter"`, `"local"`), or `null`. */
+/** @returns {string|null} Current provider ID, or `null` when none configured. */
 export function getProvider()     { try { return detectProvider(); } catch { return null; } }
 /** @returns {boolean} `true` if any AI provider is configured. */
 export function hasProvider()     { return getProvider() !== null; }
@@ -442,7 +220,7 @@ export function isLocalProvider() { return getProvider() === "local"; }
  * @returns {boolean}
  */
 export function isProviderDegraded() {
-  if (_stickyFallbackProvider && Date.now() < _stickyFallbackExpiry) return true;
+  if (stickyFallbackActive()) return true;
   const primary = getProvider();
   return primary ? isCircuitBreakerOpen(primary) : false;
 }
@@ -482,7 +260,7 @@ export function getConfiguredKeys() {
   result.ollamaModel   = getOllamaModel();
   // True only when Ollama has explicit config AND is not disabled — prevents
   // the dropdown from showing Ollama as "saved" when it's just the default URL.
-  result.ollamaConfigured = !runtimeOllamaDisabled && hasOllamaConfig();
+  result.ollamaConfigured = !isOllamaDisabled() && hasOllamaConfig();
   // Wrap the DB sweep in try/catch to match buildProviderMeta() / detectProvider()
   // / getFallbackProviders() — without it, a transient DB failure would 500
   // the GET /settings endpoint AND crash the demoQuota middleware on every
@@ -512,79 +290,10 @@ export function getConfiguredKeys() {
   return result;
 }
 
-/**
- * Get a user-configured key WITHOUT the demo fallback.
- * Used by getConfiguredKeys() so BYOK detection is accurate.
- * @param {string} envName
- * @returns {string}
- */
-function getUserConfiguredKey(envName) {
-  if (envName in runtimeKeys) return runtimeKeys[envName];
-  return process.env[envName] || "";
-}
-
 function maskKey(key) {
   if (!key) return "";
   if (key.length <= 8) return "••••••••";
   return key.slice(0, 6) + "••••••••" + key.slice(-4);
-}
-
-// ── Database key persistence ──────────────────────────────────────────────────
-
-/**
- * Restore all persisted API keys and Ollama config from the database into the
- * runtime cache. Called once at server startup after the DB is initialised.
- *
- * Keys stored in the DB take precedence over the default detection logic only
- * when no matching env var is already set — env vars remain the canonical
- * override so Docker / K8s deployments are unaffected.
- *
- * @returns {number} The number of providers successfully loaded from the database.
- */
-export function loadKeysFromDatabase() {
-  let loaded = 0;
-  try {
-    const entries = apiKeyRepo.getAll();
-    for (const { provider, value } of entries) {
-      if (provider === "local") {
-        // Restore Ollama config only when env vars are not already set.
-        const cfg = value;
-        if (cfg && typeof cfg === "object") {
-          if (!runtimeOllamaBaseUrl && !process.env.OLLAMA_BASE_URL) {
-            runtimeOllamaBaseUrl = cfg.baseUrl || "";
-          }
-          if (!runtimeOllamaModel && !process.env.OLLAMA_MODEL) {
-            runtimeOllamaModel = cfg.model || "";
-          }
-          runtimeOllamaDisabled = false;
-          loaded += 1;
-        }
-      } else if (isCompatProvider(provider)) {
-        // Compat slots store {apiKey, baseUrl, model, displayName} as JSON;
-        // they are read on demand via apiKeyRepo.get() inside getCompatConfig(),
-        // so no runtime cache restore is required here. Just count it as loaded.
-        if (value && typeof value === "object" && value.apiKey && value.baseUrl && value.model) {
-          loaded += 1;
-        }
-      } else {
-        const envName = CLOUD_KEY_MAP[provider];
-        if (!envName) continue;
-        // Only restore from DB when the env var is absent and cache is not already
-        // populated — env vars always win.
-        if (!process.env[envName] && !(envName in runtimeKeys)) {
-          runtimeKeys[envName] = String(value);
-          loaded += 1;
-        }
-      }
-    }
-    if (loaded > 0) {
-      console.log(formatLogLine("info", null, `[aiProvider] Restored ${loaded} provider key(s) from database`));
-    }
-  } catch (err) {
-    // Non-fatal: the server still works with env vars; log and continue.
-    console.error(formatLogLine("error", null, `[aiProvider] Failed to load keys from database: ${err.message}`));
-  }
-  return loaded;
 }
 
 // ── Ollama connectivity check ─────────────────────────────────────────────────
@@ -647,98 +356,9 @@ function normaliseMessages(promptOrMessages) {
   return { system: system || null, user, combined };
 }
 
-// ── FEA-003: Circuit breaker per provider ─────────────────────────────────────
-// When a provider hits a rate-limit failure that survived all internal retries
-// in withRetry(), disable it for 5 min.  Threshold is 1 (not 3) because
-// withRetry() already retried MAX_RETRIES times internally — the error that
-// reaches generateText() represents a confirmed, durable rate limit, not a
-// transient blip.
-
-/** @type {Object<string, {failures: number, disabledUntil: number}>} */
-const circuitBreakers = {};
-
-const CIRCUIT_BREAKER_THRESHOLD = 1;
-const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
-
-/**
- * Record a rate-limit failure for a provider. If the threshold is reached,
- * the provider is disabled for CIRCUIT_BREAKER_COOLDOWN_MS.
- *
- * @param {string} provider
- */
-function recordProviderFailure(provider) {
-  if (!circuitBreakers[provider]) circuitBreakers[provider] = { failures: 0, disabledUntil: 0 };
-  circuitBreakers[provider].failures += 1;
-  if (circuitBreakers[provider].failures >= CIRCUIT_BREAKER_THRESHOLD) {
-    circuitBreakers[provider].disabledUntil = Date.now() + CIRCUIT_BREAKER_COOLDOWN_MS;
-    console.warn(formatLogLine("warn", null, `[aiProvider] Circuit breaker tripped for ${provider} — disabled for ${CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s after ${CIRCUIT_BREAKER_THRESHOLD} consecutive rate-limit failures`));
-  }
-}
-
-/**
- * Record a successful call — resets the failure counter.
- *
- * @param {string} provider
- */
-function recordProviderSuccess(provider) {
-  if (circuitBreakers[provider]) {
-    circuitBreakers[provider].failures = 0;
-  }
-}
-
-/**
- * Check whether a provider's circuit breaker is open (disabled).
- *
- * @param {string} provider
- * @returns {boolean} `true` if the provider is temporarily disabled.
- */
-function isCircuitBreakerOpen(provider) {
-  const cb = circuitBreakers[provider];
-  if (!cb) return false;
-  if (cb.disabledUntil > Date.now()) return true;
-  // Cooldown expired — reset
-  if (cb.disabledUntil > 0) {
-    cb.disabledUntil = 0;
-    cb.failures = 0;
-  }
-  return false;
-}
-
-/**
- * FEA-003: Get the ordered list of fallback providers to try when the primary
- * provider hits a rate limit or transient error.
- *
- * **Same-tier only** — cloud primary falls back to other cloud providers;
- * local primary has no fallback. This prevents cross-tier mismatches where
- * a prompt built for cloud (~1600 chars, 128K context assumed) gets
- * delivered to Ollama (4K context, needs >120s to process) and hits the
- * chat timeout. Ollama is never a cross-tier rescue — the prompt shape,
- * context window, and response latency are too different.
- *
- * To use Ollama as a primary, set `AI_PROVIDER=local` or pick it from
- * the provider dropdown — detectProvider() will route all calls to Ollama
- * with the correct tier-specific prompt.
- *
- * @param {string} primaryProvider - The provider that failed.
- * @returns {string[]} Ordered list of same-tier fallback provider IDs.
- */
-function getFallbackProviders(primaryProvider) {
-  // Local tier has only one provider (Ollama) — no fallback possible.
-  if (primaryProvider === "local") return [];
-  // Cloud tier: try other cloud providers in detection order, then any
-  // configured `compat:<id>` slots (AI-001) — they share the OpenAI wire
-  // format and participate in the same circuit-breaker accounting per slot.
-  // Wrap the DB read so a transient DB failure doesn't break cloud-only
-  // fallbacks (which have no DB dependency otherwise).
-  let compatSlots = [];
-  try { compatSlots = apiKeyRepo.listCompatSlots(); } catch { /* DB unavailable — cloud fallbacks still work */ }
-  const candidates = [...CLOUD_DETECT_ORDER, ...compatSlots];
-  return candidates.filter(p =>
-    p !== primaryProvider &&
-    isProviderUsable(p) &&
-    !isCircuitBreakerOpen(p),
-  );
-}
+// FEA-003 circuit breaker + same-tier fallback list both live in registry.js
+// (state owner). The orchestrator below just calls recordProviderFailure /
+// recordProviderSuccess / isCircuitBreakerOpen / getFallbackProviders.
 
 // ── Core API call ─────────────────────────────────────────────────────────────
 
@@ -983,11 +603,10 @@ export async function generateText(prompt, options) {
         const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
         recordProviderSuccess(fallbackProvider);
         // ── Sticky fallback: pin this provider so subsequent calls in the same
-        // pipeline skip the failing primary entirely.  Expires after
+        // pipeline skip the failing primary entirely. Expires after
         // STICKY_FALLBACK_TTL_MS so normal selection resumes once the
         // quota/outage window closes.
-        _stickyFallbackProvider = fallbackProvider;
-        _stickyFallbackExpiry   = Date.now() + STICKY_FALLBACK_TTL_MS;
+        setStickyFallback(fallbackProvider);
         console.log(formatLogLine("info", null, `[aiProvider] Pinned ${fallbackProvider} as sticky fallback for ${STICKY_FALLBACK_TTL_MS / 1000}s`));
         return result;
       } catch (fallbackErr) {
