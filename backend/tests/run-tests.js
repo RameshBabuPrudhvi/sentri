@@ -76,6 +76,9 @@ const files = [
   "tests/ai-provider-cost-tracking.test.js",
   "tests/compat-config-cache.test.js",
   "tests/agent-config-routes.test.js",
+  // AI-005 — Multi-agent dispatch unit tests (resolveProvider, breakerKey,
+  // per-role circuit breakers, fallbackRole cycle guard, sticky-fallback priority).
+  "tests/agent-dispatch.test.js",
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",
   "tests/openapi.test.js",

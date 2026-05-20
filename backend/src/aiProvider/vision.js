@@ -101,6 +101,14 @@ export function hasVisionProvider() {
  *   silently ignored on Google Gemini due to SDK limitation (see § Cancellation caveat).
  * @returns {Promise<{confidence: number, box: ({x,y,width,height}|null), model: string, costUsd: number, reasoning: string|null}|null>}
  */
+// TODO(AI-005b): accept `{ workspaceId, agentRole = "healer" }` and route
+// through `resolveProvider({ agentRole, workspaceId })` so a workspace
+// configuring a dedicated vision-heal provider (e.g. Gemini Flash for
+// cost, GPT-4o for accuracy) actually drives the call. Today this path
+// still uses `getProvider()` — the workspace default — so the `healer`
+// agent_config row is ignored for vision-heal even though the metrics
+// already carry `agent_role: "default"` correctly. Requires routing
+// through `dispatcher.callProvider` instead of calling adapters directly.
 export async function callVisionModel({ screenshot, intent, contextHtml, signal } = {}) {
   if (!screenshot || !intent?.label) return null;
   const model = resolveVisionModel();

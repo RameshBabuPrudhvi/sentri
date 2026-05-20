@@ -29,6 +29,9 @@
  */
 
 import { getProviderName } from "./aiProvider.js";
+// AI-005 tripwire #4: pre-flight probe so a misconfigured agent role fails
+// at minute 0 instead of minute 9 after planner + codegen already burned spend.
+import { assertAgentConfigsHealthy } from "./aiProvider/agentHealthCheck.js";
 import { throwIfAborted, finalizeRunIfNotAborted } from "./utils/abortHelper.js";
 import { trackTelemetry } from "./utils/telemetry.js";
 import { filterElements, filterStats } from "./pipeline/elementFilter.js";
@@ -251,6 +254,23 @@ export async function generateFromUserDescription(project, run, { name, descript
   log(run, `API tests: ✅ auto-detected from description (mention endpoints, HTTP methods, /api/ paths)`);
   log(run, `Target URL: ${project.url}`);
 
+  // AI-005 pre-flight: probe every configured agent_config role before any
+  // real AI call. Workspaces with no configured agents get a fast `ok: true`
+  // and the pipeline behaves identically to single-agent mode.
+  if (project.workspaceId) {
+    try {
+      await assertAgentConfigsHealthy(project.workspaceId, { signal });
+    } catch (err) {
+      if (err.code === "ERR_AGENT_HEALTH_CHECK_FAILED") {
+        logWarn(run, `Agent health check failed — ${err.message}`);
+        for (const [role, info] of Object.entries(err.agentRoles || {})) {
+          if (!info.ok) logWarn(run, `   • ${role} (${info.provider || "no provider"}) → ${info.reason}`);
+        }
+      }
+      throw err;
+    }
+  }
+
   // Skip steps 1-3 — user provides the intent directly via name + description
   setStep(run, 1);
   log(run, `⏭️  Step 1 (Crawl) — skipped (user-provided title & description)`);
@@ -358,6 +378,23 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
   log(run, `HAR capture: ✅ enabled (API traffic → API test generation)`);
   log(run, `Target URL: ${project.url}`);
   setStep(run, 1);
+
+  // AI-005 pre-flight: probe every configured agent_config role before the
+  // crawl + AI work begins. Workspaces with no configured agents get a fast
+  // `ok: true` so single-agent installations pay zero overhead.
+  if (project.workspaceId) {
+    try {
+      await assertAgentConfigsHealthy(project.workspaceId, { signal });
+    } catch (err) {
+      if (err.code === "ERR_AGENT_HEALTH_CHECK_FAILED") {
+        logWarn(run, `Agent health check failed — ${err.message}`);
+        for (const [role, info] of Object.entries(err.agentRoles || {})) {
+          if (!info.ok) logWarn(run, `   • ${role} (${info.provider || "no provider"}) → ${info.reason}`);
+        }
+      }
+      throw err;
+    }
+  }
 
   let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl, filteredSnapshots;
   let apiEndpoints = [];
