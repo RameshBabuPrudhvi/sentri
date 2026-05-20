@@ -621,16 +621,18 @@ app_ai_cost_usd_total{provider, agent_role, operation}
 Cardinality bounded: 8 canonical roles × 5 provider labels × 3 outcomes = 120 series per metric (well under Prometheus's recommended 10k/metric limit).
 **Pipeline integration:**
 Every pipeline stage threads `agentRole` + `workspaceId` through to its `generateText` call:
-| Pipeline stage | Module | agentRole |
-|---|---|---|
-| Crawl classification | `crawler.js` → `classifyPage` | `crawl_classify` |
-| Scenario planning | `pipeline/scenarioPlanner.js` | `scenario_plan` |
-| Code generation | `pipeline/testGenerator.js` | `codegen` |
-| Code refinement | `pipeline/testRefiner.js` | `codegen` (same role) |
-| Critic review | `pipeline/testCritic.js` | `critic` |
-| Self-healing | `selfHealing.js` (DOM strategies) | `selfheal` |
-| Vision healing | `selfHealing.js` stages 7+8 | `vision_heal` (MNT-001 — already labeled) |
-| Conversational editor | `routes/chat.js` | `chat` |
+| Pipeline stage          | Module                                      | agentRole   |
+|-------------------------|---------------------------------------------|-------------|
+| Crawl classification    | `crawler.js` → `classifyPage`               | `explorer`  |
+| Scenario planning       | `pipeline/scenarioPlanner.js`               | `planner`   |
+| Code generation         | `pipeline/testGenerator.js`                 | `author`    |
+| Code refinement         | `pipeline/testRefiner.js`                   | `author`    |
+| Assertion strengthening | `pipeline/testValidator.js` / oracle stage  | `oracle`    |
+| Critic review           | `pipeline/testCritic.js`                    | `reviewer`  |
+| Self-healing (DOM)      | `selfHealing.js` (stages 1–6)               | `healer`    |
+| Vision healing          | `selfHealing.js` (stages 7–8, MNT-001)      | `healer`    |
+| Failure triage          | `pipeline/failureClusterer.js` (+ AUTO-021) | `triager`   |
+| Conversational editor   | `routes/chat.js`                            | `author` |
 **Zero-regression guarantees:**
 - `options.agentRole` is optional. Existing call sites that don't pass it behave identically to today (workspace default).
 - Agent configs left empty by the admin → pipeline falls back to workspace default → byte-identical to single-agent mode.
@@ -1121,26 +1123,6 @@ Crucially, **budget enforcement happens before the LLM call**, not after — a s
 ## Ongoing Maintenance & Platform Health
 
 *These items are not phase-bounded. Address them incrementally alongside feature work, prioritising MNT-006 (object storage) before any cloud deployment.*
-
----
-
-### MNT-001 — Vision-based locator healing 🟢 Differentiator
-
-**Status:** ✅ Complete (PR #17) — see Completed Work Summary above for the full implementation details. Shipped end-to-end: host-side stages 7 (pixelmatch CV) + 8 (LLM vision) with per-project budget circuit-breaker, SEC-007-compatible audit trail, `STRATEGY_VERSION` 3→4, baseline crop capture on green runs, coordinate re-action on heal, new Vision Healing tab on Quality card + Vision-based healing panel on Healing dashboard.
-
-<!-- Legacy section preserved below for archival reference. -->
-
-**Legacy Status:** 🔲 Planned | **Effort:** XL | **Source:** Competitive
-
-**Problem:** The self-healing waterfall uses DOM selectors exclusively (ARIA roles, text content, CSS fallbacks). When the DOM structure changes drastically — a major redesign or component library migration — all strategies can fail simultaneously. Mabl uses screenshot diff + CV-based element finding to heal across structural changes.
-
-**Fix:** Add a vision-based healing strategy as the final fallback in the waterfall. Capture a screenshot of the failing step's expected element area from the baseline, use image similarity (`pixelmatch`) to locate the nearest visual match in the current DOM, and derive a fresh selector from the matched element.
-
-**Files to change:**
-- `backend/src/selfHealing.js` — add vision strategy as waterfall stage 7
-- `backend/src/runner/executeTest.js` — pass baseline screenshot to healing context
-
-**See also:** MNT-002 — both items extend `selfHealing.js`. MNT-001 handles visual/structural DOM changes (new strategy); MNT-002 handles statistical strategy ordering (ML classifier). They are complementary but fully independent implementations. Coordinate branch timing to avoid merge conflicts.
 
 ---
 
