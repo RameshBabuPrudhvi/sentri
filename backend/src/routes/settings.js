@@ -270,18 +270,27 @@ router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
     id: existing?.id || `AGC-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,
     workspaceId: req.workspaceId, role, provider, model, systemPromptOverride,
     temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
-    maxTokens: maxTokens == null ? null : Number(maxTokens), fallbackRole,
+    maxTokens: maxTokens == null ? null : (Number.isFinite(Number(maxTokens)) ? Number(maxTokens) : null), fallbackRole,
     createdAt: existing?.createdAt || now, updatedAt: now,
   });
   res.status(existing ? 200 : 201).json(saved);
 });
+
+// Only these fields are PATCH-able. id/createdAt/role/workspaceId are
+// pinned from `existing` so a malicious body can't override the primary key
+// or stamp a different workspace onto the row.
+const PATCHABLE_AGENT_FIELDS = ["provider", "model", "systemPromptOverride", "temperature", "maxTokens", "fallbackRole"];
 
 router.patch("/settings/agent-roles/:role", requireRole("admin"), (req, res) => {
   const role = req.params.role;
   if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
   const existing = agentConfigRepo.getByRole(req.workspaceId, role);
   if (!existing) return res.status(404).json({ error: "Not found" });
-  const payload = { ...existing, ...req.body, role, workspaceId: req.workspaceId };
+  const body = req.body || {};
+  const payload = { ...existing };
+  for (const k of PATCHABLE_AGENT_FIELDS) if (k in body) payload[k] = body[k];
+  payload.role = role;
+  payload.workspaceId = req.workspaceId;
   if (payload.fallbackRole && !AGENT_ROLES.includes(payload.fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
   if (payload.fallbackRole && hasFallbackCycle(req.workspaceId, role, payload.fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
   // Mirror POST's numeric coercion so direct API callers can't smuggle
