@@ -8,7 +8,7 @@
  *   - `maxFailures`  (>= 0, integer) — fail run when failure count is above this.
  *   - `minCoveragePct`           (0–100, %) — AUTO-009d: fail when browser JS line coverage falls below this.
  *   - `minBranchPct`             (0–100, %) — AUTO-009d: fail when branch coverage falls below this (line-only runs no-op).
- *   - `minPrCoveragePct`         (0–100, %) — AUTO-009d: minimum coverage for PR-touched files (aliases overall coverage until AUTO-009e ships the PR-files filter).
+ *   - `minPrCoveragePct`         (0–100, %) — AUTO-009d: minimum coverage for the lines this PR changed (the Codecov play). Only enforced on PR-triggered runs that produced a `prCoverageDiff` payload; dormant on manual / scheduled / crawl-only runs.
  *   - `maxCoverageRegressionPct` (0–100, %) — AUTO-009d: max allowed drop relative to the previous coverage-enabled run.
  *
  * Any single field can be left blank to omit it from the gate config — the
@@ -47,7 +47,7 @@ const FIELDS = [
     help: "Run fails when branch coverage falls below this. Line-only coverage runs no-op this rule (no v8-to-istanbul data). 0–100.",
     min: 0, max: 100, step: "0.1" },
   { key: "minPrCoveragePct", label: "Min PR coverage (%)",
-    help: "Minimum coverage for PR-touched files. Currently aliases overall coverage until AUTO-009e ships the PR-files filter. 0–100.",
+    help: "Run fails when coverage of the lines this PR changed falls below this. Only enforced on PR-triggered runs (manual / scheduled / crawl-only runs skip this rule — they have no PR context). PR runs that touch zero analyzable lines also skip rather than report 0%. 0–100.",
     min: 0, max: 100, step: "0.1" },
   { key: "maxCoverageRegressionPct", label: "Max coverage regression (%)",
     help: "Run fails when coverage drops MORE than this versus the previous coverage-enabled run. Leave blank to disable — 0 means 'fail on ANY drop' (strictest). First coverage-enabled run never regresses (no prior to compare). 0–100.",
