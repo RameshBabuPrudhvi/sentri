@@ -42,6 +42,36 @@ When a vendor publishes new prices (or you find a stale entry):
 
 That's it. No code changes are required outside the table.
 
+### PR template — pricing refresh
+
+Use this body verbatim when opening a refresh PR so reviewers can verify
+the source-of-truth in one glance:
+
+```markdown
+## Summary
+Refresh `<provider>` pricing in `backend/src/aiProvider/modelCatalog.js`.
+
+## Source
+<vendor pricing page URL> — captured <ISO date>.
+
+## Changes
+| Model | Old input/1k | New input/1k | Old output/1k | New output/1k |
+|-------|--------------|--------------|---------------|---------------|
+| <model-id> | $0.000 | $0.000 | $0.000 | $0.000 |
+
+## Verification
+- [ ] `asOf` bumped to today on every changed row.
+- [ ] `backend/tests/ai-provider-cost-tracking.test.js` arithmetic
+      assertions updated (with a comment citing the vendor URL).
+- [ ] `cd backend && npm test -- tests/ai-provider-cost-tracking.test.js`
+      passes locally.
+- [ ] No other files touched. Pure data refresh.
+```
+
+The "No other files touched" line is load-bearing — pricing refreshes are
+a **data-only** change. If a refresh requires code, that's a different PR
+and should not include `chore(pricing):` in the title.
+
 ## The `asOf` field and staleness
 
 `asOf` is **informational** — the cost counter still emits using the
@@ -106,6 +136,27 @@ sum by (operation) (increase(app_ai_cost_usd_total[24h]))
 
 See `monitoring/prometheus/alerts.yml` for the
 `VisionHealBudgetExhausted` alert that fires on per-project spend caps.
+
+## Capability flags (sibling of pricing)
+
+`modelCatalog.js#CAPABILITIES` carries per-provider flags read by the
+planner agent (AI-005) and by the orchestrator at routing time:
+
+| Flag                 | Type            | Meaning                                                                            |
+| -------------------- | --------------- | ---------------------------------------------------------------------------------- |
+| `supportsVision`     | `boolean`       | Provider family CAN send images. Per-model gate still applies via `VISION_CAPABLE_MODELS`. |
+| `supportsJsonMode`   | `boolean`       | Provider honours `response_format: { type: "json_object" }` / `responseMimeType`.   |
+| `supportsStreaming`  | `boolean`       | Adapter's `stream()` returns a real token stream. `false` for Gemini + Ollama (SDK limitation). |
+| `contextWindow`      | `number \| null`| Max prompt+response tokens. `null` for OpenRouter/compat (depends on routed model). |
+| `maxOutputTokens`    | `number \| null`| Vendor-documented hard cap on a single response.                                   |
+
+Unknown providers (typos, new IDs) get the conservative defaults
+`{ supportsVision: false, supportsJsonMode: false, supportsStreaming: false, contextWindow: null, maxOutputTokens: null }`
+so a misspelled provider id can't silently promise a feature it doesn't have.
+
+Compat slots (`compat:*`) inherit OpenAI's streaming + JSON defaults but
+default `supportsVision: false` — operators with a vision-capable compat
+endpoint should override via per-slot metadata in a future PR.
 
 ## Future work (AI-007)
 

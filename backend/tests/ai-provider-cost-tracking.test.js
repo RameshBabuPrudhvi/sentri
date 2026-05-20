@@ -24,6 +24,8 @@ import {
   computeCostUsd,
   pricingFor,
   MODEL_PRICING,
+  CAPABILITIES,
+  capabilitiesFor,
 } from "../src/aiProvider/modelCatalog.js";
 
 // ── computeCostUsd() — per-provider arithmetic ───────────────────────────────
@@ -113,6 +115,57 @@ test("pricingFor: returns full entry with asOf for staleness alerts", () => {
   assert.match(p.asOf, /^\d{4}-\d{2}-\d{2}$/, "asOf should be ISO date");
   assert.equal(typeof p.inputPer1k, "number");
   assert.equal(typeof p.outputPer1k, "number");
+});
+
+// ── AI-003 capability flags ─────────────────────────────────────────────────
+
+test("CAPABILITIES: every built-in provider has the full schema", () => {
+  // Pins the capability schema so a future PR can't drop a flag without
+  // breaking this test. AI-005 planner depends on every key being present.
+  const required = ["supportsVision", "supportsJsonMode", "supportsStreaming", "contextWindow", "maxOutputTokens"];
+  for (const [provider, caps] of Object.entries(CAPABILITIES)) {
+    for (const key of required) {
+      assert.ok(key in caps, `${provider}: missing capability ${key}`);
+    }
+    assert.equal(typeof caps.supportsVision, "boolean", `${provider}: supportsVision must be boolean`);
+    assert.equal(typeof caps.supportsJsonMode, "boolean", `${provider}: supportsJsonMode must be boolean`);
+    assert.equal(typeof caps.supportsStreaming, "boolean", `${provider}: supportsStreaming must be boolean`);
+    assert.ok(
+      caps.contextWindow === null || typeof caps.contextWindow === "number",
+      `${provider}: contextWindow must be null or number`,
+    );
+    assert.ok(
+      caps.maxOutputTokens === null || typeof caps.maxOutputTokens === "number",
+      `${provider}: maxOutputTokens must be null or number`,
+    );
+  }
+});
+
+test("capabilitiesFor: Gemini reports supportsStreaming: false (SDK limitation)", () => {
+  // Pins the AI-002 design decision: Gemini's adapter.stream() returns
+  // null because @google/generative-ai doesn't expose token streaming.
+  // The planner needs this flag to route streaming UX away from Gemini.
+  assert.equal(capabilitiesFor("google").supportsStreaming, false);
+});
+
+test("capabilitiesFor: Ollama reports supportsStreaming: false (no streaming adapter)", () => {
+  assert.equal(capabilitiesFor("local").supportsStreaming, false);
+});
+
+test("capabilitiesFor: unknown provider returns conservative defaults", () => {
+  const caps = capabilitiesFor("brand-new-provider");
+  assert.equal(caps.supportsVision, false, "unknown provider should not claim vision");
+  assert.equal(caps.supportsJsonMode, false, "unknown provider should not claim JSON mode");
+  assert.equal(caps.supportsStreaming, false, "unknown provider should not claim streaming");
+  assert.equal(caps.contextWindow, null);
+  assert.equal(caps.maxOutputTokens, null);
+});
+
+test("capabilitiesFor: compat:* slots inherit OpenAI streaming + JSON defaults", () => {
+  const caps = capabilitiesFor("compat:custom-endpoint");
+  assert.equal(caps.supportsJsonMode, true, "compat slots speak OpenAI wire format");
+  assert.equal(caps.supportsStreaming, true, "compat slots can stream via the OpenAI SDK");
+  assert.equal(caps.supportsVision, false, "compat slots conservatively assume no vision");
 });
 
 test("MODEL_PRICING: every entry has the required schema fields", () => {

@@ -48,18 +48,25 @@ export const VISION_CAPABLE_MODELS = new Set([
   "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-flash",
 ]);
 
-// Per-provider capability flags. `supportsVision` requires *both* a
-// vision-capable provider family AND a vision-capable model (checked via
+// AI-003 — Per-provider capability flags. `supportsVision` requires *both*
+// a vision-capable provider family AND a vision-capable model (checked via
 // VISION_CAPABLE_MODELS at the call site). `supportsJsonMode` is the
 // `response_format: { type: "json_object" }` / `responseMimeType` flag.
-// Compat slots inherit OpenAI capabilities by default — overridable by
-// future AI-003 work via per-slot metadata.
+// `supportsStreaming` reflects whether the adapter's `stream()` returns a
+// real token stream (`true`) or the `null` sentinel that falls back to
+// non-streaming generate() (`false`) — Gemini's SDK and Ollama's
+// `/api/generate` don't expose incremental streaming from this codebase, so
+// the orchestrator and the planner (AI-005) need to know up-front to avoid
+// promising the caller a UX they won't get.
+// `maxOutputTokens` is the vendor-documented hard cap on a single response;
+// `contextWindow` is the prompt+response limit. Compat slots inherit OpenAI
+// capability defaults — overridable by future per-slot metadata work.
 export const CAPABILITIES = {
-  anthropic:  { supportsVision: true,  supportsJsonMode: false, contextWindow: 200_000 },
-  openai:     { supportsVision: true,  supportsJsonMode: true,  contextWindow: 128_000 },
-  google:     { supportsVision: true,  supportsJsonMode: true,  contextWindow: 1_000_000 },
-  openrouter: { supportsVision: true,  supportsJsonMode: true,  contextWindow: null },
-  local:      { supportsVision: false, supportsJsonMode: true,  contextWindow: 4_096 },
+  anthropic:  { supportsVision: true,  supportsJsonMode: false, supportsStreaming: true,  contextWindow: 200_000,   maxOutputTokens: 8_192 },
+  openai:     { supportsVision: true,  supportsJsonMode: true,  supportsStreaming: true,  contextWindow: 128_000,   maxOutputTokens: 16_384 },
+  google:     { supportsVision: true,  supportsJsonMode: true,  supportsStreaming: false, contextWindow: 1_000_000, maxOutputTokens: 8_192 },
+  openrouter: { supportsVision: true,  supportsJsonMode: true,  supportsStreaming: true,  contextWindow: null,      maxOutputTokens: null },
+  local:      { supportsVision: false, supportsJsonMode: true,  supportsStreaming: false, contextWindow: 4_096,     maxOutputTokens: 4_096 },
   // `compat:*` providers fall through to OpenAI capability defaults — see
   // capabilitiesFor() below.
 };
@@ -68,9 +75,15 @@ export const CAPABILITIES = {
 export function capabilitiesFor(provider) {
   if (CAPABILITIES[provider]) return CAPABILITIES[provider];
   if (typeof provider === "string" && provider.startsWith("compat:")) {
-    return { supportsVision: false, supportsJsonMode: true, contextWindow: null };
+    // Compat slots speak the OpenAI wire format; they get OpenAI's
+    // capability defaults except for `supportsVision` (the operator's
+    // chosen endpoint may not be vision-capable — assume false, override
+    // via per-slot metadata in a future PR).
+    return { supportsVision: false, supportsJsonMode: true, supportsStreaming: true, contextWindow: null, maxOutputTokens: null };
   }
-  return { supportsVision: false, supportsJsonMode: false, contextWindow: null };
+  // Unknown provider — conservative defaults so a typo doesn't promise
+  // vision support that doesn't exist.
+  return { supportsVision: false, supportsJsonMode: false, supportsStreaming: false, contextWindow: null, maxOutputTokens: null };
 }
 
 // ── AI-003 — Per-(provider, model) pricing table ─────────────────────────────
@@ -188,9 +201,11 @@ export function getCloudName(provider) {
 
 /**
  * Returns a `{ providerId → { model, name, supportsVision, supportsJsonMode,
- * contextWindow } }` map for every supported provider. Built from
- * `getSupportedProviders()` (the orchestrator's authoritative list, which
- * includes runtime compat slots) so it stays in sync with detection.
+ * supportsStreaming, contextWindow, maxOutputTokens, pricing } }` map for
+ * every supported provider. Built from `getSupportedProviders()` (the
+ * orchestrator's authoritative list, which includes runtime compat slots)
+ * so it stays in sync with detection. The planner agent (AI-005) reads
+ * this to pick a model for a given pipeline stage without hard-coding.
  */
 export function getModelCatalog() {
   const providers = _getSupportedProviders();
@@ -201,7 +216,10 @@ export function getModelCatalog() {
       name: p.name,
       supportsVision: caps.supportsVision && VISION_CAPABLE_MODELS.has(p.model),
       supportsJsonMode: caps.supportsJsonMode,
+      supportsStreaming: caps.supportsStreaming,
       contextWindow: caps.contextWindow,
+      maxOutputTokens: caps.maxOutputTokens,
+      pricing: pricingFor(p.model),
     };
     return acc;
   }, {});
