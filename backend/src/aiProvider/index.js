@@ -849,28 +849,86 @@ function recordAiTokens(provider, usage, operation = "generation") {
   } catch { /* best-effort */ }
 }
 
-async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat) {
-  const tokens = maxTokens || DEFAULT_MAX_TOKENS;
-  const messages = normaliseMessages(promptOrMessages);
-  const useJson = responseFormat !== "text";
-  const deps = { withRetry, composeSignal, CLOUD_TIMEOUT_MS, recordAiTokens };
-  if (provider === "anthropic") return (await anthropicAdapter.generate({ provider, messages, maxTokens: tokens, signal, model: buildProviderMeta().anthropic.model, apiKey: getKey("ANTHROPIC_API_KEY") }, deps)).text;
+/**
+ * Build the adapter-call options for a given provider. Returns the
+ * spec-standard `{ messages, maxTokens, signal, useJson, model, apiKey,
+ * baseUrl, defaultHeaders, guardedFetch, provider }` shape. The orchestrator
+ * is the *only* place that knows about runtime keys, OpenRouter referer
+ * headers, compat SSRF guards, etc. — adapters consume the flat result.
+ */
+function buildAdapterOpts(provider, messages, maxTokens, signal, useJson) {
+  if (provider === "anthropic") {
+    return {
+      provider, messages, maxTokens, signal, useJson,
+      model: buildProviderMeta().anthropic.model,
+      apiKey: getKey("ANTHROPIC_API_KEY"),
+    };
+  }
+  if (provider === "openai") {
+    return {
+      provider, messages, maxTokens, signal, useJson,
+      model: buildProviderMeta().openai.model,
+      apiKey: getKey("OPENAI_API_KEY"),
+    };
+  }
+  if (provider === "openrouter") {
+    return {
+      provider, messages, maxTokens, signal, useJson,
+      model: buildProviderMeta().openrouter.model,
+      apiKey: getKey("OPENROUTER_API_KEY"),
+      baseUrl: OPENROUTER_BASE_URL,
+      defaultHeaders: {
+        "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev",
+        "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri",
+      },
+    };
+  }
+  if (provider === "google") {
+    return {
+      provider, messages, maxTokens, signal, useJson,
+      model: buildProviderMeta().google.model,
+      apiKey: getKey("GOOGLE_API_KEY"),
+    };
+  }
+  if (provider === "local") {
+    return {
+      provider, messages, maxTokens, signal, useJson,
+      model: getOllamaModel(),
+      baseUrl: getOllamaBaseUrl(),
+    };
+  }
   if (isCompatProvider(provider)) {
     const compat = getCompatConfig(provider);
-    const openAiMessages = [];
-    if (messages.system) openAiMessages.push({ role: "system", content: messages.system });
-    openAiMessages.push({ role: "user", content: messages.user });
-    return (await openaiAdapter.generate({ provider, model: compat?.model, apiKey: compat?.apiKey, baseUrl: compat?.baseUrl, guardedFetch: createSsrfGuardedFetch(), maxTokens: tokens, signal, useJson, openAiMessages }, deps)).text;
+    return {
+      provider, messages, maxTokens, signal, useJson,
+      model: compat?.model,
+      apiKey: compat?.apiKey,
+      baseUrl: compat?.baseUrl,
+      guardedFetch: createSsrfGuardedFetch(),
+    };
   }
-  if (provider === "openai" || provider === "openrouter") {
-    const openAiMessages = [];
-    if (messages.system) openAiMessages.push({ role: "system", content: messages.system });
-    openAiMessages.push({ role: "user", content: messages.user });
-    return (await openaiAdapter.generate({ provider, model: provider === "openai" ? buildProviderMeta().openai.model : buildProviderMeta().openrouter.model, apiKey: provider === "openai" ? getKey("OPENAI_API_KEY") : getKey("OPENROUTER_API_KEY"), baseUrl: provider === "openrouter" ? OPENROUTER_BASE_URL : undefined, defaultHeaders: provider === "openrouter" ? {"HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev", "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri"} : undefined, maxTokens: tokens, signal, useJson, openAiMessages }, deps)).text;
-  }
-  if (provider === "google") return (await googleAdapter.generate({ provider, messages, maxTokens: tokens, signal, useJson, model: buildProviderMeta().google.model, apiKey: getKey("GOOGLE_API_KEY") }, deps)).text;
-  if (provider === "local") return (await ollamaAdapter.generate({ provider, messages, maxTokens: tokens, signal, useJson, baseUrl: getOllamaBaseUrl(), model: getOllamaModel() })).text;
   throw new Error(`Unknown provider: ${provider}`);
+}
+
+function adapterFor(provider) {
+  if (provider === "anthropic") return anthropicAdapter;
+  if (provider === "google") return googleAdapter;
+  if (provider === "local") return ollamaAdapter;
+  // openai / openrouter / compat:* all share the OpenAI wire format
+  if (provider === "openai" || provider === "openrouter" || isCompatProvider(provider)) return openaiAdapter;
+  throw new Error(`Unknown provider: ${provider}`);
+}
+
+async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat) {
+  const messages = normaliseMessages(promptOrMessages);
+  const useJson = responseFormat !== "text";
+  const opts = buildAdapterOpts(provider, messages, maxTokens || DEFAULT_MAX_TOKENS, signal, useJson);
+  const { text, usage } = await adapterFor(provider).generate(opts);
+  // Token telemetry is the orchestrator's responsibility — adapters return
+  // raw usage and don't know about the metrics registry. Keeps adapters
+  // self-contained and testable in isolation.
+  if (usage) recordAiTokens(provider, usage);
+  return text;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -1082,29 +1140,27 @@ ${String(contextHtml).slice(0, 800)}` : "");
   const base64 = screenshot.toString("base64");
   const dataUrl = `data:image/png;base64,${base64}`;
 
+  // Local / unknown providers don't have a vision adapter (Ollama returns
+  // null from generateVision). Bail before the adapter call to keep the
+  // metric label clean.
+  if (provider === "local") return null;
+
+  // Build a vision-specific opts bag. We reuse buildAdapterOpts() shape
+  // for the auth/baseUrl/SSRF fields, then layer the image fields on top.
+  const baseOpts = buildAdapterOpts(provider, { system: null, user: userPrompt, combined: userPrompt }, 512, signal, true);
+  // Override `model` with the vision-resolved model — buildAdapterOpts()
+  // returns the provider's default text model, which is wrong for vision
+  // (e.g. user picked claude-3-5-sonnet via VISION_MODEL but the active
+  // provider's default is the older claude-sonnet-4).
+  const visionOpts = { ...baseOpts, model, base64, dataUrl, userPrompt };
+
   let raw = "";
   let usage = null;
   try {
-    if (provider === "anthropic") {
-      ({ text: raw, usage } = await anthropicAdapter.generateVision({ provider, model, apiKey: getKey("ANTHROPIC_API_KEY"), base64, userPrompt, signal }));
-    } else if (provider === "google") {
-      ({ text: raw, usage } = await googleAdapter.generateVision({ provider, model, apiKey: getKey("GOOGLE_API_KEY"), base64, userPrompt }));
-    } else if (provider === "openai" || provider === "openrouter" || isCompatProvider(provider)) {
-      let apiKey = getKey("OPENAI_API_KEY"), baseUrl, defaultHeaders, guardedFetch;
-      if (provider === "openrouter") {
-        apiKey = getKey("OPENROUTER_API_KEY");
-        baseUrl = OPENROUTER_BASE_URL;
-        defaultHeaders = { "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev", "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri" };
-      } else if (isCompatProvider(provider)) {
-        const compat = getCompatConfig(provider);
-        apiKey = compat?.apiKey;
-        baseUrl = compat?.baseUrl;
-        guardedFetch = createSsrfGuardedFetch();
-      }
-      ({ text: raw, usage } = await openaiAdapter.generateVision({ provider, model, apiKey, baseUrl, defaultHeaders, guardedFetch, dataUrl, userPrompt, signal }));
-    } else {
-      return null;
-    }
+    const res = await adapterFor(provider).generateVision(visionOpts);
+    if (!res) return null;
+    raw = res.text || "";
+    usage = res.usage;
   } catch (err) {
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
@@ -1183,6 +1239,12 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   const messages = normaliseMessages(promptOrMessages);
   const useJson = responseFormat !== "text";
 
+  // Wrap onToken so we can detect whether any tokens were emitted before a
+  // mid-stream error. Without this guard, falling back to generateText()
+  // after partial tokens would deliver a duplicate full response to the user.
+  let tokensEmitted = 0;
+  const wrappedOnToken = (t) => { tokensEmitted++; onToken(t); };
+
   async function fallbackToNonStreaming(err) {
     console.warn(formatLogLine("warn", null, `[aiProvider] streamText ${provider} failed before any tokens (${err.message?.slice(0, 120)}) — retrying via non-streaming path with provider fallback.`));
     const text = await generateText(promptOrMessages, { ...options, responseFormat });
@@ -1190,27 +1252,27 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
     return text;
   }
 
+  const adapter = adapterFor(provider);
+  // Google + Ollama return null from .stream() — fall through to the
+  // synthetic-token path below which calls generateText() (provider fallback
+  // is FEA-003-covered).
   try {
-    if (provider === "anthropic") {
-      const res = await anthropicAdapter.stream({ provider, model: buildProviderMeta().anthropic.model, apiKey: getKey("ANTHROPIC_API_KEY"), maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, messages }, onToken);
-      return res?.text ?? "";
-    }
-    if (provider === "openai" || provider === "openrouter" || isCompatProvider(provider)) {
-      let apiKey = getKey("OPENAI_API_KEY"), baseUrl, defaultHeaders, guardedFetch, model = buildProviderMeta().openai.model;
-      if (provider === "openrouter") { apiKey = getKey("OPENROUTER_API_KEY"); baseUrl = OPENROUTER_BASE_URL; model = buildProviderMeta().openrouter.model; defaultHeaders = { "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev", "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri" }; }
-      if (isCompatProvider(provider)) { const compat = getCompatConfig(provider); apiKey = compat?.apiKey; baseUrl = compat?.baseUrl; model = compat?.model; guardedFetch = createSsrfGuardedFetch(); }
-      const openAiMessages = [];
-      if (messages.system) openAiMessages.push({ role: "system", content: messages.system });
-      openAiMessages.push({ role: "user", content: messages.user });
-      const res = await openaiAdapter.stream({ provider, apiKey, baseUrl, defaultHeaders, guardedFetch, model, maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, useJson, openAiMessages }, onToken);
+    const opts = buildAdapterOpts(provider, messages, options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, useJson);
+    const res = await adapter.stream(opts, wrappedOnToken);
+    if (res !== null) {
+      if (res?.usage) recordAiTokens(provider, res.usage);
       return res?.text ?? "";
     }
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
-    if (isRetryableError(err)) return fallbackToNonStreaming(err);
+    // Only fall back if no tokens were emitted — otherwise the user would
+    // see a partial stream concatenated with the full retry response.
+    if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
     throw err;
   }
 
+  // Adapter returned null (Google / Ollama). generateText() handles retry +
+  // fallback internally so these providers get FEA-003 coverage for free.
   const text = await generateText(promptOrMessages, { ...options, responseFormat });
   onToken(text);
   return text;
