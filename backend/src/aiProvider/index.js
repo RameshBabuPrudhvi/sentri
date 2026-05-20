@@ -33,6 +33,10 @@ import { formatLogLine } from "../utils/logFormatter.js";
 import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
 import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { validateUrl } from "../utils/ssrfGuard.js";
+import * as anthropicAdapter from "./adapters/anthropic.js";
+import * as openaiAdapter from "./adapters/openai.js";
+import * as googleAdapter from "./adapters/google.js";
+import * as ollamaAdapter from "./adapters/ollama.js";
 // INF-007: AI provider telemetry — latency histograms, token counters, and
 // error counters. The single most important metric surface for a SaaS QA
 // platform: it drives unit-economics (cost per workspace per day = tokens ×
@@ -1097,168 +1101,25 @@ function recordAiTokens(provider, usage, operation = "generation") {
 
 async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat) {
   const tokens = maxTokens || DEFAULT_MAX_TOKENS;
-  const { system, user, combined } = normaliseMessages(promptOrMessages);
-  // Default to JSON for backward compatibility (pipeline needs structured output).
-  // Chat endpoint passes responseFormat: "text" for free-form conversation.
+  const messages = normaliseMessages(promptOrMessages);
   const useJson = responseFormat !== "text";
-
-  if (provider === "anthropic") {
-    const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
-    // composeSignal is created inside each retry attempt so that a per-call
-    // timeout on attempt N does not leave the signal permanently aborted for
-    // subsequent attempts.  The external (user-abort) signal is still checked
-    // across all attempts — only the timeout is per-attempt.
-    return await withRetry(async () => {
-      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
-      try {
-        const params = {
-          model: buildProviderMeta().anthropic.model,
-          max_tokens: tokens,
-          messages: [{ role: "user", content: user }],
-        };
-        // Anthropic natively supports a top-level "system" field
-        if (system) params.system = system;
-        const msg = await client.messages.create(params, { signal: composedSignal });
-        // INF-007: Anthropic exposes token usage on `msg.usage` as
-        // `{ input_tokens, output_tokens }`. Record per-call so the cost
-        // dashboard can integrate over time.
-        recordAiTokens(provider, { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens });
-        return msg.content[0].text;
-      } finally { cleanup(); }
-    }, "Anthropic");
-  }
-
-
+  const deps = { withRetry, composeSignal, CLOUD_TIMEOUT_MS, recordAiTokens, MAX_RETRIES, BASE_DELAY_MS, MAX_BACKOFF_MS, callOllama, sleep, formatLogLine };
+  if (provider === "anthropic") return (await anthropicAdapter.generate({ provider, messages, maxTokens: tokens, signal, model: buildProviderMeta().anthropic.model, apiKey: getKey("ANTHROPIC_API_KEY") }, deps)).text;
   if (isCompatProvider(provider)) {
-    // baseUrl is SSRF-validated at config-save time in routes/settings.js
-    // AND re-validated per-call via createSsrfGuardedFetch() below — closes
-    // the DNS-rebinding window (a host that resolved to a public IP at save
-    // time can't be flipped to a private/loopback IP between save and call).
     const compat = getCompatConfig(provider);
-    const apiKey = compat?.apiKey;
-    const baseURL = compat?.baseUrl;
-    const model = compat?.model;
-    const client = new OpenAI({ apiKey, fetch: createSsrfGuardedFetch(), ...(baseURL ? { baseURL } : {}) });
-    const messages = [];
-    if (system) messages.push({ role: "system", content: system });
-    messages.push({ role: "user", content: user });
-    return await withRetry(async () => {
-      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
-      try {
-        const params = { model, max_tokens: tokens, messages };
-        if (useJson) params.response_format = { type: "json_object" };
-        const res = await client.chat.completions.create(params, { signal: composedSignal });
-        // INF-007: OpenAI-shape responses expose `res.usage` as
-        // `{ prompt_tokens, completion_tokens, total_tokens }`. Compat
-        // providers fold to the literal `compat` label inside
-        // `providerMetricLabel()` so per-slot cardinality stays bounded.
-        recordAiTokens(provider, { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens });
-        return res.choices?.[0]?.message?.content || "";
-      } finally { cleanup(); }
-    }, `OpenAI-compat (${provider})`);
+    const openAiMessages = [];
+    if (messages.system) openAiMessages.push({ role: "system", content: messages.system });
+    openAiMessages.push({ role: "user", content: messages.user });
+    return (await openaiAdapter.generate({ provider, model: compat?.model, apiKey: compat?.apiKey, baseUrl: compat?.baseUrl, guardedFetch: createSsrfGuardedFetch(), maxTokens: tokens, signal, useJson, openAiMessages }, deps)).text;
   }
-
-  if (provider === "openai") {
-    const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
-    return await withRetry(async () => {
-      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
-      try {
-        const messages = [];
-        if (system) messages.push({ role: "system", content: system });
-        messages.push({ role: "user", content: user });
-        const params = {
-          model: buildProviderMeta().openai.model,
-          max_tokens: tokens,
-          messages,
-        };
-        if (useJson) params.response_format = { type: "json_object" };
-        const res = await client.chat.completions.create(params, { signal: composedSignal });
-        // INF-007: see compat branch — OpenAI exposes the same `res.usage` shape.
-        recordAiTokens(provider, { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens });
-        return res.choices[0].message.content;
-      } finally { cleanup(); }
-    }, "OpenAI");
+  if (provider === "openai" || provider === "openrouter") {
+    const openAiMessages = [];
+    if (messages.system) openAiMessages.push({ role: "system", content: messages.system });
+    openAiMessages.push({ role: "user", content: messages.user });
+    return (await openaiAdapter.generate({ provider, model: provider === "openai" ? buildProviderMeta().openai.model : buildProviderMeta().openrouter.model, apiKey: provider === "openai" ? getKey("OPENAI_API_KEY") : getKey("OPENROUTER_API_KEY"), baseUrl: provider === "openrouter" ? OPENROUTER_BASE_URL : undefined, defaultHeaders: provider === "openrouter" ? {"HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev", "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri"} : undefined, maxTokens: tokens, signal, useJson, openAiMessages }, deps)).text;
   }
-
-  if (provider === "openrouter") {
-    // OpenRouter is OpenAI-API-compatible — reuse the OpenAI SDK with a
-    // custom baseURL. Optional HTTP-Referer / X-Title headers let OpenRouter
-    // attribute traffic on their leaderboard; they're safe to omit.
-    const client = new OpenAI({
-      apiKey: getKey("OPENROUTER_API_KEY"),
-      baseURL: OPENROUTER_BASE_URL,
-      defaultHeaders: {
-        "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev",
-        "X-Title":      process.env.OPENROUTER_APP_TITLE || "Sentri",
-      },
-    });
-    return await withRetry(async () => {
-      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
-      try {
-        const messages = [];
-        if (system) messages.push({ role: "system", content: system });
-        messages.push({ role: "user", content: user });
-        const params = {
-          model: buildProviderMeta().openrouter.model,
-          max_tokens: tokens,
-          messages,
-        };
-        if (useJson) params.response_format = { type: "json_object" };
-        const res = await client.chat.completions.create(params, { signal: composedSignal });
-        // INF-007: OpenRouter proxies provider responses through the OpenAI
-        // wire format and propagates `usage.prompt_tokens`/`completion_tokens`.
-        recordAiTokens(provider, { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens });
-        return res.choices[0].message.content;
-      } finally { cleanup(); }
-    }, "OpenRouter");
-  }
-
-  if (provider === "google") {
-    const genAI = new GoogleGenerativeAI(getKey("GOOGLE_API_KEY"));
-    return await withRetry(async () => {
-      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
-      try {
-        const generationConfig = { maxOutputTokens: tokens };
-        if (useJson) generationConfig.responseMimeType = "application/json";
-        const modelConfig = {
-          model: buildProviderMeta().google.model,
-          generationConfig,
-        };
-        // Gemini supports systemInstruction for system-level context
-        if (system) modelConfig.systemInstruction = { parts: [{ text: system }] };
-        const model = genAI.getGenerativeModel(modelConfig);
-        const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: user }] }] }, { signal: composedSignal });
-        // INF-007: Gemini exposes `result.response.usageMetadata` as
-        // `{ promptTokenCount, candidatesTokenCount, totalTokenCount }`.
-        // Normalised to the same `{ input, output }` shape as the OpenAI
-        // family so the dashboards merge cleanly.
-        const um = result?.response?.usageMetadata;
-        recordAiTokens(provider, { input: um?.promptTokenCount, output: um?.candidatesTokenCount });
-        return result.response.text();
-      } finally { cleanup(); }
-    }, "Google Gemini");
-  }
-
-  if (provider === "local") {
-    // Ollama doesn't support system messages in /api/generate — use combined prompt
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        return await callOllama(combined, tokens, signal, useJson);
-      } catch (err) {
-        // Don't retry if the user aborted
-        if (err.name === "AbortError" || signal?.aborted) throw err;
-        const isRetryable =
-          err.message.includes("ECONNREFUSED") ||
-          err.message.includes("fetch failed") ||
-          err.message.includes("Ollama HTTP 500");
-        if (attempt === MAX_RETRIES || !isRetryable) throw err;
-        const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
-        console.warn(formatLogLine("warn", null, `[Ollama] ${err.message.slice(0, 80)}. Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
-        await sleep(delay);
-      }
-    }
-  }
-
+  if (provider === "google") return (await googleAdapter.generate({ provider, messages, maxTokens: tokens, signal, useJson, model: buildProviderMeta().google.model, apiKey: getKey("GOOGLE_API_KEY") }, deps)).text;
+  if (provider === "local") return (await ollamaAdapter.generate({ provider, messages, maxTokens: tokens, signal, useJson }, deps)).text;
   throw new Error(`Unknown provider: ${provider}`);
 }
 
