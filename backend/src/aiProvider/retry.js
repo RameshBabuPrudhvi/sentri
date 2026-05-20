@@ -12,13 +12,18 @@ export function isRateLimitError(err) {
   const status = err?.status || err?.statusCode || 0;
   const RATE_LIMIT_CODES = new Set([429, 529]);
   if (RATE_LIMIT_CODES.has(status)) return true;
+  // NOTE: no trailing `\b` on `rate.?limit` / `rate_limit` / `overloaded` —
+  // `_` is a word character, so `\b` would NOT match between `t` and `_` and
+  // would miss SDK error types like `rate_limit_error` and `overloaded_error`
+  // (Anthropic). Pinned by `backend/tests/ai-fallback.test.js`.
   return /\b429\b/.test(msg)
     || /\b529\b/.test(msg)
-    || /\brate.?limit\b/i.test(msg)
+    || /\brate.?limit/i.test(msg)
+    || /\brate_limit/i.test(msg)
     || /\btoo many requests\b/i.test(msg)
-    || /\bquota\s*(exceeded|exhausted|limit)\b/i.test(msg)
+    || /\bquota\s*(exceeded|exhausted|limit)/i.test(msg)
     || /\bresource.?exhausted\b/i.test(msg)
-    || /\boverloaded\b/i.test(msg);
+    || /\boverloaded/i.test(msg);
 }
 
 export function isTransientServerError(err) {
