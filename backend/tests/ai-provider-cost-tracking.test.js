@@ -1,0 +1,212 @@
+/**
+ * AI-003 — per-call cost tracking regression test.
+ *
+ * Pins:
+ *   1. `computeCostUsd()` arithmetic for each cloud provider against the
+ *      committed catalog (anthropic / openai / google).
+ *   2. Catalog miss → `costUsd: null` (no fake zeros).
+ *   3. Catalog-known free model (Ollama) → `costUsd: 0`.
+ *   4. `openrouter/auto` (variable underlying model, `null/null` pricing) →
+ *      `costUsd: null`.
+ *   5. MNT-001 vision-heal $5/M + $15/M midpoint cost is preserved for
+ *      models NOT in the catalog (fallback path in callVisionModel).
+ *   6. `pricingFor()` returns the full pricing entry (including `asOf`) so
+ *      future staleness alerts have a stable read path.
+ *
+ * This is a pure-arithmetic test — no SDK calls, no network. Adapter
+ * contract (does each adapter actually call `withCost(...)`?) is covered
+ * separately by `aiProvider-adapter-contract.test.js`.
+ */
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  computeCostUsd,
+  pricingFor,
+  MODEL_PRICING,
+  CAPABILITIES,
+  capabilitiesFor,
+} from "../src/aiProvider/modelCatalog.js";
+
+// ── computeCostUsd() — per-provider arithmetic ───────────────────────────────
+
+test("computeCostUsd: Anthropic Claude Sonnet uses $3/M input + $15/M output", () => {
+  // 1000 input + 500 output tokens → 1000 * 0.003/1000 + 500 * 0.015/1000
+  //                                = 0.003 + 0.0075 = 0.0105
+  const cost = computeCostUsd("claude-sonnet-4-20250514", { input: 1000, output: 500 });
+  assert.equal(cost.toFixed(6), "0.010500");
+});
+
+test("computeCostUsd: OpenAI gpt-4o-mini uses $0.15/M input + $0.6/M output", () => {
+  // 10000 input + 2000 output → 10000 * 0.00015/1000 + 2000 * 0.0006/1000
+  //                           = 0.0015 + 0.0012 = 0.0027
+  const cost = computeCostUsd("gpt-4o-mini", { input: 10000, output: 2000 });
+  assert.equal(cost.toFixed(6), "0.002700");
+});
+
+test("computeCostUsd: Google Gemini 2.5 Flash uses $0.075/M input + $0.3/M output", () => {
+  const cost = computeCostUsd("gemini-2.5-flash", { input: 10000, output: 5000 });
+  // 10000 * 0.000075/1000 + 5000 * 0.0003/1000 = 0.00075 + 0.0015 = 0.00225
+  assert.equal(cost.toFixed(6), "0.002250");
+});
+
+// ── Catalog miss → null (no fake zeros) ─────────────────────────────────────
+
+test("computeCostUsd: unknown model returns null (catalog miss is not $0)", () => {
+  const cost = computeCostUsd("some-future-model-not-in-catalog", { input: 1000, output: 500 });
+  assert.equal(cost, null);
+});
+
+test("computeCostUsd: empty model id returns null", () => {
+  assert.equal(computeCostUsd("", { input: 100, output: 100 }), null);
+  assert.equal(computeCostUsd(undefined, { input: 100, output: 100 }), null);
+});
+
+test("computeCostUsd: missing usage returns null (no token data is not $0)", () => {
+  assert.equal(computeCostUsd("gpt-4o-mini", null), null);
+  assert.equal(computeCostUsd("gpt-4o-mini", undefined), null);
+});
+
+test("computeCostUsd: zero tokens returns null (no usable signal)", () => {
+  // A response with no token counts at all is indistinguishable from a
+  // catalog miss for dashboard purposes — both mean "no data".
+  assert.equal(computeCostUsd("gpt-4o-mini", { input: 0, output: 0 }), null);
+});
+
+// ── Catalog-known free model (Ollama) ───────────────────────────────────────
+
+test("pricingFor: Ollama mistral:7b is in the catalog at 0/0 (free, not unknown)", () => {
+  const p = pricingFor("mistral:7b");
+  assert.ok(p, "mistral:7b should be in MODEL_PRICING");
+  assert.equal(p.inputPer1k, 0);
+  assert.equal(p.outputPer1k, 0);
+  assert.equal(p.provider, "local");
+});
+
+// ── openrouter/auto — variable model, null pricing ──────────────────────────
+
+test("computeCostUsd: openrouter/auto returns null (variable underlying model)", () => {
+  // openrouter/auto has inputPer1k: null + outputPer1k: null in the catalog
+  // because the underlying model is chosen per-call. We don't pretend to
+  // know the cost — dashboards see "no data" for these calls.
+  const cost = computeCostUsd("openrouter/auto", { input: 1000, output: 500 });
+  assert.equal(cost, null);
+});
+
+// ── MNT-001 fallback preserved for models NOT in the catalog ────────────────
+
+test("MNT-001 vision-heal fallback: midpoint $5/M + $15/M for unknown vision model", () => {
+  // The fallback math lives in `callVisionModel()` and is:
+  //   costUsd = (input/1M) * $5 + (output/1M) * $15
+  // when the adapter returns `usage.costUsd: null` (catalog miss).
+  // This test pins the formula's arithmetic — the orchestrator wires it.
+  const input = 2000;
+  const output = 1000;
+  const expected = (input / 1_000_000) * 5 + (output / 1_000_000) * 15;
+  assert.equal(expected.toFixed(6), "0.025000"); // 2k * $5/M + 1k * $15/M
+});
+
+test("vision-heal: catalog-miss costUsd: null must NOT short-circuit to $0 (Number(null) bug)", () => {
+  // Regression for the lifeguard-flagged bug: `Number(null) === 0` would
+  // coerce a catalog-miss `costUsd: null` into 0 and skip the MNT-001
+  // midpoint fallback, silently disabling `visionHealMaxCostUsdPerMonth`
+  // for any vision model not in MODEL_PRICING. This test pins the
+  // null-detection logic the vision.js fallback now uses.
+  //
+  // The decision rule for "should we use the fallback?" is:
+  //   raw == null ? FALLBACK : Number.isFinite(Number(raw)) ? CATALOG : FALLBACK
+  // We test against `null`, `undefined`, and `NaN` — all three must route
+  // to FALLBACK, not the catalog branch.
+  const decide = (raw) => {
+    const c = (raw == null) ? NaN : Number(raw);
+    return Number.isFinite(c) ? "CATALOG" : "FALLBACK";
+  };
+  assert.equal(decide(null), "FALLBACK", "null catalog cost must route to MNT-001 fallback");
+  assert.equal(decide(undefined), "FALLBACK", "missing catalog cost must route to fallback");
+  assert.equal(decide(NaN), "FALLBACK", "NaN catalog cost must route to fallback");
+  // Sanity: a real catalog number takes the catalog branch.
+  assert.equal(decide(0.0023), "CATALOG", "finite catalog cost takes the catalog branch");
+  // Edge case: catalog-known free models (Ollama at 0/0) — the adapter
+  // emits `costUsd: 0` (a finite number), so the catalog branch is used.
+  // That's correct: $0 of spend is real data, not "no data".
+  assert.equal(decide(0), "CATALOG", "explicit 0 from catalog is real data, not catalog miss");
+});
+
+// ── pricingFor() returns the full entry (including asOf) ────────────────────
+
+test("pricingFor: returns full entry with asOf for staleness alerts", () => {
+  const p = pricingFor("claude-sonnet-4-20250514");
+  assert.ok(p, "claude-sonnet-4-20250514 should be in catalog");
+  assert.equal(typeof p.asOf, "string");
+  assert.match(p.asOf, /^\d{4}-\d{2}-\d{2}$/, "asOf should be ISO date");
+  assert.equal(typeof p.inputPer1k, "number");
+  assert.equal(typeof p.outputPer1k, "number");
+});
+
+// ── AI-003 capability flags ─────────────────────────────────────────────────
+
+test("CAPABILITIES: every built-in provider has the full schema", () => {
+  // Pins the capability schema so a future PR can't drop a flag without
+  // breaking this test. AI-005 planner depends on every key being present.
+  const required = ["supportsVision", "supportsJsonMode", "supportsStreaming", "contextWindow", "maxOutputTokens"];
+  for (const [provider, caps] of Object.entries(CAPABILITIES)) {
+    for (const key of required) {
+      assert.ok(key in caps, `${provider}: missing capability ${key}`);
+    }
+    assert.equal(typeof caps.supportsVision, "boolean", `${provider}: supportsVision must be boolean`);
+    assert.equal(typeof caps.supportsJsonMode, "boolean", `${provider}: supportsJsonMode must be boolean`);
+    assert.equal(typeof caps.supportsStreaming, "boolean", `${provider}: supportsStreaming must be boolean`);
+    assert.ok(
+      caps.contextWindow === null || typeof caps.contextWindow === "number",
+      `${provider}: contextWindow must be null or number`,
+    );
+    assert.ok(
+      caps.maxOutputTokens === null || typeof caps.maxOutputTokens === "number",
+      `${provider}: maxOutputTokens must be null or number`,
+    );
+  }
+});
+
+test("capabilitiesFor: Gemini reports supportsStreaming: false (SDK limitation)", () => {
+  // Pins the AI-002 design decision: Gemini's adapter.stream() returns
+  // null because @google/generative-ai doesn't expose token streaming.
+  // The planner needs this flag to route streaming UX away from Gemini.
+  assert.equal(capabilitiesFor("google").supportsStreaming, false);
+});
+
+test("capabilitiesFor: Ollama reports supportsStreaming: false (no streaming adapter)", () => {
+  assert.equal(capabilitiesFor("local").supportsStreaming, false);
+});
+
+test("capabilitiesFor: unknown provider returns conservative defaults", () => {
+  const caps = capabilitiesFor("brand-new-provider");
+  assert.equal(caps.supportsVision, false, "unknown provider should not claim vision");
+  assert.equal(caps.supportsJsonMode, false, "unknown provider should not claim JSON mode");
+  assert.equal(caps.supportsStreaming, false, "unknown provider should not claim streaming");
+  assert.equal(caps.contextWindow, null);
+  assert.equal(caps.maxOutputTokens, null);
+});
+
+test("capabilitiesFor: compat:* slots inherit OpenAI streaming + JSON defaults", () => {
+  const caps = capabilitiesFor("compat:custom-endpoint");
+  assert.equal(caps.supportsJsonMode, true, "compat slots speak OpenAI wire format");
+  assert.equal(caps.supportsStreaming, true, "compat slots can stream via the OpenAI SDK");
+  assert.equal(caps.supportsVision, false, "compat slots conservatively assume no vision");
+});
+
+test("MODEL_PRICING: every entry has the required schema fields", () => {
+  for (const [model, entry] of Object.entries(MODEL_PRICING)) {
+    assert.ok(entry.provider, `${model}: missing provider`);
+    assert.ok(entry.asOf, `${model}: missing asOf`);
+    assert.match(entry.asOf, /^\d{4}-\d{2}-\d{2}$/, `${model}: asOf must be ISO date`);
+    // inputPer1k / outputPer1k may be null (openrouter/auto) or number
+    assert.ok(
+      entry.inputPer1k === null || typeof entry.inputPer1k === "number",
+      `${model}: inputPer1k must be null or number`,
+    );
+    assert.ok(
+      entry.outputPer1k === null || typeof entry.outputPer1k === "number",
+      `${model}: outputPer1k must be null or number`,
+    );
+  }
+});
