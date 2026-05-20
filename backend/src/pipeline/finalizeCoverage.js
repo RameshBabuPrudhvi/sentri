@@ -268,10 +268,19 @@ export async function aggregateShardCoverage(project, results) {
  * display labels differ.
  *
  * @param {Array<Object>} shardSummaries - Sparse per-shard payloads.
+ * @param {Object} [opts]
+ * @param {string} [opts.sourceMapStatus="fallback"] - Override the merged
+ *   summary's `sourceMapStatus`. The merge stage itself doesn't probe source
+ *   maps (per-bundle line sets are already projected in shard pre-aggregation),
+ *   but callers that DO run a resolver at merge time (e.g.
+ *   `runWorker.js#finalizeShardedRun` resolves bundle URLs → source paths for
+ *   the PR-coverage diff) can report the resolution ratio they observed so the
+ *   Dashboard CoveragePanel renders a consistent badge between the merge and
+ *   raw-results paths. Accepts `"resolved" | "partial" | "fallback"`.
  * @returns {Object|null} `coverageSummary` shape, or null when no shard
  *   contributed data.
  */
-export function mergeShardSummaries(shardSummaries) {
+export function mergeShardSummaries(shardSummaries, { sourceMapStatus = "fallback" } = {}) {
   if (!Array.isArray(shardSummaries)) return null;
   const real = shardSummaries.filter((s) => s && typeof s === "object");
   if (real.length === 0) return null;
@@ -329,7 +338,7 @@ export function mergeShardSummaries(shardSummaries) {
     }
   }
 
-  return _finalizeMergedSummary({ bundleAcc, sbfAcc, sbfHasData, sourceAcc, real });
+  return _finalizeMergedSummary({ bundleAcc, sbfAcc, sbfHasData, sourceAcc, real, sourceMapStatus });
 }
 
 /**
@@ -351,7 +360,7 @@ export function mergeShardSummaries(shardSummaries) {
  *   server merge + perTest concat).
  * @returns {Object} `coverageSummary` shape.
  */
-function _finalizeMergedSummary({ bundleAcc, sbfAcc, sbfHasData, sourceAcc, real }) {
+function _finalizeMergedSummary({ bundleAcc, sbfAcc, sbfHasData, sourceAcc, real, sourceMapStatus = "fallback" }) {
   // ── Server-side merge — disjoint sum (c8 contract) ────────────────────
   // A statement id flips `count===0 → count>0` at most once across API
   // tests, AND each test runs on one shard, so union(addedX) = sum(addedX).
@@ -468,17 +477,22 @@ function _finalizeMergedSummary({ bundleAcc, sbfAcc, sbfHasData, sourceAcc, real
   }
 
   // ── sourceMapStatus ──────────────────────────────────────────────────
-  // Merge path doesn't run the resolver, so the status defaults to
-  // "fallback" — matches the single-pass aggregator's output when no
-  // resolver is supplied. topUncoveredFiles[] entries use bundleUrl labels
-  // on this path; coverage numbers are identical to the resolved path.
+  // Caller-supplied — the merge stage itself doesn't probe source maps
+  // (each shard's `perSource` is already in original-source coordinates
+  // if a resolver was run client-side, OR in bundle coordinates if not).
+  // `runWorker.js#finalizeShardedRun` runs the resolver at merge time
+  // for the PR-coverage diff path and passes back the resolution status
+  // it observed, so the Dashboard CoveragePanel sees a consistent badge
+  // between sharded and single-process runs on the same SUT. Defaults to
+  // `"fallback"` when no caller-side resolution happened (legacy
+  // behaviour, bit-for-bit identical to pre-fix output).
   return {
     totalLines,
     coveredLines,
     coveragePct,
     perTest,
     topUncoveredFiles: topUncoveredFiles.slice(0, 20),
-    sourceMapStatus: "fallback",
+    sourceMapStatus,
     ...(serverLayer ? { serverLayer: true } : {}),
     ...(granularity || {}),
   };

@@ -727,8 +727,27 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
 
   if (allShardsContributed && project?.coverageEnabled) {
     structuredLog("coverage.merge_path", { runId, shardCount, source: "shard_summaries" });
-    run.coverageSummary = mergeShardSummaries(persistedSummaries.slice(0, shardCount));
 
+    // AUTO-009k follow-up — track resolver hit-rate at the merge stage so
+    // the merged `sourceMapStatus` matches what the single-process tail
+    // produces on the same SUT. Counts every per-bundle covered line we
+    // probe through the resolver below: `bundleLinesTotal` is the
+    // denominator (all covered lines across every shard's `perSource`),
+    // `bundleLinesResolved` is incremented when `mapBundleLine` returns a
+    // source path. Status is derived from the ratio after the loop and
+    // passed into `mergeShardSummaries` so the Dashboard CoveragePanel
+    // renders a consistent badge between sharded and single-process runs.
+    let bundleLinesTotal = 0;
+    let bundleLinesResolved = 0;
+    let resolverConfigured = false;
+
+    // AUTO-009d / merge-path PR diff — `run.coverageSummary` is populated
+    // further down after the resolver loop so the merged summary can carry
+    // the observed `sourceMapStatus`. Until then, the resolver-loop guard
+    // below depends only on `run.changedFileRanges` (the PR context flag),
+    // NOT on `run.coverageSummary` — non-PR runs skip the loop entirely and
+    // the merged status remains the default "fallback".
+    //
     // AUTO-009d — PR-scoped diff over merged per-source line sets. Each
     // shard's `perSource` slot carries per-bundle covered-line ARRAYS keyed
     // by **bundle URL** (e.g. `https://app.example.com/main.js`) because
@@ -747,9 +766,10 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     // degradation as the single-process path when the operator has no
     // sourcemapBaseUrl. AUTO-009k.2 follow-up if we ever want to skip the
     // resolver call entirely when changedFileRanges is empty.
-    if (run.coverageSummary && run.changedFileRanges) {
+    if (run.changedFileRanges) {
       try {
         const sourcemapBaseUrl = project?.sourcemapBaseUrl || null;
+        resolverConfigured = !!sourcemapBaseUrl;
         const coveredLinesByFile = {};
         const totalLinesByFile = {};
         // Cache consumers per-bundle so N shards covering the same bundle
@@ -774,11 +794,13 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
               // specific line rather than dropping it entirely.
               let sourceKey = bundleUrl;
               let sourceLine = ln;
+              bundleLinesTotal++;
               if (consumer) {
                 const mapped = mapBundleLine(consumer, ln);
                 if (mapped?.source) {
                   sourceKey = mapped.source;
                   sourceLine = mapped.line;
+                  bundleLinesResolved++;
                 }
               }
               if (!coveredLinesByFile[sourceKey]) coveredLinesByFile[sourceKey] = new Set();
@@ -806,6 +828,36 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
           `[runWorker] AUTO-009k PR diff over merged summaries failed: ${prErr?.message || prErr}`));
       }
     }
+
+    // Derive merged sourceMapStatus from the per-bundle resolution stats
+    // collected above. Mirrors the aggregator's tri-state contract
+    // (`backend/src/pipeline/coverageAggregator.js`):
+    //   - "resolved" — ≥80% of probed bundle lines mapped to source paths
+    //   - "partial"  — some mapped (>0%, <80%)
+    //   - "fallback" — none / no resolver / not probed (e.g. non-PR run
+    //     never enters the resolver loop above)
+    // Without this, the merge path always emitted "fallback" and the
+    // Dashboard CoveragePanel rendered the "fallback mode" warning badge
+    // on sharded runs even when source maps were resolving correctly —
+    // confusing operators who saw "resolved" on the same SUT with
+    // `shardCount: 1`.
+    let mergedSourceMapStatus = "fallback";
+    if (resolverConfigured && bundleLinesTotal > 0) {
+      const ratio = bundleLinesResolved / bundleLinesTotal;
+      if (ratio >= 0.8) mergedSourceMapStatus = "resolved";
+      else if (ratio > 0) mergedSourceMapStatus = "partial";
+    }
+
+    // Build the merged summary now that we know the observed source-map
+    // status. Stamp `mergeSource: "shards"` so downstream consumers
+    // (Dashboard CoveragePanel, RunDetail) can surface which code path
+    // produced the coverage data — useful for diagnosing the rare
+    // partial-deploy race where some sharded runs go through the
+    // `raw_results_fallback` path below and have slightly different
+    // resolution characteristics.
+    run.coverageSummary = mergeShardSummaries(persistedSummaries.slice(0, shardCount),
+      { sourceMapStatus: mergedSourceMapStatus });
+    if (run.coverageSummary) run.coverageSummary.mergeSource = "shards";
   } else {
     // AUTO-009f fallback path — re-aggregate from raw `runs.results`. The
     // DB column retains raw jsCoverage because `appendRunResults` persisted
@@ -830,6 +882,16 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
       run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
       delete run.coverageSummary.prCoverageDiff;
     }
+    // Stamp the merge-source marker so consumers can distinguish runs that
+    // went through the preferred shard-merge path from runs that fell back
+    // to raw-results re-aggregation (typically partial-deploy races or
+    // pre-aggregation failures on individual shards). The two paths produce
+    // mathematically equivalent coverage numbers but the fallback path is
+    // bounded by `COVERAGE_MEMORY_CEILING_MB` against ALL shards' raw
+    // payloads in one pass, whereas the merge path uses each shard's
+    // already-pre-aggregated compact id-set payload — see structuredLog
+    // `coverage.merge_path` at line 821 for the matching ops telemetry.
+    if (run.coverageSummary) run.coverageSummary.mergeSource = "fallback";
   }
 
   // AUTO-009d — quality-gate evaluation runs AFTER coverage aggregation so

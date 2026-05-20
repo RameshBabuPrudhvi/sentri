@@ -994,6 +994,13 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
     delete run.coverageSummary.prCoverageDiff;
   }
+  // Stamp the merge-source marker so the Dashboard CoveragePanel and
+  // RunDetail can render a tooltip distinguishing single-process runs from
+  // the sharded merge path. All three variants (`"single_process"`,
+  // `"shards"`, `"fallback"`) are set at the boundary between aggregation
+  // and persistence so a downstream consumer never sees a coverageSummary
+  // without the marker on coverage-enabled runs.
+  if (run.coverageSummary) run.coverageSummary.mergeSource = "single_process";
 
   // AUTO-009d — gate evaluation runs AFTER coverage aggregation so the
   // coverage rules see this run's freshly-computed `coverageSummary`. The
