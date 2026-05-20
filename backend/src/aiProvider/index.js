@@ -33,7 +33,19 @@ import * as anthropicAdapter from "./adapters/anthropic.js";
 import * as openaiAdapter from "./adapters/openai.js";
 import * as googleAdapter from "./adapters/google.js";
 import * as ollamaAdapter from "./adapters/ollama.js";
-import { withRetry, isRateLimitError, isTransientServerError, isRetryableError, composeSignal, MAX_RETRIES, BASE_DELAY_MS, MAX_BACKOFF_MS, CLOUD_TIMEOUT_MS } from "./retry.js";
+import { isRateLimitError, isTransientServerError, isRetryableError, MAX_RETRIES } from "./retry.js";
+// AI-002: catalog data + capability flags moved to modelCatalog.js (per spec).
+// Importing the constants here means the orchestrator does not duplicate the
+// "single source of truth" for env-var names, detect order, vision support, etc.
+import {
+  CLOUD_KEY_MAP,
+  CLOUD_DETECT_ORDER,
+  CLOUD_DEFAULT_MODELS,
+  PROVIDER_DOCS,
+  VISION_CAPABLE_MODELS,
+  getCloudModel,
+  getCloudName,
+} from "./modelCatalog.js";
 // INF-007: AI provider telemetry — latency histograms, token counters, and
 // error counters. The single most important metric surface for a SaaS QA
 // platform: it drives unit-economics (cost per workspace per day = tokens ×
@@ -140,40 +152,15 @@ export function setActiveProvider(provider) {
   _stickyFallbackExpiry   = 0;
 }
 
-// Maps cloud provider IDs to their env-var names (single source of truth)
-const CLOUD_KEY_MAP = {
-  anthropic:  "ANTHROPIC_API_KEY",
-  openai:     "OPENAI_API_KEY",
-  google:     "GOOGLE_API_KEY",
-  openrouter: "OPENROUTER_API_KEY",
-};
-
-// Default models per cloud provider — overridable via env vars
-const CLOUD_DEFAULT_MODELS = {
-  anthropic:  { envVar: "ANTHROPIC_MODEL",  fallback: "claude-sonnet-4-20250514", name: "Claude Sonnet" },
-  openai:     { envVar: "OPENAI_MODEL",     fallback: "gpt-4o-mini",              name: "GPT-4o-mini" },
-  google:     { envVar: "GOOGLE_MODEL",     fallback: "gemini-2.5-flash",         name: "Gemini 2.5 Flash" },
-  openrouter: { envVar: "OPENROUTER_MODEL", fallback: "openrouter/auto",          name: "OpenRouter" },
-};
-
-// OpenRouter base URL — overridable for self-hosted proxies.
+// OpenRouter base URL — overridable for self-hosted proxies. Stays here
+// rather than in modelCatalog.js because it's instance-specific configuration
+// (per-deployment override), not catalog metadata.
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
-function getCloudModel(provider) {
-  const cfg = CLOUD_DEFAULT_MODELS[provider];
-  if (!cfg) return "";
-  return process.env[cfg.envVar] || cfg.fallback;
-}
-
-function getCloudName(provider) {
-  const cfg = CLOUD_DEFAULT_MODELS[provider];
-  if (!cfg) return provider;
-  // If user overrode the model, show the model id as the name
-  const model = getCloudModel(provider);
-  return model !== cfg.fallback ? model : cfg.name;
-}
-
-
+// Re-export retry helpers so external callers (e.g. crawler, pipeline) that
+// import `isRateLimitError` / `isTransientServerError` from `aiProvider.js`
+// continue to work after the refactor.
+export { isRateLimitError, isTransientServerError };
 
 function isCompatProvider(provider) {
   // Match apiKeyRepo.isCompatProvider() — require a non-empty slot id after
@@ -196,9 +183,6 @@ function getCompatConfig(provider) {
   // "cannot read properties of string" error far from the actual root cause.
   return compatConfigCache.get(provider, () => apiKeyRepo.getCompatSlot(provider));
 }
-
-// Auto-detect order for cloud providers
-const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google", "openrouter"];
 
 /**
  * Set an AI provider API key at runtime (via Settings page).
@@ -332,14 +316,6 @@ function buildProviderMeta() {
   } catch { /* DB unavailable — cloud entries still work */ }
   return meta;
 }
-
-const PROVIDER_DOCS = {
-  anthropic:  "https://console.anthropic.com/settings/keys",
-  openai:     "https://platform.openai.com/api-keys",
-  google:     "https://aistudio.google.com/apikey",
-  openrouter: "https://openrouter.ai/keys",
-  local:      "https://ollama.ai",
-};
 
 /**
  * Returns the list of all supported providers with current names/models.
@@ -1027,17 +1003,9 @@ export async function generateText(prompt, options) {
 }
 
 // ─── MNT-001 — Vision (multimodal) provider abstraction ─────────────────────
-// Whitelist of vision-capable model identifiers. An explicit VISION_MODEL
-// env var bypasses the whitelist (operator opt-in). Conservative on purpose:
-// sending an image payload to a non-vision model silently degrades to
-// ignoring the image, which would produce false-positive healing "matches"
-// against random page regions.
-const VISION_CAPABLE_MODELS = new Set([
-  "claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620",
-  "claude-3-opus-20240229", "claude-sonnet-4-20250514",
-  "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4-vision-preview",
-  "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-flash",
-]);
+// VISION_CAPABLE_MODELS lives in modelCatalog.js — operators add new vision-
+// capable model IDs there, not here. An explicit VISION_MODEL env var
+// bypasses the whitelist for opt-in coverage of new models.
 
 /**
  * Resolve which vision-capable model to use, or `null` when none is
