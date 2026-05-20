@@ -147,7 +147,12 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
  * @namespace
  */
 export const api = {
-  // ── Projects ────────────────────────────────────────────────────────────────
+  
+  getAgentRoles: () => req("GET", "/settings/agent-roles"),
+  createAgentRole: (data) => req("POST", "/settings/agent-roles", data),
+  updateAgentRole: (role, data) => req("PATCH", `/settings/agent-roles/${role}`, data),
+  deleteAgentRole: (role) => req("DELETE", `/settings/agent-roles/${role}`),
+// ── Projects ────────────────────────────────────────────────────────────────
   /** @param {Object} data - `{ name, url, credentials? }` */
   createProject: (data) => req("POST", "/projects", data),
   /** @returns {Promise<Array>} List of all projects. */

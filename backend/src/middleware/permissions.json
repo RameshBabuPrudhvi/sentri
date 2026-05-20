@@ -338,6 +338,22 @@
     "GET /metrics": {
       "role": "admin",
       "source": "backend/src/middleware/appSetup.js"
+    },
+    "GET /api/v1/settings/agent-roles": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "POST /api/v1/settings/agent-roles": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "PATCH /api/v1/settings/agent-roles/:role": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "DELETE /api/v1/settings/agent-roles/:role": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
     }
   },
   "anyAuthenticatedMember": [
