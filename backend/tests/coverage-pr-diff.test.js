@@ -47,14 +47,31 @@ async function main() {
     assert.equal(result.filesAnalyzed, 0);
   }
 
-  // ── line clamping past file total ──────────────────────────────────────
+  // ── No clamping against totalLinesByFile (AUTO-009d design) ───────────
+  // The aggregator's `totalLinesByFile` is max(mappedLine), NOT actual file
+  // line count. Clamping against it silently drops every PR-changed line
+  // past the highest covered line, making uncovered tails (the most common
+  // shape of "untested change") report as 100% covered. Codecov does not
+  // clamp. This test pins the no-clamp contract documented inline at
+  // `backend/src/pipeline/coveragePrDiff.js:95-103`.
   {
     const result = computePrCoverage({
       coveredLinesByFile: { "small.js": new Set([1, 2]) },
       totalLinesByFile: { "small.js": 5 },
       changedFileRanges: { "small.js": [[1, 100]] },
     });
-    assert.equal(result.prTotalLines, 5, "clamped to file total (5)");
+    // PR claims 100 lines (1..100). 2 are covered (lines 1, 2). 98 are
+    // uncovered — the honest answer. `totalLinesByFile` is NOT used to
+    // shrink the PR-claim range.
+    assert.equal(result.prTotalLines, 100, "all 100 PR-claimed lines counted (no clamp against totalLinesByFile)");
+    assert.equal(result.prCoveredLines, 2, "only lines 1 and 2 are in the covered set");
+    // `uncoveredChangedLines[]` (cross-file) is capped at UNCOVERED_LINE_CAP=200,
+    // so 98 uncovered lines fit verbatim. `perFile[].uncoveredLines` would
+    // be capped at PER_FILE_UNCOVERED_CAP=25 — separate axis.
+    assert.equal(result.uncoveredChangedLines.length, 98,
+      "all 98 uncovered lines surface (under UNCOVERED_LINE_CAP=200)");
+    assert.equal(result.perFile[0].uncoveredLines.length, 25,
+      "per-file list capped at PER_FILE_UNCOVERED_CAP=25");
   }
 
   // ── renderPrCoverageMd ─────────────────────────────────────────────────

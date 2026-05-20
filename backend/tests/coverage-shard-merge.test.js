@@ -86,10 +86,31 @@ async function testCoverageDisabled() {
   assert.equal(shardCov, null, "coverage disabled → null");
 }
 
-// ── Test 4: Empty/invalid input → null ──────────────────────────────────
+// ── Test 4: Empty/invalid input semantics ──────────────────────────────
+// AUTO-009k design: `aggregateShardCoverage(empty)` returns a VALID EMPTY
+// mergeable payload — NOT null. The rationale (documented inline in
+// `aggregateShardCoverage`): returning null would cause
+// `allShardsContributed` in the finalizer to be false, forcing the
+// AUTO-009f fallback path which is structurally broken after AUTO-009k
+// strips raw `jsCoverage`. An empty payload merges cleanly (contributes
+// zero lines/statements to the union) and keeps the preferred merge path.
+// `mergeShardSummaries(empty)` still returns null because there's nothing
+// to reduce — that contract is unchanged.
 async function testInvalidInputs() {
-  assert.equal(await aggregateShardCoverage(PROJECT, []), null, "empty results → null");
-  assert.equal(await aggregateShardCoverage(PROJECT, null), null, "null results → null");
+  const emptyShard = await aggregateShardCoverage(PROJECT, []);
+  assert.ok(emptyShard && typeof emptyShard === "object",
+    "empty results → valid empty mergeable payload (not null), so the finalizer's allShardsContributed stays true");
+  assert.deepEqual(emptyShard.perBundle, {}, "empty shard has empty perBundle map");
+  assert.deepEqual(emptyShard.perSource, {}, "empty shard has empty perSource map");
+  assert.deepEqual(emptyShard.perTest, [], "empty shard has empty perTest array");
+  assert.equal(emptyShard.sbfHasData, false, "empty shard has no S/B/F data");
+
+  const nullShard = await aggregateShardCoverage(PROJECT, null);
+  assert.ok(nullShard && typeof nullShard === "object",
+    "null results → same valid empty mergeable payload (defensive — caller passed bad input)");
+
+  // mergeShardSummaries still returns null when there's literally nothing
+  // to merge — that contract is the finalizer's signal to fall through.
   assert.equal(mergeShardSummaries(null), null, "null input → null");
   assert.equal(mergeShardSummaries([]), null, "empty input → null");
   assert.equal(mergeShardSummaries([null, undefined]), null, "all-null array → null");
