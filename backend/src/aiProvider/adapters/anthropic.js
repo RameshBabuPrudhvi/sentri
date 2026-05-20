@@ -10,6 +10,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
+import { throwIfAborted } from "../../utils/abortHelper.js";
 
 export async function generate({ messages, maxTokens, signal, model, apiKey }) {
   const client = new Anthropic({ apiKey });
@@ -33,6 +34,7 @@ export async function stream({ messages, maxTokens, signal, model, apiKey }, onT
   if (messages.system) params.system = messages.system;
   const s = client.messages.stream(params, { signal });
   for await (const chunk of s) {
+    throwIfAborted(signal);
     if (chunk.type === "content_block_delta" && chunk.delta?.text) onToken(chunk.delta.text);
   }
   const final = await s.finalMessage();

@@ -15,6 +15,7 @@
  */
 import OpenAI from "openai";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
+import { throwIfAborted } from "../../utils/abortHelper.js";
 
 function mkClient({ provider, apiKey, baseUrl, defaultHeaders, guardedFetch }) {
   if (provider === "openrouter") {
@@ -65,6 +66,7 @@ export async function stream(opts, onToken) {
   let full = "";
   let usage = null;
   for await (const chunk of s) {
+    throwIfAborted(signal);
     const token = chunk.choices?.[0]?.delta?.content ?? "";
     if (token) { full += token; onToken(token); }
     if (chunk?.usage) usage = { input: chunk.usage.prompt_tokens, output: chunk.usage.completion_tokens };
