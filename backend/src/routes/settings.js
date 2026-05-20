@@ -23,7 +23,7 @@ import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
-import { validateAgentConfigs } from "../aiProvider/agentHealthCheck.js";
+import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 
 const router = Router();
 
@@ -240,7 +240,13 @@ router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
 
 
 
-const AGENT_ROLES = ["explorer", "planner", "author", "oracle", "executor", "healer", "reviewer", "triager"];
+// AI-005: AGENT_ROLES is imported from `aiProvider/agentHealthCheck.js` —
+// single source of truth shared with the pipeline-side health check and
+// (via byte-for-byte mirroring) the frontend Settings dropdown. The
+// previous local definition included "executor" (no pipeline stage ever
+// used it — dead validator entry) and "default" was wrongly omitted
+// here while present in the metrics list, producing two diverging
+// allowlists. The canonical 7-role list is now the only source.
 
 // Cap on systemPromptOverride length. Even though this is admin-only, an
 // unbounded TEXT column gets serialised on every GET and bloats list

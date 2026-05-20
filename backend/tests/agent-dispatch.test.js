@@ -38,6 +38,7 @@ const {
   stickyFallbackActive,
   setRuntimeKey,
 } = await import("../src/aiProvider/registry.js");
+const { AGENT_ROLES, METRIC_AGENT_ROLES } = await import("../src/aiProvider/agentHealthCheck.js");
 
 // Boot DB so migrations create `agent_configs` + `workspaces`.
 getDatabase();
@@ -257,6 +258,35 @@ test("non-cyclic chain is accepted", () => {
   // No throw expected; round-trip read confirms persistence.
   const row = agentConfigRepo.getByRole(workspaceId, "critic");
   assert.equal(row.fallbackRole, "planner");
+});
+
+// ── Canonical-list contracts (the lifeguard-flagged drift fix) ────────────────
+
+console.log("\n🧪 AGENT_ROLES canonical contracts");
+
+test("AGENT_ROLES excludes 'executor' (dead validator entry pre-fix)", () => {
+  assert.equal(AGENT_ROLES.includes("executor"), false,
+    "'executor' was in settings.js validator pre-AI-005 but no pipeline call site ever passed it");
+});
+
+test("AGENT_ROLES excludes 'default' (synthetic metric catch-all, not configurable)", () => {
+  assert.equal(AGENT_ROLES.includes("default"), false,
+    "'default' is a Prometheus label catch-all emitted by recordAiTokens, not a saveable role");
+});
+
+test("AGENT_ROLES contains the 7 canonical pipeline roles", () => {
+  const expected = ["explorer", "planner", "author", "oracle", "reviewer", "healer", "triager"];
+  for (const role of expected) {
+    assert.equal(AGENT_ROLES.includes(role), true, `expected canonical role ${role} in AGENT_ROLES`);
+  }
+});
+
+test("METRIC_AGENT_ROLES = AGENT_ROLES + 'default' (metric cardinality enumeration)", () => {
+  assert.equal(METRIC_AGENT_ROLES.length, AGENT_ROLES.length + 1);
+  assert.equal(METRIC_AGENT_ROLES.includes("default"), true);
+  for (const role of AGENT_ROLES) {
+    assert.equal(METRIC_AGENT_ROLES.includes(role), true);
+  }
 });
 
 summary("Agent dispatch (AI-005)");

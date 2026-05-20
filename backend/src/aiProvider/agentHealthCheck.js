@@ -24,10 +24,20 @@ import { generateText } from "./index.js";
 import { resolveProvider } from "./registry.js";
 
 /**
- * Canonical AI-005 agent role names. Matches the eight-role bounded label set
- * the metrics layer assumes (8 × 5 providers × 3 outcomes ≈ 120 series). New
- * roles must be added here AND in the pipeline caller list in NEXT.md before
- * they appear in `agent_configs`.
+ * Canonical AI-005 **user-configurable** agent role names — the closed set
+ * that an admin may save in `agent_configs` via the Settings → Agent Roles
+ * UI / `POST /api/v1/settings/agent-roles`. This is the single source of
+ * truth: `backend/src/routes/settings.js` imports this list for route-level
+ * validation, and `frontend/src/config.js` mirrors it byte-for-byte for the
+ * Settings UI dropdown. Adding a new role here lights it up in three places
+ * (validator, UI dropdown, health-check probe) — but it must ALSO be wired
+ * into a real pipeline call site (`agentRole: "<name>"` in a `generateText`
+ * call) before it produces any observable behaviour.
+ *
+ * The synthetic `"default"` label used by `recordAiTokens` for unscoped
+ * calls is INTENTIONALLY excluded — it's a Prometheus catch-all, not a
+ * configurable role. The combined cardinality enumeration (this list +
+ * `"default"`) lives in {@link METRIC_AGENT_ROLES} below.
  *
  * @type {readonly string[]}
  */
@@ -39,8 +49,24 @@ export const AGENT_ROLES = Object.freeze([
   "reviewer",
   "healer",
   "triager",
-  "default",
 ]);
+
+/**
+ * AI-005 **metric label** cardinality enumeration — the full set of values
+ * `agent_role` can take on the four AI Prometheus metrics. This is
+ * `AGENT_ROLES + "default"` (the synthetic catch-all `recordAiTokens` emits
+ * when a call site doesn't pass an `agentRole`, e.g. legacy code paths or
+ * the workspace-default fallback in single-agent mode).
+ *
+ * Used by dashboards and alert rules that enumerate the full label space.
+ * Bounded cardinality contract: 8 metric-role values × 5 provider labels ×
+ * 3 outcomes ≈ 120 series per metric — well under Prometheus's 10k/metric
+ * recommended ceiling. Adding a new role to `AGENT_ROLES` automatically
+ * grows this list by one.
+ *
+ * @type {readonly string[]}
+ */
+export const METRIC_AGENT_ROLES = Object.freeze([...AGENT_ROLES, "default"]);
 
 /**
  * Issue a 1-token probe call against one (workspaceId, role) pair.
