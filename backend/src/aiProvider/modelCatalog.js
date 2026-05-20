@@ -153,7 +153,7 @@ export const MODEL_PRICING = {
  * "no data", distinct from a known-free model (Ollama) which is `0/0`.
  *
  * @param {string} model
- * @returns {{provider: string, inputPer1k: number|null, outputPer1k: number|null, asOf: string}|null}
+ * @returns {Object|null} `{provider, inputPer1k, outputPer1k, asOf}` or `null`.
  */
 export function pricingFor(model) {
   if (!model) return null;
@@ -176,7 +176,7 @@ export function pricingFor(model) {
  * free, distinct from null.
  *
  * @param {string} model - Resolved model id used for the call.
- * @param {{input?: number, output?: number}} usage - Token counts from the SDK response.
+ * @param {Object} usage - `{input?, output?}` token counts from the SDK response.
  * @returns {number|null} USD cost, or `null` for unknown pricing.
  */
 export function computeCostUsd(model, usage) {
