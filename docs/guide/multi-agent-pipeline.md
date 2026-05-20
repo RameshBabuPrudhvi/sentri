@@ -38,7 +38,7 @@ keep using the workspace default.
 | `author` | Code generation + refinement + chat (`journeyGenerator.generateIntentTests`, `feedbackLoop`, `chat.js`) | Best at structured output (Claude Sonnet) |
 | `oracle` | Assertion strengthening (planned, AUTO-023) | Strong reasoning |
 | `reviewer` | Critic review (planned, AUTO-023) | Different model from `author` for an independent second opinion |
-| `healer` | Self-healing (DOM + vision, planned full plumbing) | Low-stakes — Ollama or Gemini Flash |
+| `healer` | Self-healing — vision-heal (`selfHealing.js#tryVisionHeal` → `vision.js#callVisionModel`) | Vision-capable — Claude 3.5 Sonnet for accuracy, Gemini 1.5 Flash for cost |
 | `triager` | Failure clustering (planned, AUTO-021) | Cheap + fast |
 | `default` | Catch-all metric label for unscoped calls | — |
 
@@ -142,7 +142,7 @@ recommended ceiling.
 | Run fails immediately with `ERR_AGENT_HEALTH_CHECK_FAILED` | One configured role has a bad key or unreachable provider | Click **Settings → Agent Roles → Test** to identify which role; rotate / fix the key |
 | Specific stage keeps using the workspace default despite an agent_config row | Sticky fallback active for that role (rate-limit recovery) | Wait `STICKY_FALLBACK_TTL_MS` (default 10 min) or rotate the upstream key |
 | `fallbackRole` save returns 400 | Cycle detected (`ERR_AGENT_FALLBACK_CYCLE`) | Break the loop — set one role's `fallbackRole` to `null` |
-| Metrics for one role missing in Grafana | Pipeline caller for that stage doesn't pass `agentRole` yet | Check `selfHealing.js` / `failureClusterer.js` — full plumbing tracked under AUTO-023 |
+| Metrics for one role missing in Grafana | Pipeline caller for that stage doesn't pass `agentRole` yet | `explorer` / `planner` / `author` / `healer` are wired today; `oracle` / `reviewer` / `triager` plumb through under AUTO-023 |
 | `default` label dominates `app_ai_cost_usd_total` | Most call sites still call `generateText()` without `agentRole` | Expected on single-agent installations — the `"default"` bucket is the catch-all |
 
 ---

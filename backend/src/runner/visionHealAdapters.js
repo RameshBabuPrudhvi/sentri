@@ -139,6 +139,11 @@ export async function pixelmatchHeal(failureBuffer, baselineBuffer, threshold = 
  * This adapter maps between the two shapes and propagates `contextHtml`
  * when the caller supplies it (currently always omitted; MNT-001b territory).
  *
+ * AI-005: forwards `workspaceId` + `agentRole` so the healer agent config
+ * (provider + model) actually drives the call when the workspace has one.
+ * Both default to "fall back to workspace default", so callers that haven't
+ * adopted AI-005 yet keep the pre-AI-005 routing behaviour bit-for-bit.
+ *
  * Returns `null` on any provider failure (rate limit, malformed JSON,
  * sub-threshold confidence) per `callVisionModel`'s contract.
  *
@@ -146,12 +151,19 @@ export async function pixelmatchHeal(failureBuffer, baselineBuffer, threshold = 
  * @param {Buffer} params.failure
  * @param {{action: string, label: string}} params.intent
  * @param {string} [params.contextHtml]
+ * @param {string} [params.workspaceId] - AI-005: forwards to `callVisionModel`
+ *   so per-workspace healer agent config drives provider + model selection.
+ * @param {string} [params.agentRole]   - AI-005: defaults to "healer" inside
+ *   `callVisionModel`; pass through for telemetry parity if a caller wants
+ *   to label specific surfaces (e.g. a future "oracle" vision call).
  * @returns {Promise<Object|null>}
  */
-export async function llmVisionHeal({ failure, intent, contextHtml } = {}) {
+export async function llmVisionHeal({ failure, intent, contextHtml, workspaceId, agentRole } = {}) {
   return callVisionModel({
     screenshot: failure,
     intent,
     contextHtml,
+    workspaceId,
+    agentRole,
   });
 }
