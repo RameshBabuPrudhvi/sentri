@@ -584,6 +584,11 @@ function AgentRolesTab() {
   const [editingRole, setEditingRole] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // AI-005 — per-row probe state keyed by role. Each entry is
+  // `{ status: "running" | "ok" | "err", reason?: string, provider?: string }`
+  // so the inline badge can render the live result of the last
+  // `api.testAgentRole(role)` call without blocking the rest of the form.
+  const [probes, setProbes] = useState({});
   const load = useCallback(async () => {
     try { const r = await api.getAgentRoles(); setRows(r.roles || []); }
     catch (err) { setError(err.message || "Failed to load agent roles."); }
@@ -629,27 +634,81 @@ function AgentRolesTab() {
       setError(err.message || "Failed to delete agent role.");
     }
   }
+  // AI-005 — Fire a 1-token probe against the configured (provider, role).
+  // The backend route returns `{ ok, reason, provider }`. We never throw to
+  // the caller — every failure path (404, 500, network) ends up as a red
+  // badge so the operator can see what went wrong inline.
+  async function runProbe(role) {
+    setProbes((s) => ({ ...s, [role]: { status: "running" } }));
+    try {
+      const res = await api.testAgentRole(role);
+      setProbes((s) => ({
+        ...s,
+        [role]: {
+          status: res.ok ? "ok" : "err",
+          reason: res.reason || null,
+          provider: res.provider || null,
+        },
+      }));
+    } catch (err) {
+      setProbes((s) => ({
+        ...s,
+        [role]: { status: "err", reason: err?.body?.error || err?.message || "probe_failed", provider: null },
+      }));
+    }
+  }
   return <div className="card card-padded">
     <h3>Agent Roles</h3>
     {error && (
-      <div className="st-status-err" style={{ marginBottom: 12 }}>
+      <div className="st-status-err st-agent-error">
         <AlertCircle size={12} /> {error}
       </div>
     )}
-    <form onSubmit={save} style={{ display: "grid", gap: 8, marginBottom: 12 }}>
-      <select className="input" value={form.role} onChange={(e)=>setForm((s)=>({...s, role:e.target.value}))} disabled={!!editingRole}>{AGENT_ROLES.map((r)=><option key={r} value={r}>{r}</option>)}</select>
-      <input className="input" placeholder="provider (optional)" value={form.provider} onChange={(e)=>setForm((s)=>({...s, provider:e.target.value}))} />
-      <input className="input" placeholder="model (optional)" value={form.model} onChange={(e)=>setForm((s)=>({...s, model:e.target.value}))} />
-      <textarea className="input" placeholder="system prompt override" value={form.systemPromptOverride} onChange={(e)=>setForm((s)=>({...s, systemPromptOverride:e.target.value}))} />
-      <input className="input" type="number" step="0.1" value={form.temperature} onChange={(e)=>setForm((s)=>({...s, temperature:Number(e.target.value)}))} />
-      <input className="input" type="number" placeholder="max tokens" value={form.maxTokens} onChange={(e)=>setForm((s)=>({...s, maxTokens:e.target.value}))} />
-      <select className="input" value={form.fallbackRole} onChange={(e)=>setForm((s)=>({...s, fallbackRole:e.target.value}))}><option value="">No fallback</option>{AGENT_ROLES.map((r)=><option key={r} value={r}>{r}</option>)}</select>
-      <div style={{ display: "flex", gap: 8 }}>
+    <form onSubmit={save} className="st-agent-form">
+      <select className="input" value={form.role} onChange={(e) => setForm((s) => ({ ...s, role: e.target.value }))} disabled={!!editingRole}>{AGENT_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+      <input className="input" placeholder="provider (optional)" value={form.provider} onChange={(e) => setForm((s) => ({ ...s, provider: e.target.value }))} />
+      <input className="input" placeholder="model (optional)" value={form.model} onChange={(e) => setForm((s) => ({ ...s, model: e.target.value }))} />
+      <textarea className="input" placeholder="system prompt override" value={form.systemPromptOverride} onChange={(e) => setForm((s) => ({ ...s, systemPromptOverride: e.target.value }))} />
+      <input className="input" type="number" step="0.1" value={form.temperature} onChange={(e) => setForm((s) => ({ ...s, temperature: Number(e.target.value) }))} />
+      <input className="input" type="number" placeholder="max tokens" value={form.maxTokens} onChange={(e) => setForm((s) => ({ ...s, maxTokens: e.target.value }))} />
+      <select className="input" value={form.fallbackRole} onChange={(e) => setForm((s) => ({ ...s, fallbackRole: e.target.value }))}><option value="">No fallback</option>{AGENT_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+      <div className="st-agent-form-actions">
         <button className="btn btn-primary btn-sm" disabled={busy}>{editingRole ? "Update role config" : "Save role config"}</button>
         {editingRole && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditingRole(""); setForm(empty); setError(""); }}>Cancel edit</button>}
       </div>
     </form>
-    <div style={{ display: "grid", gap: 8 }}>{rows.map((r)=><div key={r.role} className="card-padded-sm" style={{display:"flex",justifyContent:"space-between",gap:8}}><span className="text-mono">{r.role} · {r.provider || "workspace-default"} · {r.model || "provider-default"} · temp {r.temperature}</span><div style={{display:"flex",gap:6}}><button className="btn btn-ghost btn-xs" onClick={()=>edit(r)}>Edit</button><button className="btn btn-danger btn-xs" onClick={()=>del(r.role)}>Delete</button></div></div>)}</div>
+    <div className="st-agent-rows">{rows.map((r) => {
+      const probe = probes[r.role];
+      return (
+        <div key={r.role} className="card-padded-sm st-agent-row">
+          <span className="st-agent-row-meta">{r.role} · {r.provider || "workspace-default"} · {r.model || "provider-default"} · temp {r.temperature}</span>
+          {probe && probe.status !== "running" && (
+            <span
+              className={`${probe.status === "ok" ? "st-status-ok" : "st-status-err"} st-agent-row-badge`}
+              title={probe.reason || (probe.status === "ok" ? "OK" : "Failed")}
+            >
+              {probe.status === "ok" ? <Check size={11} /> : <AlertCircle size={11} />}
+              {probe.status === "ok"
+                ? `OK · ${probe.provider || "provider"}`
+                : `${probe.reason || "failed"}${probe.provider ? ` · ${probe.provider}` : ""}`}
+            </span>
+          )}
+          <div className="st-agent-row-actions">
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => runProbe(r.role)}
+              disabled={probe?.status === "running"}
+              title="Send a 1-token probe to validate this (provider, role) without kicking off a real run."
+            >
+              {probe?.status === "running" ? <RefreshCw size={11} className="spin" /> : <Activity size={11} />}
+              {probe?.status === "running" ? "Testing…" : "Test"}
+            </button>
+            <button className="btn btn-ghost btn-xs" onClick={() => edit(r)}>Edit</button>
+            <button className="btn btn-danger btn-xs" onClick={() => del(r.role)}>Delete</button>
+          </div>
+        </div>
+      );
+    })}</div>
   </div>;
 }
 
