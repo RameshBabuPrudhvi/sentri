@@ -249,7 +249,7 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
   // Grouped by original source path (when resolved) — values mirror the
   // bundle-level { covered, total } shape so the existing aggregate math
   // still works.
-  /** @type {Map<string, { covered: Set<number>, total: number, bundleUrl: string|null }>} */
+  /** @type {Map<string, { covered: Set<number>, total: number, bundleUrl: string|null, bundleUrls: Set<string> }>} */
   const groupedByOriginal = new Map();
 
   for (const [bundleUrl, total] of runTotals.entries()) {
@@ -263,7 +263,8 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
 
     if (!consumer) {
       // Fallback — keep the bundle URL as the file label.
-      const existing = groupedByOriginal.get(bundleUrl) || { covered: new Set(), total: 0, bundleUrl };
+      const existing = groupedByOriginal.get(bundleUrl) || { covered: new Set(), total: 0, bundleUrl, bundleUrls: new Set() };
+      existing.bundleUrls.add(bundleUrl);
       for (const ln of coveredSet) existing.covered.add(ln);
       existing.total = Math.max(existing.total, total);
       groupedByOriginal.set(bundleUrl, existing);
@@ -310,7 +311,8 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
       try { mapped = resolver.mapLine ? resolver.mapLine(consumer, ln) : null; } catch { mapped = null; }
       const sourceKey = mapped?.source ? mapped.source : bundleUrl;
       const targetLine = mapped?.line ?? ln;
-      const existing = groupedByOriginal.get(sourceKey) || { covered: new Set(), total: 0, bundleUrl };
+      const existing = groupedByOriginal.get(sourceKey) || { covered: new Set(), total: 0, bundleUrl, bundleUrls: new Set() };
+      existing.bundleUrls.add(bundleUrl);
       // widthForTotal === 1 → max(existing.total, targetLine), identical
       // to the legacy path. Sampled uncovered probes (width = stride)
       // contribute the sampled line + (stride - 1) trailing neighbours
@@ -390,11 +392,35 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
     coveredLines += covered;
     // AUTO-009c — when the converter produced a per-bundle S/B/F summary,
     // attach the per-file uncovered counts so the dashboard / RunDetail can
-    // surface "47L · 12B · 3F uncovered" alongside line counts. Lookups go
-    // through `meta.bundleUrl` because grouping by original source path may
-    // have merged multiple bundles into one file; we attribute extras to
-    // the bundle that originally contributed this group.
-    const extras = meta.bundleUrl ? uncoveredExtrasByBundle.get(meta.bundleUrl) : null;
+    // surface "47L · 12B · 3F uncovered" alongside line counts.
+    //
+    // Code-split bundles: a single source file (e.g. `Cart.tsx`) can appear
+    // in multiple chunks (`chunk-A.js` + `chunk-B.js`). The source-map
+    // resolver groups them into one `groupedByOriginal` entry, but S/B/F
+    // extras are keyed by bundleUrl (because Istanbul ids are per-script).
+    // We SUM extras from ALL contributing bundles so the display-only
+    // `uncoveredBranches` / `uncoveredFunctions` counts on the merged
+    // source entry reflect the full picture. Lines are already correct
+    // (set-union via `covered: Set<number>`); only S/B/F was undercounted
+    // when only the first bundle's extras were used.
+    let mergedUncoveredBranches = 0;
+    let mergedUncoveredFunctions = 0;
+    const contributingBundles = meta.bundleUrls || new Set();
+    if (contributingBundles.size > 0) {
+      for (const bUrl of contributingBundles) {
+        const extras = uncoveredExtrasByBundle.get(bUrl);
+        if (extras) {
+          mergedUncoveredBranches  += extras.uncoveredBranches  || 0;
+          mergedUncoveredFunctions += extras.uncoveredFunctions || 0;
+        }
+      }
+    } else if (meta.bundleUrl) {
+      // Fallback for entries created without bundleUrls set (shouldn't
+      // happen after this fix, but defensive for backward compat).
+      const extras = uncoveredExtrasByBundle.get(meta.bundleUrl);
+      mergedUncoveredBranches  = extras?.uncoveredBranches  ?? 0;
+      mergedUncoveredFunctions = extras?.uncoveredFunctions ?? 0;
+    }
     topUncoveredFiles.push({
       file,
       // AUTO-009h — every row carries a `layer` discriminator. Browser
@@ -406,8 +432,8 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
       uncoveredLines: Math.max(0, total - covered),
       totalLines: total,
       bundleUrl: meta.bundleUrl || null,
-      uncoveredBranches:  extras?.uncoveredBranches  ?? 0,
-      uncoveredFunctions: extras?.uncoveredFunctions ?? 0,
+      uncoveredBranches:  mergedUncoveredBranches,
+      uncoveredFunctions: mergedUncoveredFunctions,
     });
   }
 

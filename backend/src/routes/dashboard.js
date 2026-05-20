@@ -486,10 +486,19 @@ router.get("/dashboard", async (req, res) => {
   // `topUncoveredFiles` block can render without re-querying. Sourced from
   // the same coverage-only result set; we walk it newest-last and keep
   // the most recent entry per projectId.
+  //
+  // `projectName` is stamped server-side from the already-loaded
+  // `projectsById` map so the CoveragePanel can always display a human-
+  // readable name. The previous approach (`recentRuns.find(...)?.projectName`)
+  // missed projects whose latest run was older than the 8-run `recentRuns`
+  // cap — those rendered as a truncated UUID.
   const latestCoverageByProject = {};
   for (const r of coverageRuns) {
     if (r?.projectId && r.coverageSummary) {
-      latestCoverageByProject[r.projectId] = r.coverageSummary;
+      latestCoverageByProject[r.projectId] = {
+        ...r.coverageSummary,
+        projectName: projectsById[r.projectId]?.name || null,
+      };
     }
   }
 

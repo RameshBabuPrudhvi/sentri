@@ -103,11 +103,14 @@ export async function finalizeCoverage(project, results, { changedFileRanges = n
     try { return new URL(project.url).origin; } catch { return ""; }
   })();
 
-  // AUTO-009g — memory ceiling. Walk results in order; when cumulative raw
-  // bytes exceed the cap, drop subsequent entries' `jsCoverage` (they
-  // already landed in memory but the aggregator won't see them) and mark
-  // `truncated: true` on the resulting summary. Earlier results' data is
-  // preserved verbatim so the partial summary is still useful.
+  // AUTO-009g — memory ceiling. Walk results in order; when adding an entry
+  // would push cumulative bytes past the cap, drop THAT entry's `jsCoverage`
+  // (it already landed in memory but the aggregator won't see it) and mark
+  // `truncated: true` on the resulting summary. Smaller subsequent entries
+  // that individually fit under the remaining budget are still included —
+  // this maximises coverage data within the ceiling rather than blanket-
+  // dropping everything after the first over-budget entry. Earlier results'
+  // data is preserved verbatim so the partial summary is still useful.
   let cumulativeBytes = 0;
   let truncated = false;
   for (const r of (results || [])) {

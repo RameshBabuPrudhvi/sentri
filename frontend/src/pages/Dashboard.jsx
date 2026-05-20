@@ -171,7 +171,7 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
             };
             const latestPoint = points[points.length - 1];
             const latestPct = (latestPoint && getValue(latestPoint)) || 0;
-            const projectName = (data?.recentRuns || []).find((r) => r.projectId === projectId)?.projectName || projectId.slice(0, 8);
+            const projectName = latestSummaryByProject.get(projectId)?.projectName || (data?.recentRuns || []).find((r) => r.projectId === projectId)?.projectName || projectId.slice(0, 8);
             const summary = latestSummaryByProject.get(projectId);
             // AUTO-009h — filter topUncoveredFiles by the selected layer
             // tab. `layer` is `"browser"` or `"server"`; rows without
