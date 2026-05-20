@@ -67,7 +67,10 @@ Ship a production-grade `helm/sentri/` chart (separate `backend` + `worker` Depl
 - [ ] ROADMAP.md `### INF-009` section flipped to `**Status:** ✅ Complete (PR #N)` and Completed Work Summary row added
 
 ---
-## ⏭ Queue (next 3 PRs after current)
+## ⏭ Queue (AI platform foundation track elevated)
+
+> **Heads up:** the AI-002 → AI-007 track jumps ahead of the items below because AI-002 unblocks every subsequent AI-pipeline change (`backend/src/aiProvider.js` is currently a 1,545-line monolith — agents can't safely refactor it without the decomposition). Full entries live in `ROADMAP.md` § Phase 5 (AI-002 / AI-003 / AI-004 / AI-005 / AI-006 / AI-007). Suggested PR order: **AI-002 + AI-003 bundled** (M, refactor + cost tracking) → **AI-004** (M, agent config schema, dormant) → **AI-005** (L, multi-agent dispatch) → **AI-006** (M, per-role eval) → **AI-007** (M, cost governance). AUTO-022b stays deferred (external LLM-key dependency); AUTO-014 and DIF-008 slot behind the AI track without conflict.
+
 ### 1 · AUTO-022b — Eval harness: record real LLM cache + first real baseline
 **Effort:** M (4–8h focused maintainer session) | **Priority:** 🔴 Blocker (deferred — needs LLM API key) | **Dependencies:** AUTO-022 ✅ PR #17 plumbing | **Source:** `ROADMAP.md` Phase 5 (AUTO-022b) + `docs/guide/eval-harness-record-goldens.md`
 Activate the dormant AUTO-022 regression gate by replacing the 50 synthetic golden snapshots with real DOM captures, recording `.cache/*.txt` against the live LLM via `EVAL_RECORD=1`, and committing the first real `eval-baseline.json`. Pure data PR — no new code, no schema changes. Currently deferred per maintainer call (recording requires LLM API key + 4–8h focused per-case iteration).
