@@ -114,29 +114,48 @@ export function adapterFor(provider) {
 
 /**
  * Build the adapter-call options for a given provider. Returns the
- * spec-standard `{ messages, maxTokens, signal, useJson, model, apiKey,
- * baseUrl, defaultHeaders, guardedFetch, provider }` shape. The orchestrator
- * is the *only* place that knows about runtime keys, OpenRouter referer
- * headers, compat SSRF guards, etc. — adapters consume the flat result.
+ * spec-standard `{ messages, maxTokens, signal, useJson, responseFormat,
+ * model, apiKey, baseUrl, defaultHeaders, guardedFetch, provider }` shape.
+ * The orchestrator is the *only* place that knows about runtime keys,
+ * OpenRouter referer headers, compat SSRF guards, etc. — adapters consume
+ * the flat result.
+ *
+ * AI-002 lock-in: `responseFormat` is carried end-to-end as a string so
+ * future modes (`"json_schema"` for OpenAI structured outputs, AI-005's
+ * planner-agent JSON-schema enforcement) land without changing the adapter
+ * signature. `useJson` is preserved alongside as a derived boolean for
+ * backwards compat — adapters can read either; new callers should prefer
+ * `responseFormat`. See AI-008 spec gap 1 in ROADMAP.md for the rationale.
+ *
+ * @param {string} provider
+ * @param {Object} messages - Output of `normaliseMessages()`.
+ * @param {number} maxTokens
+ * @param {AbortSignal} [signal]
+ * @param {string} [responseFormat="json_object"] - One of `"text"` (free
+ *   form), `"json_object"` (provider's JSON mode), or `"json_schema"`
+ *   (reserved for AI-005). Defaults to `"json_object"` so the legacy
+ *   pipeline contract is preserved bit-for-bit when the caller doesn't
+ *   specify a format.
  */
-export function buildAdapterOpts(provider, messages, maxTokens, signal, useJson) {
+export function buildAdapterOpts(provider, messages, maxTokens, signal, responseFormat = "json_object") {
+  // AI-002 backwards-compat: derive `useJson` so adapters that haven't yet
+  // migrated to reading `responseFormat` keep working. The contract is:
+  //   responseFormat === "text"        → useJson === false
+  //   responseFormat === "json_object" → useJson === true
+  //   responseFormat === "json_schema" → useJson === true (treated as JSON
+  //     by adapters that don't yet support schema enforcement; AI-005 will
+  //     teach the openai adapter to attach the schema body).
+  const useJson = responseFormat !== "text";
+  const base = { provider, messages, maxTokens, signal, useJson, responseFormat };
   if (provider === "anthropic") {
-    return {
-      provider, messages, maxTokens, signal, useJson,
-      model: buildProviderMeta().anthropic.model,
-      apiKey: getKey("ANTHROPIC_API_KEY"),
-    };
+    return { ...base, model: buildProviderMeta().anthropic.model, apiKey: getKey("ANTHROPIC_API_KEY") };
   }
   if (provider === "openai") {
-    return {
-      provider, messages, maxTokens, signal, useJson,
-      model: buildProviderMeta().openai.model,
-      apiKey: getKey("OPENAI_API_KEY"),
-    };
+    return { ...base, model: buildProviderMeta().openai.model, apiKey: getKey("OPENAI_API_KEY") };
   }
   if (provider === "openrouter") {
     return {
-      provider, messages, maxTokens, signal, useJson,
+      ...base,
       model: buildProviderMeta().openrouter.model,
       apiKey: getKey("OPENROUTER_API_KEY"),
       baseUrl: OPENROUTER_BASE_URL,
@@ -147,23 +166,15 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, useJson)
     };
   }
   if (provider === "google") {
-    return {
-      provider, messages, maxTokens, signal, useJson,
-      model: buildProviderMeta().google.model,
-      apiKey: getKey("GOOGLE_API_KEY"),
-    };
+    return { ...base, model: buildProviderMeta().google.model, apiKey: getKey("GOOGLE_API_KEY") };
   }
   if (provider === "local") {
-    return {
-      provider, messages, maxTokens, signal, useJson,
-      model: getOllamaModel(),
-      baseUrl: getOllamaBaseUrl(),
-    };
+    return { ...base, model: getOllamaModel(), baseUrl: getOllamaBaseUrl() };
   }
   if (isCompatProvider(provider)) {
     const compat = getCompatConfig(provider);
     return {
-      provider, messages, maxTokens, signal, useJson,
+      ...base,
       model: compat?.model,
       apiKey: compat?.apiKey,
       baseUrl: compat?.baseUrl,
@@ -255,8 +266,10 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
 
 export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat) {
   const messages = normaliseMessages(promptOrMessages);
-  const useJson = responseFormat !== "text";
-  const opts = buildAdapterOpts(provider, messages, maxTokens || DEFAULT_MAX_TOKENS, signal, useJson);
+  // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
+  // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
+  // also derives `useJson` for adapters that haven't migrated yet.
+  const opts = buildAdapterOpts(provider, messages, maxTokens || DEFAULT_MAX_TOKENS, signal, responseFormat);
   const { text, usage } = await adapterFor(provider).generate(opts);
   // Token telemetry is the orchestrator's responsibility — adapters return
   // raw usage and don't know about the metrics registry. Keeps adapters

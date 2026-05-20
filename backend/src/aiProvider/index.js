@@ -239,7 +239,6 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   if (!provider) throw new Error("No AI provider configured.");
   const { signal, responseFormat } = options;
   const messages = normaliseMessages(promptOrMessages);
-  const useJson = responseFormat !== "text";
 
   // Wrap onToken so we can detect whether any tokens were emitted before a
   // mid-stream error. Without this guard, falling back to generateText()
@@ -255,11 +254,14 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   }
 
   const adapter = adapterFor(provider);
-  // Google + Ollama return null from .stream() — fall through to the
-  // synthetic-token path below which calls generateText() (provider fallback
-  // is FEA-003-covered).
+  // AI-002: Google + Ollama explicitly return `null` from `.stream()` to mean
+  // "no native streaming — fall back to generate()". Errors are THROWN, not
+  // returned as null — adapters that return null on a transient error are a
+  // contract violation pinned by `aiProvider-adapter-contract.test.js`. The
+  // try/catch below routes thrown errors through the FEA-003 fallback chain;
+  // the `if (res !== null)` branch handles the no-streaming-support sentinel.
   try {
-    const opts = buildAdapterOpts(provider, messages, options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, useJson);
+    const opts = buildAdapterOpts(provider, messages, options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, responseFormat);
     const res = await adapter.stream(opts, wrappedOnToken);
     if (res !== null) {
       if (res?.usage) recordAiTokens(provider, res.usage);

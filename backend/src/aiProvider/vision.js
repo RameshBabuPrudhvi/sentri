@@ -135,7 +135,10 @@ ${String(contextHtml).slice(0, 800)}` : "");
 
   // Build a vision-specific opts bag. We reuse buildAdapterOpts() shape
   // for the auth/baseUrl/SSRF fields, then layer the image fields on top.
-  const baseOpts = buildAdapterOpts(provider, { system: null, user: userPrompt, combined: userPrompt }, 512, signal, true);
+  // AI-002: pass the `"json_object"` string (not the legacy `true` boolean)
+  // so `buildAdapterOpts` carries `responseFormat` through unchanged. The
+  // derived `useJson === true` is preserved for adapters that read either.
+  const baseOpts = buildAdapterOpts(provider, { system: null, user: userPrompt, combined: userPrompt }, 512, signal, "json_object");
   // Override `model` with the vision-resolved model — buildAdapterOpts()
   // returns the provider's default text model, which is wrong for vision
   // (e.g. user picked claude-3-5-sonnet via VISION_MODEL but the active

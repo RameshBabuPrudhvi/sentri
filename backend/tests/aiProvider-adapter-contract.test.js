@@ -31,27 +31,73 @@ for (const [name, adapter] of Object.entries(adapters)) {
   });
 }
 
-// ── Return-shape contract: stream() must return { text, usage } or null ─────
-// `null` is the spec-allowed "no native streaming" sentinel (Google, Ollama).
-// Anything else must conform to { text: string, usage: object|null }.
+// ── Return-shape contract: stream() — null is "no native streaming" only ────
+//
+// AI-002 lock-in: the `null` return value from `stream()` is RESERVED as a
+// "this adapter has no native streaming support" sentinel. Adapters MUST
+// throw on transient errors, not return null — otherwise the orchestrator at
+// `index.js#streamText` cannot distinguish a network failure from a
+// no-streaming-support fallback, and a future bug-author who writes
+// `catch (e) { return null }` inside the openai adapter would silently
+// degrade real errors into fallbacks.
+//
+// Whitelist: google + ollama (no streaming SDK in this codebase).
+// Blocklist: anthropic + openai (must always throw on errors, never null).
+const STREAM_NULL_ALLOWED = new Set(["google", "ollama"]);
+
 for (const [name, adapter] of Object.entries(adapters)) {
-  test(`${name}.stream() returns null OR { text, usage }`, async () => {
-    // Stub-mode adapters skip the SDK call. For adapters that don't have a
-    // stub path yet, we just assert the function exists (handled above) and
-    // skip shape assertion — better than no test.
-    if (name === "google" || name === "ollama") {
+  test(`${name}.stream() — null sentinel is whitelisted to google + ollama only`, async () => {
+    if (STREAM_NULL_ALLOWED.has(name)) {
       const res = await adapter.stream();
-      assert.equal(res, null, `${name}.stream() must return null (no native streaming)`);
+      assert.equal(res, null, `${name}.stream() must return null (no native streaming sentinel)`);
+    } else {
+      // Anthropic / OpenAI adapters must NOT short-circuit to null — calling
+      // `stream()` with no args triggers a real SDK call which will throw on
+      // missing apiKey/messages. Either outcome (throw or `{text, usage}`) is
+      // contract-conformant; a `null` return is a contract violation.
+      let result;
+      let threw = false;
+      try {
+        result = await adapter.stream({}, () => {});
+      } catch {
+        threw = true;
+      }
+      assert.ok(
+        threw || (result !== null && typeof result === "object"),
+        `${name}.stream() must throw on errors or return { text, usage } — never null. Got: ${JSON.stringify(result)}`,
+      );
     }
   });
 }
 
-// ── Return-shape contract: generateVision() must return { text, usage } or null ─
+// ── Return-shape contract: generateVision() — null sentinel for non-vision ──
+// Same null-sentinel discipline as stream(): only ollama returns null
+// (no vision support); the others must throw on errors.
 for (const [name, adapter] of Object.entries(adapters)) {
-  test(`${name}.generateVision() returns null OR { text, usage }`, async () => {
+  test(`${name}.generateVision() — null sentinel is whitelisted to ollama only`, async () => {
     if (name === "ollama") {
       const res = await adapter.generateVision();
       assert.equal(res, null, "ollama.generateVision() must return null (no vision support)");
     }
   });
 }
+
+// ── AI-002: responseFormat threading (no rename — adapters may still read
+// `useJson` for backwards compat, but `responseFormat` must reach them)
+// Verifies `buildAdapterOpts` propagates the new string-typed contract so
+// AI-005's `json_schema` mode can land without changing the adapter shape.
+test("dispatcher buildAdapterOpts threads responseFormat as a string", async () => {
+  const { buildAdapterOpts } = await import("../src/aiProvider/dispatcher.js");
+  const messages = { system: null, user: "hi", combined: "hi" };
+  // Each format value lands on the opts bag verbatim.
+  for (const fmt of ["text", "json_object", "json_schema"]) {
+    const opts = buildAdapterOpts("anthropic", messages, 100, undefined, fmt);
+    assert.equal(opts.responseFormat, fmt, `responseFormat=${fmt} must round-trip on the opts bag`);
+    // Backwards-compat: useJson is derived as boolean for legacy adapters.
+    assert.equal(opts.useJson, fmt !== "text", `useJson must mirror responseFormat !== "text" for ${fmt}`);
+  }
+  // Default when caller passes nothing: legacy pipeline contract preserved.
+  const opts = buildAdapterOpts("anthropic", messages, 100);
+  assert.equal(opts.responseFormat, "json_object", "default responseFormat must be json_object (legacy contract)");
+  assert.equal(opts.useJson, true, "default useJson must be true (legacy contract)");
+});
