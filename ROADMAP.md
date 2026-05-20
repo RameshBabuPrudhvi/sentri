@@ -1111,7 +1111,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |
 | Differentiators | 22 | 16 | 0 | 6 | DIF-002c, 008, 009, 010, 012, 015c (sub-gaps 2–6) |
-| Autonomous Intelligence | 29 | 21 | 0 | 8 | AUTO-011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015; AUTO-009 ✅ shipped in PR #19 — follow-ups 009b/c/d/e/f/g/h/i/j tracked separately) |
+| Autonomous Intelligence | 29 | 21 | 0 | 8 | AUTO-011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015; AUTO-009 ✅ shipped in PR #19 incl. all follow-ups 009b/c/d/e/f/g/h/i/j/k) |
 | Capabilities | 4 | 4 | 0 | 0 | — |
 | Process automation | 1 | 1 | 0 | 0 | — |
 | Maintenance | 17 | 5 | 0 | 12 | MNT-001/002/003 (narrowed)/004/005/008/012/013/014/015/016/017 |

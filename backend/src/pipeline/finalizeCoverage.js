@@ -245,9 +245,11 @@ export async function aggregateShardCoverage(project, results) {
  *
  * Source-map resolution: this merge stage operates on bundle-coordinate
  * data. The shard helper deliberately runs without a resolver so each
- * shard's payload is compact; v1 ships with bundleUrl-labelled
- * `topUncoveredFiles[]`. Future AUTO-009k.2 can re-run resolution at the
- * finalizer if the operator needs original-source coordinates.
+ * shard's payload is compact. `topUncoveredFiles[]` entries use bundleUrl
+ * labels (not original-source paths) on the merge path; the single-process
+ * path resolves to original-source paths via the resolver. Coverage
+ * numbers (pct, covered/total) are identical on both paths — only the
+ * display labels differ.
  *
  * @param {Array<Object>} shardSummaries - Sparse per-shard payloads.
  * @returns {Object|null} `coverageSummary` shape, or null when no shard
@@ -452,8 +454,8 @@ function _finalizeMergedSummary({ bundleAcc, sbfAcc, sbfHasData, sourceAcc, real
   // ── sourceMapStatus ──────────────────────────────────────────────────
   // Merge path doesn't run the resolver, so the status defaults to
   // "fallback" — matches the single-pass aggregator's output when no
-  // resolver is supplied. AUTO-009k.2 may re-resolve at the finalizer
-  // for original-source labels in topUncoveredFiles.
+  // resolver is supplied. topUncoveredFiles[] entries use bundleUrl labels
+  // on this path; coverage numbers are identical to the resolved path.
   return {
     totalLines,
     coveredLines,
