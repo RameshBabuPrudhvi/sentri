@@ -117,20 +117,30 @@ export async function resolveSourceMap(bundleUrl, { sourcemapBaseUrl } = {}) {
     const mapUrl = deriveMapUrl(bundleUrl, sourcemapBaseUrl);
     if (!mapUrl) return null;
 
-    // SSRF: validate before fetch. Reject loopback / private / metadata IPs.
-    const ssrfErr = await validateUrl(mapUrl);
-    if (ssrfErr) {
-      console.warn(formatLogLine("warn", null, `[sourceMapResolver] SSRF rejected ${mapUrl}: ${ssrfErr}`));
-      return null;
-    }
-
-    // Cache lookup uses bundleUrl as the primary key; we don't know the etag
-    // until after we've HEAD/GET'd. Try an etag-less hit first for cheap reuse.
+    // Cache probe runs BEFORE the SSRF validation so cache hits avoid the
+    // async DNS resolution cost (`validateUrl` does network DNS lookups
+    // on every call — see `utils/ssrfGuard.js`). The resolver is called
+    // once per unique bundle URL per test, so cache hits dominate steady
+    // state and paying DNS on each one would defeat the LRU cache's
+    // stated 1× fetch budget. The probe is a pure Map lookup — safe to
+    // run before any validation. The fetch path below still runs SSRF
+    // validation before any network I/O, so an attacker-controlled
+    // `sourcemapBaseUrl` cannot probe internal addresses through this
+    // resolver. DNS rebinding between PATCH and runtime is mitigated by
+    // `safeFetch` itself (re-resolves DNS, blocks redirects to internal).
     const probeKey = cacheKey(bundleUrl, null);
     const probe = cache.get(probeKey);
     if (probe && probe.expiresAt > Date.now()) {
       touch(probeKey, probe);
       return probe.consumer;
+    }
+
+    // SSRF: validate before fetch. Reject loopback / private / metadata IPs.
+    // Only runs on cache miss so steady-state cache hits stay free.
+    const ssrfErr = await validateUrl(mapUrl);
+    if (ssrfErr) {
+      console.warn(formatLogLine("warn", null, `[sourceMapResolver] SSRF rejected ${mapUrl}: ${ssrfErr}`));
+      return null;
     }
 
     const res = await safeFetch(mapUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });

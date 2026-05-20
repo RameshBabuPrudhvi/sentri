@@ -424,24 +424,62 @@ router.get("/dashboard", async (req, res) => {
   // AUTO-009 — dedicated lean read for coverage trend. `getRunsWithCoverage`
   // selects only `id, projectId, startedAt, type, coverageSummary` so the
   // potentially-multi-KB summary blob doesn't bloat `LEAN_COLS` for every
-  // dashboard read. Returns chronological order already.
+  // dashboard read. Returns chronological order already (newest last).
+  //
+  // Trend semantics:
+  //   - **Real 30-day date filter** anchored at `now - 30 days`. The
+  //     `windowDays: 30` label on the response is now honest — only points
+  //     within the rolling 30-day window are included. (The previous
+  //     `.slice(-30)` was a count-cap masquerading as a time window: a
+  //     workspace with 100 coverage runs in one day would surface 30 points
+  //     from a single afternoon, mislabelled as "30-day".)
+  //   - **Per-project slice of 30 max points each.** Sparkline is rendered
+  //     per project, so the natural denominator is per project, not global.
+  //     A global `.slice(-30)` evicted quiet projects' history entirely
+  //     when a single busy project produced 30+ coverage runs.
+  //
+  // `COVERAGE_TREND_WINDOW_DAYS` and `COVERAGE_TREND_MAX_PER_PROJECT` match
+  // the dashboard's sparkline density target (one point per coverage-enabled
+  // run, capped so the payload doesn't unbounded on a CI-heavy project).
+  const COVERAGE_TREND_WINDOW_DAYS = 30;
+  const COVERAGE_TREND_MAX_PER_PROJECT = 30;
   const coverageRuns = runRepo.getRunsWithCoverage(projectIds);
   const coverageTrend = (() => {
-    const series = coverageRuns
-      .filter((r) => r.coverageSummary?.coveragePct != null && r.startedAt)
-      .slice(-30)
-      .map((r) => ({
-        date: r.startedAt,
-        projectId: r.projectId,
-        coveragePct: r.coverageSummary.coveragePct,
-        // AUTO-009c — per-metric series so the Dashboard can switch between
-        // line / branch / function sparklines without re-querying. Missing
-        // on pre-AUTO-009c runs; the frontend falls back to coveragePct.
-        statementPct: r.coverageSummary.statementPct ?? null,
-        branchPct:    r.coverageSummary.branchPct    ?? null,
-        functionPct:  r.coverageSummary.functionPct  ?? null,
-      }));
-    return series.length > 0 ? { windowDays: 30, series } : null;
+    const windowCutoff = Date.now() - COVERAGE_TREND_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    // First pass: filter on data validity + date window, group by projectId.
+    // `coverageRuns` is chronological asc, so each per-project bucket also
+    // ends up chronological asc — needed for the .slice(-30) below to keep
+    // the *most recent* 30 per project.
+    const byProject = new Map();
+    for (const r of coverageRuns) {
+      if (r.coverageSummary?.coveragePct == null) continue;
+      if (!r.startedAt) continue;
+      if (new Date(r.startedAt).getTime() < windowCutoff) continue;
+      if (!byProject.has(r.projectId)) byProject.set(r.projectId, []);
+      byProject.get(r.projectId).push(r);
+    }
+    // Second pass: cap per-project series at the max-per-project ceiling,
+    // then flatten + sort by date asc so the frontend's per-project group-by
+    // still works on the flat array.
+    const series = [];
+    for (const projectRuns of byProject.values()) {
+      const capped = projectRuns.slice(-COVERAGE_TREND_MAX_PER_PROJECT);
+      for (const r of capped) {
+        series.push({
+          date: r.startedAt,
+          projectId: r.projectId,
+          coveragePct: r.coverageSummary.coveragePct,
+          // AUTO-009c — per-metric series so the Dashboard can switch between
+          // line / branch / function sparklines without re-querying. Missing
+          // on pre-AUTO-009c runs; the frontend falls back to coveragePct.
+          statementPct: r.coverageSummary.statementPct ?? null,
+          branchPct:    r.coverageSummary.branchPct    ?? null,
+          functionPct:  r.coverageSummary.functionPct  ?? null,
+        });
+      }
+    }
+    series.sort((a, b) => new Date(a.date) - new Date(b.date));
+    return series.length > 0 ? { windowDays: COVERAGE_TREND_WINDOW_DAYS, series } : null;
   })();
 
   // AUTO-009 — latest coverageSummary per project so the Dashboard's
