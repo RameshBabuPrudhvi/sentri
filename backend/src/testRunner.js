@@ -1006,7 +1006,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   let priorRunCoverage = null;
   if (project?.coverageEnabled) {
     try {
-      const history = runRepo.getRunsWithCoverage([project.id]);
+      const history = runRepo.getRunsWithCoverage([project.id], { windowDays: 0, limit: 50 });
       // Newest-last per the accessor's contract; walk backwards skipping
       // the current run id so the lookup is correct even if `save(run)`
       // wrote `run.coverageSummary` to disk between aggregation and gate

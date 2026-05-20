@@ -198,7 +198,23 @@ function stripRawCoverage(results) {
  */
 export async function aggregateShardCoverage(project, results) {
   if (!project?.coverageEnabled) return null;
-  if (!Array.isArray(results) || results.length === 0) return null;
+  // Empty shards (shardCount > tests.length) must return a valid empty
+  // mergeable payload — NOT null. Returning null would cause
+  // `allShardsContributed` in the finalizer to be false, forcing the
+  // AUTO-009f fallback path which is structurally broken after AUTO-009k
+  // strips jsCoverage. An empty payload merges cleanly (contributes zero
+  // lines/statements to the union) and keeps the preferred merge path.
+  if (!Array.isArray(results) || results.length === 0) {
+    return {
+      perBundle: {},
+      sbfPerBundle: {},
+      sbfHasData: false,
+      perSource: {},
+      serverFiles: {},
+      serverLayer: false,
+      perTest: [],
+    };
+  }
   const sutOrigin = (() => {
     try { return new URL(project.url).origin; } catch { return ""; }
   })();

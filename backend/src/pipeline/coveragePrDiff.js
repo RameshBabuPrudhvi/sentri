@@ -92,9 +92,15 @@ export function computePrCoverage({
       filesSkipped++;
       continue;
     }
-    const fileTotalLines = Number(totalLinesByFile?.[file]);
-    const maxLine = Number.isFinite(fileTotalLines) && fileTotalLines > 0
-      ? fileTotalLines : Infinity;
+    // Do NOT clamp PR-claimed lines against totalLinesByFile. The
+    // aggregator's `totalLinesByFile` is max(mappedLine) — the highest
+    // line ever covered — NOT the actual file line count. Clamping against
+    // it silently drops every PR-changed line past the highest covered
+    // line, making uncovered tails (the most common shape of "untested
+    // change") report as 100% covered. Codecov does not clamp. A PR
+    // adding lines 100-110 to a file where the highest covered line is 50
+    // must report those 10 lines as uncovered, not drop them.
+    const maxLine = Infinity;
     let fileChanged = 0;
     let fileCovered = 0;
     const fileUncovered = [];

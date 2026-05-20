@@ -807,17 +807,21 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
       }
     }
   } else {
-    // AUTO-009f fallback path — re-aggregate from raw `runs.results`. Same
-    // call used by the single-process tail in `testRunner.js`. PR diff is
-    // computed inline by `finalizeCoverage` and lifted onto the summary;
-    // we then strip it off so the persisted `coverageSummary` shape stays
-    // consistent with the merge path.
+    // AUTO-009f fallback path — re-aggregate from raw `runs.results`. The
+    // DB column retains raw jsCoverage because `appendRunResults` persisted
+    // each result per-test during execution (before the shard-tail strip
+    // which only affected the in-memory array). So this path is correct:
+    // the fresh `runRepo.getById(runId).results` at line 673 carries the
+    // full raw payloads for every shard that executed tests. The strip at
+    // testRunner.js:944 is purely an in-memory optimization that doesn't
+    // affect the DB column.
+    const fallbackReason = !persistedSummaries ? "no_persisted_summaries"
+      : persistedSummaries.length < shardCount ? "incomplete_shard_coverage"
+      : "shard_payload_invalid";
     structuredLog("coverage.merge_path", {
       runId, shardCount,
       source: "raw_results_fallback",
-      reason: !persistedSummaries ? "no_persisted_summaries"
-        : persistedSummaries.length < shardCount ? "incomplete_shard_coverage"
-        : "shard_payload_invalid",
+      reason: fallbackReason,
     });
     run.coverageSummary = await finalizeCoverage(project, results, {
       changedFileRanges: run.changedFileRanges || null,
@@ -840,7 +844,7 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
   let priorRunCoverage = null;
   if (project?.coverageEnabled) {
     try {
-      const history = runRepo.getRunsWithCoverage([project.id]);
+      const history = runRepo.getRunsWithCoverage([project.id], { windowDays: 0, limit: 50 });
       for (let i = history.length - 1; i >= 0; i--) {
         if (history[i].id !== run.id && history[i].coverageSummary) {
           priorRunCoverage = history[i].coverageSummary;
