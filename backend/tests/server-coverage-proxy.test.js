@@ -126,6 +126,51 @@ await (async () => {
 })();
 
 await (async () => {
+  // AUTO-009h hardening — trailing-slash normalisation on the prefix
+  // allowlist. `COVERAGE_FILE_PATH_PREFIX=/var/coverage/` MUST behave
+  // identically to `COVERAGE_FILE_PATH_PREFIX=/var/coverage` so operators
+  // don't accidentally lock themselves out by including a trailing slash
+  // (a common config-file/.env convention).
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sentri-cov-trail-"));
+  const safeFile = path.join(dir, "coverage.json");
+  await fs.writeFile(safeFile, JSON.stringify(FAKE_COVERAGE), "utf-8");
+  const originalPrefix = process.env.COVERAGE_FILE_PATH_PREFIX;
+  try {
+    process.env.COVERAGE_FILE_PATH_PREFIX = dir + "/";  // explicit trailing slash
+    const allowed = await snapshotServerCoverage(`file://${safeFile}`);
+    assert.ok(allowed, "trailing-slash prefix still matches subpaths");
+  } finally {
+    if (originalPrefix === undefined) delete process.env.COVERAGE_FILE_PATH_PREFIX;
+    else process.env.COVERAGE_FILE_PATH_PREFIX = originalPrefix;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+})();
+
+await (async () => {
+  // AUTO-009h hardening — prefix boundary check. A path like
+  // `/var/coverage-other/leak.json` MUST NOT match the prefix
+  // `/var/coverage` (the dash-suffixed sibling directory is a different
+  // sandbox). The `path === prefix || path.startsWith(prefix + "/")`
+  // check exists exactly to enforce this directory boundary.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sentri-cov-bound-"));
+  const siblingDir = dir + "-other";
+  await fs.mkdir(siblingDir);
+  const siblingFile = path.join(siblingDir, "leak.json");
+  await fs.writeFile(siblingFile, JSON.stringify(FAKE_COVERAGE), "utf-8");
+  const originalPrefix = process.env.COVERAGE_FILE_PATH_PREFIX;
+  try {
+    process.env.COVERAGE_FILE_PATH_PREFIX = dir; // sandbox = dir, NOT dir-other
+    const blocked = await snapshotServerCoverage(`file://${siblingFile}`);
+    assert.equal(blocked, null, "sibling directory NOT matched by prefix");
+  } finally {
+    if (originalPrefix === undefined) delete process.env.COVERAGE_FILE_PATH_PREFIX;
+    else process.env.COVERAGE_FILE_PATH_PREFIX = originalPrefix;
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(siblingDir, { recursive: true, force: true });
+  }
+})();
+
+await (async () => {
   // diffServerCoverage — `after` exercises stmt 1 and arm 1 that were 0
   // in `before`. Result should report `addedStatements: 1`,
   // `addedBranches: 1`, `addedFunctions: 0`.

@@ -1272,15 +1272,37 @@ export function restore(id) {
  * @returns {number} Number of runs restored.
  */
 /**
- * AUTO-009j — Retention sweep: null out `coverageSummary` and
- * `prCoverageDiff` on runs older than `days` days. Preserves the
- * lightweight `coveragePct` in the dashboard trend via
- * `getRunsWithCoverage` (which reads the column before this sweep
- * clears it — the trend query's `IS NOT NULL` filter means cleared
- * rows drop out of the trend naturally on the next dashboard load).
+ * AUTO-009j — Retention sweep: null out every coverage-related JSON column
+ * on runs older than `days` days. Preserves the lightweight `coveragePct`
+ * in the dashboard trend via `getRunsWithCoverage` (which reads the column
+ * before this sweep clears it — the trend query's `IS NOT NULL` filter
+ * means cleared rows drop out of the trend naturally on the next dashboard
+ * load).
  *
- * Returns the number of rows cleared. Best-effort — a failure must
- * never block the scheduler.
+ * ### Columns cleared
+ *
+ * - `coverageSummary` (migration 038) — the public aggregate (multi-KB JSON
+ *   carrying `perTest[]` + `topUncoveredFiles[]`).
+ * - `prCoverageDiff` (migration 044) — PR-scoped coverage diff
+ *   (`uncoveredChangedLines[]` capped at 200, but still per-file rows).
+ * - `shardCoverageSummaries` (migration 042) — per-shard mergeable
+ *   pre-aggregated payloads (per-bundle covered-id arrays, per-source line
+ *   arrays, server diffs). Tens-of-MB on large-bundle SUTs × N shards;
+ *   ONLY read by `finalizeShardedRun` so safe to purge once the run is
+ *   terminal. Previously left behind → storage-leak bug surfaced by
+ *   Lifeguard ANALYSIS-0001 (`backend/src/database/repositories/runRepo.js:1293`).
+ * - `changedFileRanges` (migration 044) — PR diff hunk ranges. ONLY read
+ *   by `finalizeCoverage` during the post-run tail; never read again
+ *   after the run completes. Same storage-leak rationale.
+ *
+ * The `WHERE coverageSummary IS NOT NULL` predicate keeps the sweep
+ * indexable on the most common column (coverage-enabled runs always have
+ * a non-null summary if AUTO-009f / AUTO-009k landed); we also clear
+ * `shardCoverageSummaries` / `changedFileRanges` on the same row whether
+ * or not THEY are non-null, which is cheap (idempotent UPDATE to NULL).
+ *
+ * Returns the number of rows cleared. Best-effort — a failure must never
+ * block the scheduler.
  *
  * @param {number} days
  * @returns {number}
@@ -1292,7 +1314,9 @@ export function purgeCoverageSummaryOlderThan(days) {
   const info = db.prepare(
     `UPDATE runs
         SET coverageSummary = NULL,
-            prCoverageDiff = NULL
+            prCoverageDiff = NULL,
+            shardCoverageSummaries = NULL,
+            changedFileRanges = NULL
       WHERE coverageSummary IS NOT NULL
         AND startedAt < ?
         AND deletedAt IS NULL`

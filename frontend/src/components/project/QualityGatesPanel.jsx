@@ -50,7 +50,7 @@ const FIELDS = [
     help: "Minimum coverage for PR-touched files. Currently aliases overall coverage until AUTO-009e ships the PR-files filter. 0–100.",
     min: 0, max: 100, step: "0.1" },
   { key: "maxCoverageRegressionPct", label: "Max coverage regression (%)",
-    help: "Run fails when coverage drops more than this versus the previous coverage-enabled run. 0 disables; first coverage run never regresses. 0–100.",
+    help: "Run fails when coverage drops MORE than this versus the previous coverage-enabled run. Leave blank to disable — 0 means 'fail on ANY drop' (strictest). First coverage-enabled run never regresses (no prior to compare). 0–100.",
     min: 0, max: 100, step: "0.1" },
 ];
 

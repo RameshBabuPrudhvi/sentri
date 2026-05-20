@@ -43,6 +43,7 @@ import { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } from
 import { clusterFailures } from "../pipeline/failureClusterer.js"; // AUTO-010 — sharded-run parity with single-process tail in testRunner.js
 import { finalizeCoverage, mergeShardSummaries } from "../pipeline/finalizeCoverage.js"; // AUTO-009f sharded parity + AUTO-009k set-union merge over per-shard pre-aggregated summaries.
 import { computePrCoverage } from "../pipeline/coveragePrDiff.js"; // AUTO-009k — PR-scoped diff at the merge path (per-source line sets come from mergeShardSummaries' accumulator state).
+import { resolveSourceMap, mapBundleLine } from "../pipeline/sourceMapResolver.js"; // AUTO-009k PR-diff fix — bridge bundle URLs to original source paths at the merge stage.
 import { detectCoverageRegression, fireCoverageRegressionAlert } from "../pipeline/coverageRegressionDetector.js"; // AUTO-009i — sharded-run parity for coverage regression alerting.
 import { trackTelemetry } from "../utils/telemetry.js";
 import { safeFetch } from "../utils/ssrfGuard.js"; // CAP-002 Phase 2 — trigger-path callbackUrl POST from sharded finalizer.
@@ -729,21 +730,67 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     run.coverageSummary = mergeShardSummaries(persistedSummaries.slice(0, shardCount));
 
     // AUTO-009d — PR-scoped diff over merged per-source line sets. Each
-    // shard's `perSource` slot carries per-bundle covered-line arrays;
-    // mergeShardSummaries union-ed them into the merged summary's
-    // bookkeeping but doesn't expose the resulting line sets. Reconstruct
-    // here for the PR diff filter — same shape `computePrCoverage`
-    // expects (`{ [file]: Set<lineNum> }`).
+    // shard's `perSource` slot carries per-bundle covered-line ARRAYS keyed
+    // by **bundle URL** (e.g. `https://app.example.com/main.js`) because
+    // `aggregateShardCoverage` deliberately runs without a source-map
+    // resolver to keep per-shard payloads compact. `changedFileRanges` is
+    // keyed by **source path** from the PR (e.g. `src/Cart.tsx`), so a
+    // naive intersection would silently match zero files on every sharded
+    // PR run → `minPrCoveragePct` gate becomes dormant.
+    //
+    // Fix: resolve every per-bundle covered line through the project's
+    // `sourcemapBaseUrl` resolver at the merge stage, exactly once per
+    // shard (NOT once per shard × per-test — the work was already done
+    // per-bundle in each shard, we just translate bundle→source coordinates
+    // here). When no resolver is configured / available, the per-source
+    // line set still gets the original bundle URL as its key — same
+    // degradation as the single-process path when the operator has no
+    // sourcemapBaseUrl. AUTO-009k.2 follow-up if we ever want to skip the
+    // resolver call entirely when changedFileRanges is empty.
     if (run.coverageSummary && run.changedFileRanges) {
       try {
+        const sourcemapBaseUrl = project?.sourcemapBaseUrl || null;
         const coveredLinesByFile = {};
         const totalLinesByFile = {};
+        // Cache consumers per-bundle so N shards covering the same bundle
+        // only fetch + parse the .map file once per merge. The resolver
+        // itself has an LRU cache (10MB / 1h TTL) so repeated runs across
+        // dashboard loads also stay cheap.
+        const consumerCache = new Map();
         for (const shard of persistedSummaries.slice(0, shardCount)) {
           const perSource = shard?.perSource || {};
-          for (const [file, slot] of Object.entries(perSource)) {
-            if (!coveredLinesByFile[file]) coveredLinesByFile[file] = new Set();
-            for (const ln of (slot.coveredLines || [])) coveredLinesByFile[file].add(ln);
-            totalLinesByFile[file] = Math.max(totalLinesByFile[file] || 0, slot.totalLines || 0);
+          for (const [bundleUrl, slot] of Object.entries(perSource)) {
+            let consumer = consumerCache.get(bundleUrl);
+            if (consumer === undefined) {
+              try {
+                consumer = await resolveSourceMap(bundleUrl, { sourcemapBaseUrl });
+              } catch { consumer = null; }
+              consumerCache.set(bundleUrl, consumer);
+            }
+            for (const ln of (slot.coveredLines || [])) {
+              // Map (bundleUrl, ln) → (sourcePath, sourceLine). Falls back
+              // to (bundleUrl, ln) when the resolver can't translate the
+              // line — degrades cleanly to the pre-fix behaviour for that
+              // specific line rather than dropping it entirely.
+              let sourceKey = bundleUrl;
+              let sourceLine = ln;
+              if (consumer) {
+                const mapped = mapBundleLine(consumer, ln);
+                if (mapped?.source) {
+                  sourceKey = mapped.source;
+                  sourceLine = mapped.line;
+                }
+              }
+              if (!coveredLinesByFile[sourceKey]) coveredLinesByFile[sourceKey] = new Set();
+              coveredLinesByFile[sourceKey].add(sourceLine);
+              // Track the file's max line so `computePrCoverage` can
+              // clamp PR-claimed lines past the executed file's range.
+              // `slot.totalLines` is in bundle coordinates; the per-source
+              // total is approximated by the highest mapped line.
+              if ((totalLinesByFile[sourceKey] || 0) < sourceLine) {
+                totalLinesByFile[sourceKey] = sourceLine;
+              }
+            }
           }
         }
         const prDiff = computePrCoverage({

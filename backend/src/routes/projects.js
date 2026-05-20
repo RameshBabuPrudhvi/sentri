@@ -444,10 +444,15 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
         // pre-fix behaviour (any absolute path accepted). When set, the
         // path must start with one of the comma-separated prefixes —
         // e.g. `COVERAGE_FILE_PATH_PREFIX=/var/coverage,/srv/sentri/cov`
-        // restricts reads to those two sandbox directories.
+        // restricts reads to those two sandbox directories. Trailing
+        // slashes on operator-supplied prefixes are stripped so
+        // `/var/coverage` and `/var/coverage/` behave identically —
+        // mirrors the runtime check in `serverCoverageProxy.js`.
         const prefixEnv = process.env.COVERAGE_FILE_PATH_PREFIX;
         if (prefixEnv && prefixEnv.trim()) {
-          const allowed = prefixEnv.split(",").map((p) => p.trim()).filter(Boolean);
+          const allowed = prefixEnv.split(",")
+            .map((p) => p.trim().replace(/\/+$/, ""))
+            .filter(Boolean);
           const matched = allowed.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
           if (!matched) {
             return res.status(400).json({ error: `serverCoverageEndpoint: file:// path must start with one of: ${allowed.join(", ")} (set via COVERAGE_FILE_PATH_PREFIX).` });

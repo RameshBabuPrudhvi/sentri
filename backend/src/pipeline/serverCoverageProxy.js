@@ -70,7 +70,14 @@ function validateFilePathSafety(path) {
   if (path.split("/").some((seg) => seg === "..")) return "must not contain '..' segments";
   const prefixEnv = process.env.COVERAGE_FILE_PATH_PREFIX;
   if (prefixEnv && prefixEnv.trim()) {
-    const allowed = prefixEnv.split(",").map((p) => p.trim()).filter(Boolean);
+    // Strip trailing slashes from operator-supplied prefixes so
+    // `COVERAGE_FILE_PATH_PREFIX=/var/coverage/` and `/var/coverage`
+    // behave identically. Without this, the trailing-slash form would
+    // build a `/var/coverage//` boundary check that never matches a
+    // real path (operators expect either form to work).
+    const allowed = prefixEnv.split(",")
+      .map((p) => p.trim().replace(/\/+$/, ""))
+      .filter(Boolean);
     const matched = allowed.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
     if (!matched) return `must start with one of: ${allowed.join(", ")}`;
   }
