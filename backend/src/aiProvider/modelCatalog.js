@@ -1,15 +1,22 @@
 /**
  * @module aiProvider/modelCatalog
- * @description Static provider metadata + capability flags. No mutable state,
- * no SDK imports — pure data + tiny helpers. The orchestrator (`index.js`)
- * and the state owner (`registry.js`) both consume this module; this file
- * does NOT import from either, which keeps the dependency graph acyclic.
+ * @description Static provider metadata + capability flags + AI-003 per-model
+ * pricing. No mutable state, no imports from any sibling module — pure leaf
+ * data + tiny helpers.
  *
- * Future AI-003 (capability hardening) extends `CAPABILITIES` with
- * `costPer1kInput` / `costPer1kOutput` / `contextWindow` so a planner agent
- * (AI-005) can pick a model for a given pipeline stage without hard-coding.
+ * Dependency graph (acyclic, modelCatalog is a leaf):
+ *   modelCatalog.js  ← (no sibling imports)
+ *   registry.js      → modelCatalog.js
+ *   providerInfo.js  → modelCatalog.js + registry.js (+ owns getModelCatalog)
+ *   dispatcher.js    → modelCatalog.js + registry.js + providerInfo.js
+ *   vision.js        → providerInfo.js + dispatcher.js + modelCatalog.js
+ *   index.js         → all of the above (barrel + generateText/streamText)
+ *
+ * `getModelCatalog()` (which combines per-provider runtime metadata with
+ * pricing) lives in providerInfo.js so this file stays a leaf — pure-
+ * arithmetic tests like `ai-provider-cost-tracking.test.js` import only
+ * this module and pull zero SDK / DB / metrics dependencies.
  */
-import { getSupportedProviders as _getSupportedProviders } from "./index.js";
 
 // ── Cloud provider env-var map ───────────────────────────────────────────────
 // Single source of truth shared by registry.js and the orchestrator.
@@ -199,30 +206,7 @@ export function getCloudName(provider) {
   return model !== cfg.fallback ? model : cfg.name;
 }
 
-/**
- * Returns a `{ providerId → { model, name, supportsVision, supportsJsonMode,
- * supportsStreaming, contextWindow, maxOutputTokens, pricing } }` map for
- * every supported provider. Built from `getSupportedProviders()` (the
- * orchestrator's authoritative list, which includes runtime compat slots)
- * so it stays in sync with detection. The planner agent (AI-005) reads
- * this to pick a model for a given pipeline stage without hard-coding.
- */
-export function getModelCatalog() {
-  const providers = _getSupportedProviders();
-  return providers.reduce((acc, p) => {
-    const caps = capabilitiesFor(p.id);
-    acc[p.id] = {
-      model: p.model,
-      name: p.name,
-      supportsVision: caps.supportsVision && VISION_CAPABLE_MODELS.has(p.model),
-      supportsJsonMode: caps.supportsJsonMode,
-      supportsStreaming: caps.supportsStreaming,
-      contextWindow: caps.contextWindow,
-      maxOutputTokens: caps.maxOutputTokens,
-      pricing: pricingFor(p.model),
-    };
-    return acc;
-  }, {});
-}
-
-export { _getSupportedProviders as getSupportedProviders };
+// `getModelCatalog()` (combines per-provider runtime metadata with this
+// catalog's pricing + capabilities) lives in `providerInfo.js` — that file
+// already imports from this leaf module, so co-locating the combiner there
+// keeps modelCatalog.js a pure-data leaf with zero sibling imports.

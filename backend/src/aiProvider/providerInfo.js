@@ -20,8 +20,11 @@ import {
 import {
   CLOUD_KEY_MAP,
   PROVIDER_DOCS,
+  VISION_CAPABLE_MODELS,
+  capabilitiesFor,
   getCloudModel,
   getCloudName,
+  pricingFor,
 } from "./modelCatalog.js";
 
 // ── Provider metadata ─────────────────────────────────────────────────────────
@@ -73,6 +76,36 @@ export function getSupportedProviders() {
     model: m.model,
     docsUrl: PROVIDER_DOCS[id] || "",
   }));
+}
+
+/**
+ * AI-003 — Returns a `{ providerId → { model, name, supportsVision,
+ * supportsJsonMode, supportsStreaming, contextWindow, maxOutputTokens,
+ * pricing } }` map for every supported provider. Combines runtime
+ * detection (from `getSupportedProviders()`) with the static capability +
+ * pricing catalog. The planner agent (AI-005) reads this to pick a model
+ * for a given pipeline stage without hard-coding.
+ *
+ * Lives in providerInfo.js (not modelCatalog.js) so the catalog stays a
+ * pure-data leaf — pure-arithmetic tests can import modelCatalog.js
+ * without pulling apiKeyRepo / registry / metrics through this combiner.
+ */
+export function getModelCatalog() {
+  const providers = getSupportedProviders();
+  return providers.reduce((acc, p) => {
+    const caps = capabilitiesFor(p.id);
+    acc[p.id] = {
+      model: p.model,
+      name: p.name,
+      supportsVision: caps.supportsVision && VISION_CAPABLE_MODELS.has(p.model),
+      supportsJsonMode: caps.supportsJsonMode,
+      supportsStreaming: caps.supportsStreaming,
+      contextWindow: caps.contextWindow,
+      maxOutputTokens: caps.maxOutputTokens,
+      pricing: pricingFor(p.model),
+    };
+    return acc;
+  }, {});
 }
 
 // ── Provider detection (delegates to registry.js) ───────────────────────────
