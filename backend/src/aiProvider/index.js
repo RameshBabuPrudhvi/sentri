@@ -37,7 +37,6 @@ import {
   recordProviderFailure,
   recordProviderSuccess,
   detectProvider,
-  resolveProvider,
   getFallbackProviders,
   loadKeysFromDatabase,
   STICKY_FALLBACK_TTL_MS,
@@ -66,6 +65,7 @@ import {
   buildAdapterOpts,
   recordAiTokens,
   callProvider,
+  resolveAgentCall,
 } from "./dispatcher.js";
 
 // Re-export the full public API so external callers that import from
@@ -118,21 +118,14 @@ export { resolveVisionModel, hasVisionProvider, callVisionModel } from "./vision
  * @throws {Error} If no AI provider is configured or all providers fail.
  */
 export async function generateText(prompt, options) {
-  const agentRole = options?.agentRole || null;
-  const workspaceId = options?.workspaceId || null;
-  // AI-005c: `effectiveAgentRole` is the role used for breaker / sticky /
-  // metrics keying. When `resolveProvider` returns `effectiveAgentRole: null`
-  // (single-agent fallback path — no `agent_configs` row for the workspace),
-  // all downstream state keys collapse to the bare `provider` key,
-  // preserving pre-AI-005 single-agent behaviour: ONE breaker per provider,
-  // shared across stages, so a 429 on stage 1 immediately diverts every
-  // subsequent stage in the same pipeline run to the sticky fallback —
-  // exactly the pre-AI-005 wasted-call profile. The original `agentRole`
-  // is still forwarded to `callProvider` for OTel span attribution + the
-  // metric label so per-stage observability works without changing the
-  // underlying breaker behaviour. Multi-agent mode (agent_configs rows
-  // present) keeps full per-(provider, role) isolation as the spec requires.
-  const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
+  // AI-005 — `resolveAgentCall` is the single source of truth for per-role
+  // call resolution: it produces the concrete `provider`, the AI-005c
+  // `effectiveAgentRole` for breaker / sticky keys (null for single-agent),
+  // the `effectivePrompt` with any `systemPromptOverride` applied, the
+  // `maxTokens` precedence, and the `callOpts` carrying the original
+  // `agentRole` for OTel + metric labels. See `dispatcher.js#resolveAgentCall`.
+  const { provider, effectiveAgentRole, effectivePrompt, maxTokens, callOpts } =
+    resolveAgentCall(prompt, options);
   if (!provider) {
     throw new Error(
       "No AI provider configured. Options:\n" +
@@ -144,10 +137,7 @@ export async function generateText(prompt, options) {
 
   // ── FEA-003: Try primary provider, then fall back on rate-limit OR transient 5xx errors ──
   try {
-    const effectivePrompt = (config?.systemPromptOverride && typeof prompt === "string")
-      ? { system: config.systemPromptOverride, user: prompt }
-      : prompt;
-    const result = await callProvider(provider, effectivePrompt, config?.maxTokens || options?.maxTokens, options?.signal, options?.responseFormat, { agentRole });
+    const result = await callProvider(provider, effectivePrompt, maxTokens, options?.signal, options?.responseFormat, callOpts);
     recordProviderSuccess(provider, effectiveAgentRole);
     return result;
   } catch (err) {
@@ -179,7 +169,7 @@ export async function generateText(prompt, options) {
     for (const fallbackProvider of fallbacks) {
       console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} — falling back to ${fallbackProvider}`));
       try {
-        const result = await callProvider(fallbackProvider, effectivePrompt, config?.maxTokens || options?.maxTokens, options?.signal, options?.responseFormat, { agentRole });
+        const result = await callProvider(fallbackProvider, effectivePrompt, maxTokens, options?.signal, options?.responseFormat, callOpts);
         recordProviderSuccess(fallbackProvider, effectiveAgentRole);
         // ── Sticky fallback: pin this provider so subsequent calls in the same
         // pipeline skip the failing primary entirely. Expires after
@@ -257,23 +247,19 @@ export function parseJSON(text) {
  * @throws {Error} If no AI provider is configured.
  */
 export async function streamText(promptOrMessages, onToken, options = {}) {
-  // AI-005: thread agentRole + workspaceId so per-role provider configs,
-  // sticky-fallback isolation, and metric labels apply to the streaming
-  // path on parity with generateText().
-  // AI-005c: `effectiveAgentRole` mirrors the generateText semantics —
-  // null when no `agent_configs` row exists, so single-agent workspaces
-  // collapse to the bare-provider state key path.
+  // AI-005 — `resolveAgentCall` produces the same shape for the streaming
+  // path as for `generateText` so per-role provider configs, sticky-fallback
+  // isolation, metric labels, and the AI-005c single-agent collapse rule
+  // stay in sync. The fallback path (when streaming fails before any tokens
+  // are emitted) delegates to `generateText` which calls `resolveAgentCall`
+  // a second time — accepted cost since both calls are pure-functional and
+  // identical, and a second resolution catches any agent_configs row that
+  // landed between the stream attempt and the fallback retry.
   const agentRole = options?.agentRole || null;
-  const workspaceId = options?.workspaceId || null;
-  const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
+  const { provider, effectiveAgentRole, effectivePrompt } =
+    resolveAgentCall(promptOrMessages, options);
   if (!provider) throw new Error("No AI provider configured.");
   const { signal, responseFormat } = options;
-  // Apply the agent-config systemPromptOverride when the caller passed a
-  // plain-string prompt — mirrors the generateText() effectivePrompt logic
-  // so streaming callers get the same workspace-configured system prompt.
-  const effectivePrompt = (config?.systemPromptOverride && typeof promptOrMessages === "string")
-    ? { system: config.systemPromptOverride, user: promptOrMessages }
-    : promptOrMessages;
   const messages = normaliseMessages(effectivePrompt);
 
   // Wrap onToken so we can detect whether any tokens were emitted before a
@@ -300,7 +286,10 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
     const opts = buildAdapterOpts(provider, messages, options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, responseFormat);
     const res = await adapter.stream(opts, wrappedOnToken);
     if (res !== null) {
-      if (res?.usage) recordAiTokens(provider, res.usage, "generation", agentRole || "default");
+      // `recordAiTokens`'s signature defaults agentRole to `"default"`, so
+      // pass the original `agentRole` directly — null collapses to the
+      // signature default at the function boundary, single source of truth.
+      if (res?.usage) recordAiTokens(provider, res.usage, "generation", agentRole);
       return res?.text ?? "";
     }
   } catch (err) {

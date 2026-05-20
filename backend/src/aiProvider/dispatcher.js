@@ -11,7 +11,7 @@ import * as openaiAdapter from "./adapters/openai.js";
 import * as googleAdapter from "./adapters/google.js";
 import * as ollamaAdapter from "./adapters/ollama.js";
 import { isRateLimitError, isRetryableError, MAX_RETRIES } from "./retry.js";
-import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel } from "./registry.js";
+import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel, resolveProvider } from "./registry.js";
 import {
   aiProviderLatencySeconds,
   aiProviderTokensTotal,
@@ -185,6 +185,72 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, response
   throw new Error(`Unknown provider: ${provider}`);
 }
 
+// ── Agent-call resolution ─────────────────────────────────────────────────────
+
+/**
+ * AI-005 — single source of truth for "how does an agent role resolve into a
+ * concrete adapter call?". Both {@link generateText} and {@link streamText}
+ * (and any future caller that wants the same per-role semantics) use this so
+ * the resolution semantics, `effectivePrompt` assembly, `maxTokens`
+ * precedence, and the AI-005c `effectiveAgentRole` collapse rule cannot
+ * drift between the two surfaces.
+ *
+ * Inputs are the caller's `prompt` + `options` bag. Outputs everything the
+ * caller needs to invoke `callProvider` and bookkeep breakers / sticky /
+ * metrics correctly:
+ *
+ * - `provider` — concrete provider id, or `null` when no provider is configured.
+ * - `config` — the `agent_configs` row (when one matched), `null` for fallback paths.
+ * - `effectiveAgentRole` — AI-005c — `null` when single-agent (no
+ *   `agent_configs` row exists), the `agentRole` string otherwise. Use this
+ *   for breaker / sticky-fallback / fallback-enumeration keys so single-
+ *   agent workspaces collapse to the bare-provider key (1 breaker shared
+ *   across stages, pre-PR shape) and multi-agent workspaces get full
+ *   per-`(provider, role)` isolation.
+ * - `effectivePrompt` — `{ system, user }` when the agent config carries a
+ *   `systemPromptOverride` AND the caller passed a plain string, else the
+ *   caller's prompt unchanged. Mirrors the pre-existing inline shape so
+ *   adapters see exactly what they saw before this refactor.
+ * - `maxTokens` — `config?.maxTokens || options.maxTokens` precedence.
+ *   Agent-config `maxTokens` wins over caller-supplied. Caller's value
+ *   wins when no agent config exists. Adapter-default applies when both
+ *   are undefined.
+ * - `callOpts` — `{ agentRole }` — the **original** role string (not the
+ *   collapsed `effectiveAgentRole`). Forwarded to {@link callProvider} so
+ *   OTel span attribution and Prometheus metric labels carry the per-stage
+ *   role tag even in single-agent mode where the breaker key collapses.
+ *
+ * @param {string|{system: string, user: string}} prompt - Caller's prompt.
+ * @param {Object} [options] - Caller's options bag.
+ * @param {string} [options.agentRole]
+ * @param {string} [options.workspaceId]
+ * @param {number} [options.maxTokens]
+ * @returns {{
+ *   provider: string|null,
+ *   config: Object|null,
+ *   effectiveAgentRole: string|null,
+ *   effectivePrompt: string|{system: string, user: string},
+ *   maxTokens: number|undefined,
+ *   callOpts: { agentRole: string|null }
+ * }}
+ */
+export function resolveAgentCall(prompt, options = {}) {
+  const agentRole = options.agentRole || null;
+  const workspaceId = options.workspaceId || null;
+  const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
+  const effectivePrompt = (config?.systemPromptOverride && typeof prompt === "string")
+    ? { system: config.systemPromptOverride, user: prompt }
+    : prompt;
+  return {
+    provider,
+    config,
+    effectiveAgentRole,
+    effectivePrompt,
+    maxTokens: config?.maxTokens || options.maxTokens,
+    callOpts: { agentRole },
+  };
+}
+
 // ── Token telemetry ───────────────────────────────────────────────────────────
 
 /**
@@ -291,6 +357,9 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // Token telemetry is the orchestrator's responsibility — adapters return
   // raw usage and don't know about the metrics registry. Keeps adapters
   // self-contained and testable in isolation.
-  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole || "default");
+  // `recordAiTokens`'s signature defaults agentRole + the function body
+  // OR-defaults `null` → `"default"` for the metric label, so pass the
+  // original `callOptions.agentRole` directly without re-applying the OR.
+  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole);
   return text;
 }
