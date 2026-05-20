@@ -1,31 +1,61 @@
+/**
+ * Google Gemini adapter — implements the AI-002 adapter contract:
+ *   generate({ messages, maxTokens, signal, useJson, model, apiKey, baseUrl }) → { text, usage }
+ *   stream  (not natively supported — returns null so caller falls back to generate)
+ *   generateVision({ model, apiKey, base64, userPrompt })                       → { text, usage }
+ *
+ * Cancellation caveat: the @google/generative-ai SDK's generateContent() does
+ * not honour an external AbortSignal — we still pass it to the SDK options
+ * bag for forward compatibility, but operators who need hard cancellation on
+ * Gemini must wrap the call site in a Promise.race against a signal-driven
+ * rejection.
+ */
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 
-export async function generate(ctx, deps) {
-  const genAI = new GoogleGenerativeAI(ctx.apiKey);
-  const { withRetry, composeSignal, CLOUD_TIMEOUT_MS, recordAiTokens } = deps;
+export async function generate({ messages, maxTokens, signal, useJson, model, apiKey }) {
+  const genAI = new GoogleGenerativeAI(apiKey);
   return withRetry(async () => {
-    const { signal: composedSignal, cleanup } = composeSignal(ctx.signal, CLOUD_TIMEOUT_MS);
+    const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
     try {
-      const generationConfig = { maxOutputTokens: ctx.maxTokens };
-      if (ctx.useJson) generationConfig.responseMimeType = "application/json";
-      const cfg = { model: ctx.model, generationConfig };
-      if (ctx.messages.system) cfg.systemInstruction = { parts: [{ text: ctx.messages.system }] };
+      const generationConfig = { maxOutputTokens: maxTokens };
+      if (useJson) generationConfig.responseMimeType = "application/json";
+      const cfg = { model, generationConfig };
+      if (messages.system) cfg.systemInstruction = { parts: [{ text: messages.system }] };
       const m = genAI.getGenerativeModel(cfg);
-      const result = await m.generateContent({ contents: [{ role: "user", parts: [{ text: ctx.messages.user }] }] }, { signal: composedSignal });
+      const result = await m.generateContent(
+        { contents: [{ role: "user", parts: [{ text: messages.user }] }] },
+        { signal: composedSignal },
+      );
       const um = result?.response?.usageMetadata;
-      const usage = { input: um?.promptTokenCount, output: um?.candidatesTokenCount };
-      recordAiTokens(ctx.provider, usage);
-      return { text: result.response.text(), usage };
+      return {
+        text: result.response.text(),
+        usage: { input: um?.promptTokenCount, output: um?.candidatesTokenCount },
+      };
     } finally { cleanup(); }
   }, "Google Gemini");
 }
 
+// Gemini does not expose incremental streaming via this SDK. Returning null
+// signals the orchestrator to fall back to non-streaming generate() and emit
+// the full response as a single synthetic token.
 export async function stream() { return null; }
 
-export async function generateVision(ctx) {
-  const genAI = new GoogleGenerativeAI(ctx.apiKey);
-  const m = genAI.getGenerativeModel({ model: ctx.model, generationConfig: { maxOutputTokens: 512, responseMimeType: "application/json" } });
-  const result = await m.generateContent({ contents: [{ role: "user", parts: [{ text: ctx.userPrompt }, { inlineData: { mimeType: "image/png", data: ctx.base64 } }] }] });
+export async function generateVision({ model, apiKey, base64, userPrompt }) {
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const m = genAI.getGenerativeModel({
+    model,
+    generationConfig: { maxOutputTokens: 512, responseMimeType: "application/json" },
+  });
+  const result = await m.generateContent({
+    contents: [{ role: "user", parts: [
+      { text: userPrompt },
+      { inlineData: { mimeType: "image/png", data: base64 } },
+    ] }],
+  });
   const um = result?.response?.usageMetadata;
-  return { text: result.response.text(), usage: { input: um?.promptTokenCount, output: um?.candidatesTokenCount } };
+  return {
+    text: result.response.text(),
+    usage: { input: um?.promptTokenCount, output: um?.candidatesTokenCount },
+  };
 }

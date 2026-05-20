@@ -96,13 +96,23 @@ async function callOllama(prompt, maxTokens, externalSignal, useJson, baseUrl, m
   }
 }
 
-export async function generate(ctx) {
+/**
+ * Ollama adapter — implements the AI-002 adapter contract:
+ *   generate({ messages, maxTokens, signal, useJson, model, baseUrl }) → { text, usage }
+ *   stream  (not supported — returns null so caller falls back to generate)
+ *   generateVision (not supported — returns null)
+ *
+ * Ollama uses the prebuilt `messages.combined` string (system + user joined)
+ * because /api/generate has no system-prompt field. `apiKey` is ignored
+ * (Ollama is unauthenticated by default).
+ */
+export async function generate({ messages, maxTokens, signal, useJson, model, baseUrl }) {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const text = await callOllama(ctx.messages.combined, ctx.maxTokens, ctx.signal, ctx.useJson, ctx.baseUrl, ctx.model);
+      const text = await callOllama(messages.combined, maxTokens, signal, useJson, baseUrl, model);
       return { text, usage: null };
     } catch (err) {
-      if (err.name === "AbortError" || ctx.signal?.aborted) throw err;
+      if (err.name === "AbortError" || signal?.aborted) throw err;
       const isRetryable = err.message.includes("ECONNREFUSED") || err.message.includes("fetch failed") || err.message.includes("Ollama HTTP 500");
       if (attempt === MAX_RETRIES || !isRetryable) throw err;
       const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
