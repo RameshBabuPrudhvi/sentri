@@ -128,6 +128,7 @@ const files = [
   "tests/coverage-aggregator.test.js",
   "tests/run-coverage-integration.test.js",
   "tests/run-shard-coverage.test.js",        // AUTO-009f — sharded-run parity regression
+  "tests/coverage-shard-merge.test.js",      // AUTO-009k — two-stage per-shard pre-aggregation + set-union merge
   "tests/coverage-memory-ceiling.test.js",   // AUTO-009g — memory-ceiling enforcement
   "tests/coverage-pr-diff.test.js",          // AUTO-009d — PR-scoped coverage diff (the Codecov play)
   "tests/source-map-resolver.test.js",

@@ -41,7 +41,8 @@ import { runFeedbackLoop } from "../runner/feedbackIntegration.js"; // CAP-002 P
 import { finalizeRunIfNotAborted } from "../utils/abortHelper.js";
 import { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } from "../testRunner.js";
 import { clusterFailures } from "../pipeline/failureClusterer.js"; // AUTO-010 — sharded-run parity with single-process tail in testRunner.js
-import { finalizeCoverage } from "../pipeline/finalizeCoverage.js"; // AUTO-009f — sharded-run parity for coverage aggregation (previously every multi-shard run with coverageEnabled persisted coverageSummary: null).
+import { finalizeCoverage, mergeShardSummaries } from "../pipeline/finalizeCoverage.js"; // AUTO-009f sharded parity + AUTO-009k set-union merge over per-shard pre-aggregated summaries.
+import { computePrCoverage } from "../pipeline/coveragePrDiff.js"; // AUTO-009k — PR-scoped diff at the merge path (per-source line sets come from mergeShardSummaries' accumulator state).
 import { detectCoverageRegression, fireCoverageRegressionAlert } from "../pipeline/coverageRegressionDetector.js"; // AUTO-009i — sharded-run parity for coverage regression alerting.
 import { trackTelemetry } from "../utils/telemetry.js";
 import { safeFetch } from "../utils/ssrfGuard.js"; // CAP-002 Phase 2 — trigger-path callbackUrl POST from sharded finalizer.
@@ -686,29 +687,98 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
   // Root Cause Summary panel would never render for sharded runs.
   run.rootCauses = clusterFailures({ results });
 
-  // AUTO-009f — sharded-run parity for coverage aggregation. The per-shard
-  // execution path persists raw `jsCoverage` blobs into `runs.results` via
-  // `appendRunResults` (see `testRunner.js#processResult`). Without this
-  // call the multi-shard finalizer would persist `coverageSummary: null`
-  // and the Dashboard / RunDetail panels would never render for sharded
-  // runs even when `project.coverageEnabled === true`. `finalizeCoverage`
-  // also strips the raw blobs from `results[]` in place, but here that's
-  // a no-op for persistence — the strip happens on the freshly-read DB
-  // snapshot; the live `runs.results` column still has them. We rely on
-  // the AUTO-009j retention sweep (when shipped) to trim historical
-  // payloads; for now, document the cost. Coverage size is bounded by
-  // AUTO-009g's memory ceiling so a runaway shard can't OOM the finalizer.
-  // AUTO-009d — pass run.changedFileRanges (populated at trigger time by
-  // routes/trigger.js when launched from a GitHub PR webhook) so the
-  // sharded finalizer also produces a PR-scoped diff. Lift the diff onto
-  // `run.prCoverageDiff` for the dedicated column, then strip it from the
-  // summary so the persisted `coverageSummary` shape stays unchanged.
-  run.coverageSummary = await finalizeCoverage(project, results, {
-    changedFileRanges: run.changedFileRanges || null,
-  });
-  if (run.coverageSummary?.prCoverageDiff) {
-    run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
-    delete run.coverageSummary.prCoverageDiff;
+  // AUTO-009k — Two-stage coverage aggregation (industry pattern: c8 / nyc /
+  // Istanbul `libCoverage.merge()` / Codecov upload-then-merge).
+  //
+  // **Preferred path**: each shard pre-aggregated its slice via
+  // `aggregateShardCoverage` and persisted a compact mergeable summary via
+  // `runRepo.setShardCoverageSummary`. The finalizer reads
+  // `run.shardCoverageSummaries` and calls `mergeShardSummaries` to take
+  // set union across shards. Set union is associative, so the merged
+  // output is mathematically identical to single-pass aggregation over
+  // the union of all shards' raw results — but without re-processing
+  // megabytes of raw V8 ranges from `runs.results` in one finalizer pass.
+  //
+  // **Fallback path (AUTO-009f)**: if `shardCoverageSummaries` is null or
+  // has fewer slots than `shardCount` (partial-deploy race: some shards
+  // ran old code without AUTO-009k persistence), fall back to re-aggregating
+  // from raw `jsCoverage` blobs in `runs.results` via `finalizeCoverage`.
+  // Functionally correct — id-set union over per-test results is
+  // mathematically equivalent to per-shard merge — and memory-bounded by
+  // AUTO-009g's `COVERAGE_MEMORY_CEILING_MB`.
+  //
+  // Both paths produce byte-equivalent `coverageSummary` shapes modulo
+  // `sourceMapStatus` (merge path defaults to "fallback"; the raw path
+  // can run resolution per-shard). PR-scoped diff (AUTO-009d) is computed
+  // post-merge from the merged per-source line sets when
+  // `run.changedFileRanges` is populated.
+  const persistedSummaries = Array.isArray(run.shardCoverageSummaries)
+    ? run.shardCoverageSummaries
+    : null;
+  const shardCount = Number(run.shardCount || 1);
+  // Treat the merge path as eligible only when every shard contributed a
+  // payload. A partial array (`length < shardCount` or `null` slots) signals
+  // a deploy race or a pre-aggregation failure on at least one shard — the
+  // AUTO-009f fallback over raw results stays correct in that case.
+  const allShardsContributed = persistedSummaries
+    && persistedSummaries.length >= shardCount
+    && persistedSummaries.slice(0, shardCount).every((s) => s && typeof s === "object");
+
+  if (allShardsContributed && project?.coverageEnabled) {
+    structuredLog("coverage.merge_path", { runId, shardCount, source: "shard_summaries" });
+    run.coverageSummary = mergeShardSummaries(persistedSummaries.slice(0, shardCount));
+
+    // AUTO-009d — PR-scoped diff over merged per-source line sets. Each
+    // shard's `perSource` slot carries per-bundle covered-line arrays;
+    // mergeShardSummaries union-ed them into the merged summary's
+    // bookkeeping but doesn't expose the resulting line sets. Reconstruct
+    // here for the PR diff filter — same shape `computePrCoverage`
+    // expects (`{ [file]: Set<lineNum> }`).
+    if (run.coverageSummary && run.changedFileRanges) {
+      try {
+        const coveredLinesByFile = {};
+        const totalLinesByFile = {};
+        for (const shard of persistedSummaries.slice(0, shardCount)) {
+          const perSource = shard?.perSource || {};
+          for (const [file, slot] of Object.entries(perSource)) {
+            if (!coveredLinesByFile[file]) coveredLinesByFile[file] = new Set();
+            for (const ln of (slot.coveredLines || [])) coveredLinesByFile[file].add(ln);
+            totalLinesByFile[file] = Math.max(totalLinesByFile[file] || 0, slot.totalLines || 0);
+          }
+        }
+        const prDiff = computePrCoverage({
+          coveredLinesByFile,
+          totalLinesByFile,
+          changedFileRanges: run.changedFileRanges,
+        });
+        if (prDiff) {
+          run.prCoverageDiff = prDiff;
+        }
+      } catch (prErr) {
+        console.warn(formatLogLine("warn", runId,
+          `[runWorker] AUTO-009k PR diff over merged summaries failed: ${prErr?.message || prErr}`));
+      }
+    }
+  } else {
+    // AUTO-009f fallback path — re-aggregate from raw `runs.results`. Same
+    // call used by the single-process tail in `testRunner.js`. PR diff is
+    // computed inline by `finalizeCoverage` and lifted onto the summary;
+    // we then strip it off so the persisted `coverageSummary` shape stays
+    // consistent with the merge path.
+    structuredLog("coverage.merge_path", {
+      runId, shardCount,
+      source: "raw_results_fallback",
+      reason: !persistedSummaries ? "no_persisted_summaries"
+        : persistedSummaries.length < shardCount ? "incomplete_shard_coverage"
+        : "shard_payload_invalid",
+    });
+    run.coverageSummary = await finalizeCoverage(project, results, {
+      changedFileRanges: run.changedFileRanges || null,
+    });
+    if (run.coverageSummary?.prCoverageDiff) {
+      run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
+      delete run.coverageSummary.prCoverageDiff;
+    }
   }
 
   // AUTO-009d — quality-gate evaluation runs AFTER coverage aggregation so

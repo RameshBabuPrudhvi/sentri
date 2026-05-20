@@ -531,6 +531,77 @@ export async function aggregateRunCoverage(results = [], { sutOrigin, resolver, 
       outRef.coveredLinesByFile[file] = meta.covered;
       outRef.totalLinesByFile[file] = meta.total;
     }
+    // AUTO-009k — also expose the raw per-bundle id-set bookkeeping so
+    // sharded callers can persist a JSON-serializable per-shard summary
+    // (`runRepo.setShardCoverageSummary`) for the boundary-crossing
+    // finalizer to merge via set union. Sets aren't JSON-serializable,
+    // so we project to sorted arrays at this layer — the merge consumer
+    // (`finalizeCoverage.js#mergeShardSummaries`) reconstitutes via
+    // `new Set(arr)` and unions across shards. Mirrors the industry
+    // pattern (c8 / nyc / Istanbul `libCoverage.createCoverageMap().merge()`):
+    // each process emits per-file Istanbul-shaped data; the final stage
+    // takes set union over the hit maps.
+    //
+    // Why arrays not Maps: JSON.stringify on a Map yields `{}`; arrays
+    // round-trip cleanly. Sorting is for determinism — a future test
+    // comparing two summary payloads by hash needs stable byte ordering.
+    //
+    // Per-bundle line-set arrays go alongside the S/B/F id arrays so the
+    // run-level `coveragePct` (which derives from line union, not
+    // statement union) reconstructs correctly after merge.
+    const mergeable = {
+      // Per-bundle line bookkeeping for `coveragePct` / `topUncoveredFiles`.
+      perBundle: {},
+      // Per-bundle S/B/F id bookkeeping for `statementPct` / `branchPct` /
+      // `functionPct`. Empty when `sbfHasData === false` (v8-to-istanbul
+      // produced no data for this shard).
+      sbfPerBundle: {},
+      sbfHasData,
+      // Per-source-path line bookkeeping mirrors `groupedByOriginal` — the
+      // merge consumer needs original-source paths so source-map resolution
+      // happens once per run (in the shard tail), not once per shard at
+      // merge time. `bundleUrl` is preserved so the merged summary can
+      // still attribute `uncoveredBranches` / `uncoveredFunctions` extras
+      // to the bundle that contributed each source group.
+      perSource: {},
+      // AUTO-009h — server-side coverage state from this shard. Sums per
+      // file across the shard's API tests; merge consumer set-unions
+      // across shards (server diffs are disjoint per file by the c8
+      // contract, so summing across shards is correct — same contract
+      // documented at the inline `Aggregation contract` block above).
+      serverFiles: {},
+      serverLayer,
+    };
+    for (const [bundleUrl, covered] of runCovered.entries()) {
+      mergeable.perBundle[bundleUrl] = {
+        covered: Array.from(covered).sort((a, b) => a - b),
+        totalLines: runTotals.get(bundleUrl) || 0,
+      };
+    }
+    for (const [bundleUrl, coveredIds] of sbfCoveredByBundle.entries()) {
+      mergeable.sbfPerBundle[bundleUrl] = {
+        coveredIds: Array.from(coveredIds).sort(),
+        totals: sbfTotalsByBundle.get(bundleUrl) || { statements: 0, branches: 0, functions: 0 },
+      };
+    }
+    for (const [file, meta] of groupedByOriginal.entries()) {
+      mergeable.perSource[file] = {
+        coveredLines: Array.from(meta.covered).sort((a, b) => a - b),
+        totalLines: meta.total,
+        bundleUrl: meta.bundleUrl || null,
+      };
+    }
+    for (const [path, m] of serverFiles.entries()) {
+      mergeable.serverFiles[path] = {
+        addedStatements: m.addedStatements,
+        addedBranches:   m.addedBranches,
+        addedFunctions:  m.addedFunctions,
+        totalStatements: m.totalStatements,
+        totalBranches:   m.totalBranches,
+        totalFunctions:  m.totalFunctions,
+      };
+    }
+    outRef.mergeable = mergeable;
   }
   const coveragePct = totalLines > 0 ? coveredLines / totalLines : 0;
   for (const row of perTest) row.deltaPct = totalLines > 0 ? row.deltaLines / totalLines : 0;

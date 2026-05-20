@@ -886,22 +886,36 @@ export function incrementRunStats(runId, { passedDelta = 0, failedDelta = 0, tot
  * @param {string} path       - Public artifact URL for this shard's trace.
  */
 /**
- * AUTO-009f — Atomically write a per-shard pre-aggregated coverage summary
- * into the sparse `shardCoverageSummaries` JSON array. Each shard writes
- * its own slot exactly once at the runTests-tail (shard mode); the
- * boundary-crossing finalizer reads the array and merges all per-shard
- * summaries into the final `coverageSummary` blob via
- * `pipeline/finalizeCoverage.js#mergeShardSummaries`.
+ * AUTO-009f / AUTO-009k — Atomically write a per-shard pre-aggregated
+ * coverage summary into the sparse `shardCoverageSummaries` JSON array.
  *
- * Mirrors `setShardTracePath` — transaction-wrapped read-modify-write with
- * a dialect-conditional `FOR UPDATE` lock on Postgres so two concurrent
- * shards writing different array slots cannot lose each other's writes.
- * Best-effort by contract: a write failure is swallowed by the caller so
- * coverage capture never fails a run.
+ * Each shard calls this at the runTests-tail (`testRunner.js`, shard mode)
+ * with the output of `pipeline/finalizeCoverage.js#aggregateShardCoverage` —
+ * a compact mergeable payload containing per-bundle covered-id arrays
+ * (`Set<"s:id"|"b:id:arm"|"f:id">` projected to sorted strings), per-source
+ * line-set arrays, server-side diffs, and the shard's per-test deltas.
+ * The boundary-crossing finalizer (`runWorker.js#finalizeShardedRun`)
+ * reads `runs.shardCoverageSummaries` and calls
+ * `pipeline/finalizeCoverage.js#mergeShardSummaries` to take set union
+ * across shards — matching the industry pattern (c8 / nyc / Istanbul
+ * `libCoverage.createCoverageMap().merge()` / Codecov upload-then-merge).
+ *
+ * Naively summing per-shard count totals is wrong (proven counter-example:
+ * shard 0 covers lines [1,2,3], shard 1 covers lines [3,4,5] → naive
+ * 3+3=6 vs true union 5). The merge consumer's set-union semantics is what
+ * makes this correct; see `coverage-shard-merge.test.js` for the proof.
+ *
+ * **Concurrency contract:** mirrors `setShardTracePath` — transaction-
+ * wrapped read-modify-write with a dialect-conditional `FOR UPDATE` lock
+ * on Postgres so two concurrent shards writing different array slots
+ * cannot lose each other's writes. Best-effort by contract: a write
+ * failure must be swallowed by the caller so coverage capture never
+ * fails a run (the finalizer's AUTO-009f fallback path re-aggregates
+ * from raw `runs.results` when this column is partial / null).
  *
  * @param {string} runId
  * @param {number} shardIndex - 0-based shard index.
- * @param {Object} summary    - This shard's `aggregateRunCoverage` output.
+ * @param {Object} summary    - This shard's `aggregateShardCoverage` output.
  */
 export function setShardCoverageSummary(runId, shardIndex, summary) {
   if (!runId || shardIndex == null || !summary || typeof summary !== "object") return;

@@ -176,5 +176,292 @@ function stripRawCoverage(results) {
   }
 }
 
+/**
+ * AUTO-009k — Build the JSON-serializable per-shard pre-aggregated coverage
+ * payload that gets persisted via `runRepo.setShardCoverageSummary`. Each
+ * shard runs the full aggregator over its OWN slice of results (resolver
+ * disabled — source-map resolution happens once at the finalizer, not N
+ * times across shards), then keeps only the `mergeable` side channel
+ * (per-bundle id arrays, per-source line arrays, server diffs, per-test
+ * deltas). Best-effort: never throws so coverage capture can't fail a shard.
+ *
+ * The merge consumer (`mergeShardSummaries` below) takes set union across
+ * the persisted shard summaries — matching the industry pattern (c8 / nyc
+ * / Istanbul `libCoverage.merge()`).
+ *
+ * @param {Object} project        - Env-scoped project (`coverageEnabled`).
+ * @param {Array<Object>} results - This shard's slice of results.
+ * @returns {Promise<Object|null>} Per-shard mergeable payload, or null.
+ */
+export async function aggregateShardCoverage(project, results) {
+  if (!project?.coverageEnabled) return null;
+  if (!Array.isArray(results) || results.length === 0) return null;
+  const sutOrigin = (() => {
+    try { return new URL(project.url).origin; } catch { return ""; }
+  })();
+  try {
+    // No resolver — keep the shard summary in bundle-coordinate space.
+    // Source-map resolution is expensive (network + LRU cache + WASM
+    // SourceMapConsumer per bundle) and would be wasted N times if each
+    // shard ran it; the finalizer resolves once after merge.
+    const outRef = {};
+    const summary = await aggregateRunCoverage(results, { sutOrigin, outRef });
+    if (!summary || !outRef.mergeable) return null;
+    return {
+      ...outRef.mergeable,
+      // Per-test deltas are disjoint across shards (each test runs on one
+      // shard), so the merge consumer concatenates losslessly.
+      perTest: Array.isArray(summary.perTest) ? summary.perTest : [],
+    };
+  } catch (err) {
+    console.warn(formatLogLine("warn", null,
+      `[aggregateShardCoverage] failed: ${err?.message || err}`));
+    return null;
+  }
+}
+
+/**
+ * AUTO-009k — Set-union merge across per-shard pre-aggregated coverage
+ * summaries. Returns the final `coverageSummary` shape that
+ * `aggregateRunCoverage` would have produced over the union of all shards'
+ * raw results — without re-processing megabytes of raw V8 ranges at the
+ * finalizer.
+ *
+ * **Mathematical contract:** set union is associative and commutative, so
+ * `merge([shard0, shard1, ...])` ≡ `aggregateRunCoverage(concat(allResults))`
+ * for the coverage fields. Per-test deltas concatenate losslessly because
+ * each test runs on exactly one shard. Server-side file diffs sum directly
+ * per the c8 disjoint-diff contract (a statement can only flip
+ * `count===0 → count>0` once across a run).
+ *
+ * **Naive count-summing is wrong** — proven counter-example: shard 0 covers
+ * lines [1,2,3] of file.js, shard 1 covers lines [3,4,5]. Naive sum:
+ * `coveredLines = 6`. True union: `coveredLines = 5`. The set-union
+ * semantics here is what makes the industry pattern (c8 / nyc / Istanbul /
+ * Codecov) correct.
+ *
+ * Source-map resolution: this merge stage operates on bundle-coordinate
+ * data. The shard helper deliberately runs without a resolver so each
+ * shard's payload is compact; v1 ships with bundleUrl-labelled
+ * `topUncoveredFiles[]`. Future AUTO-009k.2 can re-run resolution at the
+ * finalizer if the operator needs original-source coordinates.
+ *
+ * @param {Array<Object>} shardSummaries - Sparse per-shard payloads.
+ * @returns {Object|null} `coverageSummary` shape, or null when no shard
+ *   contributed data.
+ */
+export function mergeShardSummaries(shardSummaries) {
+  if (!Array.isArray(shardSummaries)) return null;
+  const real = shardSummaries.filter((s) => s && typeof s === "object");
+  if (real.length === 0) return null;
+
+  // ── Per-bundle line union ─────────────────────────────────────────────
+  const bundleAcc = new Map();
+  for (const shard of real) {
+    const perBundle = shard.perBundle || {};
+    for (const [bundleUrl, slot] of Object.entries(perBundle)) {
+      const entry = bundleAcc.get(bundleUrl) || { covered: new Set(), totalLines: 0 };
+      for (const ln of (slot.covered || [])) entry.covered.add(ln);
+      // Total lines is stable per bundle across shards; `max` defends
+      // against a flaky shard that captured a partial payload.
+      entry.totalLines = Math.max(entry.totalLines, slot.totalLines || 0);
+      bundleAcc.set(bundleUrl, entry);
+    }
+  }
+
+  // ── Per-bundle S/B/F id union ─────────────────────────────────────────
+  // Id encoding (`s:N` / `b:N:arm` / `f:N`) lets one Set hold all three
+  // dimensions; post-merge tally splits by prefix.
+  const sbfAcc = new Map();
+  let sbfHasData = false;
+  for (const shard of real) {
+    if (shard.sbfHasData) sbfHasData = true;
+    const sbf = shard.sbfPerBundle || {};
+    for (const [bundleUrl, slot] of Object.entries(sbf)) {
+      const entry = sbfAcc.get(bundleUrl) || {
+        coveredIds: new Set(),
+        totals: { statements: 0, branches: 0, functions: 0 },
+      };
+      for (const id of (slot.coveredIds || [])) entry.coveredIds.add(id);
+      const t = slot.totals || { statements: 0, branches: 0, functions: 0 };
+      entry.totals.statements = Math.max(entry.totals.statements, t.statements || 0);
+      entry.totals.branches   = Math.max(entry.totals.branches,   t.branches   || 0);
+      entry.totals.functions  = Math.max(entry.totals.functions,  t.functions  || 0);
+      sbfAcc.set(bundleUrl, entry);
+    }
+  }
+
+  // ── Per-source-path line union ────────────────────────────────────────
+  const sourceAcc = new Map();
+  for (const shard of real) {
+    const perSource = shard.perSource || {};
+    for (const [file, slot] of Object.entries(perSource)) {
+      const entry = sourceAcc.get(file) || {
+        covered: new Set(),
+        totalLines: 0,
+        bundleUrl: slot.bundleUrl || null,
+      };
+      for (const ln of (slot.coveredLines || [])) entry.covered.add(ln);
+      entry.totalLines = Math.max(entry.totalLines, slot.totalLines || 0);
+      if (!entry.bundleUrl && slot.bundleUrl) entry.bundleUrl = slot.bundleUrl;
+      sourceAcc.set(file, entry);
+    }
+  }
+
+  return _finalizeMergedSummary({ bundleAcc, sbfAcc, sbfHasData, sourceAcc, real });
+}
+
+/**
+ * AUTO-009k — Internal: take the post-union accumulator state from
+ * `mergeShardSummaries` and the per-shard payloads, produce the public
+ * `coverageSummary` shape. Split out so the union-accumulation logic and
+ * the totals-computation logic stay short and individually testable.
+ *
+ * Math mirrors `aggregateRunCoverage`'s tail so the merged output is
+ * byte-equivalent to the single-pass version modulo `topUncoveredFiles`
+ * ordering (re-sorted below by descending uncoveredLines).
+ *
+ * @param {Object} state
+ * @param {Map}    state.bundleAcc  - bundleUrl → { covered:Set, totalLines }
+ * @param {Map}    state.sbfAcc     - bundleUrl → { coveredIds:Set, totals }
+ * @param {boolean} state.sbfHasData
+ * @param {Map}    state.sourceAcc  - file → { covered:Set, totalLines, bundleUrl }
+ * @param {Array<Object>} state.real - Original per-shard payloads (for
+ *   server merge + perTest concat).
+ * @returns {Object} `coverageSummary` shape.
+ */
+function _finalizeMergedSummary({ bundleAcc, sbfAcc, sbfHasData, sourceAcc, real }) {
+  // ── Server-side merge — disjoint sum (c8 contract) ────────────────────
+  // A statement id flips `count===0 → count>0` at most once across API
+  // tests, AND each test runs on one shard, so union(addedX) = sum(addedX).
+  // Totals stable per c8 instrumentation; first-seen wins.
+  const serverAcc = new Map();
+  let serverLayer = false;
+  for (const shard of real) {
+    if (shard.serverLayer) serverLayer = true;
+    const sf = shard.serverFiles || {};
+    for (const [path, m] of Object.entries(sf)) {
+      const entry = serverAcc.get(path);
+      if (!entry) {
+        serverAcc.set(path, {
+          addedStatements: m.addedStatements || 0,
+          addedBranches:   m.addedBranches   || 0,
+          addedFunctions:  m.addedFunctions  || 0,
+          totalStatements: m.totalStatements || 0,
+          totalBranches:   m.totalBranches   || 0,
+          totalFunctions:  m.totalFunctions  || 0,
+        });
+      } else {
+        entry.addedStatements += m.addedStatements || 0;
+        entry.addedBranches   += m.addedBranches   || 0;
+        entry.addedFunctions  += m.addedFunctions  || 0;
+      }
+    }
+  }
+
+  // ── Per-bundle uncovered S/B/F extras ─────────────────────────────────
+  // So each source-grouped entry can attribute uncovered branch/function
+  // counts to the bundle it came from. Mirrors `uncoveredExtrasByBundle`
+  // in the aggregator.
+  const uncoveredExtrasByBundle = new Map();
+  for (const [bundleUrl, entry] of sbfAcc.entries()) {
+    let cs = 0, cb = 0, cf = 0;
+    for (const key of entry.coveredIds) {
+      if (key.startsWith("s:")) cs++;
+      else if (key.startsWith("b:")) cb++;
+      else if (key.startsWith("f:")) cf++;
+    }
+    uncoveredExtrasByBundle.set(bundleUrl, {
+      uncoveredBranches:  Math.max(0, entry.totals.branches  - cb),
+      uncoveredFunctions: Math.max(0, entry.totals.functions - cf),
+    });
+  }
+
+  // ── Build topUncoveredFiles[] from browser + server layers ────────────
+  let totalLines = 0;
+  let coveredLines = 0;
+  const topUncoveredFiles = [];
+  for (const [file, entry] of sourceAcc.entries()) {
+    const covered = entry.covered.size;
+    const total = entry.totalLines;
+    totalLines += total;
+    coveredLines += covered;
+    const extras = entry.bundleUrl ? uncoveredExtrasByBundle.get(entry.bundleUrl) : null;
+    topUncoveredFiles.push({
+      file,
+      layer: "browser",
+      uncoveredLines: Math.max(0, total - covered),
+      totalLines: total,
+      bundleUrl: entry.bundleUrl || null,
+      uncoveredBranches:  extras?.uncoveredBranches  ?? 0,
+      uncoveredFunctions: extras?.uncoveredFunctions ?? 0,
+    });
+  }
+  for (const [path, m] of serverAcc.entries()) {
+    topUncoveredFiles.push({
+      file: path,
+      layer: "server",
+      uncoveredLines: Math.max(0, m.totalStatements - m.addedStatements),
+      totalLines: m.totalStatements,
+      bundleUrl: null,
+      uncoveredBranches:  Math.max(0, m.totalBranches  - m.addedBranches),
+      uncoveredFunctions: Math.max(0, m.totalFunctions - m.addedFunctions),
+    });
+  }
+  topUncoveredFiles.sort((a, b) => b.uncoveredLines - a.uncoveredLines);
+
+  const coveragePct = totalLines > 0 ? coveredLines / totalLines : 0;
+
+  // ── Concat per-test deltas, recompute deltaPct against merged totals ──
+  const perTest = [];
+  for (const shard of real) {
+    for (const row of (shard.perTest || [])) perTest.push({ ...row });
+  }
+  for (const row of perTest) row.deltaPct = totalLines > 0 ? row.deltaLines / totalLines : 0;
+
+  // ── Granularity (S/B/F) — only when at least one shard captured it ────
+  let granularity = null;
+  if (sbfHasData) {
+    let totalStatements = 0, coveredStatements = 0;
+    let totalBranches   = 0, coveredBranches   = 0;
+    let totalFunctions  = 0, coveredFunctions  = 0;
+    for (const entry of sbfAcc.values()) {
+      let cs = 0, cb = 0, cf = 0;
+      for (const key of entry.coveredIds) {
+        if (key.startsWith("s:")) cs++;
+        else if (key.startsWith("b:")) cb++;
+        else if (key.startsWith("f:")) cf++;
+      }
+      totalStatements += entry.totals.statements; coveredStatements += cs;
+      totalBranches   += entry.totals.branches;   coveredBranches   += cb;
+      totalFunctions  += entry.totals.functions;  coveredFunctions  += cf;
+    }
+    granularity = {
+      totalStatements, coveredStatements,
+      statementPct: totalStatements > 0 ? coveredStatements / totalStatements : 0,
+      totalBranches, coveredBranches,
+      branchPct:    totalBranches   > 0 ? coveredBranches   / totalBranches   : 0,
+      totalFunctions, coveredFunctions,
+      functionPct:  totalFunctions  > 0 ? coveredFunctions  / totalFunctions  : 0,
+    };
+  }
+
+  // ── sourceMapStatus ──────────────────────────────────────────────────
+  // Merge path doesn't run the resolver, so the status defaults to
+  // "fallback" — matches the single-pass aggregator's output when no
+  // resolver is supplied. AUTO-009k.2 may re-resolve at the finalizer
+  // for original-source labels in topUncoveredFiles.
+  return {
+    totalLines,
+    coveredLines,
+    coveragePct,
+    perTest,
+    topUncoveredFiles: topUncoveredFiles.slice(0, 20),
+    sourceMapStatus: "fallback",
+    ...(serverLayer ? { serverLayer: true } : {}),
+    ...(granularity || {}),
+  };
+}
+
 /** Test-only — exported so the perf test can assert the configured ceiling. */
 export const __COVERAGE_MEMORY_CEILING_BYTES_FOR_TEST = COVERAGE_MEMORY_CEILING_BYTES;

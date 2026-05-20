@@ -30,7 +30,7 @@
 
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest, executeTestIterations } from "./runner/executeTest.js";
-import { finalizeCoverage } from "./pipeline/finalizeCoverage.js";
+import { finalizeCoverage, aggregateShardCoverage } from "./pipeline/finalizeCoverage.js";
 import { detectCoverageRegression, fireCoverageRegressionAlert } from "./pipeline/coverageRegressionDetector.js"; // AUTO-009i
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
@@ -899,6 +899,48 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // Returns the shard's stats delta so the worker can compose them onto the
   // parent `runs` row atomically.
   if (isShardMode) {
+    // AUTO-009k — pre-aggregate this shard's coverage slice and persist the
+    // mergeable per-shard summary so the boundary-crossing finalizer can
+    // set-union across shards instead of re-processing megabytes of raw V8
+    // ranges from `runs.results`. Matches the industry pattern (c8 / nyc /
+    // Istanbul `libCoverage.merge()` / Codecov upload-then-merge): each
+    // shard emits a compact Istanbul-shaped summary; the finalizer merges
+    // via id-set union. Naive count-summing across shards is wrong (proven
+    // counter-example: see `mergeShardSummaries` JSDoc).
+    //
+    // Pre-aggregation also lets us strip raw `jsCoverage` from this shard's
+    // results BEFORE they're persisted to `runs.results` — saving 10s of MB
+    // per row on large-bundle SUTs. The boundary-crossing finalizer
+    // (`runWorker.js#finalizeShardedRun`) detects the persisted summaries
+    // via `runRepo.getById(runId).shardCoverageSummaries` and uses
+    // `mergeShardSummaries` instead of the legacy AUTO-009f re-aggregation
+    // path. Fallback path remains so a partial-deploy / migration race
+    // (some shards on old code without persistence) still produces a
+    // correct summary via the raw-results aggregator.
+    //
+    // Best-effort: any failure in pre-aggregation OR persistence falls back
+    // to the AUTO-009f re-aggregation path. Coverage capture must never
+    // fail a shard.
+    try {
+      const shardCoverage = await aggregateShardCoverage(project, run.results);
+      if (shardCoverage) {
+        runRepo.setShardCoverageSummary(run.id, shardIndex, shardCoverage);
+        // Strip raw jsCoverage from this shard's in-memory results — the
+        // per-shard summary now carries the mergeable id-set state, and
+        // the boundary-crossing finalizer reads `shardCoverageSummaries`
+        // (not raw `runs.results`) when AUTO-009k payloads are present.
+        // The strip prevents megabytes of raw V8 ranges from landing in
+        // `runs.results` via the route layer's eventual save.
+        for (const r of run.results) {
+          if (r && "jsCoverage" in r) delete r.jsCoverage;
+        }
+      }
+    } catch (err) {
+      // Swallow + log — fall back to AUTO-009f re-aggregation at finalizer.
+      console.warn(formatLogLine("warn", runId,
+        `[testRunner] AUTO-009k pre-aggregation failed: ${err?.message || err}`));
+    }
+
     const elapsed = ((Date.now() - runStart) / 1000).toFixed(1);
     structuredLog("run.shard_execution_done", {
       runId, shardIndex,

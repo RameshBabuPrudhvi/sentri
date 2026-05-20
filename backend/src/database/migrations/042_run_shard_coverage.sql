@@ -1,17 +1,40 @@
--- AUTO-009f — Shard-aware coverage aggregation.
+-- AUTO-009f / AUTO-009k — Shard-aware coverage aggregation.
 --
 -- Each shard worker pre-aggregates its slice's coverage via
--- `aggregateRunCoverage` (jsCoverage blobs never leave the worker process
--- because they're megabytes per test). The shard then writes the
--- summarised JSON into a sparse `shardCoverageSummaries[]` array on the
--- parent run, indexed by shardIndex. The boundary-crossing finalizer
--- (in `runWorker.js#finalizeShardedRun`) reads the array and merges all
--- shard summaries into the final `runs.coverageSummary` blob.
+-- `pipeline/finalizeCoverage.js#aggregateShardCoverage` and writes the
+-- compact mergeable summary (per-bundle covered-id arrays:
+-- `Set<"s:id"|"b:id:arm"|"f:id">` serialized as sorted strings, plus
+-- per-source line arrays, server-side diffs, and per-test deltas) into
+-- the sparse `shardCoverageSummaries[]` array, indexed by shardIndex.
+-- The boundary-crossing finalizer (`runWorker.js#finalizeShardedRun`)
+-- reads the array and merges via
+-- `pipeline/finalizeCoverage.js#mergeShardSummaries` — set union across
+-- shards. Matches the industry pattern (c8 / nyc / Istanbul
+-- `libCoverage.createCoverageMap().merge()` / Codecov upload-then-merge):
+-- each process emits per-file Istanbul-shaped data, the final stage takes
+-- set union over the hit maps.
 --
--- Per-test deltas are not re-attributable across shards (each test runs
--- on exactly one shard, so `perTest[]` from each shard concatenates
--- losslessly), but lines/statements/branches/functions covered by
--- multiple shards are de-duped during merge via the union of per-file
--- covered-line sets that each shard summary already carries as count
--- totals — see `pipeline/finalizeCoverage.js#mergeShardSummaries`.
+-- **Why set union, not count sum:** naively summing per-shard count totals
+-- is wrong when shards cover overlapping lines. Counter-example: shard 0
+-- covers lines [1,2,3], shard 1 covers lines [3,4,5] → naive 3+3=6 vs true
+-- union 5. The merge consumer's `mergeShardSummaries` enforces set-union
+-- semantics; `coverage-shard-merge.test.js` pins the invariant.
+--
+-- **Per-test deltas concatenate losslessly:** each test runs on exactly
+-- one shard, so `perTest[]` from each shard has disjoint testIds.
+--
+-- **Server-side diffs sum directly** per the c8 disjoint-diff contract
+-- (a statement id flips `count===0 → count>0` at most once across a run).
+--
+-- **Memory savings:** pre-aggregation also strips raw `jsCoverage`
+-- payloads from `runs.results` before they're persisted (each shard's
+-- mergeable summary holds the id-set state instead), eliminating 10s of
+-- MB per row on large-bundle SUTs.
+--
+-- **Fallback (AUTO-009f):** when this column is null / partial (e.g.
+-- partial-deploy race where some shards ran old code without per-shard
+-- pre-aggregation), the finalizer falls back to re-aggregating from raw
+-- `jsCoverage` blobs in `runs.results`. The aggregator's id-set union
+-- over per-test results is mathematically equivalent to per-shard merge
+-- (set union is associative), bounded by `COVERAGE_MEMORY_CEILING_MB`.
 ALTER TABLE runs ADD COLUMN shardCoverageSummaries TEXT;
