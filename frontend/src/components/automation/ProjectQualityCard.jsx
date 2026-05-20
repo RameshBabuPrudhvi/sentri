@@ -62,6 +62,22 @@ function CoveragePanel({ project, canEdit, onToast }) {
     project.coverageRegressionThresholdPct != null ? String(project.coverageRegressionThresholdPct) : "",
   );
   const [saving, setSaving] = useState(false);
+
+  // AUTO-009 — per-project coverage trend. `api.getCoverageTrend(projectId)`
+  // narrows the dashboard's `coverageTrend` series to this project so the
+  // Coverage tab shows a mini sparkline + latest-% badge without the operator
+  // needing to navigate to the Dashboard. Fetched on mount; null when coverage
+  // is disabled or no runs have produced data yet.
+  const [trend, setTrend] = useState(null);
+  useEffect(() => {
+    if (!project.coverageEnabled) { setTrend(null); return; }
+    let cancelled = false;
+    api.getCoverageTrend(project.id)
+      .then((t) => { if (!cancelled) setTrend(t); })
+      .catch(() => { /* best-effort — settings tab still works without the sparkline */ });
+    return () => { cancelled = true; };
+  }, [project.id, project.coverageEnabled]);
+
   const save = async () => {
     const trimmedThreshold = regressionThreshold.trim();
     const thresholdVal = trimmedThreshold === "" ? null : Number(trimmedThreshold);
@@ -112,6 +128,26 @@ function CoveragePanel({ project, canEdit, onToast }) {
         </div>
       </div>
       <button className="btn btn-primary btn-sm" onClick={save} disabled={!canEdit || saving}>{saving ? "Saving…" : "Save"}</button>
+      {/* AUTO-009 — per-project coverage sparkline + latest-% badge.
+          Only renders when coverage is enabled AND at least one run has
+          produced data (trend !== null). Gives operators immediate feedback
+          on their project's coverage trajectory without navigating to the
+          Dashboard. */}
+      {trend && trend.series && trend.series.length > 0 && (() => {
+        const latest = trend.series[trend.series.length - 1];
+        const latestPct = Math.round((latest?.coveragePct || 0) * 100);
+        return (
+          <div className="aap-section">
+            <div className="aap-stats">
+              <strong>Latest coverage: {latestPct}%</strong>
+              <span className="text-muted"> · {trend.series.length} run{trend.series.length !== 1 ? "s" : ""} in last {trend.windowDays}d</span>
+            </div>
+            <div className="aap-stats aap-stats--hint">
+              {trend.series.map((p, i) => `${Math.round((p.coveragePct || 0) * 100)}%`).join(" → ")}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -631,11 +631,11 @@ export const api = {
    * Backed by `GET /api/v1/dashboard`'s `coverageTrend` block. The
    * `projectId` parameter narrows the series to one project client-side.
    *
-   * **Current consumers:** none — the Dashboard `CoveragePanel` reads
-   * `data.coverageTrend` directly from `getDashboard()` (avoids a second
-   * fetch). This helper is retained for future per-project coverage pages
-   * (e.g. `ProjectDetail.jsx` → Coverage tab) that would want to fetch
-   * coverage for one project without loading the full dashboard payload.
+   * **Consumers:** `ProjectQualityCard.jsx` → Coverage tab (fetches the
+   * per-project series on mount to render a latest-% badge + text sparkline
+   * without navigating to the Dashboard). The Dashboard `CoveragePanel`
+   * reads `data.coverageTrend` directly from `getDashboard()` instead
+   * (avoids a second fetch for the workspace-wide view).
    *
    * @param {string} [projectId] — Narrow the series to one project.
    * @returns {Promise<Object|null>}
