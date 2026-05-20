@@ -524,116 +524,17 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 **Status:** ✅ Complete (PR #20) — see Completed Work Summary above for the full implementation details. Shipped scope matches the original spec: 7 modules under `backend/src/aiProvider/` (`index` / `registry` / `retry` / `modelCatalog` / `providerInfo` / `dispatcher` / `vision`) + 4 adapters (`anthropic` / `openai` / `google` / `ollama`) behind a 1-line re-export shim at `backend/src/aiProvider.js`. Adapter contract locked at `generate / stream / generateVision` returning `{ text, usage }`. Zero behavior change — every existing export remains importable from `aiProvider.js`; detection priority, SSRF guard, demo-key fallback, circuit breaker semantics, vision support, and INF-007 token telemetry all preserved bit-for-bit. New `aiProvider-adapter-contract.test.js` pins the per-adapter return shape.
 
-**Original Status:** 🔲 Planned | **Effort:** M | **Source:** Maintainability + multi-agent readiness (preparatory for future `AI-004` agent config + `AI-005` multi-agent dispatch)
-**Problem:** `backend/src/aiProvider.js` is a 1,545-line monolith spanning runtime key store, SSRF guard, provider detection, circuit breakers, sticky-fallback, per-call timeout composition, retry with backoff, 5 provider SDK integrations (Anthropic / OpenAI / Google Gemini / OpenRouter / OpenAI-compat / Ollama NDJSON), token telemetry (INF-007), vision-model multimodal shapes (MNT-001), and demo-key fallback. Every new provider, agent role, or call-shape change requires touching the same file — agents writing code (and human reviewers) cannot hold the whole module in working memory. The shape also blocks future multi-agent work: there is no adapter contract to extend, no place to add per-role circuit breakers, and no capability metadata (vision / JSON mode / context window / cost-per-1k) that the planner agent will need to pick a model for a given pipeline stage.
-**Fix:** Decompose into 5 modules + 4 adapters under `backend/src/aiProvider/`, behind a thin `index.js` that re-exports the existing public API verbatim (byte-identical behavior — no behavior change, no new providers, no `agentRole` parameter):
-```
-backend/src/aiProvider/
-├── index.js              — Re-exports generateText / streamText / parseJSON / etc.
-├── registry.js           — Mutable state: runtime keys, sticky fallback, active provider, circuit breakers + detectProvider / resolveProvider boundary
-├── retry.js              — withRetry, isRateLimitError, isTransientServerError, composeSignal
-├── modelCatalog.js       — Provider metadata + model defaults + capability flags (supportsVision, supportsJsonMode, contextWindow)
-└── adapters/
-    ├── anthropic.js      — Messages API + streaming + token usage shape
-    ├── openai.js         — OpenAI + OpenRouter + compat:<slot> (shared SDK, SSRF-guarded fetch for compat) + streaming
-    ├── google.js         — Gemini generateContent + systemInstruction + usageMetadata
-    └── ollama.js         — /api/generate + NDJSON fallback + ECONNREFUSED retry
-```
-**Adapter contract** (single shape for all four, locked in this PR so future providers + future `agentRole` work are one-file changes):
-```js
-// adapters/*.js each export:
-async generate({ messages, maxTokens, signal, useJson, model, apiKey, baseUrl })
-  → { text, usage: { input, output } }
-async stream({ ... }, onToken)
-  → { text, usage } | null   // null = caller falls back to generate
-```
-**Zero-regression guarantees:**
-- Every existing export remains importable from `backend/src/aiProvider.js` (legacy file becomes a thin re-export of `./aiProvider/index.js`).
-- Detection priority preserved: sticky-fallback → quick-switch override → `AI_PROVIDER` env → cloud auto-detect → compat slots → Ollama.
-- SSRF guard on compat providers preserved (`createSsrfGuardedFetch` unchanged), including `ALLOW_PRIVATE_URLS` escape hatch.
-- Demo key fallback (`DEMO_GOOGLE_API_KEY`) preserved.
-- Circuit breaker semantics preserved (1-failure threshold, 5-min cooldown, same-tier fallback only).
-- Vision support (MNT-001's `callVisionModel`) folded into adapters as a parallel `generateVision()` export.
-- INF-007 token telemetry preserved bit-for-bit (per-adapter `recordAiTokens` calls, `providerMetricLabel` folding compat slots to the literal `"compat"` label).
-- `loadKeysFromDatabase` / `checkOllamaConnection` / `parseJSON` / `normaliseMessages` / `composeSignal` all preserved with identical signatures.
-**Files to change:**
-- `backend/src/aiProvider.js` — replaced by 1-line re-export from `./aiProvider/index.js`
-- `backend/src/aiProvider/{index,registry,retry,modelCatalog}.js` — new
-- `backend/src/aiProvider/adapters/{anthropic,openai,google,ollama}.js` — new
-- All existing callers — no changes required (public API stable)
-- `backend/tests/` — existing `ai-provider*.test.js` files should pass unchanged; add `aiProvider-adapter-contract.test.js` pinning the `{ text, usage }` return shape per adapter
-- `docs/changelog.md` — under `### Changed`, note the module restructure with the "no behavior change" callout
-**Acceptance criteria:**
-- All existing backend tests pass unchanged (no test file modifications beyond the new contract test).
-- `backend/src/aiProvider.js` is ≤20 lines (pure re-export shim).
-- Each new file is ≤450 lines (agent-friendly working set).
-- `git log --follow` on the legacy file resolves cleanly through the restructure.
-- No new dependencies. No new env vars. No new DB migrations. No new routes.
-- `npm test` passes for both SQLite and Postgres (INF-008 dual-matrix).
-**Dependencies:** none (FEA-003 ✅ circuit breakers, AI-001 ✅ compat providers, INF-007 ✅ telemetry, MNT-001 ✅ vision support all already in `aiProvider.js` and preserved).
-**Follow-on items (deliberately deferred — separate PRs):**
-- `AI-003` — Adapter capability hardening: per-call cost tracking, `modelCatalog` schema with `costPer1kInput` / `costPer1kOutput`, structured `usage` extension.
-- `AI-004` — Agent role config schema (DB table, settings UI, dormant in pipeline).
-- `AI-005` — Multi-agent dispatch (depends on AUTO-023 DAG runner): `options.agentRole` parameter, per-role circuit breakers via `breakerKey(provider, role)`, per-role token telemetry label, per-workspace × per-role key resolution matrix.
-- `AI-006` — Per-role eval harness extension (depends on AUTO-022b).
-- `AI-007` — AI cost governance: per-role / per-workspace ceilings, alerts, kill switches.
+**Effort:** M | **Source:** Maintainability + multi-agent readiness (preparatory for `AI-004` agent config + `AI-005` multi-agent dispatch)
+
 ---
 ### AI-003 — Adapter capability hardening + cost tracking
 
 **Status:** ✅ Complete (PR #20) — see Completed Work Summary above for the full implementation details. Shipped scope: `MODEL_PRICING` table in `backend/src/aiProvider/modelCatalog.js` covers Anthropic / OpenAI / Google / OpenRouter (auto null pricing) / canonical Ollama models (free) with `inputPer1k` / `outputPer1k` / `asOf` per entry; `CAPABILITIES` extended with `supportsVision` / `supportsJsonMode` / `supportsStreaming` / `contextWindow` / `maxOutputTokens`; new `computeCostUsd(model, usage)` helper returns `null` on catalog miss (no fake zeros), `0` for known-free Ollama models. Every adapter (`anthropic` / `openai` / `google` / `ollama`) attaches `usage.costUsd`; `app_ai_cost_usd_total{provider, operation}` now bumped on every generation + vision-heal call from the catalog-derived value. MNT-001 `$5/M + $15/M` midpoint preserved as a vision-heal fallback when the model isn't in the catalog. Bugfix landed alongside: `Number(null) === 0` no longer disables `visionHealMaxCostUsdPerMonth` for catalog-miss vision models (regression test pins the fix). Operator guide at `docs/guide/ai-cost-tracking.md` documents the one-file pricing-refresh workflow with a PR-template block.
 
-**Original Status:** 🔲 Planned | **Effort:** S | **Source:** Follow-on from AI-002 · Prerequisite for AI-005 / AI-007 · Industry pattern (LangChain `BaseChatModel.cost`, LlamaIndex `LLMMetadata`)
-**Problem:** After AI-002 lands, every adapter returns `{ text, usage: { input, output } }` — but `modelCatalog.js` carries only display name + default model id. The planner agent (AI-005) cannot pick a model for a stage without knowing whether it supports vision / JSON mode, what its context window is, or what it costs. The MNT-001 cost counter (`app_ai_cost_usd_total`) currently hardcodes pricing in the vision-heal adapter — every other call records token counts but no dollar cost. Without per-call cost tracking, AI-007 (cost governance) has no signal to gate on.
-**Fix:** Extend `modelCatalog.js` with structured capability + pricing metadata per (provider, model) pair, and have every adapter consult the catalog to emit a normalised cost number alongside the existing `usage` block. No new external dependencies — pricing data lives in-repo as a maintainer-owned JSON table.
-```js
-// modelCatalog.js — extended schema (per model entry)
-{
-  id: "claude-sonnet-4-20250514",
-  displayName: "Claude Sonnet",
-  provider: "anthropic",
-  capabilities: {
-    supportsVision: true,
-    supportsJsonMode: true,
-    supportsStreaming: true,
-    contextWindow: 200000,
-    maxOutputTokens: 8192,
-  },
-  pricing: {
-    inputPer1k: 0.003,    // USD
-    outputPer1k: 0.015,
-    asOf: "2026-04-01",   // date metadata last verified
-  },
-}
-```
-```js
-// adapters/*.js — extended return shape
-async generate({ ... })
-  → { text, usage: { input, output, costUsd } }
-async stream({ ... }, onToken)
-  → { text, usage: { input, output, costUsd } } | null
-```
-**Zero-regression guarantees:**
-- `costUsd` is additive — existing callers reading `usage.input` / `usage.output` are unaffected.
-- Models missing pricing entries emit `costUsd: null` (no fake zeros) so dashboards can distinguish "no data" from "free call".
-- Capability flags default to conservative values (`supportsVision: false`, `supportsJsonMode: false`) when a model isn't in the catalog — degrades gracefully for self-hosted or new compat providers.
-- INF-007 `app_ai_provider_tokens_total` counter unchanged.
-- MNT-001 `app_ai_cost_usd_total` counter generalised — now bumped from every adapter call (not just vision-heal), with `operation` label defaulting to `"generation"`.
-**Files to change:**
-- `backend/src/aiProvider/modelCatalog.js` — extend schema, add pricing JSON for the 5 cloud providers + canonical Ollama models (mistral:7b, llama3:8b, etc. → `costUsd: 0`)
-- `backend/src/aiProvider/adapters/*.js` — compute `costUsd` from catalog lookup × usage tokens, attach to return shape
-- `backend/src/utils/metrics.js` — generalise `app_ai_cost_usd_total` so any adapter call records cost (not just `operation: "vision_heal"`)
-- `backend/tests/ai-provider-cost-tracking.test.js` (new) — pins per-provider cost computation, catalog miss → `costUsd: null`, MNT-001 vision-heal cost preserved
-- `docs/guide/ai-cost-tracking.md` (new) — operator guide: catalog source-of-truth, how to update pricing, what "asOf" means
-- `docs/changelog.md` — under `### Added`, note per-call cost tracking surface
-**Acceptance criteria:**
-- Every adapter populates `costUsd` for models in the catalog.
-- `app_ai_cost_usd_total` counter increments on every generation / stream call (not just vision).
-- Operators can update pricing by editing one JSON file — no code changes needed.
-- Pricing-update PR template documented (when vendor publishes new prices, update entry + bump `asOf`).
-- All existing tests pass unchanged.
-**Dependencies:** AI-002 (adapter contract must be uniform before extending it).
-**Out of scope (defer to AI-007):** cost ceilings, budget enforcement, kill switches. AI-003 only emits the signal; AI-007 acts on it.
+**Effort:** S | **Source:** Follow-on from AI-002 · Prerequisite for AI-005 / AI-007 · Industry pattern (LangChain `BaseChatModel.cost`, LlamaIndex `LLMMetadata`)
+
 ---
+
 ### AI-004 — Agent role config schema (dormant) 🔵 Medium
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Multi-agent foundation · Prerequisite for AI-005 · Industry pattern (CrewAI `Agent` config, LangGraph `Node` definition, AutoGen `AgentConfig`)
 **Problem:** Multi-agent dispatch (AI-005) needs a place to read "which provider, model, system prompt, and temperature should the planner agent use?" from. The pipeline today (`backend/src/pipeline/*`) hardcodes prompt templates and reads provider config from the workspace default. Without a config layer, the multi-agent dispatch PR will need to ship: DB schema + repo + settings UI + dispatch wiring all at once — too large for safe review. AI-004 ships the config plumbing in isolation, with the pipeline still calling the workspace default. The config is read but ignored — dormant until AI-005 lights it up.
