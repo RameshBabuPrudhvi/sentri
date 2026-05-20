@@ -1,8 +1,8 @@
 import { formatLogLine } from "../utils/logFormatter.js";
 
-export const MAX_RETRIES = parseInt(process.env.AI_MAX_RETRIES, 10) || 2;
-export const BASE_DELAY_MS = parseInt(process.env.AI_RETRY_BASE_MS, 10) || 2000;
-export const MAX_BACKOFF_MS = parseInt(process.env.AI_RETRY_MAX_MS, 10) || 10000;
+export const MAX_RETRIES = parseInt(process.env.LLM_MAX_RETRIES, 10) || 3;
+export const BASE_DELAY_MS = parseInt(process.env.LLM_BASE_DELAY_MS, 10) || 2000;
+export const MAX_BACKOFF_MS = parseInt(process.env.LLM_MAX_BACKOFF_MS, 10) || 30000;
 export const CLOUD_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 120_000;
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -10,12 +10,15 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 export function isRateLimitError(err) {
   const msg = (err?.message || "").toLowerCase();
   const status = err?.status || err?.statusCode || 0;
-  return status === 429
-    || /\b429\b/.test(msg)
-    || /rate limit/i.test(msg)
-    || /too many requests/i.test(msg)
-    || /quota/i.test(msg)
-    || /overloaded/i.test(msg);
+  const RATE_LIMIT_CODES = new Set([429, 529]);
+  if (RATE_LIMIT_CODES.has(status)) return true;
+  return /\b429\b/.test(msg)
+    || /\b529\b/.test(msg)
+    || /\brate.?limit\b/i.test(msg)
+    || /\btoo many requests\b/i.test(msg)
+    || /\bquota\s*(exceeded|exhausted|limit)\b/i.test(msg)
+    || /\bresource.?exhausted\b/i.test(msg)
+    || /\boverloaded\b/i.test(msg);
 }
 
 export function isTransientServerError(err) {

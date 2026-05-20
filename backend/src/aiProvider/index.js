@@ -25,10 +25,6 @@
  * - {@link loadKeysFromDatabase} — Restore all persisted keys from DB into the runtime cache (called at startup).
  */
 
-import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { throwIfAborted } from "../utils/abortHelper.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
 import * as compatConfigCache from "../utils/compatConfigCache.js";
@@ -651,41 +647,6 @@ export async function checkOllamaConnection() {
 
 // ── Retry with exponential backoff ────────────────────────────────────────────
 
-const RATE_LIMIT_CODES = [429, 529];
-const RETRY_ERRORS     = ["rate_limit_error", "overloaded_error", "Too Many Requests"];
-
-async function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Detect whether an error is a rate limit / quota exhaustion from any AI provider.
- * Used internally for retry decisions and exported for the pipeline to detect
- * rate limits that survived all retries.
- *
- * @param {Error} err
- * @returns {boolean}
- */
-/**
- * Detect transient server-side failures that warrant retry + provider
- * fallback but aren't rate limits. Common examples:
- *   - Google Gemini 503 "This model is currently experiencing high demand"
- *   - Anthropic 503 "overloaded_error" (already matches isRateLimitError via /overloaded/)
- *   - OpenAI 500/502/504 transient backend errors
- *   - Provider-specific HTTP 5xx with "high demand", "service unavailable", "try again later"
- *
- * Distinct from isRateLimitError — these are not quota issues, they're
- * temporary server outages. We retry with backoff and fall back to other
- * providers, but don't trip the per-provider rate-limit circuit breaker
- * (the provider's key is fine; the backend is struggling).
- *
- * @param {Error} err
- * @returns {boolean}
- */
-/**
- * True if the error should be retried — either a rate limit (quota issue)
- * or a transient server error (provider outage).
- */
 // ── Core constants ────────────────────────────────────────────────────────────
 
 const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
