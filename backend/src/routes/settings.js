@@ -239,7 +239,7 @@ router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
 
 
 
-const AGENT_ROLES = ["planner", "codegen", "critic", "selfheal", "crawl_classify", "scenario_plan", "assertion_enhance", "state_explorer"];
+const AGENT_ROLES = ["explorer", "planner", "author", "oracle", "executor", "healer", "reviewer", "triager"];
 
 function hasFallbackCycle(workspaceId, role, fallbackRole) {
   if (!fallbackRole) return false;

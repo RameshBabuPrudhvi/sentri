@@ -28,7 +28,7 @@ async function main() {
     const cookieB = `access_token=${b.token}`;
 
     await test("CRUD round-trip", async () => {
-      let out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", provider: "openai", fallbackRole: "critic" } });
+      let out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", provider: "openai", fallbackRole: "reviewer" } });
       assert.equal(out.res.status, 201);
       out = await apiReq(base, "/api/settings/agent-roles", { cookie: cookieA });
       assert.equal(out.res.status, 200);
@@ -41,13 +41,13 @@ async function main() {
     });
 
     await test("cross-workspace ACL isolation", async () => {
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "critic", provider: "anthropic" } });
+      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "reviewer", provider: "anthropic" } });
       const own = await apiReq(base, "/api/settings/agent-roles", { cookie: cookieA });
       const other = await apiReq(base, "/api/settings/agent-roles", { cookie: cookieB });
       assert.equal(own.res.status, 200);
       assert.equal(other.res.status, 200);
-      assert.ok((own.json.roles || []).some((r) => r.role === "critic"));
-      assert.ok(!(other.json.roles || []).some((r) => r.role === "critic"));
+      assert.ok((own.json.roles || []).some((r) => r.role === "reviewer"));
+      assert.ok(!(other.json.roles || []).some((r) => r.role === "reviewer"));
     });
 
     await test("role-name allowlist enforced", async () => {
@@ -56,9 +56,9 @@ async function main() {
     });
 
     await test("fallback cycle detection", async () => {
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "critic" } });
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "critic", fallbackRole: "codegen" } });
-      const out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "codegen", fallbackRole: "planner" } });
+      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "reviewer" } });
+      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "reviewer", fallbackRole: "author" } });
+      const out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "author", fallbackRole: "planner" } });
       assert.equal(out.res.status, 400);
     });
 

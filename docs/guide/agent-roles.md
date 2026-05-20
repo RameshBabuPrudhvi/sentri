@@ -8,16 +8,18 @@ This release does **not** change runtime pipeline dispatch. The generation pipel
 
 ## Canonical roles
 
-The server only accepts these role names:
+The server only accepts these role names. Each maps to a single QA-domain
+responsibility and produces one artifact, so multi-agent dispatch (AI-005)
+can route work cleanly without overlap:
 
-- `planner`
-- `codegen`
-- `critic`
-- `selfheal`
-- `crawl_classify`
-- `scenario_plan`
-- `assertion_enhance`
-- `state_explorer`
+- `explorer` — crawls and classifies pages/states; output: state graph
+- `planner` — decomposes goals into ordered test scenarios
+- `author` — generates Playwright test code from scenarios
+- `oracle` — generates and strengthens assertions (test oracle)
+- `executor` — runs tests and captures traces/screencast/artifacts
+- `healer` — repairs broken selectors and flows across runs
+- `reviewer` — quality gate on generated tests (LLM-as-judge)
+- `triager` — classifies failures (real bug / flake / env)
 
 ## Fields
 
@@ -34,7 +36,7 @@ Each workspace/role config can define:
 
 - Role names must be from the canonical allowlist.
 - `fallbackRole` must also be canonical.
-- `fallbackRole` graphs must be acyclic (e.g. `planner -> critic -> planner` is rejected).
+- `fallbackRole` graphs must be acyclic (e.g. `planner -> reviewer -> planner` is rejected).
 - All reads/writes are workspace-scoped.
 
 ## UI path
