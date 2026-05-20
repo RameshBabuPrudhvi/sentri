@@ -37,6 +37,7 @@ import {
   recordProviderFailure,
   recordProviderSuccess,
   detectProvider,
+  resolveProvider,
   getFallbackProviders,
   loadKeysFromDatabase,
   STICKY_FALLBACK_TTL_MS,
@@ -117,7 +118,9 @@ export { resolveVisionModel, hasVisionProvider, callVisionModel } from "./vision
  * @throws {Error} If no AI provider is configured or all providers fail.
  */
 export async function generateText(prompt, options) {
-  const provider = detectProvider();
+  const agentRole = options?.agentRole || null;
+  const workspaceId = options?.workspaceId || null;
+  const { provider, config } = resolveProvider({ agentRole, workspaceId });
   if (!provider) {
     throw new Error(
       "No AI provider configured. Options:\n" +
@@ -129,8 +132,11 @@ export async function generateText(prompt, options) {
 
   // ── FEA-003: Try primary provider, then fall back on rate-limit OR transient 5xx errors ──
   try {
-    const result = await callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
-    recordProviderSuccess(provider);
+    const effectivePrompt = (config?.systemPromptOverride && typeof prompt === "string")
+      ? { system: config.systemPromptOverride, user: prompt }
+      : prompt;
+    const result = await callProvider(provider, effectivePrompt, config?.maxTokens || options?.maxTokens, options?.signal, options?.responseFormat, { agentRole });
+    recordProviderSuccess(provider, agentRole);
     return result;
   } catch (err) {
     // Only fall back on retriable errors (rate limits or transient server errors).
@@ -147,8 +153,8 @@ export async function generateText(prompt, options) {
     // and try fallbacks. Transient 5xx errors don't trip the circuit breaker because
     // the quota is fine; the provider's backend is just temporarily overloaded.
     const errType = isRateLimitError(err) ? "rate-limited" : "transient server error (5xx)";
-    if (isRateLimitError(err)) recordProviderFailure(provider);
-    const fallbacks = getFallbackProviders(provider);
+    if (isRateLimitError(err)) recordProviderFailure(provider, agentRole);
+    const fallbacks = getFallbackProviders(provider, agentRole);
 
     if (fallbacks.length === 0) {
       // No fallbacks available — log why and rethrow so the caller (and user)
@@ -161,13 +167,13 @@ export async function generateText(prompt, options) {
     for (const fallbackProvider of fallbacks) {
       console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} — falling back to ${fallbackProvider}`));
       try {
-        const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
-        recordProviderSuccess(fallbackProvider);
+        const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat, { agentRole });
+        recordProviderSuccess(fallbackProvider, agentRole);
         // ── Sticky fallback: pin this provider so subsequent calls in the same
         // pipeline skip the failing primary entirely. Expires after
         // STICKY_FALLBACK_TTL_MS so normal selection resumes once the
         // quota/outage window closes.
-        setStickyFallback(fallbackProvider);
+        setStickyFallback(fallbackProvider, agentRole);
         console.log(formatLogLine("info", null, `[aiProvider] Pinned ${fallbackProvider} as sticky fallback for ${STICKY_FALLBACK_TTL_MS / 1000}s`));
         return result;
       } catch (fallbackErr) {
@@ -176,7 +182,7 @@ export async function generateText(prompt, options) {
           // providers. Transient 5xx errors don't disable the provider — the
           // backend is temporarily overloaded, not permanently broken.
           if (isRateLimitError(fallbackErr) && fallbackProvider !== "local") {
-            recordProviderFailure(fallbackProvider);
+            recordProviderFailure(fallbackProvider, agentRole);
           }
           const fallbackErrType = isRateLimitError(fallbackErr) ? "rate-limited" : "transient server error (5xx)";
           console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} ${fallbackErrType} — trying next`));

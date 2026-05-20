@@ -20,6 +20,7 @@ import {
   classifyAiError,
 } from "../utils/metrics.js";
 import { buildProviderMeta } from "./providerInfo.js";
+import { getCurrentTraceId } from "../utils/observability.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -205,17 +206,17 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, response
  * @param {object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
  * @param {"generation"|"vision_heal"} [operation="generation"] - Which surface initiated the call.
  */
-export function recordAiTokens(provider, usage, operation = "generation") {
+export function recordAiTokens(provider, usage, operation = "generation", agentRole = "default") {
   if (!usage) return;
   const label = providerMetricLabel(provider);
   try {
     const inTokens = Number(usage.input);
     if (Number.isFinite(inTokens) && inTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, kind: "input", operation }, inTokens);
+      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "input", operation }, inTokens);
     }
     const outTokens = Number(usage.output);
     if (Number.isFinite(outTokens) && outTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, kind: "output", operation }, outTokens);
+      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "output", operation }, outTokens);
     }
     // AI-003 — generalised cost counter. Adapters compute `costUsd` from the
     // catalog (see modelCatalog.js#computeCostUsd) and attach it to the
@@ -225,7 +226,7 @@ export function recordAiTokens(provider, usage, operation = "generation") {
     // because incrementing by 0 is a no-op anyway.
     const costUsd = Number(usage.costUsd);
     if (Number.isFinite(costUsd) && costUsd > 0) {
-      aiProviderCostUsdTotal.inc({ provider: label, operation }, costUsd);
+      aiProviderCostUsdTotal.inc({ provider: label, agent_role: agentRole || "default", operation }, costUsd);
     }
   } catch { /* best-effort */ }
 }
@@ -238,18 +239,21 @@ export function recordAiTokens(provider, usage, operation = "generation") {
  * SaaS operators get RED dashboards (Rate / Errors / Duration) per provider
  * without ad-hoc logging or invasive try/catch at every call site.
  */
-export async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat) {
+export async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions = {}) {
   // All call sites in this file are test-generation traffic. Vision-heal
   // calls live in `callVisionModel` and pass `operation: "vision_heal"`
   // to the same metric counters directly.
   const operation = "generation";
   const label = providerMetricLabel(provider);
+  const agentRole = callOptions.agentRole || "default";
+  const traceId = getCurrentTraceId();
+  if (traceId) console.log(formatLogLine("info", null, `[aiProvider] traceId=${traceId} provider=${provider} role=${agentRole}`));
   const startedAt = process.hrtime.bigint();
   try {
-    const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat);
+    const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions);
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      aiProviderLatencySeconds.observe({ provider: label, outcome: "success", operation }, seconds);
+      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome: "success", operation }, seconds);
     } catch { /* best-effort */ }
     return result;
   } catch (err) {
@@ -257,14 +261,14 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: label, outcome, operation }, seconds);
-      aiProviderErrorsTotal.inc({ provider: label, reason, operation });
+      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome, operation }, seconds);
+      aiProviderErrorsTotal.inc({ provider: label, agent_role: agentRole, reason, operation });
     } catch { /* best-effort */ }
     throw err;
   }
 }
 
-export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat) {
+export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions = {}) {
   const messages = normaliseMessages(promptOrMessages);
   // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
   // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
@@ -274,6 +278,6 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // Token telemetry is the orchestrator's responsibility — adapters return
   // raw usage and don't know about the metrics registry. Keeps adapters
   // self-contained and testable in isolation.
-  if (usage) recordAiTokens(provider, usage);
+  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole || "default");
   return text;
 }

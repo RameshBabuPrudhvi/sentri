@@ -41,6 +41,13 @@ export function getRequestId() {
   return requestContext.getStore()?.requestId || null;
 }
 
+export function getCurrentTraceId() {
+  const store = requestContext.getStore();
+  if (store?.traceId) return store.traceId;
+  const sc = getSpanContext();
+  return sc?.traceId || null;
+}
+
 export function getSpanContext() {
   if (!otelApi) return null;
   const span = otelApi.trace.getSpan(otelApi.context.active());
