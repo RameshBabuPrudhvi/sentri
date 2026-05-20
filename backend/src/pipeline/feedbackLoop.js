@@ -410,7 +410,7 @@ export async function regenerateFailingTest(improvement, signal) {
     throwIfAborted(signal);
     const tier = getTier();
     const prompt = buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier);
-    const text = await generateText(prompt, { signal });
+    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId: test.workspaceId || test.projectWorkspaceId || null });
     const improved = parseJSON(text);
 
     // Only pick safe fields from the AI response — never let the LLM

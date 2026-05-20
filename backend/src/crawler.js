@@ -196,7 +196,7 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
   const classifiedPages = [];
   for (const snap of filteredSnapshots) {
     throwIfAborted(signal);
-    const classified = await classifyPageWithAI(snap, snap.elements, { signal });
+    const classified = await classifyPageWithAI(snap, snap.elements, { signal, workspaceId: project.workspaceId || null });
     if (classified._aiAssisted) {
       log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
     }
@@ -271,7 +271,7 @@ export async function generateFromUserDescription(project, run, { name, descript
 
   const rawTests = await generateFromDescription(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
-  }, { dialsPrompt, testCount, signal });
+  }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null });
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Steps 5-7: Dedup → Enhance → Validate (shared pipeline) ────────────
@@ -613,7 +613,13 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
   setStep(run, 4);
   structuredLog("pipeline.generate", { runId: run.id, pages: effectiveClassifiedPages.length, journeys: journeys.length });
   log(run, `🤖 Generating intent-driven tests...`);
-  const genResult = await generateAllTests(effectiveClassifiedPages, journeys, effectiveSnapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
+  const genResult = await generateAllTests(
+    effectiveClassifiedPages,
+    journeys,
+    effectiveSnapshotsByUrl,
+    (msg) => log(run, msg),
+    { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null },
+  );
   const rawTests = genResult.tests;
   log(run, `📝 Raw UI tests: ${rawTests.length}`);
 

@@ -448,7 +448,12 @@ router.post("/chat", async (req, res) => {
 
   // Local models have small context windows — cap output tokens so
   // prompt + output don't overflow. Cloud providers handle this natively.
-  const streamOpts = { signal: controller.signal, responseFormat: "text" };
+  const streamOpts = {
+    signal: controller.signal,
+    responseFormat: "text",
+    agentRole: "author",
+    workspaceId: req.workspaceId || null,
+  };
   if (isLocal) streamOpts.maxTokens = 2048;
 
   try {
