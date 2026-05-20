@@ -519,6 +519,381 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ---
 
+### AI-002 — AI provider modularization + adapter contract 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Maintainability + multi-agent readiness (preparatory for future `AI-004` agent config + `AI-005` multi-agent dispatch)
+**Problem:** `backend/src/aiProvider.js` is a 1,545-line monolith spanning runtime key store, SSRF guard, provider detection, circuit breakers, sticky-fallback, per-call timeout composition, retry with backoff, 5 provider SDK integrations (Anthropic / OpenAI / Google Gemini / OpenRouter / OpenAI-compat / Ollama NDJSON), token telemetry (INF-007), vision-model multimodal shapes (MNT-001), and demo-key fallback. Every new provider, agent role, or call-shape change requires touching the same file — agents writing code (and human reviewers) cannot hold the whole module in working memory. The shape also blocks future multi-agent work: there is no adapter contract to extend, no place to add per-role circuit breakers, and no capability metadata (vision / JSON mode / context window / cost-per-1k) that the planner agent will need to pick a model for a given pipeline stage.
+**Fix:** Decompose into 5 modules + 4 adapters under `backend/src/aiProvider/`, behind a thin `index.js` that re-exports the existing public API verbatim (byte-identical behavior — no behavior change, no new providers, no `agentRole` parameter):
+```
+backend/src/aiProvider/
+├── index.js              — Re-exports generateText / streamText / parseJSON / etc.
+├── registry.js           — Mutable state: runtime keys, sticky fallback, active provider, circuit breakers + detectProvider / resolveProvider boundary
+├── retry.js              — withRetry, isRateLimitError, isTransientServerError, composeSignal
+├── modelCatalog.js       — Provider metadata + model defaults + capability flags (supportsVision, supportsJsonMode, contextWindow)
+└── adapters/
+    ├── anthropic.js      — Messages API + streaming + token usage shape
+    ├── openai.js         — OpenAI + OpenRouter + compat:<slot> (shared SDK, SSRF-guarded fetch for compat) + streaming
+    ├── google.js         — Gemini generateContent + systemInstruction + usageMetadata
+    └── ollama.js         — /api/generate + NDJSON fallback + ECONNREFUSED retry
+```
+**Adapter contract** (single shape for all four, locked in this PR so future providers + future `agentRole` work are one-file changes):
+```js
+// adapters/*.js each export:
+async generate({ messages, maxTokens, signal, useJson, model, apiKey, baseUrl })
+  → { text, usage: { input, output } }
+async stream({ ... }, onToken)
+  → { text, usage } | null   // null = caller falls back to generate
+```
+**Zero-regression guarantees:**
+- Every existing export remains importable from `backend/src/aiProvider.js` (legacy file becomes a thin re-export of `./aiProvider/index.js`).
+- Detection priority preserved: sticky-fallback → quick-switch override → `AI_PROVIDER` env → cloud auto-detect → compat slots → Ollama.
+- SSRF guard on compat providers preserved (`createSsrfGuardedFetch` unchanged), including `ALLOW_PRIVATE_URLS` escape hatch.
+- Demo key fallback (`DEMO_GOOGLE_API_KEY`) preserved.
+- Circuit breaker semantics preserved (1-failure threshold, 5-min cooldown, same-tier fallback only).
+- Vision support (MNT-001's `callVisionModel`) folded into adapters as a parallel `generateVision()` export.
+- INF-007 token telemetry preserved bit-for-bit (per-adapter `recordAiTokens` calls, `providerMetricLabel` folding compat slots to the literal `"compat"` label).
+- `loadKeysFromDatabase` / `checkOllamaConnection` / `parseJSON` / `normaliseMessages` / `composeSignal` all preserved with identical signatures.
+**Files to change:**
+- `backend/src/aiProvider.js` — replaced by 1-line re-export from `./aiProvider/index.js`
+- `backend/src/aiProvider/{index,registry,retry,modelCatalog}.js` — new
+- `backend/src/aiProvider/adapters/{anthropic,openai,google,ollama}.js` — new
+- All existing callers — no changes required (public API stable)
+- `backend/tests/` — existing `ai-provider*.test.js` files should pass unchanged; add `aiProvider-adapter-contract.test.js` pinning the `{ text, usage }` return shape per adapter
+- `docs/changelog.md` — under `### Changed`, note the module restructure with the "no behavior change" callout
+**Acceptance criteria:**
+- All existing backend tests pass unchanged (no test file modifications beyond the new contract test).
+- `backend/src/aiProvider.js` is ≤20 lines (pure re-export shim).
+- Each new file is ≤450 lines (agent-friendly working set).
+- `git log --follow` on the legacy file resolves cleanly through the restructure.
+- No new dependencies. No new env vars. No new DB migrations. No new routes.
+- `npm test` passes for both SQLite and Postgres (INF-008 dual-matrix).
+**Dependencies:** none (FEA-003 ✅ circuit breakers, AI-001 ✅ compat providers, INF-007 ✅ telemetry, MNT-001 ✅ vision support all already in `aiProvider.js` and preserved).
+**Follow-on items (deliberately deferred — separate PRs):**
+- `AI-003` — Adapter capability hardening: per-call cost tracking, `modelCatalog` schema with `costPer1kInput` / `costPer1kOutput`, structured `usage` extension.
+- `AI-004` — Agent role config schema (DB table, settings UI, dormant in pipeline).
+- `AI-005` — Multi-agent dispatch (depends on AUTO-023 DAG runner): `options.agentRole` parameter, per-role circuit breakers via `breakerKey(provider, role)`, per-role token telemetry label, per-workspace × per-role key resolution matrix.
+- `AI-006` — Per-role eval harness extension (depends on AUTO-022b).
+- `AI-007` — AI cost governance: per-role / per-workspace ceilings, alerts, kill switches.
+---
+### AI-003 — Adapter capability hardening + cost tracking 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** S | **Source:** Follow-on from AI-002 · Prerequisite for AI-005 / AI-007 · Industry pattern (LangChain `BaseChatModel.cost`, LlamaIndex `LLMMetadata`)
+**Problem:** After AI-002 lands, every adapter returns `{ text, usage: { input, output } }` — but `modelCatalog.js` carries only display name + default model id. The planner agent (AI-005) cannot pick a model for a stage without knowing whether it supports vision / JSON mode, what its context window is, or what it costs. The MNT-001 cost counter (`app_ai_cost_usd_total`) currently hardcodes pricing in the vision-heal adapter — every other call records token counts but no dollar cost. Without per-call cost tracking, AI-007 (cost governance) has no signal to gate on.
+**Fix:** Extend `modelCatalog.js` with structured capability + pricing metadata per (provider, model) pair, and have every adapter consult the catalog to emit a normalised cost number alongside the existing `usage` block. No new external dependencies — pricing data lives in-repo as a maintainer-owned JSON table.
+```js
+// modelCatalog.js — extended schema (per model entry)
+{
+  id: "claude-sonnet-4-20250514",
+  displayName: "Claude Sonnet",
+  provider: "anthropic",
+  capabilities: {
+    supportsVision: true,
+    supportsJsonMode: true,
+    supportsStreaming: true,
+    contextWindow: 200000,
+    maxOutputTokens: 8192,
+  },
+  pricing: {
+    inputPer1k: 0.003,    // USD
+    outputPer1k: 0.015,
+    asOf: "2026-04-01",   // date metadata last verified
+  },
+}
+```
+```js
+// adapters/*.js — extended return shape
+async generate({ ... })
+  → { text, usage: { input, output, costUsd } }
+async stream({ ... }, onToken)
+  → { text, usage: { input, output, costUsd } } | null
+```
+**Zero-regression guarantees:**
+- `costUsd` is additive — existing callers reading `usage.input` / `usage.output` are unaffected.
+- Models missing pricing entries emit `costUsd: null` (no fake zeros) so dashboards can distinguish "no data" from "free call".
+- Capability flags default to conservative values (`supportsVision: false`, `supportsJsonMode: false`) when a model isn't in the catalog — degrades gracefully for self-hosted or new compat providers.
+- INF-007 `app_ai_provider_tokens_total` counter unchanged.
+- MNT-001 `app_ai_cost_usd_total` counter generalised — now bumped from every adapter call (not just vision-heal), with `operation` label defaulting to `"generation"`.
+**Files to change:**
+- `backend/src/aiProvider/modelCatalog.js` — extend schema, add pricing JSON for the 5 cloud providers + canonical Ollama models (mistral:7b, llama3:8b, etc. → `costUsd: 0`)
+- `backend/src/aiProvider/adapters/*.js` — compute `costUsd` from catalog lookup × usage tokens, attach to return shape
+- `backend/src/utils/metrics.js` — generalise `app_ai_cost_usd_total` so any adapter call records cost (not just `operation: "vision_heal"`)
+- `backend/tests/ai-provider-cost-tracking.test.js` (new) — pins per-provider cost computation, catalog miss → `costUsd: null`, MNT-001 vision-heal cost preserved
+- `docs/guide/ai-cost-tracking.md` (new) — operator guide: catalog source-of-truth, how to update pricing, what "asOf" means
+- `docs/changelog.md` — under `### Added`, note per-call cost tracking surface
+**Acceptance criteria:**
+- Every adapter populates `costUsd` for models in the catalog.
+- `app_ai_cost_usd_total` counter increments on every generation / stream call (not just vision).
+- Operators can update pricing by editing one JSON file — no code changes needed.
+- Pricing-update PR template documented (when vendor publishes new prices, update entry + bump `asOf`).
+- All existing tests pass unchanged.
+**Dependencies:** AI-002 (adapter contract must be uniform before extending it).
+**Out of scope (defer to AI-007):** cost ceilings, budget enforcement, kill switches. AI-003 only emits the signal; AI-007 acts on it.
+---
+### AI-004 — Agent role config schema (dormant) 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Multi-agent foundation · Prerequisite for AI-005 · Industry pattern (CrewAI `Agent` config, LangGraph `Node` definition, AutoGen `AgentConfig`)
+**Problem:** Multi-agent dispatch (AI-005) needs a place to read "which provider, model, system prompt, and temperature should the planner agent use?" from. The pipeline today (`backend/src/pipeline/*`) hardcodes prompt templates and reads provider config from the workspace default. Without a config layer, the multi-agent dispatch PR will need to ship: DB schema + repo + settings UI + dispatch wiring all at once — too large for safe review. AI-004 ships the config plumbing in isolation, with the pipeline still calling the workspace default. The config is read but ignored — dormant until AI-005 lights it up.
+**Fix:** New `agent_configs` table per workspace storing one row per role (`planner` / `codegen` / `critic` / `selfheal` / `crawl_classify` / `scenario_plan` / etc.). Settings UI under **Settings → AI → Agent Roles** lets admins define each role's `(provider, model, systemPromptOverride, temperature, maxTokens, fallbackRole)`. Backend exposes `agentConfigRepo.getByRole(workspaceId, role)` but no pipeline code reads it yet — that's AI-005's job.
+```sql
+-- migration NNN_agent_configs.sql
+CREATE TABLE agent_configs (
+  id TEXT PRIMARY KEY,
+  workspaceId TEXT NOT NULL,
+  role TEXT NOT NULL,                  -- "planner" | "codegen" | "critic" | ...
+  provider TEXT,                       -- null → use workspace default
+  model TEXT,                          -- null → use provider default
+  systemPromptOverride TEXT,           -- null → use pipeline default
+  temperature REAL DEFAULT 0.2,
+  maxTokens INTEGER,
+  fallbackRole TEXT,                   -- name of role to delegate to on failure
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  UNIQUE(workspaceId, role)
+);
+```
+**Zero-regression guarantees:**
+- No pipeline code reads `agentConfigRepo` in AI-004. The config is dormant.
+- Existing `generateText` / `streamText` calls behave identically — `options.agentRole` parameter is **not** added in this PR.
+- Workspace default provider remains the source of truth.
+- Settings UI is a new admin-only tab; viewers don't see it.
+**Files to change:**
+- `backend/src/database/migrations/NNN_agent_configs.sql` — new table
+- `backend/src/database/repositories/agentConfigRepo.js` — `getByRole`, `listByWorkspace`, `upsert`, `remove`
+- `backend/src/routes/settings.js` — `GET/POST/PATCH/DELETE /api/v1/settings/agent-roles[/:role]` (admin-only, registered in `permissions.json`)
+- `backend/src/middleware/permissions.json` — register the new routes
+- `frontend/src/pages/Settings.jsx` — new **AI → Agent Roles** tab (table + CRUD form, role-name dropdown sourced from a hardcoded `AGENT_ROLES` constant in `frontend/src/config.js`)
+- `frontend/src/api.js` — `getAgentRoles`, `createAgentRole`, `updateAgentRole`, `deleteAgentRole`
+- `backend/tests/agent-config-routes.test.js` (new) — CRUD round-trip, cross-workspace ACL, role-name allowlist, fallback-role cycle detection
+- `docs/api/settings.md` — document the new endpoints
+- `docs/guide/agent-roles.md` (new) — operator guide explaining the 8 canonical roles (even though only the workspace default is used today)
+- `docs/changelog.md` — under `### Added`, note the dormant config layer
+**Acceptance criteria:**
+- Admins can create / edit / delete agent role configs via UI and API.
+- Cross-workspace ACL enforced (workspace A admin cannot read workspace B's agent configs).
+- Role-name allowlist enforced server-side (no free-form role names — must match the canonical 8 stage names).
+- `fallbackRole` references validated server-side, cycle detection prevents `planner → critic → planner`.
+- Pipeline behavior unchanged — verified by the existing eval harness golden set (AUTO-022) producing identical scores.
+**Dependencies:** AI-002 (registry must expose `resolveProvider({ providerId })` so AI-005 can later override workspace default).
+**Out of scope:** Pipeline integration. AI-004 ships config storage + UI; AI-005 ships the dispatch wiring.
+---
+### AI-005 — Multi-agent dispatch (agentRole-aware generation) 🟢 Differentiator
+**Status:** 🔲 Planned | **Effort:** L | **Source:** Strategic differentiator (Mabl / Testim / SmartBear ship single-LLM pipelines) · Industry pattern (CrewAI agent handoff, LangGraph stateful node dispatch, AutoGen `GroupChat`)
+**Problem:** Single-agent mode uses one provider + model for all 8 pipeline stages (crawl classification → scenario planning → code generation → critic review → self-healing). This is the lowest-cost path but suboptimal: a customer might want Claude Sonnet for codegen (best at structured output), GPT-4o-mini for crawl classification (cheap + fast on simple JSON), Gemini Flash for the critic (different model gives independent second opinion), and Ollama for self-healing (low-stakes, on-prem). The agent-config table from AI-004 stores these preferences but is dormant — AI-005 lights it up.
+**Fix:** Add `options.agentRole` parameter to `generateText` / `streamText` / `generateVision`. When provided, `registry.resolveProvider({ agentRole, workspaceId })` reads the agent config from `agentConfigRepo` and returns the resolved provider/model/systemPrompt/temperature, falling back to the workspace default when the role is unconfigured. Per-role circuit breakers via `breakerKey(providerId, agentRole)` so a rate-limited Claude planner does not trip Claude for the critic. Per-role token + cost telemetry via a new `agent_role` Prometheus label (bounded cardinality: 8 fixed role names).
+```js
+// New call signature
+await generateText(prompt, {
+  agentRole: "planner",           // ← NEW — looks up agent_configs row
+  workspaceId: req.workspaceId,   // ← NEW — required when agentRole set
+  maxTokens: 4000,
+  signal: abortSignal,
+});
+```
+**Detection priority extended:**
+```
+1. Sticky fallback (rate-limit recovery) — same as today
+2. agentRole resolution (NEW) — if set, read agent_configs[role]
+3. Quick-switch override (header dropdown) — same as today
+4. AI_PROVIDER env — same as today
+5. Auto-detect cloud → compat → Ollama — same as today
+```
+Sticky-fallback stays at the top so a rate-limited primary doesn't keep failing under an agent override. `agentRole` slots between sticky-fallback and quick-switch — agents win over operator UI selection when configured, but never bypass an active rate-limit recovery.
+**Per-role circuit breakers:**
+```js
+// registry.js — extended breaker keying
+function breakerKey(provider, agentRole) {
+  return agentRole ? `${provider}::${agentRole}` : provider;
+}
+```
+A rate-limited `anthropic::planner` does NOT trip `anthropic::critic` — each role gets its own breaker. Same-provider fallback inside a role still uses the agentRole-scoped breaker chain; cross-role fallback (planner → planner_cheap via `fallbackRole`) is a separate code path.
+**Per-role telemetry:**
+```
+app_ai_provider_latency_seconds{provider, agent_role, outcome}
+app_ai_provider_tokens_total{provider, agent_role, kind}
+app_ai_provider_errors_total{provider, agent_role, reason}
+app_ai_cost_usd_total{provider, agent_role, operation}
+```
+Cardinality bounded: 8 canonical roles × 5 provider labels × 3 outcomes = 120 series per metric (well under Prometheus's recommended 10k/metric limit).
+**Pipeline integration:**
+Every pipeline stage threads `agentRole` + `workspaceId` through to its `generateText` call:
+| Pipeline stage | Module | agentRole |
+|---|---|---|
+| Crawl classification | `crawler.js` → `classifyPage` | `crawl_classify` |
+| Scenario planning | `pipeline/scenarioPlanner.js` | `scenario_plan` |
+| Code generation | `pipeline/testGenerator.js` | `codegen` |
+| Code refinement | `pipeline/testRefiner.js` | `codegen` (same role) |
+| Critic review | `pipeline/testCritic.js` | `critic` |
+| Self-healing | `selfHealing.js` (DOM strategies) | `selfheal` |
+| Vision healing | `selfHealing.js` stages 7+8 | `vision_heal` (MNT-001 — already labeled) |
+| Conversational editor | `routes/chat.js` | `chat` |
+**Zero-regression guarantees:**
+- `options.agentRole` is optional. Existing call sites that don't pass it behave identically to today (workspace default).
+- Agent configs left empty by the admin → pipeline falls back to workspace default → byte-identical to single-agent mode.
+- The eval harness (AUTO-022) golden set runs against the workspace default and continues to produce identical scores in single-agent mode.
+- Sticky-fallback still wins over agentRole resolution — a rate-limited provider doesn't keep failing under an agent override.
+- Per-role circuit breakers default to provider-only keying when `agentRole` is absent (zero new state for non-multi-agent workspaces).
+**Files to change:**
+- `backend/src/aiProvider/registry.js` — extend `resolveProvider` to read `agentConfigRepo`, extend `breakerKey` with agentRole, plumb new label through `recordAiTokens` / `recordAiCost`
+- `backend/src/aiProvider/index.js` — thread `agentRole` + `workspaceId` through `generateText` / `streamText` / `generateVision`
+- `backend/src/utils/metrics.js` — add `agent_role` label to the 4 AI counters (default `"default"` when unset to keep label cardinality stable)
+- `backend/src/crawler.js`, `backend/src/pipeline/{scenarioPlanner,testGenerator,testRefiner,testCritic}.js`, `backend/src/selfHealing.js`, `backend/src/routes/chat.js` — pass `agentRole` + `workspaceId` to every `generateText` call
+- `frontend/src/pages/Settings.jsx` — light up the dormant AI-004 settings tab with a "Test agent" button per role that runs a sample prompt against the configured agent and shows the response (validates the config end-to-end)
+- `backend/tests/agent-dispatch.test.js` (new) — pins agentRole → provider resolution, fallback to workspace default when role unconfigured, per-role circuit breaker isolation (Claude planner rate-limited, Claude critic still works), per-role telemetry labels, `fallbackRole` cycle protection, sticky-fallback still wins over agentRole
+- `backend/tests/agent-dispatch-pipeline.test.js` (new) — end-to-end: configure planner=claude + codegen=openai, run a generation, assert both providers were called for their respective stages
+- `docs/guide/multi-agent-pipeline.md` (new) — operator guide: when to use single vs multi-agent mode, recommended role-provider matchups, cost implications
+- `docs/changelog.md` — under `### Added`, note multi-agent dispatch with the "off by default, fully backwards compatible" callout
+**Acceptance criteria:**
+- Configuring an agent role redirects only that stage's LLM call — verified by `agent-dispatch-pipeline.test.js`.
+- Unconfigured roles fall back to workspace default — eval harness scores unchanged.
+- Per-role circuit breakers isolated — rate-limiting Claude planner does not affect Claude critic.
+- Per-role telemetry labels visible in `/metrics` output and queryable in Grafana.
+- `fallbackRole` cycle (planner → critic → planner) rejected at config-save time with a 400 error.
+- Sticky-fallback still wins — a rate-limited provider under an agent override falls back to the same-tier alternate, not back to the agent's preferred provider.
+- Eval harness (AUTO-022) re-run in multi-agent mode produces ≥ baseline scores (no regression from role specialisation).
+**Dependencies:** AI-002 (adapter contract), AI-003 (cost tracking — telemetry layer), AI-004 (agent config storage), AUTO-023 (DAG runner — not a hard dep, but DAG context is where the "agent handshake" payload lives long-term).
+**Out of scope:**
+- Per-workspace × per-agent key resolution matrix — deferred to a follow-up `AI-005b` if multi-tenant SaaS customers want their own keys per agent role (today, agent_configs.provider points to a workspace-level key).
+- Agent-to-agent handoff envelope (the structured `{ fromRole, toRole, artifact, traceId }` payload) — that belongs in AUTO-023 DAG runner, not the AI provider layer.
+- Streaming partial results between agents — AI-005 keeps the current "agent completes its stage, full result passes to next stage" model.
+---
+### AI-006 — Per-role eval harness extension 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Quality gate for AI-005 · Extends AUTO-022 eval harness · Industry pattern (Anthropic's eval-per-task, OpenAI Evals registry per skill)
+**Problem:** AUTO-022's eval harness scores the end-to-end pipeline as one number (aggregate Levenshtein × 0.4 selectors + 0.3 actions + 0.3 assertions). When multi-agent mode lights up in AI-005, a regression in the planner won't be distinguishable from a regression in codegen — the aggregate score moves and the operator has no signal pointing at which agent role caused the drop. Without per-role goldens, swapping `codegen` from Claude Sonnet to GPT-4o-mini is unmeasurable: did codegen quality drop 5%? 15%? Unchanged? Today's harness can't say.
+**Fix:** Extend the golden-set schema with per-role expected outputs and per-role scoring. A single golden case carries expected outputs for each agent role that participates in the pipeline; the harness runs the full pipeline AND records each agent's intermediate output, then scores each intermediate against its role's golden.
+```json
+// backend/tests/fixtures/eval-goldens/form-fill-001.json
+{
+  "id": "form-fill-001",
+  "category": "form-fill",
+  "input": {
+    "url": "https://example.com/signup",
+    "snapshot": { ... },
+    "userIntent": "Sign up a new user"
+  },
+  "perRoleExpected": {
+    "crawl_classify": { "type": "form", "purpose": "registration" },
+    "scenario_plan": { "steps": ["fill email", "fill password", "click submit", "assert dashboard"] },
+    "codegen": "test('signup flow', async ({ page }) => { ... })",
+    "critic": { "issues": [], "approved": true }
+  }
+}
+```
+```bash
+# CLI invocation extended
+$ node backend/scripts/run-eval.mjs --per-role
+# Output: per-role scores + aggregate
+# planner:  0.92 (vs baseline 0.94, ΔP-0.02 — within tolerance)
+# codegen:  0.87 (vs baseline 0.91, ΔP-0.04 — within tolerance)
+# critic:   0.88 (vs baseline 0.90, ΔP-0.02 — within tolerance)
+# aggregate: 0.89 (vs baseline 0.92, ΔP-0.03 — within tolerance)
+```
+**Per-role regression thresholds** (configurable in `eval-baseline.json`):
+- Per-role drop > 8% → fail per role (tighter than aggregate's 10%)
+- Aggregate drop > 5% → fail (unchanged from AUTO-022)
+- Operators get a per-role diff that points at the regressing agent
+**Zero-regression guarantees:**
+- Single-agent mode (no agent_configs rows) runs the aggregate-only path — byte-identical to AUTO-022.
+- Goldens missing `perRoleExpected` fall back to aggregate-only scoring (so the 5 canonical AUTO-022 goldens still work).
+- The `--per-role` flag is opt-in; default CLI behavior matches AUTO-022.
+**Files to change:**
+- `backend/src/eval/pipelineEval.js` — extend scorer to optionally take `perRoleExpected` and return per-role scores alongside aggregate
+- `backend/src/eval/pipelineAdapter.js` — capture per-stage intermediate outputs (planner output, codegen output, critic output) for scoring
+- `backend/scripts/run-eval.mjs` — `--per-role` flag, per-role regression detection, per-role diff in the report
+- `backend/tests/fixtures/eval-goldens/*.json` — extend the 5 canonical templates with `perRoleExpected` blocks; document the schema in `docs/guide/eval-harness-record-goldens.md`
+- `backend/src/database/repositories/metricSamplesRepo.js` — accept per-role sample rows (`eval.role.planner`, `eval.role.codegen`, etc.) — schema unchanged, new sentinel metric names
+- `frontend/src/pages/Dashboard.jsx` — extend the AI Eval Quality panel with a per-role breakdown tab (one sparkline per role)
+- `backend/tests/eval-per-role.test.js` (new) — per-role score parity, missing perRoleExpected → aggregate-only fallback, per-role threshold enforcement, frontend panel data shape
+- `docs/guide/eval-harness.md` — document the per-role surface
+- `docs/changelog.md` — under `### Added`, note per-role eval scoring
+**Acceptance criteria:**
+- Running `node backend/scripts/run-eval.mjs --per-role` produces per-role scores in the report.
+- A regression isolated to one role (e.g. swapping codegen from Claude → GPT-4o-mini) shows the drop on that role's
+- - A regression isolated to one role (e.g. swapping codegen from Claude → GPT-4o-mini) shows the drop on that role's sparkline without polluting other roles' scores.
+- Per-role thresholds fire independently of aggregate threshold — a 9% codegen drop with stable other roles fails the gate even when aggregate is within 5%.
+- Goldens without `perRoleExpected` continue to work via aggregate-only scoring (zero churn on AUTO-022's canonical 5 templates).
+- Dashboard AI Eval Quality panel renders per-role sparklines when per-role samples exist; falls back to the aggregate-only view otherwise.
+- All existing AUTO-022 tests pass unchanged.
+**Dependencies:** AUTO-022 (eval harness scorer + persistence), AI-005 (multi-agent dispatch — so the harness has distinct per-role outputs to score). AI-006 can ship before AI-005 with goldens covering only single-agent's aggregate, but the per-role panel stays dormant until AI-005 lights up real per-role calls.
+**Out of scope:**
+- Per-role baselines per provider/model pair (`claude-sonnet-codegen-baseline.json` vs `gpt-4o-mini-codegen-baseline.json`). A single baseline per role keeps the matrix manageable; operators wanting to A/B test models do that via the AI-005 settings UI and read the dashboard diff, not via parallel baseline files.
+- Cross-role regression correlation (e.g. "planner drift caused codegen drift") — interesting but speculative without production data; revisit after multi-agent has been in production for a sprint.
+---
+### AI-007 — AI cost governance + budget enforcement 🟡 High
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Production hardening · SaaS unit-economics requirement · Industry pattern (OpenAI usage limits, Anthropic admin caps, Vercel AI Gateway budgets)
+**Problem:** AI-003 emits per-call `costUsd`, AI-005 emits per-role costs, and the Dashboard renders a 30-day trend — but nothing stops a runaway agent loop. A misconfigured `fallbackRole` cycle, a self-healing storm against a SUT that keeps changing selectors, or a critic that keeps requesting refinements can burn through hundreds of dollars before an operator notices. Production AI platforms (Cursor, Vercel AI Gateway, OpenRouter) all ship per-workspace and per-key budgets with hard kill switches. Sentri ships nothing — the only protection today is the per-project `visionHealMaxCostUsdPerMonth` from MNT-001, which only covers vision healing.
+**Fix:** Generalise MNT-001's budget counter pattern to cover every AI call. Three governance layers, each opt-in but stacked:
+1. **Per-workspace daily + monthly ceilings** (`workspaces.aiCostDailyCapUsd`, `workspaces.aiCostMonthlyCapUsd`) — admin-configurable, defaults null (disabled).
+2. **Per-role ceilings** (`agent_configs.costMonthlyCapUsd` extending AI-004's schema) — finer-grained, defaults null.
+3. **Per-run kill switch** (`projects.aiCostPerRunCapUsd`) — caps a single run's AI spend; defaults null.
+Counters live in a new `ai_cost_counters` table mirroring `vision_budget_counters`:
+```sql
+CREATE TABLE ai_cost_counters (
+  id TEXT PRIMARY KEY,
+  workspaceId TEXT NOT NULL,
+  scope TEXT NOT NULL,              -- "workspace" | "role" | "run"
+  scopeKey TEXT NOT NULL,           -- role name | runId | "*" for workspace
+  windowKind TEXT NOT NULL,         -- "day" | "month" | "run"
+  windowStart TEXT NOT NULL,        -- UTC day boundary | UTC month boundary | run startedAt
+  costUsd REAL NOT NULL DEFAULT 0,
+  UNIQUE(workspaceId, scope, scopeKey, windowKind, windowStart)
+);
+```
+Every adapter call passes through `aiBudget.record(workspaceId, role, runId, costUsd)` which atomically bumps all three scope counters in one transaction. Before each call, `aiBudget.checkAllowed(...)` reads the same counters and rejects with a structured error when any cap is hit. Self-echo across replicas (a worker on replica A racing one on replica B both incrementing the same counter) handled by the existing AES-GCM ordering pattern + row-level locks — same primitive as `vision_budget_counters` from MNT-001.
+**Alert + UI surface:**
+- New `app_ai_budget_exhausted_total{scope, scope_key, reason}` Prometheus counter, with corresponding `AIBudgetExhausted` alert in `monitoring/prometheus/alerts.yml`.
+- New `ai.budget.exceeded` activity row (SEC-007 hash-chain compatible) — captures `{ scope, scopeKey, capUsd, actualUsd, blockedRunId }`.
+- Settings → AI → **Budgets** tab (admin-only) lets operators set caps and shows current spend vs cap per scope with a colour-coded progress bar (green <50%, amber 50–80%, red >80%).
+- Dashboard AI Eval Quality panel gains a "Cost vs Budget" row showing today's spend / today's cap and this month's spend / this month's cap.
+- FEA-001 notification channel fires at 80% threshold (warning, once per window) and at 100% (hard block, once per window) — Teams adaptive card + email + webhook, same pattern as MNT-001's vision-budget-exhausted alert.
+**Behaviour when a cap is hit:**
+- **Workspace daily cap hit:** All AI calls in the workspace return a structured `AI_BUDGET_EXHAUSTED` error. Runs in flight finish their current AI call but pre-flight rejection blocks the next call. New runs can be enqueued but stall at the first AI call until the next UTC day boundary.
+- **Per-role cap hit:** Only that role's calls are blocked. The pipeline either uses the role's `fallbackRole` (AI-004) if it has spare budget, or fails the stage with a clear error. Tests already generated don't retry against the rate-limited role.
+- **Per-run cap hit:** That specific run's AI calls fail. The run is marked `completed_with_budget_exhausted` (new status, similar to `completed_empty`), persisted with `run.aiBudgetExhausted: { capUsd, actualUsd, blockingStage }` for forensics.
+Crucially, **budget enforcement happens before the LLM call**, not after — a single 50¢ call that pushes us $0.49 over a $0.01-from-cap budget gets blocked rather than processed-and-then-flagged. This matches OpenRouter's pre-flight reject pattern; the alternative ("oh, we overspent by $0.49 but it's already done") is what makes Vercel AI Gateway's post-hoc model untenable for cost-conscious customers.
+**Zero-regression guarantees:**
+- All caps default to `null` (disabled). Existing deployments see no change.
+- Workspaces without any caps configured don't touch `ai_cost_counters` (early return on the budget-check path).
+- MNT-001's vision-healing budget remains in place and operates independently — vision is a separate counter scope (`scope: "vision_heal"`) so adding the new generic counters doesn't double-count vision spend.
+- Eval harness (AUTO-022, AI-006) bypasses budgets — it runs against the `__eval_harness__` sentinel projectId which AI-007 explicitly excludes from counter increments. Otherwise running the eval harness would burn workspace budgets and skew unit-economics dashboards.
+**Files to change:**
+- `backend/src/database/migrations/NNN_ai_cost_governance.sql` — new `ai_cost_counters` table, `workspaces.aiCostDailyCapUsd` + `workspaces.aiCostMonthlyCapUsd`, `projects.aiCostPerRunCapUsd`, `agent_configs.costMonthlyCapUsd` (extends AI-004 schema)
+- `backend/src/database/repositories/aiCostCounterRepo.js` (new) — atomic `record()` + `checkAllowed()` + `getCurrentSpend()` mirroring `visionBudgetRepo`
+- `backend/src/aiProvider/registry.js` — call `aiCostCounterRepo.checkAllowed()` pre-flight, `aiCostCounterRepo.record()` post-flight (best-effort try/catch on record so a counter write failure doesn't fail the AI call, but checkAllowed failures DO fail the call)
+- `backend/src/utils/metrics.js` — `app_ai_budget_exhausted_total{scope, scope_key, reason}` counter
+- `monitoring/prometheus/alerts.yml` — `AIBudgetExhausted` alert at 80% threshold (warning) and 100% (page)
+- `backend/src/utils/activityLogger.js` — register `ai.budget.exceeded` event type for SEC-007 hash chain
+- `backend/src/pipeline/notifications.js` — fire FEA-001 webhook on 80% + 100% (once per window per scope, deduplicated via a `notified_at` column on `ai_cost_counters`)
+- `backend/src/routes/settings.js` — `GET/POST /api/v1/settings/ai-budgets` (admin-only)
+- `backend/src/routes/projects.js` — `aiCostPerRunCapUsd` in `SINGLE_FIELD_BYPASS` so PATCH from the project quality card skips name/url validation
+- `frontend/src/pages/Settings.jsx` — new **AI → Budgets** tab with per-scope cap inputs + live spend-vs-cap progress bars
+- `frontend/src/pages/Dashboard.jsx` — extend AI Eval Quality panel with "Cost vs Budget" rows
+- `frontend/src/pages/RunDetail.jsx` — render `run.aiBudgetExhausted` panel when the run was budget-killed
+- `backend/tests/ai-budget-governance.test.js` (new) — atomic counter bumps, pre-flight rejection on cap hit, fallback-role takes over when per-role cap exhausted, run kill-switch persists `aiBudgetExhausted` shape, eval harness bypass, vision-healing budget remains independent, notification dedup across multi-replica writes
+- `backend/tests/ai-budget-routes.test.js` (new) — HTTP integration: cap CRUD, cross-workspace ACL, malformed cap rejection, GET spend-vs-cap shape
+- `docs/guide/ai-cost-governance.md` (new) — operator guide: setting caps, reading spend dashboards, what happens at 80%/100%, distinguishing cap-blocked runs from rate-limit-blocked runs
+- `docs/guide/env-vars.md` — document any new env vars (none expected; everything DB-driven)
+- `docs/changelog.md` — under `### Added`, note budget enforcement with the "off by default" callout
+- `QA.md` — § AI Cost Governance manual test plan: cap configuration, spend tracking, 80% notification, 100% block, fallback-role takeover, per-run kill switch
+- `permissions.json` — register the new settings endpoints at `admin`
+**Acceptance criteria:**
+- Setting `aiCostDailyCapUsd: 1.00` on a workspace and running enough AI calls to exceed $1.00 in a UTC day blocks subsequent calls with a structured `AI_BUDGET_EXHAUSTED` error until UTC day boundary.
+- Setting `agent_configs.costMonthlyCapUs
+- - Setting `agent_configs.costMonthlyCapUsd: 5.00` on the `codegen` role blocks codegen calls past $5/month while other roles continue working.
+- Setting `projects.aiCostPerRunCapUsd: 0.50` and triggering a run that would exceed $0.50 of AI spend marks the run `completed_with_budget_exhausted` and persists the forensics shape on `run.aiBudgetExhausted`.
+- Pre-flight rejection — a single call that would push us over the cap is blocked, not processed-and-then-flagged.
+- Reaching 80% of any cap fires a Teams/email/webhook notification once per window (verified by the dedup column).
+- Reaching 100% fires a second notification + the `AIBudgetExhausted` Prometheus alert.
+- `ai.budget.exceeded` activity row hash-chains correctly under SEC-007.
+- Eval harness (AUTO-022, AI-006) does NOT increment workspace counters — verified by running the full eval suite against a workspace with `aiCostDailyCapUsd: 0.01` and confirming no exhaustion.
+- Vision-healing budget (MNT-001) operates independently — exhausting the generic AI budget does not affect vision-heal spend, and vice versa.
+- Multi-replica counter writes are atomic — `agent-budget-governance.test.js` simulates 8× concurrent `record()` calls and asserts no lost increments.
+- Settings UI shows current spend vs cap per scope with colour-coded progress; admin can edit caps and see the change reflected on next AI call.
+**Dependencies:** AI-003 (per-call cost tracking — without `costUsd` in the adapter return shape, AI-007 has nothing to count), AI-004 (per-role caps need `agent_configs` schema), AI-005 (per-role enforcement requires the `agentRole` parameter to actually flow to AI calls). MNT-001 vision-budget pattern is the implementation template.
+**Out of scope:**
+- Predictive budget exhaustion ("at current rate you'll hit cap in 4 hours") — interesting but speculative; revisit after operators have a sprint of real spend data to calibrate against.
+- Per-user (not per-workspace) caps — multi-tenant SaaS will want this eventually but it's a workspace-billing-model decision, not an AI infrastructure decision; defer until a customer asks.
+- Cost prediction before the call (estimate token count from prompt + multiply by pricing) — the existing post-call counter is accurate; pre-call estimation adds complexity for marginal benefit. Pre-flight rejection works fine off the running counter (call is blocked when *cumulative* spend would exceed cap, regardless of the next call's exact cost).
+- Auto-scaling caps based on historical usage — operator-driven only.
+- Refund of partially-consumed run cost when budget hits mid-run — the run is marked `completed_with_budget_exhausted`, the spent cost stays counted. Refunding would require transaction-rollback semantics on Anthropic / OpenAI which they don't expose.
+---
+
 ### INF-008 — Promote PostgreSQL to default; add dual-DB CI matrix 🔴 Blocker
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** AUDIT.md A3, P1, B4 (formerly `ARCH-001` in AUDIT_IMPL.md)
