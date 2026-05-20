@@ -855,6 +855,75 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🧩 Agent Roles (AI-004)
+
+**Preconditions:** User A (admin) logged in; at least one extra workspace member at `qa_lead` or `viewer` role for the negative checks. A second workspace + admin (User D in a separate workspace) for the cross-workspace isolation check.
+
+**Surfaces covered:** Settings → **Agent Roles** tab (admin-only). Backed by `backend/src/routes/settings.js` (`GET` / `POST` / `PATCH` / `DELETE /api/v1/settings/agent-roles[/:role]`), persisted in the `agent_configs` table (`backend/src/database/migrations/046_agent_configs.sql`). Each workspace/role pair stores `provider`, `model`, `systemPromptOverride`, `temperature`, `maxTokens`, and `fallbackRole`. Canonical roles allowlist (8): `explorer`, `planner`, `author`, `oracle`, `executor`, `healer`, `reviewer`, `triager` (`backend/src/routes/settings.js:242`).
+
+> ⚠️ **AI-004 is dormant** — saving a config does NOT yet change crawl / generate / run behaviour. The pipeline still uses the workspace-default provider and built-in prompts. AI-005 will wire dispatch. Verify that runs behave identically before and after configuring any role.
+
+**A. Visibility (admin-only gate)**
+
+1. As User A (admin), open Settings → the **Agent Roles** tab is visible in the tab strip.
+2. As User B (`qa_lead`) or User C (`viewer`), open Settings → the **Agent Roles** tab is NOT rendered (`frontend/src/pages/Settings.jsx:544` — `adminOnly: true`).
+3. As `viewer`, directly hit `GET /api/v1/settings/agent-roles` via DevTools → **403** (server-side `requireRole("admin")`). Same for `POST` / `PATCH` / `DELETE` (`backend/src/middleware/permissions.json` agent-roles entries).
+
+**B. CRUD round-trip**
+
+4. Pick `planner` from the role dropdown, enter `provider: "openai"`, `model: "gpt-4o-mini"`, `temperature: 0.2`, leave the rest blank → **Save role config** → row appears in the list below with `planner · openai · gpt-4o-mini · temp 0.2`. HTTP returns **201** on first create (`backend/src/routes/settings.js:286`).
+5. POST the same role again with a different `model` → **200** (upsert; row's `model` updates, `id` and `createdAt` preserved).
+6. Click **Edit** on the `planner` row → form pre-fills with the saved values; the role dropdown is disabled (cannot rename a row by editing).
+7. Change `temperature: 0.5`, click **Update role config** → toast clears, row reflects new temperature.
+8. Click **Delete** on the `planner` row → row disappears; subsequent `GET` does not return it.
+
+**C. Cross-workspace isolation**
+
+9. As User A (admin in WS-1), save a `reviewer` config with `provider: "anthropic"`.
+10. As User D (admin in WS-2 — separate workspace), open Settings → Agent Roles → the list does NOT include the `reviewer` row from WS-1. Direct `GET /api/v1/settings/agent-roles` returns only WS-2's rows.
+11. Reverse the check from WS-1 → User D's configs are not leaked back.
+
+**D. Role-name allowlist (negative)**
+
+12. Via DevTools, `POST /api/v1/settings/agent-roles` with `{ role: "hacker" }` → **400 "Invalid role"** (`backend/src/routes/settings.js:269`). The frontend dropdown only exposes canonical names, so this branch is reachable only by direct API callers.
+13. Same check on `fallbackRole`: POST `{ role: "planner", fallbackRole: "hacker" }` → **400 "Invalid fallbackRole"**.
+
+**E. Fallback cycle detection (negative)**
+
+14. Create `planner` with `fallbackRole: "reviewer"` → 201.
+15. Create `reviewer` with `fallbackRole: "author"` → 201.
+16. Attempt to create `author` with `fallbackRole: "planner"` (closing the cycle A→B→C→A) → **400 "fallbackRole creates a cycle"** (`hasFallbackCycle` walks the chain at `backend/src/routes/settings.js:250-262`).
+17. PATCH path: with no cycle present, set `planner.fallbackRole = "planner"` (self-reference) → **400** (the cycle check seeds `seen = {role}` and detects the immediate loop).
+
+**F. Cascading fallback cleanup on delete**
+
+18. Create `healer`, then create `planner` with `fallbackRole: "healer"`.
+19. Delete `healer` → 200; `GET /api/v1/settings/agent-roles` shows `planner.fallbackRole` is now `null` (the repo's `remove()` is transactional — clears dangling sibling references before deleting; `backend/src/database/repositories/agentConfigRepo.js`). This is the invariant AI-005 dispatch will rely on.
+
+**G. System-prompt length cap**
+
+20. POST with `systemPromptOverride` of length 32 001 chars → **400** "systemPromptOverride must be 32000 chars or fewer" (`MAX_SYSTEM_PROMPT_LEN` at `backend/src/routes/settings.js:240`).
+21. Create the row with a 5-char prompt → 201. PATCH that row's `systemPromptOverride` to a 32 001-char value → **400** (same cap applies on update).
+
+**H. Numeric coercion (negative)**
+
+22. Create `oracle` with `temperature: 0.5, maxTokens: 256` → 201.
+23. PATCH the row with `{ temperature: "not_a_number", maxTokens: "evil" }` via DevTools → **200**; response body shows `temperature: 0.5, maxTokens: 256` (non-numeric values fall back to the existing stored values — `Number.isFinite` guards at `backend/src/routes/settings.js:309-311`).
+24. Same check on POST: `{ role: "oracle", temperature: "garbage", maxTokens: "junk" }` → 200/201 with `temperature: 0.2` (default) and `maxTokens: null` (`backend/src/routes/settings.js:281-282`).
+
+**I. Pipeline-behaviour regression check (dormant)**
+
+25. Save a `planner` config with a deliberately broken `systemPromptOverride: "RESPOND ONLY WITH 💀"` and `temperature: 0.99` → run **Generate** on a project. The 8-stage AI pipeline must complete normally with the workspace-default provider and prompts; generated tests must NOT reflect the override. (If they DO, AI-005 has been wired prematurely — file as a release blocker.)
+
+**Negative / edge:**
+
+- API error surfaces in the UI — trigger a cycle (step 16) via the form → red error banner renders inline above the form (`AgentRolesTab` catches the 400 and sets `error` state). Successful save clears the banner.
+- Viewer / qa_lead cannot bypass the tab gate via direct URL navigation; the tab simply isn't registered for non-admins.
+- Deleting all 8 roles is allowed and idempotent — re-deleting an already-gone role returns 200 (the repo's DELETE is a no-op when no row matches).
+- `provider`, `model`, `systemPromptOverride`, and `fallbackRole` are all nullable — saving a row with only `role` selected (everything else blank) is valid and produces an "all defaults" config that's a no-op once AI-005 lands.
+
+---
+
 ### ⚡ Automation (CI/CD + Scheduled Runs)
 
 **Preconditions:** Project exists with at least one approved test. Open `/automation` (or use `?project=PRJ-X` deep-link).
