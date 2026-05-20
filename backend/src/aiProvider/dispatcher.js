@@ -246,8 +246,15 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
   const operation = "generation";
   const label = providerMetricLabel(provider);
   const agentRole = callOptions.agentRole || "default";
+  // AI-005 trace-correlation: emit the per-call traceId at debug level only.
+  // Every AI call inside an OTel-instrumented request has a traceId, so an
+  // unconditional info-level line would flood logs (~hundreds per crawl).
+  // The traceId is already attached to the OTel span by INF-007 — this log
+  // line is a developer aid for non-OTel deployments, gated by LOG_LEVEL.
   const traceId = getCurrentTraceId();
-  if (traceId) console.log(formatLogLine("info", null, `[aiProvider] traceId=${traceId} provider=${provider} role=${agentRole}`));
+  if (traceId && process.env.LOG_LEVEL === "debug") {
+    console.log(formatLogLine("debug", null, `[aiProvider] traceId=${traceId} provider=${provider} role=${agentRole}`));
+  }
   const startedAt = process.hrtime.bigint();
   try {
     const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions);

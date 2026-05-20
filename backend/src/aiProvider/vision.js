@@ -157,8 +157,8 @@ ${String(contextHtml).slice(0, 800)}` : "");
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: metricLabel, outcome, operation: "vision_heal" }, seconds);
-      aiProviderErrorsTotal.inc({ provider: metricLabel, reason, operation: "vision_heal" });
+      aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: "default", outcome, operation: "vision_heal" }, seconds);
+      aiProviderErrorsTotal.inc({ provider: metricLabel, agent_role: "default", reason, operation: "vision_heal" });
     } catch {}
     return null;
   }
@@ -201,13 +201,13 @@ ${String(contextHtml).slice(0, 800)}` : "");
     costUsd = inK * 5 + outK * 15;
     try {
       if (Number.isFinite(costUsd) && costUsd > 0) {
-        aiProviderCostUsdTotal.inc({ provider: metricLabel, operation: "vision_heal" }, costUsd);
+        aiProviderCostUsdTotal.inc({ provider: metricLabel, agent_role: "default", operation: "vision_heal" }, costUsd);
       }
     } catch {}
   }
   try {
     const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-    aiProviderLatencySeconds.observe({ provider: metricLabel, outcome: "success", operation: "vision_heal" }, seconds);
+    aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: "default", outcome: "success", operation: "vision_heal" }, seconds);
   } catch {}
   return { confidence: Math.min(1, Math.max(0, confidence)), box, model, costUsd, reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null };
 }

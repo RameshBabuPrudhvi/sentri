@@ -167,7 +167,7 @@ export async function generateText(prompt, options) {
     for (const fallbackProvider of fallbacks) {
       console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} — falling back to ${fallbackProvider}`));
       try {
-        const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat, { agentRole });
+        const result = await callProvider(fallbackProvider, effectivePrompt, config?.maxTokens || options?.maxTokens, options?.signal, options?.responseFormat, { agentRole });
         recordProviderSuccess(fallbackProvider, agentRole);
         // ── Sticky fallback: pin this provider so subsequent calls in the same
         // pipeline skip the failing primary entirely. Expires after
@@ -241,10 +241,21 @@ export function parseJSON(text) {
  * @throws {Error} If no AI provider is configured.
  */
 export async function streamText(promptOrMessages, onToken, options = {}) {
-  const provider = detectProvider();
+  // AI-005: thread agentRole + workspaceId so per-role provider configs,
+  // sticky-fallback isolation, and metric labels apply to the streaming
+  // path on parity with generateText().
+  const agentRole = options?.agentRole || null;
+  const workspaceId = options?.workspaceId || null;
+  const { provider, config } = resolveProvider({ agentRole, workspaceId });
   if (!provider) throw new Error("No AI provider configured.");
   const { signal, responseFormat } = options;
-  const messages = normaliseMessages(promptOrMessages);
+  // Apply the agent-config systemPromptOverride when the caller passed a
+  // plain-string prompt — mirrors the generateText() effectivePrompt logic
+  // so streaming callers get the same workspace-configured system prompt.
+  const effectivePrompt = (config?.systemPromptOverride && typeof promptOrMessages === "string")
+    ? { system: config.systemPromptOverride, user: promptOrMessages }
+    : promptOrMessages;
+  const messages = normaliseMessages(effectivePrompt);
 
   // Wrap onToken so we can detect whether any tokens were emitted before a
   // mid-stream error. Without this guard, falling back to generateText()
@@ -270,7 +281,7 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
     const opts = buildAdapterOpts(provider, messages, options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, responseFormat);
     const res = await adapter.stream(opts, wrappedOnToken);
     if (res !== null) {
-      if (res?.usage) recordAiTokens(provider, res.usage);
+      if (res?.usage) recordAiTokens(provider, res.usage, "generation", agentRole || "default");
       return res?.text ?? "";
     }
   } catch (err) {

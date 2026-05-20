@@ -190,9 +190,15 @@ export function isCircuitBreakerOpen(provider, agentRole = null) {
 }
 
 function resetCircuitBreaker(provider) {
-  if (circuitBreakers[provider]) {
-    circuitBreakers[provider].failures = 0;
-    circuitBreakers[provider].disabledUntil = 0;
+  // AI-005: breaker keys are now `provider` OR `provider::agentRole`. A
+  // credential reset must clear every role-scoped variant — otherwise a
+  // user fixing an API key on a rate-limited Claude planner would still see
+  // the per-role breaker stay tripped for 5 minutes.
+  for (const key of Object.keys(circuitBreakers)) {
+    if (key === provider || key.startsWith(`${provider}::`)) {
+      circuitBreakers[key].failures = 0;
+      circuitBreakers[key].disabledUntil = 0;
+    }
   }
 }
 
@@ -215,6 +221,20 @@ export function isProviderUsable(provider) {
 }
 
 export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
+  // AI-005 detection priority: sticky-fallback > agentRole > quick-switch > env > auto-detect.
+  // An active sticky-fallback for this role MUST win over the configured agent
+  // provider — otherwise a rate-limited primary keeps being retried under the
+  // agent override and silently collapses the multi-agent dispatch. This is
+  // tripwire #1 from the AI-005 spec.
+  if (agentRole) {
+    for (const [key, entry] of stickyFallbacks) {
+      if (!key.endsWith(`::${agentRole}`)) continue;
+      if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) {
+        return { provider: entry.provider, config: null };
+      }
+      if (Date.now() >= entry.expiry) stickyFallbacks.delete(key);
+    }
+  }
   if (agentRole && workspaceId) {
     const cfg = agentConfigRepo.getByRole(workspaceId, agentRole);
     if (cfg?.provider && isProviderUsable(cfg.provider)) return { provider: cfg.provider, config: cfg };
