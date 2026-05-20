@@ -259,14 +259,6 @@ router.get("/settings/agent-roles", requireRole("admin"), (req, res) => {
   res.json({ roles: agentConfigRepo.listByWorkspace(req.workspaceId) });
 });
 
-router.get("/settings/agent-roles/:role", requireRole("admin"), (req, res) => {
-  const role = req.params.role;
-  if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
-  const row = agentConfigRepo.getByRole(req.workspaceId, role);
-  if (!row) return res.status(404).json({ error: "Not found" });
-  res.json(row);
-});
-
 router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
   const { role, provider = null, model = null, systemPromptOverride = null, temperature = 0.2, maxTokens = null, fallbackRole = null } = req.body || {};
   if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
@@ -292,6 +284,10 @@ router.patch("/settings/agent-roles/:role", requireRole("admin"), (req, res) => 
   const payload = { ...existing, ...req.body, role, workspaceId: req.workspaceId };
   if (payload.fallbackRole && !AGENT_ROLES.includes(payload.fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
   if (payload.fallbackRole && hasFallbackCycle(req.workspaceId, role, payload.fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
+  // Mirror POST's numeric coercion so direct API callers can't smuggle
+  // non-numeric strings past SQLite's flexible typing into REAL/INTEGER columns.
+  payload.temperature = Number.isFinite(Number(payload.temperature)) ? Number(payload.temperature) : existing.temperature;
+  payload.maxTokens = payload.maxTokens == null ? null : (Number.isFinite(Number(payload.maxTokens)) ? Number(payload.maxTokens) : existing.maxTokens);
   payload.updatedAt = new Date().toISOString();
   const saved = agentConfigRepo.upsert(payload);
   res.json(saved);

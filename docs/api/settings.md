@@ -191,7 +191,6 @@ Deleted projects, tests, and runs are soft-deleted (moved to the Recycle Bin) ra
 Admin-only endpoints for workspace-scoped, dormant role config.
 
 - `GET /api/v1/settings/agent-roles` — list all role configs in current workspace.
-- `GET /api/v1/settings/agent-roles/:role` — get one role config.
 - `POST /api/v1/settings/agent-roles` — create/upsert a role config.
 - `PATCH /api/v1/settings/agent-roles/:role` — partially update a role config.
 - `DELETE /api/v1/settings/agent-roles/:role` — delete one role config.

@@ -55,6 +55,14 @@ async function main() {
       assert.equal(out.res.status, 400);
     });
 
+    await test("PATCH coerces non-numeric temperature/maxTokens", async () => {
+      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "oracle", temperature: 0.5, maxTokens: 256 } });
+      const out = await apiReq(base, "/api/settings/agent-roles/oracle", { method: "PATCH", cookie: cookieA, body: { temperature: "not_a_number", maxTokens: "evil" } });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.temperature, 0.5);
+      assert.equal(out.json.maxTokens, 256);
+    });
+
     await test("fallback cycle detection", async () => {
       await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "reviewer" } });
       await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "reviewer", fallbackRole: "author" } });

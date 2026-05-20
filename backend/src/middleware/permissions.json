@@ -343,10 +343,6 @@
       "role": "admin",
       "source": "backend/src/routes/settings.js"
     },
-    "GET /api/v1/settings/agent-roles/:role": {
-      "role": "admin",
-      "source": "backend/src/routes/settings.js"
-    },
     "POST /api/v1/settings/agent-roles": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"
