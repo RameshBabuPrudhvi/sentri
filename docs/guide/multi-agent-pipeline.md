@@ -110,9 +110,11 @@ Agent health check failed — Agent health check failed: critic=401, planner=ok
 and as `ERR_AGENT_HEALTH_CHECK_FAILED` on the run status. The probe is
 skipped automatically when the workspace has no agent configs.
 
-You can also re-run the probe for one role on demand from **Settings →
-Agents → Test** — it returns `{ ok, reason, provider }` and shows a green /
-red badge inline.
+You can also re-run the probe for one role on demand by calling
+`POST /api/v1/settings/agent-roles/:role/test` (admin only). It returns
+`{ role, ok, reason, provider }`. A **Settings → Agents** tab that
+surfaces this as an inline green / red badge per role is tracked as
+follow-up AI-005c (frontend-only).
 
 ---
 
@@ -137,7 +139,7 @@ recommended ceiling.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Run fails immediately with `ERR_AGENT_HEALTH_CHECK_FAILED` | One configured role has a bad key or unreachable provider | Click **Settings → Agents → Test** to identify which role; rotate / fix the key |
+| Run fails immediately with `ERR_AGENT_HEALTH_CHECK_FAILED` | One configured role has a bad key or unreachable provider | Inspect the per-role breakdown in the run log, or call `POST /api/v1/settings/agent-roles/:role/test` directly; rotate / fix the key |
 | Specific stage keeps using the workspace default despite an agent_config row | Sticky fallback active for that role (rate-limit recovery) | Wait `STICKY_FALLBACK_TTL_MS` (default 10 min) or rotate the upstream key |
 | `fallbackRole` save returns 400 | Cycle detected (`ERR_AGENT_FALLBACK_CYCLE`) | Break the loop — set one role's `fallbackRole` to `null` |
 | Metrics for one role missing in Grafana | Pipeline caller for that stage doesn't pass `agentRole` yet | Check `selfHealing.js` / `failureClusterer.js` — full plumbing tracked under AUTO-023 |
