@@ -88,6 +88,44 @@ await (async () => {
 })();
 
 await (async () => {
+  // AUTO-009h hardening — file:// path with `..` segments must be rejected
+  // at runtime even when the route layer somehow allowed it (DB tamper,
+  // env change between PATCH and runtime). Defense-in-depth — see
+  // `routes/projects.js` for the PATCH-time check.
+  const cov = await snapshotServerCoverage("file:///var/coverage/../etc/passwd");
+  assert.equal(cov, null, "`..` traversal rejected at runtime");
+})();
+
+await (async () => {
+  // AUTO-009h hardening — relative file:// paths rejected at runtime.
+  // The route layer rejects these at PATCH time, but the runtime check
+  // catches the case where an existing DB row predates the validation.
+  const cov = await snapshotServerCoverage("file://./relative/path.json");
+  assert.equal(cov, null, "relative file:// path rejected at runtime");
+})();
+
+await (async () => {
+  // AUTO-009h hardening — `COVERAGE_FILE_PATH_PREFIX` env-based allowlist.
+  // When set, only paths matching one of the configured prefixes succeed.
+  // Real file at the safe path → reads fine. Outside-prefix path → null.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sentri-cov-prefix-"));
+  const safeFile = path.join(dir, "coverage.json");
+  await fs.writeFile(safeFile, JSON.stringify(FAKE_COVERAGE), "utf-8");
+  const originalPrefix = process.env.COVERAGE_FILE_PATH_PREFIX;
+  try {
+    process.env.COVERAGE_FILE_PATH_PREFIX = dir;
+    const allowed = await snapshotServerCoverage(`file://${safeFile}`);
+    assert.ok(allowed, "path within prefix is allowed");
+    const blocked = await snapshotServerCoverage("file:///etc/hostname");
+    assert.equal(blocked, null, "path outside prefix is rejected");
+  } finally {
+    if (originalPrefix === undefined) delete process.env.COVERAGE_FILE_PATH_PREFIX;
+    else process.env.COVERAGE_FILE_PATH_PREFIX = originalPrefix;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+})();
+
+await (async () => {
   // diffServerCoverage — `after` exercises stmt 1 and arm 1 that were 0
   // in `before`. Result should report `addedStatements: 1`,
   // `addedBranches: 1`, `addedFunctions: 0`.

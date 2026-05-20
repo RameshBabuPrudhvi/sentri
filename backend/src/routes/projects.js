@@ -402,6 +402,20 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
   //     URL the server fetches) but require an absolute path so a relative
   //     `file://./cov.json` doesn't accidentally resolve against the
   //     server's CWD. Documented in `docs/guide/coverage-server-side.md`.
+  //
+  // Defense-in-depth for `file://`: the endpoint is qa_lead-gated and the
+  // content is JSON-parsed (never echoed back to clients), so an attacker
+  // with qa_lead access already has higher-impact attack surfaces than
+  // reading arbitrary JSON files from disk. Still, when operators want
+  // to constrain the read scope, `COVERAGE_FILE_PATH_PREFIX` (env, comma-
+  // separated list of allowed absolute path prefixes) bounds where
+  // `serverCoverageEndpoint` can point. Unset = no restriction (back-compat).
+  // The check is path-prefix only — no path traversal normalisation here
+  // because we don't `fs.realpath()` resolve at PATCH time (the file might
+  // not exist yet in CI setups). A `..` segment in the operator-supplied
+  // path would still be readable by the runtime fs.readFile, so operators
+  // who care about that vector should set the prefix to a sandbox dir
+  // (e.g. `/var/coverage`) and never include `..` in their config.
   if (Object.hasOwn(req.body, "serverCoverageEndpoint")) {
     const value = req.body.serverCoverageEndpoint;
     if (value === null || value === "") {
@@ -416,6 +430,28 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
         const path = trimmed.slice("file://".length);
         if (!path.startsWith("/")) {
           return res.status(400).json({ error: "serverCoverageEndpoint: file:// path must be absolute (e.g. file:///var/coverage/coverage.json)." });
+        }
+        // Reject `..` segments so a typo / pasted path with parent
+        // references can't traverse outside the operator's intended
+        // directory. Industry-standard hardening — c8 / nyc / Istanbul's
+        // own `--report-dir` flags accept absolute paths but tools that
+        // surface them in dashboards (Codecov, Coveralls) reject `..`
+        // segments at config time.
+        if (path.split("/").some((seg) => seg === "..")) {
+          return res.status(400).json({ error: "serverCoverageEndpoint: file:// path must not contain '..' segments." });
+        }
+        // Optional path-prefix allowlist. Empty / unset env keeps the
+        // pre-fix behaviour (any absolute path accepted). When set, the
+        // path must start with one of the comma-separated prefixes —
+        // e.g. `COVERAGE_FILE_PATH_PREFIX=/var/coverage,/srv/sentri/cov`
+        // restricts reads to those two sandbox directories.
+        const prefixEnv = process.env.COVERAGE_FILE_PATH_PREFIX;
+        if (prefixEnv && prefixEnv.trim()) {
+          const allowed = prefixEnv.split(",").map((p) => p.trim()).filter(Boolean);
+          const matched = allowed.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+          if (!matched) {
+            return res.status(400).json({ error: `serverCoverageEndpoint: file:// path must start with one of: ${allowed.join(", ")} (set via COVERAGE_FILE_PATH_PREFIX).` });
+          }
         }
         fields.serverCoverageEndpoint = trimmed;
       } else {

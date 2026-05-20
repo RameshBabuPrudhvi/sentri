@@ -53,6 +53,31 @@ import { formatLogLine } from "../utils/logFormatter.js";
 const FETCH_TIMEOUT_MS = 10_000;
 
 /**
+ * Validate a `file://` path against the runtime safety guards: must be
+ * absolute, must not contain `..` traversal segments, and must match the
+ * operator's `COVERAGE_FILE_PATH_PREFIX` allowlist when configured. This
+ * mirrors the PATCH-time check in `routes/projects.js`#serverCoverageEndpoint
+ * — defense-in-depth against DB tampering, env-var injection, or any future
+ * write path that bypasses the route layer.
+ *
+ * Returns null when the path is safe, or a human-readable rejection reason.
+ *
+ * @param {string} path - Filesystem path (already stripped of `file://`).
+ * @returns {string|null}
+ */
+function validateFilePathSafety(path) {
+  if (!path.startsWith("/")) return "must be absolute";
+  if (path.split("/").some((seg) => seg === "..")) return "must not contain '..' segments";
+  const prefixEnv = process.env.COVERAGE_FILE_PATH_PREFIX;
+  if (prefixEnv && prefixEnv.trim()) {
+    const allowed = prefixEnv.split(",").map((p) => p.trim()).filter(Boolean);
+    const matched = allowed.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+    if (!matched) return `must start with one of: ${allowed.join(", ")}`;
+  }
+  return null;
+}
+
+/**
  * Snapshot the SUT's current Istanbul / NYC coverage object.
  *
  * @param {string} endpoint - `http(s)://…/__coverage__` or `file:///abs/path`.
@@ -64,6 +89,16 @@ export async function snapshotServerCoverage(endpoint) {
   try {
     if (endpoint.startsWith("file://")) {
       const path = endpoint.slice("file://".length);
+      // Runtime safety check — mirrors the PATCH-time validation. The
+      // route layer already enforces this, but DB tampering or an env
+      // change between PATCH and runtime could land an unsafe path here.
+      // Reject silently (with a warn log) so an attacker can't probe
+      // the rejection error by observing run output.
+      const safetyErr = validateFilePathSafety(path);
+      if (safetyErr) {
+        console.warn(formatLogLine("warn", null, `[serverCoverageProxy] file:// rejected (${safetyErr}): ${path}`));
+        return null;
+      }
       const body = await fs.readFile(path, "utf-8");
       return JSON.parse(body);
     }
