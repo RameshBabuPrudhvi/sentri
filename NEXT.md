@@ -90,7 +90,6 @@ Items that do not overlap INF-009's changed files and can land in a separate PR 
 | AUTO-014 | Test dependency and execution ordering | M | 🔵 Medium | None — `executeTest.js` dispatch loop, new `testDependencyResolver.js`, `RunDetail.jsx`, `TestDetail.jsx`. Zero overlap with INF-009's Helm / K8s surface. |
 | DIF-008 | Jira / Linear issue sync | L | 🟢 Differentiator | None — `routes/settings.js`, `Settings.jsx`, new `utils/integrations.js` |
 | SEC-005 | SAML / OIDC SSO federation | L | 🟢 Strategic | None — `routes/auth.js`, `middleware/authenticate.js`, `Settings.jsx` (different tab) |
-| AUTO-009 follow-ups (009e) | Coverage gate documentation / polish | XS | 🔵 Medium | ⚠️ Touches `QualityGatesPanel.jsx` + `routes/projects.js` `validateQualityGates`. Low risk but should land after INF-009 to avoid Helm-chart conflict on health-check related env-var docs |
 
 ---
 
