@@ -629,12 +629,16 @@ export const api = {
    * AUTO-009 — read the 30-day project-wide coverage trend.
    *
    * Backed by `GET /api/v1/dashboard`'s `coverageTrend` block. The
-   * `projectId` parameter is accepted for API parity with `NEXT.md`'s
-   * spec and to allow caller-side filtering; the server payload already
-   * carries `projectId` on each series point so we narrow client-side.
+   * `projectId` parameter narrows the series to one project client-side.
+   *
+   * **Current consumers:** none — the Dashboard `CoveragePanel` reads
+   * `data.coverageTrend` directly from `getDashboard()` (avoids a second
+   * fetch). This helper is retained for future per-project coverage pages
+   * (e.g. `ProjectDetail.jsx` → Coverage tab) that would want to fetch
+   * coverage for one project without loading the full dashboard payload.
    *
    * @param {string} [projectId] — Narrow the series to one project.
-   * @returns {Promise<{ windowDays: number, series: Array<{ date: string, projectId: string, coveragePct: number }> } | null>}
+   * @returns {Promise<Object|null>}
    */
   getCoverageTrend: (projectId) => req("GET", "/dashboard").then((d) => {
     const trend = d?.coverageTrend;
@@ -643,7 +647,6 @@ export const api = {
     const series = trend.series.filter((p) => p.projectId === projectId);
     return series.length > 0 ? { ...trend, series } : null;
   }),
-
   /**
    * AUTO-022 — read the per-case breakdown for one AI eval-harness run.
    * Powers the Dashboard `EvalPanel` drill-down side panel.

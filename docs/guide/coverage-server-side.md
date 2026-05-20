@@ -114,6 +114,29 @@ attacker who can hit `/__coverage__` learns:
       publicly accessible.
 - [ ] Remove or password-gate the route in any image that ships to prod.
 
+### File-watch mode (`file://`) — additional threat surface
+
+The `file://` mode reads **any absolute path** on the Sentri backend's
+filesystem and `JSON.parse`s it. The PATCH endpoint is role-gated at `qa_lead`
+and validates the path is absolute (rejects `file://./relative`), but there is
+**no allowlist** constraining which directories are readable. A `qa_lead` user
+(or an attacker who compromises a `qa_lead` session) could configure
+`file:///etc/passwd` or `file:///app/.env` — the JSON parse would fail (not
+valid JSON), but the file contents are still read into memory and the error
+message may leak a fragment.
+
+**Mitigations:**
+- The endpoint is `qa_lead`-gated — viewers and unauthenticated users cannot
+  set it.
+- Non-JSON files fail at `JSON.parse` and return `null` (no coverage data),
+  so the contents are not persisted or surfaced in the API response.
+- The Sentri backend process should run as a **non-root user** with minimal
+  filesystem permissions. In Docker, mount the coverage volume `:ro` and
+  ensure the container user cannot read sensitive host paths.
+- For maximum isolation, prefer the **HTTP mode** over file-watch — the SSRF
+  guard validates the URL against private-IP ranges and re-resolves DNS at
+  runtime to mitigate rebinding.
+
 ## How the diff works
 
 For every API test, Sentri:
