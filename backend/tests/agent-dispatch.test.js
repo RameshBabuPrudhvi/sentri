@@ -49,14 +49,26 @@ ensureDefaultWorkspaces();
 const { test, summary } = createTestRunner();
 const now = () => new Date().toISOString();
 
-// Seed a workspace row we can attach agent_configs to.
+// Seed a workspace row we can attach agent_configs to. The `workspaces`
+// table carries a foreign-key constraint on `ownerId` → `users.id` (from
+// migration 005_workspaces_rbac.sql), so we must seed a user first or
+// SQLite rejects the workspace INSERT with `FOREIGN KEY constraint failed`.
+// We insert directly (rather than `registerAndLogin`-style HTTP flow) so
+// this unit test doesn't depend on the auth stack — these tests only
+// exercise the dispatcher-layer state machine in `registry.js` +
+// `agentConfigRepo.js`, and a real workspace row is the minimum schema
+// state the FK requires.
 function seedWorkspace() {
   const db = getDatabase();
-  const id = `ws-${randomUUID().slice(0, 8)}`;
+  const userId = `usr-${randomUUID().slice(0, 8)}`;
+  const wsId = `ws-${randomUUID().slice(0, 8)}`;
+  db.prepare(
+    "INSERT INTO users (id, name, email, passwordHash, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(userId, `Test ${userId}`, `${userId}@test.local`, "x", now(), now());
   db.prepare(
     "INSERT INTO workspaces (id, name, slug, ownerId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, `ws-${id}`, id, "test-user", now(), now());
-  return id;
+  ).run(wsId, `ws-${wsId}`, wsId, userId, now(), now());
+  return wsId;
 }
 
 function upsertConfig(workspaceId, role, overrides = {}) {
