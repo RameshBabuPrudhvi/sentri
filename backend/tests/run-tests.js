@@ -125,6 +125,14 @@ const files = [
   "tests/run-shard-finalizer.test.js",
   "tests/failure-clusterer.test.js",
   "tests/worker-pool-dashboard.test.js",
+  "tests/coverage-aggregator.test.js",
+  "tests/run-coverage-integration.test.js",
+  "tests/run-shard-coverage.test.js",        // AUTO-009f — sharded-run parity regression
+  "tests/coverage-shard-merge.test.js",      // AUTO-009k — two-stage per-shard pre-aggregation + set-union merge
+  "tests/coverage-memory-ceiling.test.js",   // AUTO-009g — memory-ceiling enforcement
+  "tests/coverage-pr-diff.test.js",          // AUTO-009d — PR-scoped coverage diff (the Codecov play)
+  "tests/source-map-resolver.test.js",
+  "tests/server-coverage-proxy.test.js", // AUTO-009h — server-side coverage capture for API tests
   "tests/observability.test.js",
   // AUTO-022 — AI eval harness scorer + regression-detection + metric_samples persistence.
   "tests/eval-pipeline.test.js",

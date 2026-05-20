@@ -38,7 +38,7 @@ import { fireNotifications } from "../utils/notifications.js";
 import { validateUrl, safeFetch } from "../utils/ssrfGuard.js";
 import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
 import { computeImpactedTests } from "../pipeline/impactAnalysis.js";
-import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesForPr } from "../integrations/githubChecks.js";
+import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesWithRangesForPr } from "../integrations/githubChecks.js";
 import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { envScopedProject as buildEnvScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
@@ -168,6 +168,7 @@ function buildTestRun({
   changedFiles = [],
   impactAnalysis = null,
   environmentId = null,
+  changedFileRanges = null, // AUTO-009d — PR diff hunk ranges, consumed by finalizeCoverage
 }) {
   const lookup = riskById || new Map();
   const initialResults = [
@@ -215,6 +216,7 @@ function buildTestRun({
     changedFiles,
     impactAnalysis,
     environmentId,
+    changedFileRanges, // AUTO-009d — persisted so the runner can pass to finalizeCoverage
   };
 }
 
@@ -356,25 +358,35 @@ function normalizeChangedFiles(values) {
 
 async function resolveChangedFiles(project, body, runId) {
   const override = normalizeChangedFiles(body?.changedFiles);
-  if (override) return { changedFiles: override, fallbackReason: null };
+  // AUTO-009d — caller-provided overrides skip the GitHub round-trip and
+  // therefore have no per-file line ranges. Coverage-of-changed-lines
+  // degrades to `null` for these calls (the gate evaluator falls back to
+  // overall coveragePct), which matches the pre-AUTO-009d behaviour.
+  if (override) return { changedFiles: override, changedFileRanges: null, fallbackReason: null };
 
   const payload = normalizeGithubPayload(body || {});
-  if (!payload.repo || !payload.prNumber) return { changedFiles: null, fallbackReason: "no_changed_files" };
+  if (!payload.repo || !payload.prNumber) {
+    return { changedFiles: null, changedFileRanges: null, fallbackReason: "no_changed_files" };
+  }
   const settings = githubCheckSettingsRepo.getByProjectId(project.id);
-  if (!settings?.installationId) return { changedFiles: null, fallbackReason: "no_changed_files" };
+  if (!settings?.installationId) {
+    return { changedFiles: null, changedFileRanges: null, fallbackReason: "no_changed_files" };
+  }
 
   try {
-    return {
-      changedFiles: await getChangedFilesForPr({
-        repo: payload.repo,
-        prNumber: payload.prNumber,
-        installationId: settings.installationId,
-      }),
-      fallbackReason: null,
-    };
+    // AUTO-009d — fetch the PR's file list AND the per-file line ranges in
+    // a SINGLE pagination pass against the GitHub `/pulls/:n/files`
+    // endpoint. The combined helper halves API rate-limit consumption vs.
+    // the previous parallel-call shape (2–20 calls → 1–10).
+    const { files: changedFiles, ranges: changedFileRanges } = await getChangedFilesWithRangesForPr({
+      repo: payload.repo,
+      prNumber: payload.prNumber,
+      installationId: settings.installationId,
+    });
+    return { changedFiles, changedFileRanges, fallbackReason: null };
   } catch (err) {
     console.error(formatLogLine("warn", runId, `[impact-analysis] Failed to fetch GitHub PR files: ${err.message}`));
-    return { changedFiles: null, fallbackReason: "github_fetch_failed" };
+    return { changedFiles: null, changedFileRanges: null, fallbackReason: "github_fetch_failed" };
   }
 }
 
@@ -502,8 +514,8 @@ async function handleTrigger(req, res) {
   const triggerCrawl = req.body?.triggerCrawl === true;
   const previewUrl = typeof req.body?.previewUrl === "string" ? req.body.previewUrl : null;
   const runId = generateRunId();
-  const { changedFiles, fallbackReason: changedFilesFallback } = triggerCrawl
-    ? { changedFiles: null, fallbackReason: "crawl_run" }
+  const { changedFiles, changedFileRanges, fallbackReason: changedFilesFallback } = triggerCrawl
+    ? { changedFiles: null, changedFileRanges: null, fallbackReason: "crawl_run" }
     : await resolveChangedFiles(project, req.body || {}, runId);
 
   // ── 4. Guard: no concurrent run ───────────────────────────────────────
@@ -586,6 +598,7 @@ async function handleTrigger(req, res) {
         changedFiles: changedFiles || [],
         impactAnalysis: impact,
         environmentId: environment?.id || null,
+        changedFileRanges: changedFileRanges || null, // AUTO-009d
       });
   runRepo.create(run);
 

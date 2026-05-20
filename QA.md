@@ -1986,3 +1986,9 @@ Once-per-release smoke. Pass all 8 sections before tagging.
    | Tight enterprise hard-cap | 20 | 10 |
 
 6. **Emergency global disable (SRE path)** — `kubectl set env deployment/sentri-backend VISION_HEAL_DISABLED=1`. Bypasses every per-project setting; `tryVisionHeal` returns `null` immediately. Use only during active incidents.
+
+## Browser code coverage (AUTO-009)
+1. Enable Coverage in Automation → Quality card → Coverage tab.
+2. Run tests twice and verify dashboard Coverage section shows 30-day points.
+3. Verify project with coverage disabled shows empty-state prompt.
+4. Verify run coverage summary includes sourceMapStatus fallback when no sourcemaps.

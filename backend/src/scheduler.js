@@ -50,6 +50,9 @@ let _staleDetectionTask = null;
 /** @type {Object|null} Daily SEC-007 audit-log retention sweep task. */
 let _auditRetentionTask = null;
 
+/** @type {Object|null} Daily AUTO-009j coverage retention sweep task. */
+let _coverageRetentionTask = null;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -404,7 +407,33 @@ export function initScheduler() {
     }
   }, { timezone: "UTC", scheduled: true });
 
-  console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded), stale detection + audit retention armed`));
+  // AUTO-009j: daily coverage retention sweep — runs every day at 04:00 UTC,
+  // 30 min after the audit sweep so the two don't contend for the DB write
+  // lock. Honours `COVERAGE_RETENTION_DAYS`:
+  //   - unset / empty → default 90 days
+  //   - 0             → never delete (task is armed but is a no-op)
+  //   - > 0           → null out `coverageSummary` + `prCoverageDiff` on
+  //                      runs older than the configured window. The 30-day
+  //                      dashboard sparkline reads `getRunsWithCoverage`
+  //                      which filters `IS NOT NULL`, so cleared rows drop
+  //                      out of the trend naturally.
+  _coverageRetentionTask = cron.schedule("0 4 * * *", () => {
+    try {
+      const raw = process.env.COVERAGE_RETENTION_DAYS;
+      const days = raw === undefined || raw === "" ? 90 : Number.parseInt(raw, 10);
+      if (!Number.isFinite(days) || days <= 0) return; // 0 → disabled
+      const cleared = runRepo.purgeCoverageSummaryOlderThan(days);
+      if (cleared > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] Coverage retention sweep cleared ${cleared} run(s) older than ${days} days`));
+      }
+    } catch (err) {
+      console.error(formatLogLine("error", null,
+        `[scheduler] Coverage retention sweep failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
+  console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded), stale detection + audit retention + coverage retention armed`));
 }
 
 /**
@@ -450,6 +479,10 @@ export function stopAllTasks() {
   if (_auditRetentionTask) {
     _auditRetentionTask.stop();
     _auditRetentionTask = null;
+  }
+  if (_coverageRetentionTask) {
+    _coverageRetentionTask.stop();
+    _coverageRetentionTask = null;
   }
 }
 

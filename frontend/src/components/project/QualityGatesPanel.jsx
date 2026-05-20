@@ -6,6 +6,10 @@
  *   - `minPassRate`  (0–100, %) — fail run when pass rate is below this.
  *   - `maxFlakyPct`  (0–100, %) — fail run when flaky % is above this.
  *   - `maxFailures`  (>= 0, integer) — fail run when failure count is above this.
+ *   - `minCoveragePct`           (0–100, %) — AUTO-009d: fail when browser JS line coverage falls below this.
+ *   - `minBranchPct`             (0–100, %) — AUTO-009d: fail when branch coverage falls below this (line-only runs no-op).
+ *   - `minPrCoveragePct`         (0–100, %) — AUTO-009d: minimum coverage for the lines this PR changed (the Codecov play). Only enforced on PR-triggered runs that produced a `prCoverageDiff` payload; dormant on manual / scheduled / crawl-only runs.
+ *   - `maxCoverageRegressionPct` (0–100, %) — AUTO-009d: max allowed drop relative to the previous coverage-enabled run.
  *
  * Any single field can be left blank to omit it from the gate config — the
  * server stores only the fields that are present, so partial configs are valid.
@@ -30,6 +34,24 @@ const FIELDS = [
   { key: "maxFailures", label: "Max failures",
     help: "Run fails when total failures exceed this. Integer ≥ 0.",
     min: 0, step: "1" },
+  // AUTO-009d — coverage gates. Only enforced when the project has
+  // `coverageEnabled: true`; line-only coverage runs (no v8-to-istanbul
+  // data) silently no-op the branch rule. Leave any field blank to omit
+  // that particular threshold — the server-side validator (`routes/
+  // projects.js#validateQualityGates`) only rejects a payload that
+  // resolves to *zero* gate fields total.
+  { key: "minCoveragePct", label: "Min coverage (%)",
+    help: "Run fails when browser JS line coverage falls below this. Requires coverageEnabled. 0–100.",
+    min: 0, max: 100, step: "0.1" },
+  { key: "minBranchPct", label: "Min branch coverage (%)",
+    help: "Run fails when branch coverage falls below this. Line-only coverage runs no-op this rule (no v8-to-istanbul data). 0–100.",
+    min: 0, max: 100, step: "0.1" },
+  { key: "minPrCoveragePct", label: "Min PR coverage (%)",
+    help: "Run fails when coverage of the lines this PR changed falls below this. Only enforced on PR-triggered runs (manual / scheduled / crawl-only runs skip this rule — they have no PR context). PR runs that touch zero analyzable lines also skip rather than report 0%. 0–100.",
+    min: 0, max: 100, step: "0.1" },
+  { key: "maxCoverageRegressionPct", label: "Max coverage regression (%)",
+    help: "Run fails when coverage drops MORE than this versus the previous coverage-enabled run. Leave blank to disable — 0 means 'fail on ANY drop' (strictest). First coverage-enabled run never regresses (no prior to compare). 0–100.",
+    min: 0, max: 100, step: "0.1" },
 ];
 
 /**

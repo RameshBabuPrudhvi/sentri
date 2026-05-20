@@ -64,12 +64,43 @@ function validateQualityGates(payload) {
     if (!Number.isInteger(payload.maxFailures) || payload.maxFailures < 0) return "maxFailures must be a non-negative integer";
     gates.maxFailures = payload.maxFailures;
   }
+  // AUTO-009d — coverage gates. All four are expressed as percentages
+  // (0–100) so the UI can share the same `<input type="number" min=0 max=100
+  // step=1>` primitive as `minPassRate` / `maxFlakyPct`. The evaluator
+  // compares against `coveragePct` / `branchPct` (which are stored as 0–1
+  // ratios on `run.coverageSummary`) by multiplying by 100 once at
+  // comparison time — keeps the wire format human-readable and avoids
+  // a footgun where a user types `0.7` expecting "70%" and gets "0.7%".
+  if (payload.minCoveragePct != null) {
+    if (!Number.isFinite(payload.minCoveragePct) || payload.minCoveragePct < 0 || payload.minCoveragePct > 100) {
+      return "minCoveragePct must be between 0 and 100";
+    }
+    gates.minCoveragePct = payload.minCoveragePct;
+  }
+  if (payload.minBranchPct != null) {
+    if (!Number.isFinite(payload.minBranchPct) || payload.minBranchPct < 0 || payload.minBranchPct > 100) {
+      return "minBranchPct must be between 0 and 100";
+    }
+    gates.minBranchPct = payload.minBranchPct;
+  }
+  if (payload.minPrCoveragePct != null) {
+    if (!Number.isFinite(payload.minPrCoveragePct) || payload.minPrCoveragePct < 0 || payload.minPrCoveragePct > 100) {
+      return "minPrCoveragePct must be between 0 and 100";
+    }
+    gates.minPrCoveragePct = payload.minPrCoveragePct;
+  }
+  if (payload.maxCoverageRegressionPct != null) {
+    if (!Number.isFinite(payload.maxCoverageRegressionPct) || payload.maxCoverageRegressionPct < 0 || payload.maxCoverageRegressionPct > 100) {
+      return "maxCoverageRegressionPct must be between 0 and 100";
+    }
+    gates.maxCoverageRegressionPct = payload.maxCoverageRegressionPct;
+  }
   // Reject empty payloads — without at least one gate field, the stored
   // `{}` would render as "Active" in the UI and cause the evaluator to
   // return `{ passed: true }` for every run despite no thresholds being
   // configured. Clients clearing all gates should use DELETE instead.
   if (Object.keys(gates).length === 0) {
-    return "qualityGates must contain at least one gate field (minPassRate, maxFlakyPct, maxFailures)";
+    return "qualityGates must contain at least one gate field (minPassRate, maxFlakyPct, maxFailures, minCoveragePct, minBranchPct, minPrCoveragePct, maxCoverageRegressionPct)";
   }
   return gates;
 }
@@ -234,7 +265,7 @@ router.get("/:id", (req, res) => {
  *     the edit form round-trip without requiring the user to re-type secrets
  *     (which the server never sends back — see `projectSanitiser.js`).
  */
-router.patch("/:id", requireRole("qa_lead"), (req, res) => {
+router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
   const existing = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!existing) return res.status(404).json({ error: "not found" });
 
@@ -248,7 +279,7 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
   // injection still falls through to the full `validateProjectPayload` +
   // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct"]);
   const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
@@ -342,6 +373,113 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
     const cap = req.body.visionHealMaxCostUsdPerMonth;
     if (!Number.isFinite(cap) || cap < 0 || cap > 100000) return res.status(400).json({ error: "visionHealMaxCostUsdPerMonth must be a number between 0 and 100000." });
     fields.visionHealMaxCostUsdPerMonth = cap;
+  }
+  if (Object.hasOwn(req.body, "coverageEnabled")) {
+    if (typeof req.body.coverageEnabled !== "boolean") {
+      return res.status(400).json({ error: "coverageEnabled must be a boolean." });
+    }
+    fields.coverageEnabled = req.body.coverageEnabled;
+  }
+  if (Object.hasOwn(req.body, "sourcemapBaseUrl")) {
+    const value = req.body.sourcemapBaseUrl;
+    if (value === null || value === "") {
+      fields.sourcemapBaseUrl = null;
+    } else if (typeof value !== "string") {
+      return res.status(400).json({ error: "sourcemapBaseUrl must be a string URL or null." });
+    } else {
+      const trimmed = value.trim();
+      const urlErr = await validateUrl(trimmed);
+      if (urlErr) return res.status(400).json({ error: `sourcemapBaseUrl: ${urlErr}` });
+      fields.sourcemapBaseUrl = trimmed;
+    }
+  }
+
+  // AUTO-009h — server-side coverage capture for API tests. Accepts:
+  //   - `null` / "" → opt-out (default).
+  //   - `http://…` / `https://…` → SSRF-validated snapshot endpoint
+  //     (typical c8 / NYC `GET /__coverage__` pattern).
+  //   - `file:///…` → shared-FS path (file-watch mode). Skip SSRF (not a
+  //     URL the server fetches) but require an absolute path so a relative
+  //     `file://./cov.json` doesn't accidentally resolve against the
+  //     server's CWD. Documented in `docs/guide/coverage-server-side.md`.
+  //
+  // Defense-in-depth for `file://`: the endpoint is qa_lead-gated and the
+  // content is JSON-parsed (never echoed back to clients), so an attacker
+  // with qa_lead access already has higher-impact attack surfaces than
+  // reading arbitrary JSON files from disk. Still, when operators want
+  // to constrain the read scope, `COVERAGE_FILE_PATH_PREFIX` (env, comma-
+  // separated list of allowed absolute path prefixes) bounds where
+  // `serverCoverageEndpoint` can point. Unset = no restriction (back-compat).
+  // The check is path-prefix only — no path traversal normalisation here
+  // because we don't `fs.realpath()` resolve at PATCH time (the file might
+  // not exist yet in CI setups). A `..` segment in the operator-supplied
+  // path would still be readable by the runtime fs.readFile, so operators
+  // who care about that vector should set the prefix to a sandbox dir
+  // (e.g. `/var/coverage`) and never include `..` in their config.
+  if (Object.hasOwn(req.body, "serverCoverageEndpoint")) {
+    const value = req.body.serverCoverageEndpoint;
+    if (value === null || value === "") {
+      fields.serverCoverageEndpoint = null;
+    } else if (typeof value !== "string") {
+      return res.status(400).json({ error: "serverCoverageEndpoint must be a string URL or null." });
+    } else {
+      const trimmed = value.trim();
+      if (trimmed.startsWith("file://")) {
+        // File-watch mode. Validate the path is absolute so a typo can't
+        // surprise the operator with CWD-relative resolution at run time.
+        const path = trimmed.slice("file://".length);
+        if (!path.startsWith("/")) {
+          return res.status(400).json({ error: "serverCoverageEndpoint: file:// path must be absolute (e.g. file:///var/coverage/coverage.json)." });
+        }
+        // Reject `..` segments so a typo / pasted path with parent
+        // references can't traverse outside the operator's intended
+        // directory. Industry-standard hardening — c8 / nyc / Istanbul's
+        // own `--report-dir` flags accept absolute paths but tools that
+        // surface them in dashboards (Codecov, Coveralls) reject `..`
+        // segments at config time.
+        if (path.split("/").some((seg) => seg === "..")) {
+          return res.status(400).json({ error: "serverCoverageEndpoint: file:// path must not contain '..' segments." });
+        }
+        // Optional path-prefix allowlist. Empty / unset env keeps the
+        // pre-fix behaviour (any absolute path accepted). When set, the
+        // path must start with one of the comma-separated prefixes —
+        // e.g. `COVERAGE_FILE_PATH_PREFIX=/var/coverage,/srv/sentri/cov`
+        // restricts reads to those two sandbox directories. Trailing
+        // slashes on operator-supplied prefixes are stripped so
+        // `/var/coverage` and `/var/coverage/` behave identically —
+        // mirrors the runtime check in `serverCoverageProxy.js`.
+        const prefixEnv = process.env.COVERAGE_FILE_PATH_PREFIX;
+        if (prefixEnv && prefixEnv.trim()) {
+          const allowed = prefixEnv.split(",")
+            .map((p) => p.trim().replace(/\/+$/, ""))
+            .filter(Boolean);
+          const matched = allowed.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+          if (!matched) {
+            return res.status(400).json({ error: `serverCoverageEndpoint: file:// path must start with one of: ${allowed.join(", ")} (set via COVERAGE_FILE_PATH_PREFIX).` });
+          }
+        }
+        fields.serverCoverageEndpoint = trimmed;
+      } else {
+        const urlErr = await validateUrl(trimmed);
+        if (urlErr) return res.status(400).json({ error: `serverCoverageEndpoint: ${urlErr}` });
+        fields.serverCoverageEndpoint = trimmed;
+      }
+    }
+  }
+
+  // AUTO-009i — per-project coverage regression alerting threshold.
+  // Accepts null (disable) or a number in (0, 100]. Zero disables because
+  // "alert on any drop > 0%" is too noisy; operators who want that should
+  // use the quality-gate `maxCoverageRegressionPct: 0` which FAILS the run.
+  if (Object.hasOwn(req.body, "coverageRegressionThresholdPct")) {
+    const v = req.body.coverageRegressionThresholdPct;
+    if (v === null || v === 0) {
+      fields.coverageRegressionThresholdPct = null;
+    } else if (!Number.isFinite(v) || v < 0 || v > 100) {
+      return res.status(400).json({ error: "coverageRegressionThresholdPct must be null, 0 (disable), or a number between 0 and 100." });
+    } else {
+      fields.coverageRegressionThresholdPct = v;
+    }
   }
 
   if (req.body.credentials === null) {

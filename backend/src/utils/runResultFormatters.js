@@ -4,6 +4,7 @@
  */
 
 import { isNonExecutedSkip } from "./skipReasons.js";
+import { renderPrCoverageMd } from "../pipeline/coveragePrDiff.js"; // AUTO-009d — PR-scoped coverage section in GitHub Check summary
 
 const GREEN_STATUSES = new Set(["passed", "warning"]);
 const FAIL_STATUSES = new Set(["failed", "error"]);
@@ -171,5 +172,11 @@ export function renderGithubCheckSummary(run, { baseRun = null, runUrl = "" } = 
   if (vitalsViolations.length) {
     lines.push("", "### Web Vitals budget violations", ...vitalsViolations.map((v) => `- ${v}`));
   }
+  // AUTO-009d — PR-scoped coverage section. Renders only when the run was
+  // triggered from a GitHub PR and `finalizeCoverage` populated
+  // `run.prCoverageDiff`. Non-PR runs (manual UI, scheduled, crawl-only)
+  // produce an empty string so the existing summary shape stays unchanged.
+  const prCovMd = renderPrCoverageMd(run?.prCoverageDiff);
+  if (prCovMd) lines.push("", prCovMd);
   return lines.join("\n");
 }

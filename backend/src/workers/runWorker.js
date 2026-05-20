@@ -41,6 +41,10 @@ import { runFeedbackLoop } from "../runner/feedbackIntegration.js"; // CAP-002 P
 import { finalizeRunIfNotAborted } from "../utils/abortHelper.js";
 import { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } from "../testRunner.js";
 import { clusterFailures } from "../pipeline/failureClusterer.js"; // AUTO-010 — sharded-run parity with single-process tail in testRunner.js
+import { finalizeCoverage, mergeShardSummaries } from "../pipeline/finalizeCoverage.js"; // AUTO-009f sharded parity + AUTO-009k set-union merge over per-shard pre-aggregated summaries.
+import { computePrCoverage } from "../pipeline/coveragePrDiff.js"; // AUTO-009k — PR-scoped diff at the merge path (per-source line sets come from mergeShardSummaries' accumulator state).
+import { resolveSourceMap, mapBundleLine } from "../pipeline/sourceMapResolver.js"; // AUTO-009k PR-diff fix — bridge bundle URLs to original source paths at the merge stage.
+import { detectCoverageRegression, fireCoverageRegressionAlert } from "../pipeline/coverageRegressionDetector.js"; // AUTO-009i — sharded-run parity for coverage regression alerting.
 import { trackTelemetry } from "../utils/telemetry.js";
 import { safeFetch } from "../utils/ssrfGuard.js"; // CAP-002 Phase 2 — trigger-path callbackUrl POST from sharded finalizer.
 
@@ -674,12 +678,7 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
   run.retryCount = results.reduce((sum, r) => sum + (r.retryCount || 0), 0);
   run.failedAfterRetry = results.filter((r) => r.failedAfterRetry).length;
 
-  // Quality gates + web vitals — same evaluators as the single-shard path.
-  // The exported `__evaluateQualityGatesForTest` / `__evaluateWebVitalsBudgetsForTest`
-  // aliases are the public test-friendly names; we deliberately reuse them
-  // here rather than duplicate the logic (it's a moderately large pure
-  // function with subtle data-driven-skip handling — see testRunner.js).
-  run.gateResult = __evaluateQualityGatesForTest(project.qualityGates, run);
+  // Web vitals — evaluated independently of coverage (no ordering dep).
   run.webVitalsResult = __evaluateWebVitalsBudgetsForTest(project.webVitalsBudgets, run);
 
   // AUTO-010 — Deterministic root-cause clustering on the full DB results
@@ -688,6 +687,264 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
   // multi-shard run would persist `rootCauses: null` and the RunDetail
   // Root Cause Summary panel would never render for sharded runs.
   run.rootCauses = clusterFailures({ results });
+
+  // AUTO-009k — Two-stage coverage aggregation (industry pattern: c8 / nyc /
+  // Istanbul `libCoverage.merge()` / Codecov upload-then-merge).
+  //
+  // **Preferred path**: each shard pre-aggregated its slice via
+  // `aggregateShardCoverage` and persisted a compact mergeable summary via
+  // `runRepo.setShardCoverageSummary`. The finalizer reads
+  // `run.shardCoverageSummaries` and calls `mergeShardSummaries` to take
+  // set union across shards. Set union is associative, so the merged
+  // output is mathematically identical to single-pass aggregation over
+  // the union of all shards' raw results — but without re-processing
+  // megabytes of raw V8 ranges from `runs.results` in one finalizer pass.
+  //
+  // **Fallback path (AUTO-009f)**: if `shardCoverageSummaries` is null or
+  // has fewer slots than `shardCount` (partial-deploy race: some shards
+  // ran old code without AUTO-009k persistence), fall back to re-aggregating
+  // from raw `jsCoverage` blobs in `runs.results` via `finalizeCoverage`.
+  // Functionally correct — id-set union over per-test results is
+  // mathematically equivalent to per-shard merge — and memory-bounded by
+  // AUTO-009g's `COVERAGE_MEMORY_CEILING_MB`.
+  //
+  // Both paths produce byte-equivalent `coverageSummary` shapes modulo
+  // `sourceMapStatus` (merge path defaults to "fallback"; the raw path
+  // can run resolution per-shard). PR-scoped diff (AUTO-009d) is computed
+  // post-merge from the merged per-source line sets when
+  // `run.changedFileRanges` is populated.
+  const persistedSummaries = Array.isArray(run.shardCoverageSummaries)
+    ? run.shardCoverageSummaries
+    : null;
+  const shardCount = Number(run.shardCount || 1);
+  // Treat the merge path as eligible only when every shard contributed a
+  // payload. A partial array (`length < shardCount` or `null` slots) signals
+  // a deploy race or a pre-aggregation failure on at least one shard — the
+  // AUTO-009f fallback over raw results stays correct in that case.
+  const allShardsContributed = persistedSummaries
+    && persistedSummaries.length >= shardCount
+    && persistedSummaries.slice(0, shardCount).every((s) => s && typeof s === "object");
+
+  if (allShardsContributed && project?.coverageEnabled) {
+    structuredLog("coverage.merge_path", { runId, shardCount, source: "shard_summaries" });
+
+    // AUTO-009k follow-up — track resolver hit-rate at the merge stage so
+    // the merged `sourceMapStatus` matches what the single-process tail
+    // produces on the same SUT. Counts every per-bundle covered line we
+    // probe through the resolver below: `bundleLinesTotal` is the
+    // denominator (all covered lines across every shard's `perSource`),
+    // `bundleLinesResolved` is incremented when `mapBundleLine` returns a
+    // source path. Status is derived from the ratio after the loop and
+    // passed into `mergeShardSummaries` so the Dashboard CoveragePanel
+    // renders a consistent badge between sharded and single-process runs.
+    let bundleLinesTotal = 0;
+    let bundleLinesResolved = 0;
+    let resolverConfigured = false;
+
+    // AUTO-009d — merge-path resolver probe + PR-scoped coverage diff.
+    //
+    // Two concerns intentionally decoupled inside this block (BUG-0001 fix):
+    //
+    // 1. **`sourceMapStatus` accuracy** — needs the resolver to probe SOME
+    //    covered lines so the merged summary reports `resolved` / `partial`
+    //    / `fallback` honestly. Independent of PR context. The probe ALWAYS
+    //    runs when `sourcemapBaseUrl` is configured, regardless of whether
+    //    the run came from a PR.
+    //
+    // 2. **PR-coverage diff** — needs `changedFileRanges` to intersect
+    //    against. Only fires on PR-triggered runs, gated separately inside
+    //    the probe block below so the resolver work above populates the
+    //    resolution counters whether or not PR context exists.
+    //
+    // Why per-bundle resolution at the merge stage: each shard's `perSource`
+    // slot carries per-bundle covered-line ARRAYS keyed by **bundle URL**
+    // (e.g. `https://app.example.com/main.js`) because
+    // `aggregateShardCoverage` deliberately runs without a source-map
+    // resolver to keep per-shard payloads compact. `changedFileRanges` is
+    // keyed by **source path** from the PR (e.g. `src/Cart.tsx`), so a
+    // naive intersection would silently match zero files on every sharded
+    // PR run → `minPrCoveragePct` gate becomes dormant. The consumer cache
+    // (`consumerCache` below) ensures N shards covering the same bundle
+    // only fetch + parse the `.map` file once per merge. When no resolver
+    // is configured the per-source line set still gets the original bundle
+    // URL as its key — same degradation as the single-process path.
+    // BUG-0001 fix (AGENT.md §148 "default: fix it" — no follow-up entry).
+    // Decoupled from `run.changedFileRanges` so the resolver probe ALWAYS
+    // runs when `sourcemapBaseUrl` is configured. The pre-fix guard tied
+    // `sourceMapStatus` accuracy to PR context, so non-PR sharded runs
+    // always reported `"fallback"` even when source maps were resolving
+    // correctly — confusing operators who saw `"resolved"` on the same SUT
+    // with `shardCount: 1`. The PR-diff `computePrCoverage` call below is
+    // still PR-gated; only the resolver probing is unconditional.
+    const sourcemapBaseUrl = project?.sourcemapBaseUrl || null;
+    resolverConfigured = !!sourcemapBaseUrl;
+    if (resolverConfigured) {
+      try {
+        const coveredLinesByFile = {};
+        const totalLinesByFile = {};
+        // Cache consumers per-bundle so N shards covering the same bundle
+        // only fetch + parse the .map file once per merge. The resolver
+        // itself has an LRU cache (10MB / 1h TTL) so repeated runs across
+        // dashboard loads also stay cheap.
+        const consumerCache = new Map();
+        for (const shard of persistedSummaries.slice(0, shardCount)) {
+          const perSource = shard?.perSource || {};
+          for (const [bundleUrl, slot] of Object.entries(perSource)) {
+            let consumer = consumerCache.get(bundleUrl);
+            if (consumer === undefined) {
+              try {
+                consumer = await resolveSourceMap(bundleUrl, { sourcemapBaseUrl });
+              } catch { consumer = null; }
+              consumerCache.set(bundleUrl, consumer);
+            }
+            for (const ln of (slot.coveredLines || [])) {
+              // Map (bundleUrl, ln) → (sourcePath, sourceLine). Falls back
+              // to (bundleUrl, ln) when the resolver can't translate the
+              // line — degrades cleanly to the pre-fix behaviour for that
+              // specific line rather than dropping it entirely.
+              let sourceKey = bundleUrl;
+              let sourceLine = ln;
+              bundleLinesTotal++;
+              if (consumer) {
+                const mapped = mapBundleLine(consumer, ln);
+                if (mapped?.source) {
+                  sourceKey = mapped.source;
+                  sourceLine = mapped.line;
+                  bundleLinesResolved++;
+                }
+              }
+              if (!coveredLinesByFile[sourceKey]) coveredLinesByFile[sourceKey] = new Set();
+              coveredLinesByFile[sourceKey].add(sourceLine);
+              // Track the file's max line so `computePrCoverage` can
+              // clamp PR-claimed lines past the executed file's range.
+              // `slot.totalLines` is in bundle coordinates; the per-source
+              // total is approximated by the highest mapped line.
+              if ((totalLinesByFile[sourceKey] || 0) < sourceLine) {
+                totalLinesByFile[sourceKey] = sourceLine;
+              }
+            }
+          }
+        }
+        // BUG-0001 fix continuation — only compute the PR-coverage diff
+        // when PR context exists. The resolver work above also populates
+        // `bundleLinesTotal` / `bundleLinesResolved` for non-PR runs so
+        // `sourceMapStatus` reports accurately regardless of PR context.
+        if (run.changedFileRanges) {
+          const prDiff = computePrCoverage({
+            coveredLinesByFile,
+            totalLinesByFile,
+            changedFileRanges: run.changedFileRanges,
+          });
+          if (prDiff) {
+            run.prCoverageDiff = prDiff;
+          }
+        }
+      } catch (prErr) {
+        console.warn(formatLogLine("warn", runId,
+          `[runWorker] AUTO-009k resolver probe / PR diff over merged summaries failed: ${prErr?.message || prErr}`));
+      }
+    }
+
+    // Derive merged sourceMapStatus from the per-bundle resolution stats
+    // collected above. Mirrors the aggregator's tri-state contract
+    // (`backend/src/pipeline/coverageAggregator.js`):
+    //   - "resolved" — ≥80% of probed bundle lines mapped to source paths
+    //   - "partial"  — some mapped (>0%, <80%)
+    //   - "fallback" — `sourcemapBaseUrl` unset, or resolver was configured
+    //     but every `.map` fetch / probe failed
+    //
+    // BUG-0001 fix: the resolver probe now runs for every run with
+    // `sourcemapBaseUrl` configured (PR or non-PR), so `bundleLinesTotal`
+    // is populated whenever the operator has wired up source maps. Pre-fix
+    // the probe was gated on `run.changedFileRanges`, causing every non-PR
+    // sharded run to fall through to "fallback" even when source maps
+    // resolved correctly — confusing operators who saw "resolved" on the
+    // same SUT with `shardCount: 1`.
+    let mergedSourceMapStatus = "fallback";
+    if (resolverConfigured && bundleLinesTotal > 0) {
+      const ratio = bundleLinesResolved / bundleLinesTotal;
+      if (ratio >= 0.8) mergedSourceMapStatus = "resolved";
+      else if (ratio > 0) mergedSourceMapStatus = "partial";
+    }
+
+    // Build the merged summary now that we know the observed source-map
+    // status. Stamp `mergeSource: "shards"` so downstream consumers
+    // (Dashboard CoveragePanel, RunDetail) can surface which code path
+    // produced the coverage data — useful for diagnosing the rare
+    // partial-deploy race where some sharded runs go through the
+    // `raw_results_fallback` path below and have slightly different
+    // resolution characteristics.
+    run.coverageSummary = mergeShardSummaries(persistedSummaries.slice(0, shardCount),
+      { sourceMapStatus: mergedSourceMapStatus });
+    if (run.coverageSummary) run.coverageSummary.mergeSource = "shards";
+  } else {
+    // AUTO-009f fallback path — re-aggregate from raw `runs.results`. The
+    // DB column retains raw jsCoverage because `appendRunResults` persisted
+    // each result per-test during execution (before the shard-tail strip
+    // which only affected the in-memory array). So this path is correct:
+    // the fresh `runRepo.getById(runId).results` at line 673 carries the
+    // full raw payloads for every shard that executed tests. The strip at
+    // testRunner.js:944 is purely an in-memory optimization that doesn't
+    // affect the DB column.
+    const fallbackReason = !persistedSummaries ? "no_persisted_summaries"
+      : persistedSummaries.length < shardCount ? "incomplete_shard_coverage"
+      : "shard_payload_invalid";
+    structuredLog("coverage.merge_path", {
+      runId, shardCount,
+      source: "raw_results_fallback",
+      reason: fallbackReason,
+    });
+    run.coverageSummary = await finalizeCoverage(project, results, {
+      changedFileRanges: run.changedFileRanges || null,
+    });
+    if (run.coverageSummary?.prCoverageDiff) {
+      run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
+      delete run.coverageSummary.prCoverageDiff;
+    }
+    // Stamp the merge-source marker so consumers can distinguish runs that
+    // went through the preferred shard-merge path from runs that fell back
+    // to raw-results re-aggregation (typically partial-deploy races or
+    // pre-aggregation failures on individual shards). The two paths produce
+    // mathematically equivalent coverage numbers but the fallback path is
+    // bounded by `COVERAGE_MEMORY_CEILING_MB` against ALL shards' raw
+    // payloads in one pass, whereas the merge path uses each shard's
+    // already-pre-aggregated compact id-set payload — see structuredLog
+    // `coverage.merge_path` at line 821 for the matching ops telemetry.
+    if (run.coverageSummary) run.coverageSummary.mergeSource = "fallback";
+  }
+
+  // AUTO-009d — quality-gate evaluation runs AFTER coverage aggregation so
+  // the four coverage rules (`minCoveragePct`, `minBranchPct`,
+  // `minPrCoveragePct`, `maxCoverageRegressionPct`) see this run's freshly-
+  // computed `coverageSummary`. Mirrors the single-process ordering at
+  // `testRunner.js:933-950`. The regression rule needs the previous
+  // coverage-enabled run's summary; we pull it via the lean
+  // `getRunsWithCoverage` accessor and pick the most-recent row that isn't
+  // `run.id` itself. Best-effort — a repo failure falls back to
+  // `priorRunCoverage: null` which short-circuits the regression rule.
+  let priorRunCoverage = null;
+  if (project?.coverageEnabled) {
+    try {
+      const history = runRepo.getRunsWithCoverage([project.id], { windowDays: 0, limit: 50 });
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].id !== run.id && history[i].coverageSummary) {
+          priorRunCoverage = history[i].coverageSummary;
+          break;
+        }
+      }
+    } catch { /* best-effort — null prior degrades cleanly */ }
+  }
+
+  // AUTO-009i — coverage regression alerting on sharded runs (parity with
+  // the single-process path in testRunner.js). Fires AFTER priorRunCoverage
+  // is resolved and BEFORE gate evaluation. Best-effort — same contract as
+  // `fireNotifications`.
+  try {
+    const regression = detectCoverageRegression(run.coverageSummary, priorRunCoverage, project);
+    if (regression) await fireCoverageRegressionAlert(regression, run, project);
+  } catch { /* best-effort — regression alert failure must never block finalize */ }
+
+  run.gateResult = __evaluateQualityGatesForTest(project.qualityGates, run, { priorRunCoverage });
 
   // Persist aggregates BEFORE the feedback loop so a feedback-loop crash
   // doesn't lose the gate verdict (CI consumers polling `/trigger/runs/:id`
@@ -698,6 +955,8 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     gateResult: run.gateResult,
     webVitalsResult: run.webVitalsResult,
     rootCauses: run.rootCauses, // AUTO-010
+    coverageSummary: run.coverageSummary, // AUTO-009f
+    prCoverageDiff: run.prCoverageDiff || null, // AUTO-009d
   });
 
   // Re-read live status from the DB before the (expensive) feedback loop.

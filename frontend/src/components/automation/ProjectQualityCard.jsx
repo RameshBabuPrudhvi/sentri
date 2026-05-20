@@ -52,7 +52,105 @@ const INNER_TABS = [
   { id: "iterations",  label: "Iterations",     icon: Database    },
   { id: "piifirewall", label: "PII Firewall",   icon: Lock        },
   { id: "visionheal",  label: "Vision Healing", icon: Eye         },
+  { id: "coverage",    label: "Coverage",       icon: Globe       },
 ];
+
+function CoveragePanel({ project, canEdit, onToast }) {
+  const [enabled, setEnabled] = useState(!!project.coverageEnabled);
+  const [sourcemapBaseUrl, setSourcemapBaseUrl] = useState(project.sourcemapBaseUrl || "");
+  const [regressionThreshold, setRegressionThreshold] = useState(
+    project.coverageRegressionThresholdPct != null ? String(project.coverageRegressionThresholdPct) : "",
+  );
+  const [saving, setSaving] = useState(false);
+
+  // AUTO-009 — per-project coverage trend. `api.getCoverageTrend(projectId)`
+  // narrows the dashboard's `coverageTrend` series to this project so the
+  // Coverage tab shows a mini sparkline + latest-% badge without the operator
+  // needing to navigate to the Dashboard. Fetched on mount; null when coverage
+  // is disabled or no runs have produced data yet.
+  const [trend, setTrend] = useState(null);
+  useEffect(() => {
+    if (!project.coverageEnabled) { setTrend(null); return; }
+    let cancelled = false;
+    api.getCoverageTrend(project.id)
+      .then((t) => { if (!cancelled) setTrend(t); })
+      .catch(() => { /* best-effort — settings tab still works without the sparkline */ });
+    return () => { cancelled = true; };
+  }, [project.id, project.coverageEnabled]);
+
+  const save = async () => {
+    const trimmedThreshold = regressionThreshold.trim();
+    const thresholdVal = trimmedThreshold === "" ? null : Number(trimmedThreshold);
+    if (thresholdVal !== null && (!Number.isFinite(thresholdVal) || thresholdVal < 0 || thresholdVal > 100)) {
+      onToast?.({ type: "error", message: "Regression alert threshold must be empty (disabled) or a number between 0 and 100." });
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.updateProject(project.id, {
+        coverageEnabled: enabled,
+        sourcemapBaseUrl: sourcemapBaseUrl.trim() || null,
+        coverageRegressionThresholdPct: thresholdVal,
+      });
+      onToast?.({ type: "success", message: "Coverage settings saved." });
+    } catch (err) {
+      onToast?.({ type: "error", message: err?.message || "Failed to save coverage settings." });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="aap-panel">
+      <label className="aap-stats">
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={!canEdit || saving} />
+        {" "}Enable browser JS coverage capture
+      </label>
+      <input className="aap-input" placeholder="Optional source-map base URL" value={sourcemapBaseUrl} onChange={(e) => setSourcemapBaseUrl(e.target.value)} disabled={!canEdit || saving} />
+      <div className="aap-section">
+        <label className="aap-field-label">
+          Regression alert threshold (%) — leave empty to disable
+        </label>
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="0.1"
+          className="aap-input"
+          placeholder="e.g. 5"
+          value={regressionThreshold}
+          onChange={(e) => setRegressionThreshold(e.target.value)}
+          disabled={!canEdit || saving}
+        />
+        <div className="aap-stats aap-stats--hint">
+          Fires a Teams / email / webhook notification when coverage drops more than
+          this percentage vs. the prior run. Does NOT fail the run — use Quality Gates
+          → Max coverage regression for that. Example: 5 alerts on any drop &gt; 5%.
+        </div>
+      </div>
+      <button className="btn btn-primary btn-sm" onClick={save} disabled={!canEdit || saving}>{saving ? "Saving…" : "Save"}</button>
+      {/* AUTO-009 — per-project coverage sparkline + latest-% badge.
+          Only renders when coverage is enabled AND at least one run has
+          produced data (trend !== null). Gives operators immediate feedback
+          on their project's coverage trajectory without navigating to the
+          Dashboard. */}
+      {trend && trend.series && trend.series.length > 0 && (() => {
+        const latest = trend.series[trend.series.length - 1];
+        const latestPct = Math.round((latest?.coveragePct || 0) * 100);
+        return (
+          <div className="aap-section">
+            <div className="aap-stats">
+              <strong>Latest coverage: {latestPct}%</strong>
+              <span className="text-muted"> · {trend.series.length} run{trend.series.length !== 1 ? "s" : ""} in last {trend.windowDays}d</span>
+            </div>
+            <div className="aap-stats aap-stats--hint">
+              {trend.series.map((p, i) => `${Math.round((p.coveragePct || 0) * 100)}%`).join(" → ")}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
 
 /**
  * CAP-001: configures `project.iterationCap` — the per-project ceiling on
@@ -701,6 +799,13 @@ export default function ProjectQualityCard({
                 onToast={onToast}
               />
             )}
+            {innerTab === "coverage" && (
+              <CoveragePanel
+                project={project}
+                canEdit={canEdit}
+                onToast={onToast}
+              />
+            )}
             {innerTab === "webvitals" && (
               <>
                 <WebVitalsBudgetsPanel
@@ -711,14 +816,7 @@ export default function ProjectQualityCard({
                 {/* AUTO-017.3: per-metric trend charts. Threshold lines are
                     sourced from the project's `webVitalsBudgets` so users see
                     violations in context (PR checklist NEXT.md:67). */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                    gap: 12,
-                    marginTop: 16,
-                  }}
-                >
+                <div className="aap-webvitals-grid">
                   {WEB_VITAL_METRICS.map((m) => (
                     <WebVitalTrend
                       key={m.key}

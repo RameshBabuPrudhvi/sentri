@@ -625,7 +625,28 @@ export const api = {
   // ── Dashboard ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
-
+  /**
+   * AUTO-009 — read the 30-day project-wide coverage trend.
+   *
+   * Backed by `GET /api/v1/dashboard`'s `coverageTrend` block. The
+   * `projectId` parameter narrows the series to one project client-side.
+   *
+   * **Consumers:** `ProjectQualityCard.jsx` → Coverage tab (fetches the
+   * per-project series on mount to render a latest-% badge + text sparkline
+   * without navigating to the Dashboard). The Dashboard `CoveragePanel`
+   * reads `data.coverageTrend` directly from `getDashboard()` instead
+   * (avoids a second fetch for the workspace-wide view).
+   *
+   * @param {string} [projectId] — Narrow the series to one project.
+   * @returns {Promise<Object|null>}
+   */
+  getCoverageTrend: (projectId) => req("GET", "/dashboard").then((d) => {
+    const trend = d?.coverageTrend;
+    if (!trend?.series?.length) return null;
+    if (!projectId) return trend;
+    const series = trend.series.filter((p) => p.projectId === projectId);
+    return series.length > 0 ? { ...trend, series } : null;
+  }),
   /**
    * AUTO-022 — read the per-case breakdown for one AI eval-harness run.
    * Powers the Dashboard `EvalPanel` drill-down side panel.

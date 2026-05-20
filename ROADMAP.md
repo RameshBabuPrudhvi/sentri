@@ -15,11 +15,11 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** AUTO-009 (browser code coverage mapping) — promoted after MNT-001 + AUTO-022 plumbing shipped in PR #17. INF-009 (Helm chart + K8s + DR) holds queue slot 1, AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 2, AUTO-014 (test dependency + execution ordering) slot 3. MNT-001 + AUTO-022 (vision healing + AI eval harness plumbing) shipped in PR #17 — see Completed Work Summary for full details.
+> **Current sprint:** INF-009 (Helm chart + K8s readiness/liveness + DR playbook) — promoted after AUTO-009 (browser code coverage mapping — all 10 sub-items 009b/c/d/e/f/g/h/i/j shipped) landed in PR #19. Queue: AI-002 + AI-003 (AI provider modularization + adapter capability hardening, bundled — `backend/src/aiProvider.js` 1,545-line decomposition into modules + adapters + per-call cost tracking foundation) slot 1, AI-004 (agent role config schema — dormant) slot 2, AI-005 (multi-agent dispatch — `agentRole` parameter + per-role circuit breakers + per-role telemetry) slot 3, AI-006 (per-role eval harness extension) slot 4, AI-007 (AI cost governance + budget enforcement) slot 5, AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 6, AUTO-014 (test dependency + execution ordering) slot 7, DIF-008 (Jira / Linear issue sync) slot 8.
 >
-> **Blockers:** none remaining · **Remaining:** ~14 planned items across Phases 2–5 + Maintenance (see Summary table at the bottom for the authoritative breakdown).
+> **Blockers:** none remaining · **Remaining:** ~19 planned items across Phases 2–5 + Maintenance (incl. AI-002 through AI-007 added as the AI platform foundation track — see Summary table at the bottom for the authoritative breakdown).
 >
-> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): MNT-001 + AUTO-022 PR #17 · INF-007 PR #14 · SEC-007 PR #12 · SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
+> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): AUTO-009 PR #19 · MNT-001 + AUTO-022 PR #17 · INF-007 PR #14 · SEC-007 PR #12 · SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
 
 ---
 
@@ -139,6 +139,7 @@ The following items have been verified complete against the codebase and are **n
 | INF-007 | OpenTelemetry + Sentry observability baseline. Preloaded OTel SDK via `node --import ./src/otel-preload.mjs` (wired into `backend/package.json` scripts + `backend/Dockerfile` `CMD` + the `worker` `docker-compose.yml` command) so `@opentelemetry/auto-instrumentations-node` patches `express` / `pg` / `ioredis` / outbound HTTP BEFORE any application module loads — in-graph init was too late and would have silently dropped framework-level spans. New `backend/src/utils/observability.js` owns the `AsyncLocalStorage`-based `requestContext`, the `crypto.randomUUID()`-minted `createRequestId`, and the dynamic-import `initOpenTelemetry()` that's a no-op when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset. New `backend/src/utils/metrics.js` owns a single `prom-client` `Registry` and 14 brand-neutral `app_*` counters / histograms / gauges (HTTP RED, run lifecycle, per-test, crawler, pipeline stage, AI provider latency / tokens / errors, BullMQ queue depth) with three histogram-bucket presets tuned per metric type and a `classifyAiError` helper that constrains AI error labels to a fixed 6-value enum (`rate_limit` / `timeout` / `auth` / `server_error` / `network` / `unknown`) to prevent cardinality bombs from raw vendor error messages. `backend/src/middleware/appSetup.js` mounts three middleware layers — per-request `X-Request-Id` minting / inbound-echo with `requestContext.run()` wrapping every downstream handler so `getRequestId()` works anywhere; HTTP RED metrics recorded on `res.finish` using the matched Express ROUTE TEMPLATE (`${req.baseUrl}${req.route.path}`) never the raw URL, with `__not_found__` and `__other__` constant-cardinality fallbacks; and the `GET /metrics` Prometheus scrape endpoint with timing-safe Bearer-token auth via `crypto.timingSafeEqual` over SHA-256 digests (matches the established pattern at `appSetup.js:574` and `trigger.js:854-857`) + live `app_queue_depth` gauge refresh from BullMQ `getQueueStats()` on every scrape. AI provider instrumentation wraps the legacy `callProvider` as an instrumentation shell around a renamed `_callProviderUnsafe` — records `app_ai_provider_latency_seconds{provider, outcome}` (where `outcome ∈ {success, rate_limited, error}` so the p99-by-outcome panel detects slow timeouts inflating the error tail), `app_ai_provider_errors_total{provider, reason}` via `classifyAiError`, and per-SDK-shape `app_ai_provider_tokens_total{provider, kind=input|output}` token recording (Anthropic `msg.usage`, OpenAI/Compat/OpenRouter `res.usage`, Gemini `result.response.usageMetadata`). `providerMetricLabel()` folds `compat:<slot-id>` → literal `compat` so per-slot cardinality stays bounded. Run-lifecycle counters bump from `runRepo.create()` (per-row `app_runs_total{type}`); `testRunner.processResult` and `finalize` emit per-test `app_tests_executed_total` + `app_test_duration_seconds` and run-level `app_run_outcome_total` + `app_run_duration_seconds`; `crawler.js` emits `app_crawl_pages_total{mode}` (link-crawl vs state-explorer) and the same run-outcome / run-duration pair for both crawl and generate run types. Every metric increment is wrapped in `try/catch` so observability is best-effort and never fails a real request or run. Structured logging extracted from `logFormatter.js` into a dedicated `backend/src/utils/structuredLog.js` (per NEXT.md INF-007 "Files to change") with `formatLogLine` + `structuredLog` both auto-injecting `requestId` (from `AsyncLocalStorage`) and OTel `traceId` / `spanId` (from `getSpanContext`) on every output line — the 3-way Sentry → Loki → Jaeger correlation pivot for production debugging. `JSON.stringify` drops undefined keys natively (clean output when OTel is off); text mode runs `.filter(([, v]) => v !== undefined && v !== null)` so the OTel-disabled path emits no `traceId=undefined spanId=undefined` noise. Backend Sentry init lives in the preload (`Sentry.init({ beforeSend(event) { delete event.request?.headers; ... }})` strips Authorization / Cookie / X-CSRF-Token before any event leaves the host); `middleware/workspaceScope.js` `attachSentryContext(req)` populates `Sentry.setUser({ id })` + `workspace_id` + `user_role` tags at both auth code paths (JWT-validated and API-key-validated) so multi-tenant Sentry inboxes are searchable per workspace without leaking email / username (GDPR / SOC 2 minimum); `index.js` registers `Sentry.setupExpressErrorHandler(app)` after all routes (no-op when `SENTRY_DSN` is unset). Frontend `@sentry/react` init in `frontend/src/main.jsx` runs only when `VITE_SENTRY_DSN` is set, with `browserTracingIntegration()` for automatic pageload + History API navigation breadcrumbs (the operator pivot for "what page was the user on?"), `sendDefaultPii: false`, a `stripUrlSecrets` helper that trims query strings + hashes from URL-carrying breadcrumbs (OAuth `code`, magic-link `token`, password-reset `t`, audit-log `cursor`), explicit deletion of auto-collected `event.user.email` / `username` / `ip_address` in `beforeSend`, and only the anonymous `user.id` + `workspaceId` forwarded from the persisted `app_auth_user` localStorage row (matching the backend's `setUser({ id })`-only pattern). `frontend/src/components/layout/ErrorBoundary.jsx` calls `Sentry.captureException(error)` when `VITE_SENTRY_DSN` is set. New `monitoring/prometheus/alerts.yml` ships 11 alert rules grouped by concern (availability / runs / queue / AI providers / runtime / observability liveness) with every rule carrying a `runbook_url` anchor; the `BackendScrapeDown` meta-alert fires after 3 min of `up == 0` so a broken scrape pipeline doesn't silently dark every other alert. New `docs/guide/observability.md` is the canonical operator hand-off — metric reference table, trace ↔ log ↔ Sentry correlation workflow, Prometheus scrape config example, full on-call runbook for every alert rule, and a 5-step deployment verification checklist. `docs/guide/env-vars.md` documents `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SERVICE_NAME` / `METRICS_SCRAPE_KEY` / `SENTRY_DSN` / `SENTRY_TRACES_SAMPLE_RATE` / `VITE_SENTRY_DSN` / `VITE_SENTRY_TRACES_SAMPLE_RATE` with the init-order note about `--import`; `backend/.env.example` adds a delimited Observability block with the `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` generator command for `METRICS_SCRAPE_KEY`. `permissions.json` registers `GET /metrics` at the admin role. Every layer is a no-op when its env var is unset so the default deployment ships with zero external telemetry traffic. New `backend/tests/observability.test.js` (registered in `run-tests.js`) covers nine scenarios — `formatLogLine` requestId propagation through `AsyncLocalStorage`, no-context omission of the `req:` tag, OTel `initOpenTelemetry()` no-op when endpoint is unset, X-Request-Id minting on responses without an inbound header, X-Request-Id verbatim echo when an inbound header is supplied, `/metrics` 401 without Bearer token, `/metrics` 401 with wrong token, `/metrics` 200 + `text/plain` Prometheus exposition + presence of `nodejs_*` + `app_runs_total` + `app_tests_executed_total` + `app_crawl_pages_total`, and `METRICS_SCRAPE_KEY` runtime-unset → 401 even with a previously-valid token. Brand-neutral `app_*` prefix per `docs/guide/rebranding.md` so Prometheus dashboards and alert rules don't require migration during a future product rebrand. | PR #14 |
 | AUTO-010 | Root-cause failure clustering. New pure helper `backend/src/pipeline/failureClusterer.js` exports `clusterFailures({ results })` returning `[{ fingerprint, affectedTestIds[], sharedUrl, sharedSelector, errorPattern, size }]` — no DB access, no LLM calls, deterministic fingerprint hashing only (AI-generated explanations remain AUTO-021's scope). Matching heuristic merges two failed results when normalised `errorPattern` strings are byte-equal AND (same URL origin prefix OR selector Levenshtein edit-distance ≤ 4 OR both sides URL-less + selector-less). `size` counts all failed result rows (including data-driven iterations); `affectedTestIds` is the deduplicated set of distinct test IDs surfaced in the UI's "N affected test(s)" copy. Migration `027_run_root_causes.sql` adds a nullable JSON `runs.rootCauses` column registered in `runRepo.JSON_FIELDS` + `INSERT_COLS`; `ARRAY_DEFAULT_FIELDS` Set in `rowToRun` defaults pre-migration rows to `[]` so external consumers reading `run.rootCauses.length` never throw. `backend/src/testRunner.js` calls the clusterer on single-process run completion; `backend/src/workers/runWorker.js` `finalizeShardedRun` mirrors the same call against the full DB results set (parity with the single-shard tail — without this every multi-shard run would persist `rootCauses: null` and the panel would never render for CAP-002 sharded runs). `frontend/src/pages/RunDetail.jsx` renders a collapsible "Root Cause Summary" panel above the test list when `run.rootCauses.length >= 1`, defaults collapsed for a single cluster, auto-expands when ≥2 clusters surface via a `hasSetInitialExpand` ref so SSE snapshots don't clobber user toggles. Coverage: `backend/tests/failure-clusterer.test.js` (registered in `run-tests.js`) covers same-message → single cluster of 10, distinct messages → N singleton clusters, URL-prefix grouping (`/auth/login` vs `/auth/callback` merge), selector-similarity threshold, passed-results filtered out, data-driven iteration dedup, URL-less + selector-less fallback, URL-less with different selectors stay separate (regression for `null === null` shortcut), JSON round-trip (no leaked `Set` / `_seenTestIds` scratchpad), and <500ms perf budget on a 100-row fixture. E2E mock spec at `tests/e2e/specs/run-detail-root-cause-ui.spec.mjs` asserts the panel renders with a synthetic `rootCauses` payload via `page.route()`. `docs/api/projects.md` documents the new `run.rootCauses[]` shape on `GET /api/v1/runs/:runId`. | PR #6 |
 | MNT-001 | Vision-based locator healing — host-side stages 7 (pixelmatch CV) + 8 (LLM vision) fire only after every DOM strategy in the runtime healing waterfall has failed. New `tryVisionHeal(ctx, deps)` orchestrator in `backend/src/selfHealing.js` with dependency-injected `pixelmatchHeal` / `llmVisionHeal` / `isBudgetExhausted` so unit tests stay deterministic (no real CV, no real network in CI). Real adapters in `backend/src/runner/visionHealAdapters.js` ship the sliding-window pixelmatch matcher (real `pixelmatch@^7` + `pngjs@^7` with stride adaptation under a `VISION_HEAL_MAX_WINDOWS` budget) and an LLM-vision proxy to `aiProvider.callVisionModel`. New `callVisionModel()` covers the Anthropic / OpenAI / Google / OpenRouter / OpenAI-compat multimodal message-shape differences behind one provider-agnostic call; ties usage into INF-007's token telemetry under a new `operation="vision_heal"` label (existing AI counters gained the third `operation` label, defaulting existing callers to `"generation"`) plus a new `app_ai_cost_usd_total{provider, operation}` counter for SaaS unit-economics dashboards. `STRATEGY_VERSION` bumped 3 → 4 (existing healing hints invalidate automatically — the next run retraverses the waterfall to relearn); indices 7 / 8 reserved for host-side vision via new `STRATEGY_INDEX_PIXELMATCH` / `STRATEGY_INDEX_LLM_VISION` exports. Migration `035_projects_vision_healing.sql` adds per-project `visionHealing` / `visionHealMaxCallsPerDay` / `visionHealMaxCostUsdPerMonth` columns. Migration `036_element_baselines.sql` adds the `element_baselines` table that stores per-element baseline PNG crops (BLOB) captured on green runs via the new `captureElementCrop()` helper in `pageCapture.js`, keyed `(projectId, healingKey)` where `healingKey` mirrors the versioned `<testId>@v<N>::<action>::<label>` shape from `healing_history` so code-edits invalidate stale baselines automatically. Migration `037_vision_budget_counter.sql` adds the `vision_budget_counters` table with per-project per-window counters (day + month) that auto-roll at UTC boundary and back the budget circuit-breaker; `record(projectId, costUsd)` bumps both windows in a single transaction, `isBudgetExhausted(projectId)` reads against project caps. Stage-8 skips emit a new `healing.vision_budget_exhausted` audit row + `app_vision_heal_budget_exhausted_total{projectId, reason}` Prometheus counter for the `VisionHealBudgetExhausted` alert in `monitoring/prometheus/alerts.yml`. `executeTest.js` wires real deps into `tryVisionHeal`, persists green-run baselines after passing tests, loads them on failure for stage 7, records cost after stage-8 success, and emits coordinate re-action via `performVisionHealReaction(page, action, box, label, key)` so the heal completes the originally-failed click / press / tap / dblclick / hover / rightclick. New **Vision Healing** tab in the Quality card (per-project mode picker `off` / `pixelmatch_only` / `pixelmatch_and_llm`, daily call cap, monthly cost cap; `pixelmatch_and_llm` server-gated by `aiProvider.hasVisionProvider()`). New `VisionHealPanel` on the Healing dashboard with zero-state explainer, stats grid (total heals / LLM spend / strategy split with `>= 50%` LLM-share warning), and audit-log deep-link. SEC-007-compatible audit trail: `persistHealingEvents` emits `healing.vision_pixelmatch` / `healing.vision_llm` rows via `logActivity` with full `meta` (confidence, strategyIndex, box, model, costUsd) — hash-chain verifiable. Coverage: 19 unit tests in `self-healing-vision.test.js`, end-to-end pixelmatch tests in `vision-heal-pixelmatch.test.js`, coordinate re-action tests in `vision-heal-reaction.test.js`, repo round-trip + retention + cascade-delete in `element-baseline-repo.test.js` and `vision-budget-repo.test.js`, metric-shape regression assertions in `observability.test.js`. Operator guide `docs/guide/vision-healing.md`; QA.md release-verification checklist. | PR #17 |
+| AUTO-009 | Browser code coverage mapping (MVP + AUTO-009b/c/d/f/g/h/i/j follow-ups landed in the same PR). Opt-in per-project (`projects.coverageEnabled`) Playwright V8 JS coverage capture in `executeTest.js` bracketing each test with `page.coverage.startJSCoverage` / `stopJSCoverage`. New `backend/src/pipeline/coverageAggregator.js` summarises per-test coverage into `runs.coverageSummary` (line / statement / branch / function pct via AUTO-009c `v8ToIstanbul.js` converter, `topUncoveredFiles[]` capped at 20, `sourceMapStatus` `"resolved"`/`"partial"`/`"fallback"`). AUTO-009b source-map resolution via `backend/src/pipeline/sourceMapResolver.js` (`source-map@^0.7` behind an LRU cache — 10MB cap, 1h TTL, alias-counted entries, SSRF-guarded via `utils/ssrfGuard.js`); optional `projects.sourcemapBaseUrl` override. AUTO-009d PR-scoped coverage diff (the Codecov play) via `backend/src/integrations/githubChecks.js#getChangedFilesWithRangesForPr` (combined files+ranges helper, single pagination pass) + `backend/src/pipeline/coveragePrDiff.js` (`computePrCoverage` intersects covered lines with the PR's changed line ranges, `renderPrCoverageMd` appends a "Coverage of changed lines" section to the GitHub Check summary). Four new quality gates wired into `evaluateQualityGates`: `minCoveragePct`, `minBranchPct`, `minPrCoveragePct`, `maxCoverageRegressionPct` — all 0–100 percentages. AUTO-009f / AUTO-009k sharded-run parity + two-stage merge: each shard pre-aggregates its slice via `pipeline/finalizeCoverage.js#aggregateShardCoverage` (compact Istanbul-shaped per-bundle id-set arrays + per-source line arrays + server diffs + per-test deltas) and persists via `runRepo.setShardCoverageSummary` into the sparse `runs.shardCoverageSummaries[]` JSON column (migration 042). The boundary-crossing finalizer (`workers/runWorker.js#finalizeShardedRun`) reads the array and calls `pipeline/finalizeCoverage.js#mergeShardSummaries` to take set union across shards — matching the industry pattern (c8 / nyc / Istanbul `libCoverage.createCoverageMap().merge()` / Codecov upload-then-merge). Naive count-summing would be wrong (proven counter-example: shard 0 covers lines [1,2,3], shard 1 covers lines [3,4,5] → naive 3+3=6 vs true union 5; pinned by `coverage-shard-merge.test.js`). Fallback path (AUTO-009f) re-aggregates from raw `jsCoverage` blobs in `runs.results` when `shardCoverageSummaries` is partial (partial-deploy race protection) — functionally correct because id-set union over per-test results is mathematically equivalent to per-shard merge (set union associative), bounded by `COVERAGE_MEMORY_CEILING_MB`. Pre-aggregation also strips raw V8 ranges from `runs.results` (10s of MB savings per row on large-bundle SUTs). AUTO-009g memory ceiling (`COVERAGE_MEMORY_CEILING_MB`, default 500) drops raw `jsCoverage` payloads past the threshold and stamps `summary.truncated = true`. AUTO-009h server-side Istanbul/NYC coverage for API tests via `backend/src/pipeline/serverCoverageProxy.js` — supports HTTP `GET /__coverage__` (SSRF-guarded) and `file://` shared-FS modes; aggregator merges server diffs into `topUncoveredFiles[]` with `layer: "browser" \| "server"` discriminator. AUTO-009i coverage regression alerting via `backend/src/pipeline/coverageRegressionDetector.js` — per-project `coverageRegressionThresholdPct` fires Teams adaptive card / email / webhook through the FEA-001 channels + `coverage.regression` audit row. AUTO-009j daily retention sweep in `scheduler.js` at 04:00 UTC nulls `coverageSummary` + `prCoverageDiff` on runs older than `COVERAGE_RETENTION_DAYS` (default 90). 8 DB migrations (038–045) add `projects.coverageEnabled` / `sourcemapBaseUrl` / `serverCoverageEndpoint` / `coverageRegressionThresholdPct` and `runs.coverageSummary` / `shardCoverageSummaries` / `changedFileRanges` / `prCoverageDiff`. New `runRepo` helpers: lean `getRunsWithCoverage(projectIds)` for the dashboard trend (avoids bloating LEAN_COLS), atomic `setShardCoverageSummary` (transaction-wrapped, dialect-conditional `FOR UPDATE`), and `purgeCoverageSummaryOlderThan(days)`. Dashboard `routes/dashboard.js` ships `coverageTrend` (30-day per-project series with line/branch/function pct) + `latestCoverageByProject`; new `frontend/src/pages/Dashboard.jsx` `CoveragePanel` component renders Browser/Server/Combined layer toggle + Lines/Branches/Functions metric toggle + sparkline + top-uncovered files with `sourceMapStatus` badge. `frontend/src/components/automation/ProjectQualityCard.jsx` adds a new "Coverage" inner tab (enable toggle, sourcemap base URL, regression alert threshold). `QualityGatesPanel.jsx` adds the four coverage gate fields. `TestRunView.jsx` renders per-test `+47L · +12B · +3F` blue badges from `coverageSummary.perTest`. `RunDetail.jsx` appends `%` suffix to pct rule violations and surfaces `priorCoveragePct` context on regression violations. 8 new tests registered in `run-tests.js`: `coverage-aggregator`, `run-coverage-integration` (full shape + S/B/F + source-map modes), `run-shard-coverage` (sharded-run parity regression), `coverage-memory-ceiling` (AUTO-009g), `coverage-pr-diff` (AUTO-009d), `source-map-resolver`, `server-coverage-proxy` (AUTO-009h). E2E `tests/e2e/specs/coverage-ui.spec.mjs` covers Dashboard panel + RunDetail badge + ProjectQualityCard toggle via `page.route()` mocks. `docs/guide/coverage-mapping.md` + `docs/guide/coverage-server-side.md` guide operators through enable/interpret/security; `QA.md` adds AUTO-009 manual test checklist; `docs/changelog.md` updated under `## [Unreleased]`. New deps: `source-map@^0.7.4`, `v8-to-istanbul@^9.3.0`. | PR #19 |
 | AUTO-022 | AI eval harness with golden-set regression — plumbing complete, gate dormant until AUTO-022b records real LLM cache. New `backend/src/eval/pipelineEval.js` deterministic scorer parses generated Playwright code into selector / action / assertion tuples and scores each dimension via length-normalised Levenshtein distance (40 / 30 / 30 weighted). New `backend/src/eval/pipelineAdapter.js` provides record / replay adapters keyed on `sha256(promptVersion + EVAL_MODEL + snapshot + url)` so CI runs offline and deterministic. New `backend/scripts/run-eval.mjs` CLI (`--write-baseline`, `--report=`, `--persist`, `EVAL_RECORD=1`) compares aggregate score to `eval-baseline.json` and exits non-zero on >5% aggregate or >10% per-dimension regression, naming each per-case aggregate drop > 20%. Cold-start guard short-circuits to exit 0 when `.cache/` is empty so the merge isn't blocked by missing recordings. New `--persist` flag writes per-case scores into `metric_samples` (4 rows per case: `eval.aggregate` / `eval.selectors` / `eval.actions` / `eval.assertions`, scoped to `__eval_harness__` sentinel projectId, tagged with a per-run uuid for Dashboard grouping; `actual` Playwright code persisted on the aggregate row capped at 4 KB). `metricSamplesRepo` gains `insertSamples` (batched txn), `getSeries` `order` param, and `getSeriesByRunId` (cross-dialect LIKE pre-filter + JS verification — works on SQLite + Postgres without `json_extract`). New Dashboard **AI Eval Quality** panel renders a 30-day per-dimension trend with drill-down — backed by an `evalTrend` block on `GET /api/v1/dashboard` and a new `GET /api/v1/dashboard/eval/:runId` route that joins persisted scores with `expected` lifted from the on-disk golden JSON. New path-filtered `.github/workflows/eval.yml` runs `node backend/scripts/run-eval.mjs` in replay mode and uploads `eval-report.json` artifact. Five canonical golden templates (one per category — form-fill, list-click, modal, multi-page-nav, assertion-heavy) under `backend/tests/fixtures/eval-goldens/`; remaining 45 cases are skeletons tracked as AUTO-022b. Operator guide at `docs/guide/eval-harness.md`; maintainer brief at `docs/guide/eval-harness-record-goldens.md`. 32 unit + integration tests cover scorer exports (`eval-pipeline.test.js`), regression-detection diagnostics (`eval-regression.test.js`), `metric_samples` persistence (`eval-persistence.test.js`), CLI E2E subprocess exit codes (`eval-cli-e2e.test.js`), and frontend score-format helpers (`eval-score-format.test.js`). | PR #17 |
 
 ---
@@ -150,8 +151,8 @@ The following items have been verified complete against the codebase and are **n
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete                                                                                                                                                                            | — |
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | ✅ Mostly complete — SEC-001/002/003/004, INF-001/002/003/004/005/006, ACL-001/002, FEA-001/002/003, ENH-036 + ENH-036b all ✅ (SEC-004 MFA shipped in PR #10 with TOTP + WebAuthn + per-workspace enforcement); SEC-005 (SSO) tracked as 🟢 Strategic under Phase 5 per AUDIT.md severity reconciliation | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/005/006/007/011/012/013/014/015/016 ✅ — DIF-005 embedded trace viewer shipped in PR #9; **INT-002** GitHub PR check comments shipped in PR #15; **DIF-012** multi-environment support shipped in PR #2); remaining: DIF-008–010, DIF-015b/c sub-items | 10–12 weeks |
-| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-001/002/002b/003/003b/004/005/006/007/008/010/012/013/015/015b/016/016b/017/017.3/019 ✅ (AUTO-008 shipped in PR #9, AUTO-010 in PR #6, AUTO-004 in PR #18, AUTO-001 in PR #15); remaining: AUTO-009, AUTO-011, AUTO-014, AUTO-018, AUTO-021 (AUTO-020 superseded by AUTO-015) · Capabilities row: CAP-001 (data-driven) ✅ PR #1, CAP-002 (sharding) ✅ PR #3; CAP-002b (SaaS-readiness follow-ups) tracked separately in Summary | 14–18 weeks |
-| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11), SEC-007 compliance audit log ✅ (PR #12), INF-007 OTel/Sentry observability ✅ (PR #14), AUTO-022 eval harness plumbing ✅ (PR #17 — gate dormant until AUTO-022b records real LLM cache, deferred). Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
+| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-001/002/002b/003/003b/004/005/006/007/008/009/010/012/013/015/015b/016/016b/017/017.3/019 ✅ (AUTO-009 shipped in PR #19, AUTO-008 in PR #9, AUTO-010 in PR #6, AUTO-004 in PR #18, AUTO-001 in PR #15); remaining: AUTO-011, AUTO-014, AUTO-018, AUTO-021 (AUTO-020 superseded by AUTO-015) · Capabilities row: CAP-001 (data-driven) ✅ PR #1, CAP-002 (sharding) ✅ PR #3; CAP-002b (SaaS-readiness follow-ups) tracked separately in Summary | 14–18 weeks |
+| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent, **AI platform foundation (AI-002–007)** | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11), SEC-007 compliance audit log ✅ (PR #12), INF-007 OTel/Sentry observability ✅ (PR #14), AUTO-022 eval harness plumbing ✅ (PR #17 — gate dormant until AUTO-022b records real LLM cache, deferred); AI-002..AI-007 (provider modularization → adapter cost tracking → agent config → multi-agent dispatch → per-role eval → cost governance) queued. Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
@@ -423,7 +424,9 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ### AUTO-009 — Browser code coverage mapping 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (PR #19) | **Effort:** L | **Source:** Competitive Gap Analysis
+
+> **Implementation note — AUTO-009b/c (shipped in PR #19):** Source-map resolution against `project.sourcemapBaseUrl` and statement / branch / function granularity ship together. `backend/src/pipeline/sourceMapResolver.js` uses `source-map@^0.7` behind an LRU cache (10MB / 1h TTL) with the SSRF guard from `utils/ssrfGuard.js`; `backend/src/pipeline/v8ToIstanbul.js` lifts V8 ranges into Istanbul `FileCoverage` so the aggregator reports `statementPct`, `branchPct`, `functionPct` independently of `coveragePct`. `sourceMapStatus` is computed dynamically (`resolved` ≥80%, `partial` >0%, `fallback` 0%); the Dashboard CoveragePanel renders the active metric via a tab toggle and badges `fallback mode` / `partial maps` when source-map resolution is incomplete. RunDetail per-test badges read `+47L · +12B · +3F`. Granularity keys are omitted from the persisted shape when the converter never produces data (byte-identical to pre-009c rows). Pre-existing executeTest.js / dashboard LEAN_COLS / source-map cache-miss bugs flagged by the lifeguard review are fixed in the same PR.
 
 **Problem:** There is no way to know what percentage of application code is exercised by the test suite. Playwright supports V8 code coverage via `page.coverage.startJSCoverage()`. This would answer "what percentage of my app is actually tested?"
 
@@ -514,6 +517,381 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 > **AUDIT.md findings cross-validated:** All 17 Critical/High findings in AUDIT.md were verified against the live codebase (no false positives). Findings include: SQLite default with second-class PostgreSQL adapter (A3), no OpenTelemetry / Prometheus / Sentry (B2, F7, O1), migration prefix collisions (B4), no Zod validation (B5), no TypeScript (F1), no Helm/K8s (D1), prompt-injection unmitigated (S11/S12), no AI eval harness (AI2), duplicate `activityTypes.js` (A4).
 
+---
+
+### AI-002 — AI provider modularization + adapter contract 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Maintainability + multi-agent readiness (preparatory for future `AI-004` agent config + `AI-005` multi-agent dispatch)
+**Problem:** `backend/src/aiProvider.js` is a 1,545-line monolith spanning runtime key store, SSRF guard, provider detection, circuit breakers, sticky-fallback, per-call timeout composition, retry with backoff, 5 provider SDK integrations (Anthropic / OpenAI / Google Gemini / OpenRouter / OpenAI-compat / Ollama NDJSON), token telemetry (INF-007), vision-model multimodal shapes (MNT-001), and demo-key fallback. Every new provider, agent role, or call-shape change requires touching the same file — agents writing code (and human reviewers) cannot hold the whole module in working memory. The shape also blocks future multi-agent work: there is no adapter contract to extend, no place to add per-role circuit breakers, and no capability metadata (vision / JSON mode / context window / cost-per-1k) that the planner agent will need to pick a model for a given pipeline stage.
+**Fix:** Decompose into 5 modules + 4 adapters under `backend/src/aiProvider/`, behind a thin `index.js` that re-exports the existing public API verbatim (byte-identical behavior — no behavior change, no new providers, no `agentRole` parameter):
+```
+backend/src/aiProvider/
+├── index.js              — Re-exports generateText / streamText / parseJSON / etc.
+├── registry.js           — Mutable state: runtime keys, sticky fallback, active provider, circuit breakers + detectProvider / resolveProvider boundary
+├── retry.js              — withRetry, isRateLimitError, isTransientServerError, composeSignal
+├── modelCatalog.js       — Provider metadata + model defaults + capability flags (supportsVision, supportsJsonMode, contextWindow)
+└── adapters/
+    ├── anthropic.js      — Messages API + streaming + token usage shape
+    ├── openai.js         — OpenAI + OpenRouter + compat:<slot> (shared SDK, SSRF-guarded fetch for compat) + streaming
+    ├── google.js         — Gemini generateContent + systemInstruction + usageMetadata
+    └── ollama.js         — /api/generate + NDJSON fallback + ECONNREFUSED retry
+```
+**Adapter contract** (single shape for all four, locked in this PR so future providers + future `agentRole` work are one-file changes):
+```js
+// adapters/*.js each export:
+async generate({ messages, maxTokens, signal, useJson, model, apiKey, baseUrl })
+  → { text, usage: { input, output } }
+async stream({ ... }, onToken)
+  → { text, usage } | null   // null = caller falls back to generate
+```
+**Zero-regression guarantees:**
+- Every existing export remains importable from `backend/src/aiProvider.js` (legacy file becomes a thin re-export of `./aiProvider/index.js`).
+- Detection priority preserved: sticky-fallback → quick-switch override → `AI_PROVIDER` env → cloud auto-detect → compat slots → Ollama.
+- SSRF guard on compat providers preserved (`createSsrfGuardedFetch` unchanged), including `ALLOW_PRIVATE_URLS` escape hatch.
+- Demo key fallback (`DEMO_GOOGLE_API_KEY`) preserved.
+- Circuit breaker semantics preserved (1-failure threshold, 5-min cooldown, same-tier fallback only).
+- Vision support (MNT-001's `callVisionModel`) folded into adapters as a parallel `generateVision()` export.
+- INF-007 token telemetry preserved bit-for-bit (per-adapter `recordAiTokens` calls, `providerMetricLabel` folding compat slots to the literal `"compat"` label).
+- `loadKeysFromDatabase` / `checkOllamaConnection` / `parseJSON` / `normaliseMessages` / `composeSignal` all preserved with identical signatures.
+**Files to change:**
+- `backend/src/aiProvider.js` — replaced by 1-line re-export from `./aiProvider/index.js`
+- `backend/src/aiProvider/{index,registry,retry,modelCatalog}.js` — new
+- `backend/src/aiProvider/adapters/{anthropic,openai,google,ollama}.js` — new
+- All existing callers — no changes required (public API stable)
+- `backend/tests/` — existing `ai-provider*.test.js` files should pass unchanged; add `aiProvider-adapter-contract.test.js` pinning the `{ text, usage }` return shape per adapter
+- `docs/changelog.md` — under `### Changed`, note the module restructure with the "no behavior change" callout
+**Acceptance criteria:**
+- All existing backend tests pass unchanged (no test file modifications beyond the new contract test).
+- `backend/src/aiProvider.js` is ≤20 lines (pure re-export shim).
+- Each new file is ≤450 lines (agent-friendly working set).
+- `git log --follow` on the legacy file resolves cleanly through the restructure.
+- No new dependencies. No new env vars. No new DB migrations. No new routes.
+- `npm test` passes for both SQLite and Postgres (INF-008 dual-matrix).
+**Dependencies:** none (FEA-003 ✅ circuit breakers, AI-001 ✅ compat providers, INF-007 ✅ telemetry, MNT-001 ✅ vision support all already in `aiProvider.js` and preserved).
+**Follow-on items (deliberately deferred — separate PRs):**
+- `AI-003` — Adapter capability hardening: per-call cost tracking, `modelCatalog` schema with `costPer1kInput` / `costPer1kOutput`, structured `usage` extension.
+- `AI-004` — Agent role config schema (DB table, settings UI, dormant in pipeline).
+- `AI-005` — Multi-agent dispatch (depends on AUTO-023 DAG runner): `options.agentRole` parameter, per-role circuit breakers via `breakerKey(provider, role)`, per-role token telemetry label, per-workspace × per-role key resolution matrix.
+- `AI-006` — Per-role eval harness extension (depends on AUTO-022b).
+- `AI-007` — AI cost governance: per-role / per-workspace ceilings, alerts, kill switches.
+---
+### AI-003 — Adapter capability hardening + cost tracking 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** S | **Source:** Follow-on from AI-002 · Prerequisite for AI-005 / AI-007 · Industry pattern (LangChain `BaseChatModel.cost`, LlamaIndex `LLMMetadata`)
+**Problem:** After AI-002 lands, every adapter returns `{ text, usage: { input, output } }` — but `modelCatalog.js` carries only display name + default model id. The planner agent (AI-005) cannot pick a model for a stage without knowing whether it supports vision / JSON mode, what its context window is, or what it costs. The MNT-001 cost counter (`app_ai_cost_usd_total`) currently hardcodes pricing in the vision-heal adapter — every other call records token counts but no dollar cost. Without per-call cost tracking, AI-007 (cost governance) has no signal to gate on.
+**Fix:** Extend `modelCatalog.js` with structured capability + pricing metadata per (provider, model) pair, and have every adapter consult the catalog to emit a normalised cost number alongside the existing `usage` block. No new external dependencies — pricing data lives in-repo as a maintainer-owned JSON table.
+```js
+// modelCatalog.js — extended schema (per model entry)
+{
+  id: "claude-sonnet-4-20250514",
+  displayName: "Claude Sonnet",
+  provider: "anthropic",
+  capabilities: {
+    supportsVision: true,
+    supportsJsonMode: true,
+    supportsStreaming: true,
+    contextWindow: 200000,
+    maxOutputTokens: 8192,
+  },
+  pricing: {
+    inputPer1k: 0.003,    // USD
+    outputPer1k: 0.015,
+    asOf: "2026-04-01",   // date metadata last verified
+  },
+}
+```
+```js
+// adapters/*.js — extended return shape
+async generate({ ... })
+  → { text, usage: { input, output, costUsd } }
+async stream({ ... }, onToken)
+  → { text, usage: { input, output, costUsd } } | null
+```
+**Zero-regression guarantees:**
+- `costUsd` is additive — existing callers reading `usage.input` / `usage.output` are unaffected.
+- Models missing pricing entries emit `costUsd: null` (no fake zeros) so dashboards can distinguish "no data" from "free call".
+- Capability flags default to conservative values (`supportsVision: false`, `supportsJsonMode: false`) when a model isn't in the catalog — degrades gracefully for self-hosted or new compat providers.
+- INF-007 `app_ai_provider_tokens_total` counter unchanged.
+- MNT-001 `app_ai_cost_usd_total` counter generalised — now bumped from every adapter call (not just vision-heal), with `operation` label defaulting to `"generation"`.
+**Files to change:**
+- `backend/src/aiProvider/modelCatalog.js` — extend schema, add pricing JSON for the 5 cloud providers + canonical Ollama models (mistral:7b, llama3:8b, etc. → `costUsd: 0`)
+- `backend/src/aiProvider/adapters/*.js` — compute `costUsd` from catalog lookup × usage tokens, attach to return shape
+- `backend/src/utils/metrics.js` — generalise `app_ai_cost_usd_total` so any adapter call records cost (not just `operation: "vision_heal"`)
+- `backend/tests/ai-provider-cost-tracking.test.js` (new) — pins per-provider cost computation, catalog miss → `costUsd: null`, MNT-001 vision-heal cost preserved
+- `docs/guide/ai-cost-tracking.md` (new) — operator guide: catalog source-of-truth, how to update pricing, what "asOf" means
+- `docs/changelog.md` — under `### Added`, note per-call cost tracking surface
+**Acceptance criteria:**
+- Every adapter populates `costUsd` for models in the catalog.
+- `app_ai_cost_usd_total` counter increments on every generation / stream call (not just vision).
+- Operators can update pricing by editing one JSON file — no code changes needed.
+- Pricing-update PR template documented (when vendor publishes new prices, update entry + bump `asOf`).
+- All existing tests pass unchanged.
+**Dependencies:** AI-002 (adapter contract must be uniform before extending it).
+**Out of scope (defer to AI-007):** cost ceilings, budget enforcement, kill switches. AI-003 only emits the signal; AI-007 acts on it.
+---
+### AI-004 — Agent role config schema (dormant) 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Multi-agent foundation · Prerequisite for AI-005 · Industry pattern (CrewAI `Agent` config, LangGraph `Node` definition, AutoGen `AgentConfig`)
+**Problem:** Multi-agent dispatch (AI-005) needs a place to read "which provider, model, system prompt, and temperature should the planner agent use?" from. The pipeline today (`backend/src/pipeline/*`) hardcodes prompt templates and reads provider config from the workspace default. Without a config layer, the multi-agent dispatch PR will need to ship: DB schema + repo + settings UI + dispatch wiring all at once — too large for safe review. AI-004 ships the config plumbing in isolation, with the pipeline still calling the workspace default. The config is read but ignored — dormant until AI-005 lights it up.
+**Fix:** New `agent_configs` table per workspace storing one row per role (`planner` / `codegen` / `critic` / `selfheal` / `crawl_classify` / `scenario_plan` / etc.). Settings UI under **Settings → AI → Agent Roles** lets admins define each role's `(provider, model, systemPromptOverride, temperature, maxTokens, fallbackRole)`. Backend exposes `agentConfigRepo.getByRole(workspaceId, role)` but no pipeline code reads it yet — that's AI-005's job.
+```sql
+-- migration NNN_agent_configs.sql
+CREATE TABLE agent_configs (
+  id TEXT PRIMARY KEY,
+  workspaceId TEXT NOT NULL,
+  role TEXT NOT NULL,                  -- "planner" | "codegen" | "critic" | ...
+  provider TEXT,                       -- null → use workspace default
+  model TEXT,                          -- null → use provider default
+  systemPromptOverride TEXT,           -- null → use pipeline default
+  temperature REAL DEFAULT 0.2,
+  maxTokens INTEGER,
+  fallbackRole TEXT,                   -- name of role to delegate to on failure
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  UNIQUE(workspaceId, role)
+);
+```
+**Zero-regression guarantees:**
+- No pipeline code reads `agentConfigRepo` in AI-004. The config is dormant.
+- Existing `generateText` / `streamText` calls behave identically — `options.agentRole` parameter is **not** added in this PR.
+- Workspace default provider remains the source of truth.
+- Settings UI is a new admin-only tab; viewers don't see it.
+**Files to change:**
+- `backend/src/database/migrations/NNN_agent_configs.sql` — new table
+- `backend/src/database/repositories/agentConfigRepo.js` — `getByRole`, `listByWorkspace`, `upsert`, `remove`
+- `backend/src/routes/settings.js` — `GET/POST/PATCH/DELETE /api/v1/settings/agent-roles[/:role]` (admin-only, registered in `permissions.json`)
+- `backend/src/middleware/permissions.json` — register the new routes
+- `frontend/src/pages/Settings.jsx` — new **AI → Agent Roles** tab (table + CRUD form, role-name dropdown sourced from a hardcoded `AGENT_ROLES` constant in `frontend/src/config.js`)
+- `frontend/src/api.js` — `getAgentRoles`, `createAgentRole`, `updateAgentRole`, `deleteAgentRole`
+- `backend/tests/agent-config-routes.test.js` (new) — CRUD round-trip, cross-workspace ACL, role-name allowlist, fallback-role cycle detection
+- `docs/api/settings.md` — document the new endpoints
+- `docs/guide/agent-roles.md` (new) — operator guide explaining the 8 canonical roles (even though only the workspace default is used today)
+- `docs/changelog.md` — under `### Added`, note the dormant config layer
+**Acceptance criteria:**
+- Admins can create / edit / delete agent role configs via UI and API.
+- Cross-workspace ACL enforced (workspace A admin cannot read workspace B's agent configs).
+- Role-name allowlist enforced server-side (no free-form role names — must match the canonical 8 stage names).
+- `fallbackRole` references validated server-side, cycle detection prevents `planner → critic → planner`.
+- Pipeline behavior unchanged — verified by the existing eval harness golden set (AUTO-022) producing identical scores.
+**Dependencies:** AI-002 (registry must expose `resolveProvider({ providerId })` so AI-005 can later override workspace default).
+**Out of scope:** Pipeline integration. AI-004 ships config storage + UI; AI-005 ships the dispatch wiring.
+---
+### AI-005 — Multi-agent dispatch (agentRole-aware generation) 🟢 Differentiator
+**Status:** 🔲 Planned | **Effort:** L | **Source:** Strategic differentiator (Mabl / Testim / SmartBear ship single-LLM pipelines) · Industry pattern (CrewAI agent handoff, LangGraph stateful node dispatch, AutoGen `GroupChat`)
+**Problem:** Single-agent mode uses one provider + model for all 8 pipeline stages (crawl classification → scenario planning → code generation → critic review → self-healing). This is the lowest-cost path but suboptimal: a customer might want Claude Sonnet for codegen (best at structured output), GPT-4o-mini for crawl classification (cheap + fast on simple JSON), Gemini Flash for the critic (different model gives independent second opinion), and Ollama for self-healing (low-stakes, on-prem). The agent-config table from AI-004 stores these preferences but is dormant — AI-005 lights it up.
+**Fix:** Add `options.agentRole` parameter to `generateText` / `streamText` / `generateVision`. When provided, `registry.resolveProvider({ agentRole, workspaceId })` reads the agent config from `agentConfigRepo` and returns the resolved provider/model/systemPrompt/temperature, falling back to the workspace default when the role is unconfigured. Per-role circuit breakers via `breakerKey(providerId, agentRole)` so a rate-limited Claude planner does not trip Claude for the critic. Per-role token + cost telemetry via a new `agent_role` Prometheus label (bounded cardinality: 8 fixed role names).
+```js
+// New call signature
+await generateText(prompt, {
+  agentRole: "planner",           // ← NEW — looks up agent_configs row
+  workspaceId: req.workspaceId,   // ← NEW — required when agentRole set
+  maxTokens: 4000,
+  signal: abortSignal,
+});
+```
+**Detection priority extended:**
+```
+1. Sticky fallback (rate-limit recovery) — same as today
+2. agentRole resolution (NEW) — if set, read agent_configs[role]
+3. Quick-switch override (header dropdown) — same as today
+4. AI_PROVIDER env — same as today
+5. Auto-detect cloud → compat → Ollama — same as today
+```
+Sticky-fallback stays at the top so a rate-limited primary doesn't keep failing under an agent override. `agentRole` slots between sticky-fallback and quick-switch — agents win over operator UI selection when configured, but never bypass an active rate-limit recovery.
+**Per-role circuit breakers:**
+```js
+// registry.js — extended breaker keying
+function breakerKey(provider, agentRole) {
+  return agentRole ? `${provider}::${agentRole}` : provider;
+}
+```
+A rate-limited `anthropic::planner` does NOT trip `anthropic::critic` — each role gets its own breaker. Same-provider fallback inside a role still uses the agentRole-scoped breaker chain; cross-role fallback (planner → planner_cheap via `fallbackRole`) is a separate code path.
+**Per-role telemetry:**
+```
+app_ai_provider_latency_seconds{provider, agent_role, outcome}
+app_ai_provider_tokens_total{provider, agent_role, kind}
+app_ai_provider_errors_total{provider, agent_role, reason}
+app_ai_cost_usd_total{provider, agent_role, operation}
+```
+Cardinality bounded: 8 canonical roles × 5 provider labels × 3 outcomes = 120 series per metric (well under Prometheus's recommended 10k/metric limit).
+**Pipeline integration:**
+Every pipeline stage threads `agentRole` + `workspaceId` through to its `generateText` call:
+| Pipeline stage | Module | agentRole |
+|---|---|---|
+| Crawl classification | `crawler.js` → `classifyPage` | `crawl_classify` |
+| Scenario planning | `pipeline/scenarioPlanner.js` | `scenario_plan` |
+| Code generation | `pipeline/testGenerator.js` | `codegen` |
+| Code refinement | `pipeline/testRefiner.js` | `codegen` (same role) |
+| Critic review | `pipeline/testCritic.js` | `critic` |
+| Self-healing | `selfHealing.js` (DOM strategies) | `selfheal` |
+| Vision healing | `selfHealing.js` stages 7+8 | `vision_heal` (MNT-001 — already labeled) |
+| Conversational editor | `routes/chat.js` | `chat` |
+**Zero-regression guarantees:**
+- `options.agentRole` is optional. Existing call sites that don't pass it behave identically to today (workspace default).
+- Agent configs left empty by the admin → pipeline falls back to workspace default → byte-identical to single-agent mode.
+- The eval harness (AUTO-022) golden set runs against the workspace default and continues to produce identical scores in single-agent mode.
+- Sticky-fallback still wins over agentRole resolution — a rate-limited provider doesn't keep failing under an agent override.
+- Per-role circuit breakers default to provider-only keying when `agentRole` is absent (zero new state for non-multi-agent workspaces).
+**Files to change:**
+- `backend/src/aiProvider/registry.js` — extend `resolveProvider` to read `agentConfigRepo`, extend `breakerKey` with agentRole, plumb new label through `recordAiTokens` / `recordAiCost`
+- `backend/src/aiProvider/index.js` — thread `agentRole` + `workspaceId` through `generateText` / `streamText` / `generateVision`
+- `backend/src/utils/metrics.js` — add `agent_role` label to the 4 AI counters (default `"default"` when unset to keep label cardinality stable)
+- `backend/src/crawler.js`, `backend/src/pipeline/{scenarioPlanner,testGenerator,testRefiner,testCritic}.js`, `backend/src/selfHealing.js`, `backend/src/routes/chat.js` — pass `agentRole` + `workspaceId` to every `generateText` call
+- `frontend/src/pages/Settings.jsx` — light up the dormant AI-004 settings tab with a "Test agent" button per role that runs a sample prompt against the configured agent and shows the response (validates the config end-to-end)
+- `backend/tests/agent-dispatch.test.js` (new) — pins agentRole → provider resolution, fallback to workspace default when role unconfigured, per-role circuit breaker isolation (Claude planner rate-limited, Claude critic still works), per-role telemetry labels, `fallbackRole` cycle protection, sticky-fallback still wins over agentRole
+- `backend/tests/agent-dispatch-pipeline.test.js` (new) — end-to-end: configure planner=claude + codegen=openai, run a generation, assert both providers were called for their respective stages
+- `docs/guide/multi-agent-pipeline.md` (new) — operator guide: when to use single vs multi-agent mode, recommended role-provider matchups, cost implications
+- `docs/changelog.md` — under `### Added`, note multi-agent dispatch with the "off by default, fully backwards compatible" callout
+**Acceptance criteria:**
+- Configuring an agent role redirects only that stage's LLM call — verified by `agent-dispatch-pipeline.test.js`.
+- Unconfigured roles fall back to workspace default — eval harness scores unchanged.
+- Per-role circuit breakers isolated — rate-limiting Claude planner does not affect Claude critic.
+- Per-role telemetry labels visible in `/metrics` output and queryable in Grafana.
+- `fallbackRole` cycle (planner → critic → planner) rejected at config-save time with a 400 error.
+- Sticky-fallback still wins — a rate-limited provider under an agent override falls back to the same-tier alternate, not back to the agent's preferred provider.
+- Eval harness (AUTO-022) re-run in multi-agent mode produces ≥ baseline scores (no regression from role specialisation).
+**Dependencies:** AI-002 (adapter contract), AI-003 (cost tracking — telemetry layer), AI-004 (agent config storage), AUTO-023 (DAG runner — not a hard dep, but DAG context is where the "agent handshake" payload lives long-term).
+**Out of scope:**
+- Per-workspace × per-agent key resolution matrix — deferred to a follow-up `AI-005b` if multi-tenant SaaS customers want their own keys per agent role (today, agent_configs.provider points to a workspace-level key).
+- Agent-to-agent handoff envelope (the structured `{ fromRole, toRole, artifact, traceId }` payload) — that belongs in AUTO-023 DAG runner, not the AI provider layer.
+- Streaming partial results between agents — AI-005 keeps the current "agent completes its stage, full result passes to next stage" model.
+---
+### AI-006 — Per-role eval harness extension 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Quality gate for AI-005 · Extends AUTO-022 eval harness · Industry pattern (Anthropic's eval-per-task, OpenAI Evals registry per skill)
+**Problem:** AUTO-022's eval harness scores the end-to-end pipeline as one number (aggregate Levenshtein × 0.4 selectors + 0.3 actions + 0.3 assertions). When multi-agent mode lights up in AI-005, a regression in the planner won't be distinguishable from a regression in codegen — the aggregate score moves and the operator has no signal pointing at which agent role caused the drop. Without per-role goldens, swapping `codegen` from Claude Sonnet to GPT-4o-mini is unmeasurable: did codegen quality drop 5%? 15%? Unchanged? Today's harness can't say.
+**Fix:** Extend the golden-set schema with per-role expected outputs and per-role scoring. A single golden case carries expected outputs for each agent role that participates in the pipeline; the harness runs the full pipeline AND records each agent's intermediate output, then scores each intermediate against its role's golden.
+```json
+// backend/tests/fixtures/eval-goldens/form-fill-001.json
+{
+  "id": "form-fill-001",
+  "category": "form-fill",
+  "input": {
+    "url": "https://example.com/signup",
+    "snapshot": { ... },
+    "userIntent": "Sign up a new user"
+  },
+  "perRoleExpected": {
+    "crawl_classify": { "type": "form", "purpose": "registration" },
+    "scenario_plan": { "steps": ["fill email", "fill password", "click submit", "assert dashboard"] },
+    "codegen": "test('signup flow', async ({ page }) => { ... })",
+    "critic": { "issues": [], "approved": true }
+  }
+}
+```
+```bash
+# CLI invocation extended
+$ node backend/scripts/run-eval.mjs --per-role
+# Output: per-role scores + aggregate
+# planner:  0.92 (vs baseline 0.94, ΔP-0.02 — within tolerance)
+# codegen:  0.87 (vs baseline 0.91, ΔP-0.04 — within tolerance)
+# critic:   0.88 (vs baseline 0.90, ΔP-0.02 — within tolerance)
+# aggregate: 0.89 (vs baseline 0.92, ΔP-0.03 — within tolerance)
+```
+**Per-role regression thresholds** (configurable in `eval-baseline.json`):
+- Per-role drop > 8% → fail per role (tighter than aggregate's 10%)
+- Aggregate drop > 5% → fail (unchanged from AUTO-022)
+- Operators get a per-role diff that points at the regressing agent
+**Zero-regression guarantees:**
+- Single-agent mode (no agent_configs rows) runs the aggregate-only path — byte-identical to AUTO-022.
+- Goldens missing `perRoleExpected` fall back to aggregate-only scoring (so the 5 canonical AUTO-022 goldens still work).
+- The `--per-role` flag is opt-in; default CLI behavior matches AUTO-022.
+**Files to change:**
+- `backend/src/eval/pipelineEval.js` — extend scorer to optionally take `perRoleExpected` and return per-role scores alongside aggregate
+- `backend/src/eval/pipelineAdapter.js` — capture per-stage intermediate outputs (planner output, codegen output, critic output) for scoring
+- `backend/scripts/run-eval.mjs` — `--per-role` flag, per-role regression detection, per-role diff in the report
+- `backend/tests/fixtures/eval-goldens/*.json` — extend the 5 canonical templates with `perRoleExpected` blocks; document the schema in `docs/guide/eval-harness-record-goldens.md`
+- `backend/src/database/repositories/metricSamplesRepo.js` — accept per-role sample rows (`eval.role.planner`, `eval.role.codegen`, etc.) — schema unchanged, new sentinel metric names
+- `frontend/src/pages/Dashboard.jsx` — extend the AI Eval Quality panel with a per-role breakdown tab (one sparkline per role)
+- `backend/tests/eval-per-role.test.js` (new) — per-role score parity, missing perRoleExpected → aggregate-only fallback, per-role threshold enforcement, frontend panel data shape
+- `docs/guide/eval-harness.md` — document the per-role surface
+- `docs/changelog.md` — under `### Added`, note per-role eval scoring
+**Acceptance criteria:**
+- Running `node backend/scripts/run-eval.mjs --per-role` produces per-role scores in the report.
+- A regression isolated to one role (e.g. swapping codegen from Claude → GPT-4o-mini) shows the drop on that role's
+- - A regression isolated to one role (e.g. swapping codegen from Claude → GPT-4o-mini) shows the drop on that role's sparkline without polluting other roles' scores.
+- Per-role thresholds fire independently of aggregate threshold — a 9% codegen drop with stable other roles fails the gate even when aggregate is within 5%.
+- Goldens without `perRoleExpected` continue to work via aggregate-only scoring (zero churn on AUTO-022's canonical 5 templates).
+- Dashboard AI Eval Quality panel renders per-role sparklines when per-role samples exist; falls back to the aggregate-only view otherwise.
+- All existing AUTO-022 tests pass unchanged.
+**Dependencies:** AUTO-022 (eval harness scorer + persistence), AI-005 (multi-agent dispatch — so the harness has distinct per-role outputs to score). AI-006 can ship before AI-005 with goldens covering only single-agent's aggregate, but the per-role panel stays dormant until AI-005 lights up real per-role calls.
+**Out of scope:**
+- Per-role baselines per provider/model pair (`claude-sonnet-codegen-baseline.json` vs `gpt-4o-mini-codegen-baseline.json`). A single baseline per role keeps the matrix manageable; operators wanting to A/B test models do that via the AI-005 settings UI and read the dashboard diff, not via parallel baseline files.
+- Cross-role regression correlation (e.g. "planner drift caused codegen drift") — interesting but speculative without production data; revisit after multi-agent has been in production for a sprint.
+---
+### AI-007 — AI cost governance + budget enforcement 🟡 High
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Production hardening · SaaS unit-economics requirement · Industry pattern (OpenAI usage limits, Anthropic admin caps, Vercel AI Gateway budgets)
+**Problem:** AI-003 emits per-call `costUsd`, AI-005 emits per-role costs, and the Dashboard renders a 30-day trend — but nothing stops a runaway agent loop. A misconfigured `fallbackRole` cycle, a self-healing storm against a SUT that keeps changing selectors, or a critic that keeps requesting refinements can burn through hundreds of dollars before an operator notices. Production AI platforms (Cursor, Vercel AI Gateway, OpenRouter) all ship per-workspace and per-key budgets with hard kill switches. Sentri ships nothing — the only protection today is the per-project `visionHealMaxCostUsdPerMonth` from MNT-001, which only covers vision healing.
+**Fix:** Generalise MNT-001's budget counter pattern to cover every AI call. Three governance layers, each opt-in but stacked:
+1. **Per-workspace daily + monthly ceilings** (`workspaces.aiCostDailyCapUsd`, `workspaces.aiCostMonthlyCapUsd`) — admin-configurable, defaults null (disabled).
+2. **Per-role ceilings** (`agent_configs.costMonthlyCapUsd` extending AI-004's schema) — finer-grained, defaults null.
+3. **Per-run kill switch** (`projects.aiCostPerRunCapUsd`) — caps a single run's AI spend; defaults null.
+Counters live in a new `ai_cost_counters` table mirroring `vision_budget_counters`:
+```sql
+CREATE TABLE ai_cost_counters (
+  id TEXT PRIMARY KEY,
+  workspaceId TEXT NOT NULL,
+  scope TEXT NOT NULL,              -- "workspace" | "role" | "run"
+  scopeKey TEXT NOT NULL,           -- role name | runId | "*" for workspace
+  windowKind TEXT NOT NULL,         -- "day" | "month" | "run"
+  windowStart TEXT NOT NULL,        -- UTC day boundary | UTC month boundary | run startedAt
+  costUsd REAL NOT NULL DEFAULT 0,
+  UNIQUE(workspaceId, scope, scopeKey, windowKind, windowStart)
+);
+```
+Every adapter call passes through `aiBudget.record(workspaceId, role, runId, costUsd)` which atomically bumps all three scope counters in one transaction. Before each call, `aiBudget.checkAllowed(...)` reads the same counters and rejects with a structured error when any cap is hit. Self-echo across replicas (a worker on replica A racing one on replica B both incrementing the same counter) handled by the existing AES-GCM ordering pattern + row-level locks — same primitive as `vision_budget_counters` from MNT-001.
+**Alert + UI surface:**
+- New `app_ai_budget_exhausted_total{scope, scope_key, reason}` Prometheus counter, with corresponding `AIBudgetExhausted` alert in `monitoring/prometheus/alerts.yml`.
+- New `ai.budget.exceeded` activity row (SEC-007 hash-chain compatible) — captures `{ scope, scopeKey, capUsd, actualUsd, blockedRunId }`.
+- Settings → AI → **Budgets** tab (admin-only) lets operators set caps and shows current spend vs cap per scope with a colour-coded progress bar (green <50%, amber 50–80%, red >80%).
+- Dashboard AI Eval Quality panel gains a "Cost vs Budget" row showing today's spend / today's cap and this month's spend / this month's cap.
+- FEA-001 notification channel fires at 80% threshold (warning, once per window) and at 100% (hard block, once per window) — Teams adaptive card + email + webhook, same pattern as MNT-001's vision-budget-exhausted alert.
+**Behaviour when a cap is hit:**
+- **Workspace daily cap hit:** All AI calls in the workspace return a structured `AI_BUDGET_EXHAUSTED` error. Runs in flight finish their current AI call but pre-flight rejection blocks the next call. New runs can be enqueued but stall at the first AI call until the next UTC day boundary.
+- **Per-role cap hit:** Only that role's calls are blocked. The pipeline either uses the role's `fallbackRole` (AI-004) if it has spare budget, or fails the stage with a clear error. Tests already generated don't retry against the rate-limited role.
+- **Per-run cap hit:** That specific run's AI calls fail. The run is marked `completed_with_budget_exhausted` (new status, similar to `completed_empty`), persisted with `run.aiBudgetExhausted: { capUsd, actualUsd, blockingStage }` for forensics.
+Crucially, **budget enforcement happens before the LLM call**, not after — a single 50¢ call that pushes us $0.49 over a $0.01-from-cap budget gets blocked rather than processed-and-then-flagged. This matches OpenRouter's pre-flight reject pattern; the alternative ("oh, we overspent by $0.49 but it's already done") is what makes Vercel AI Gateway's post-hoc model untenable for cost-conscious customers.
+**Zero-regression guarantees:**
+- All caps default to `null` (disabled). Existing deployments see no change.
+- Workspaces without any caps configured don't touch `ai_cost_counters` (early return on the budget-check path).
+- MNT-001's vision-healing budget remains in place and operates independently — vision is a separate counter scope (`scope: "vision_heal"`) so adding the new generic counters doesn't double-count vision spend.
+- Eval harness (AUTO-022, AI-006) bypasses budgets — it runs against the `__eval_harness__` sentinel projectId which AI-007 explicitly excludes from counter increments. Otherwise running the eval harness would burn workspace budgets and skew unit-economics dashboards.
+**Files to change:**
+- `backend/src/database/migrations/NNN_ai_cost_governance.sql` — new `ai_cost_counters` table, `workspaces.aiCostDailyCapUsd` + `workspaces.aiCostMonthlyCapUsd`, `projects.aiCostPerRunCapUsd`, `agent_configs.costMonthlyCapUsd` (extends AI-004 schema)
+- `backend/src/database/repositories/aiCostCounterRepo.js` (new) — atomic `record()` + `checkAllowed()` + `getCurrentSpend()` mirroring `visionBudgetRepo`
+- `backend/src/aiProvider/registry.js` — call `aiCostCounterRepo.checkAllowed()` pre-flight, `aiCostCounterRepo.record()` post-flight (best-effort try/catch on record so a counter write failure doesn't fail the AI call, but checkAllowed failures DO fail the call)
+- `backend/src/utils/metrics.js` — `app_ai_budget_exhausted_total{scope, scope_key, reason}` counter
+- `monitoring/prometheus/alerts.yml` — `AIBudgetExhausted` alert at 80% threshold (warning) and 100% (page)
+- `backend/src/utils/activityLogger.js` — register `ai.budget.exceeded` event type for SEC-007 hash chain
+- `backend/src/pipeline/notifications.js` — fire FEA-001 webhook on 80% + 100% (once per window per scope, deduplicated via a `notified_at` column on `ai_cost_counters`)
+- `backend/src/routes/settings.js` — `GET/POST /api/v1/settings/ai-budgets` (admin-only)
+- `backend/src/routes/projects.js` — `aiCostPerRunCapUsd` in `SINGLE_FIELD_BYPASS` so PATCH from the project quality card skips name/url validation
+- `frontend/src/pages/Settings.jsx` — new **AI → Budgets** tab with per-scope cap inputs + live spend-vs-cap progress bars
+- `frontend/src/pages/Dashboard.jsx` — extend AI Eval Quality panel with "Cost vs Budget" rows
+- `frontend/src/pages/RunDetail.jsx` — render `run.aiBudgetExhausted` panel when the run was budget-killed
+- `backend/tests/ai-budget-governance.test.js` (new) — atomic counter bumps, pre-flight rejection on cap hit, fallback-role takes over when per-role cap exhausted, run kill-switch persists `aiBudgetExhausted` shape, eval harness bypass, vision-healing budget remains independent, notification dedup across multi-replica writes
+- `backend/tests/ai-budget-routes.test.js` (new) — HTTP integration: cap CRUD, cross-workspace ACL, malformed cap rejection, GET spend-vs-cap shape
+- `docs/guide/ai-cost-governance.md` (new) — operator guide: setting caps, reading spend dashboards, what happens at 80%/100%, distinguishing cap-blocked runs from rate-limit-blocked runs
+- `docs/guide/env-vars.md` — document any new env vars (none expected; everything DB-driven)
+- `docs/changelog.md` — under `### Added`, note budget enforcement with the "off by default" callout
+- `QA.md` — § AI Cost Governance manual test plan: cap configuration, spend tracking, 80% notification, 100% block, fallback-role takeover, per-run kill switch
+- `permissions.json` — register the new settings endpoints at `admin`
+**Acceptance criteria:**
+- Setting `aiCostDailyCapUsd: 1.00` on a workspace and running enough AI calls to exceed $1.00 in a UTC day blocks subsequent calls with a structured `AI_BUDGET_EXHAUSTED` error until UTC day boundary.
+- Setting `agent_configs.costMonthlyCapUs
+- - Setting `agent_configs.costMonthlyCapUsd: 5.00` on the `codegen` role blocks codegen calls past $5/month while other roles continue working.
+- Setting `projects.aiCostPerRunCapUsd: 0.50` and triggering a run that would exceed $0.50 of AI spend marks the run `completed_with_budget_exhausted` and persists the forensics shape on `run.aiBudgetExhausted`.
+- Pre-flight rejection — a single call that would push us over the cap is blocked, not processed-and-then-flagged.
+- Reaching 80% of any cap fires a Teams/email/webhook notification once per window (verified by the dedup column).
+- Reaching 100% fires a second notification + the `AIBudgetExhausted` Prometheus alert.
+- `ai.budget.exceeded` activity row hash-chains correctly under SEC-007.
+- Eval harness (AUTO-022, AI-006) does NOT increment workspace counters — verified by running the full eval suite against a workspace with `aiCostDailyCapUsd: 0.01` and confirming no exhaustion.
+- Vision-healing budget (MNT-001) operates independently — exhausting the generic AI budget does not affect vision-heal spend, and vice versa.
+- Multi-replica counter writes are atomic — `agent-budget-governance.test.js` simulates 8× concurrent `record()` calls and asserts no lost increments.
+- Settings UI shows current spend vs cap per scope with colour-coded progress; admin can edit caps and see the change reflected on next AI call.
+**Dependencies:** AI-003 (per-call cost tracking — without `costUsd` in the adapter return shape, AI-007 has nothing to count), AI-004 (per-role caps need `agent_configs` schema), AI-005 (per-role enforcement requires the `agentRole` parameter to actually flow to AI calls). MNT-001 vision-budget pattern is the implementation template.
+**Out of scope:**
+- Predictive budget exhaustion ("at current rate you'll hit cap in 4 hours") — interesting but speculative; revisit after operators have a sprint of real spend data to calibrate against.
+- Per-user (not per-workspace) caps — multi-tenant SaaS will want this eventually but it's a workspace-billing-model decision, not an AI infrastructure decision; defer until a customer asks.
+- Cost prediction before the call (estimate token count from prompt + multiply by pricing) — the existing post-call counter is accurate; pre-call estimation adds complexity for marginal benefit. Pre-flight rejection works fine off the running counter (call is blocked when *cumulative* spend would exceed cap, regardless of the next call's exact cost).
+- Auto-scaling caps based on historical usage — operator-driven only.
+- Refund of partially-consumed run cost when budget hits mid-run — the run is marked `completed_with_budget_exhausted`, the spent cost stays counted. Refunding would require transaction-rollback semantics on Anthropic / OpenAI which they don't expose.
 ---
 
 ### INF-008 — Promote PostgreSQL to default; add dual-DB CI matrix 🔴 Blocker
@@ -1108,7 +1486,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |
 | Differentiators | 22 | 16 | 0 | 6 | DIF-002c, 008, 009, 010, 012, 015c (sub-gaps 2–6) |
-| Autonomous Intelligence | 29 | 20 | 0 | 9 | AUTO-009/011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015) |
+| Autonomous Intelligence | 29 | 21 | 0 | 8 | AUTO-011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015; AUTO-009 ✅ shipped in PR #19 incl. all follow-ups 009b/c/d/e/f/g/h/i/j/k) |
 | Capabilities | 4 | 4 | 0 | 0 | — |
 | Process automation | 1 | 1 | 0 | 0 | — |
 | Maintenance | 17 | 5 | 0 | 12 | MNT-001/002/003 (narrowed)/004/005/008/012/013/014/015/016/017 |

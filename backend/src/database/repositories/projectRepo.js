@@ -28,6 +28,10 @@ function rowToProject(row) {
     visionHealing: row.visionHealing || 'off',
     visionHealMaxCallsPerDay: row.visionHealMaxCallsPerDay ?? 100,
     visionHealMaxCostUsdPerMonth: row.visionHealMaxCostUsdPerMonth ?? 50,
+    coverageEnabled: row.coverageEnabled === 1,
+    sourcemapBaseUrl: row.sourcemapBaseUrl || null,
+    serverCoverageEndpoint: row.serverCoverageEndpoint || null,
+    coverageRegressionThresholdPct: row.coverageRegressionThresholdPct ?? null, // AUTO-009i
   };
 }
 
@@ -54,6 +58,10 @@ function projectToRow(p) {
     visionHealing: p.visionHealing || 'off',
     visionHealMaxCallsPerDay: p.visionHealMaxCallsPerDay ?? 100,
     visionHealMaxCostUsdPerMonth: p.visionHealMaxCostUsdPerMonth ?? 50,
+    coverageEnabled: p.coverageEnabled ? 1 : 0,
+    sourcemapBaseUrl: p.sourcemapBaseUrl || null,
+    serverCoverageEndpoint: p.serverCoverageEndpoint || null,
+    coverageRegressionThresholdPct: p.coverageRegressionThresholdPct ?? null, // AUTO-009i
   };
 }
 
@@ -115,8 +123,8 @@ export function create(project) {
   const row = projectToRow(project);
   row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth)
-    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth)
+    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, coverageEnabled, sourcemapBaseUrl, serverCoverageEndpoint, coverageRegressionThresholdPct)
+    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @coverageEnabled, @sourcemapBaseUrl, @serverCoverageEndpoint, @coverageRegressionThresholdPct)
   `).run(row);
 }
 
@@ -127,7 +135,7 @@ export function create(project) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth"];
+  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {
@@ -140,6 +148,9 @@ export function update(id, fields) {
       // throws "SQLite3 can only bind numbers, strings, bigints, buffers,
       // and null". Coerce here so callers can pass a natural `true` / `false`.
       if (key === "strictPiiFirewall" && typeof val === "boolean") {
+        val = val ? 1 : 0;
+      }
+      if (key === "coverageEnabled" && typeof val === "boolean") {
         val = val ? 1 : 0;
       }
       sets.push(`${key} = @${key}`);

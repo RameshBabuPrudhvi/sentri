@@ -37,6 +37,7 @@ import { injectCursorOverlay } from "./cursorOverlay.js";
 import { diffScreenshot } from "./visualDiff.js";
 import { applyNetworkCondition } from "./networkConditions.js";
 import { writeArtifactBuffer } from "../utils/objectStorage.js";
+import { snapshotServerCoverage, diffServerCoverage } from "../pipeline/serverCoverageProxy.js"; // AUTO-009h — opt-in server-side coverage capture for API tests.
 
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
@@ -414,6 +415,16 @@ function formatTestError(err) {
  * @param {string}  [opts.timezoneId] - AUTO-007: IANA timezone (e.g. `"Europe/Paris"`).
  * @param {Object}  [opts.geolocation] - AUTO-007: `{ latitude, longitude }`.
  * @param {string}  [opts.networkCondition] - AUTO-006: `fast|slow3g|offline`.
+ * @param {boolean} [opts.coverageEnabled] - AUTO-009 / AUTO-009k: project's
+ *   coverage capture toggle, forwarded from `testRunner.js` so the per-test
+ *   path doesn't re-issue `projectRepo.getById()` once per test (N+1 SQLite
+ *   read on parallel runs). When omitted, falls back to a per-test repo
+ *   lookup for backward compatibility with callers that bypass the runner
+ *   (legacy tests, future direct callsites). Treat `undefined` as "not
+ *   supplied" so the fallback path engages; `false` means "explicitly off".
+ * @param {string}  [opts.serverCoverageEndpoint] - AUTO-009h: per-project
+ *   endpoint for server-side coverage capture, same forwarding pattern as
+ *   `coverageEnabled`. Only consumed by `executeApiTest`.
  */
 export async function executeTest(test, browser, runId, stepIndex, runStart, opts = {}) {
   // ── API-only test path: no browser context needed ──────────────────────
@@ -421,7 +432,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   // Fall back to isApiTest() for callers that bypass the runner (e.g. tests).
   const isApi = test._isApi ?? (test.playwrightCode && isApiTest(test.playwrightCode));
   if (isApi) {
-    return executeApiTest(test, runId, stepIndex, runStart);
+    return executeApiTest(test, runId, stepIndex, runStart, opts);
   }
 
   // ── Browser-based test path — browser must be available ────────────────
@@ -543,7 +554,27 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     visualDiff: null,   // DIF-001: final-screenshot visual-regression result
     browser: opts.browser || "chromium", // DIF-002: browser engine this test ran under
     webVitals: null,
+    jsCoverage: null,
   };
+
+  // AUTO-009 — start V8 JS coverage BEFORE the test navigates so the first
+  // byte of the SUT bundle is instrumented. Opt-in per project; failures
+  // are best-effort and never flip a passing test.
+  //
+  // Prefer `opts.coverageEnabled` (forwarded from testRunner.js once per
+  // run) to avoid a per-test `projectRepo.getById()` round-trip — on a
+  // 200-test parallel run that's 200 SQLite reads saved. Falls back to
+  // the repo lookup for callers that don't forward (backward compat).
+  let coverageStarted = false;
+  try {
+    const covEnabled = opts.coverageEnabled !== undefined
+      ? opts.coverageEnabled
+      : (() => { try { return projectRepo.getById(test.projectId)?.coverageEnabled; } catch { return false; } })();
+    if (covEnabled && page?.coverage?.startJSCoverage) {
+      await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: false });
+      coverageStarted = true;
+    }
+  } catch { /* best-effort */ }
 
   const start = Date.now();
   result.startedAt = start;
@@ -889,6 +920,15 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   } finally {
     clearTimeout(testTimeoutHandle);
 
+    // AUTO-009 — stop V8 coverage before the page closes so the collector
+    // returns the script range list intact. Best-effort: a stop failure
+    // (page already closed, CDP detached) leaves `result.jsCoverage` at
+    // its initial null and the run-level aggregator degrades to "no
+    // coverage data for this test".
+    if (coverageStarted && page?.coverage?.stopJSCoverage) {
+      try { result.jsCoverage = await page.coverage.stopJSCoverage(); } catch { result.jsCoverage = null; }
+    }
+
     // Capture the final page URL for the frontend BrowserChrome
     try { result.url = page.url(); } catch { /* page already closed */ }
     if (!result.url || result.url === "about:blank") result.url = test.sourceUrl || "";
@@ -974,7 +1014,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
  * spinning up a browser page. Skips screenshots, video, DOM snapshots,
  * and screencast — none of which apply to API tests.
  */
-async function executeApiTest(test, runId, stepIndex, runStart) {
+async function executeApiTest(test, runId, stepIndex, runStart, opts = {}) {
   const result = {
     testId: test.id,
     testName: test.name,
@@ -992,10 +1032,34 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
     boundingBoxes: [],
     url: test.sourceUrl || "",
     isApiTest: true,
+    // AUTO-009h — server-side coverage diff captured from the SUT's
+    // Istanbul / NYC `__coverage__` endpoint. Null when the project hasn't
+    // configured `serverCoverageEndpoint` or the snapshot failed.
+    serverCoverage: null,
   };
 
   const start = Date.now();
   result.startedAt = start;
+
+  // AUTO-009h — snapshot the SUT's coverage BEFORE the API test fires so
+  // the post-test diff isolates exactly what this test exercised. Opt-in
+  // per project; failures are best-effort and never flip a passing test
+  // (the snapshot can timeout, the SUT can be down, the endpoint can
+  // return non-JSON — all degrade silently to `serverCoverage: null`).
+  //
+  // Prefer `opts.serverCoverageEndpoint` (forwarded from testRunner.js
+  // once per run) to avoid a per-test `projectRepo.getById()` round-trip.
+  // Falls back to the repo lookup for callers that don't forward.
+  let serverCoverageEndpoint = null;
+  let serverCoverageBefore = null;
+  try {
+    serverCoverageEndpoint = opts.serverCoverageEndpoint !== undefined
+      ? (opts.serverCoverageEndpoint || null)
+      : (() => { try { return projectRepo.getById(test.projectId)?.serverCoverageEndpoint || null; } catch { return null; } })();
+    if (serverCoverageEndpoint) {
+      serverCoverageBefore = await snapshotServerCoverage(serverCoverageEndpoint);
+    }
+  } catch { /* best-effort */ }
 
   // AbortController lets us forcibly dispose Playwright request contexts
   // inside runApiTestCode when the timeout fires, preventing lingering
@@ -1027,8 +1091,37 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
     result.network = err.__apiLogs || [];
   } finally {
     clearTimeout(timeoutHandle);
+
+    // AUTO-009h — capture `durationMs` BEFORE the post-test coverage
+    // snapshot so the reported test duration reflects only the test
+    // itself, not the snapshot round-trip. A 50-MB coverage JSON over a
+    // staging-network HTTP GET can take 100-200ms; without this hoist
+    // every API test would appear ~200ms slower than it actually was on
+    // any project with `serverCoverageEndpoint` configured, and the
+    // p95 / p99 latency dashboards would silently drift.
     result.durationMs = Date.now() - start;
     result.runTimestamp = start - runStart;
+
+    // AUTO-009h — snapshot the SUT's coverage AFTER the API test and diff
+    // against the pre-snapshot so `result.serverCoverage` carries exactly
+    // the statements / branches / functions this test newly exercised.
+    // Best-effort: any snapshot failure leaves `result.serverCoverage` as
+    // whatever the pre-snapshot logic set it to (typically null), so a
+    // SUT outage mid-test doesn't fail an otherwise-passing run.
+    if (serverCoverageEndpoint) {
+      try {
+        const after = await snapshotServerCoverage(serverCoverageEndpoint);
+        if (after) {
+          const delta = diffServerCoverage(serverCoverageBefore, after);
+          // Only attach when the diff has data — otherwise `null` keeps the
+          // aggregator's "no server-side coverage for this test" branch
+          // identical to the opt-out path.
+          if (delta && Object.keys(delta).length > 0) {
+            result.serverCoverage = delta;
+          }
+        }
+      } catch { /* best-effort */ }
+    }
   }
 
   return result;
