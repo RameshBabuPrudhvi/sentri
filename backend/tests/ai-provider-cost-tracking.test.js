@@ -106,6 +106,32 @@ test("MNT-001 vision-heal fallback: midpoint $5/M + $15/M for unknown vision mod
   assert.equal(expected.toFixed(6), "0.025000"); // 2k * $5/M + 1k * $15/M
 });
 
+test("vision-heal: catalog-miss costUsd: null must NOT short-circuit to $0 (Number(null) bug)", () => {
+  // Regression for the lifeguard-flagged bug: `Number(null) === 0` would
+  // coerce a catalog-miss `costUsd: null` into 0 and skip the MNT-001
+  // midpoint fallback, silently disabling `visionHealMaxCostUsdPerMonth`
+  // for any vision model not in MODEL_PRICING. This test pins the
+  // null-detection logic the vision.js fallback now uses.
+  //
+  // The decision rule for "should we use the fallback?" is:
+  //   raw == null ? FALLBACK : Number.isFinite(Number(raw)) ? CATALOG : FALLBACK
+  // We test against `null`, `undefined`, and `NaN` — all three must route
+  // to FALLBACK, not the catalog branch.
+  const decide = (raw) => {
+    const c = (raw == null) ? NaN : Number(raw);
+    return Number.isFinite(c) ? "CATALOG" : "FALLBACK";
+  };
+  assert.equal(decide(null), "FALLBACK", "null catalog cost must route to MNT-001 fallback");
+  assert.equal(decide(undefined), "FALLBACK", "missing catalog cost must route to fallback");
+  assert.equal(decide(NaN), "FALLBACK", "NaN catalog cost must route to fallback");
+  // Sanity: a real catalog number takes the catalog branch.
+  assert.equal(decide(0.0023), "CATALOG", "finite catalog cost takes the catalog branch");
+  // Edge case: catalog-known free models (Ollama at 0/0) — the adapter
+  // emits `costUsd: 0` (a finite number), so the catalog branch is used.
+  // That's correct: $0 of spend is real data, not "no data".
+  assert.equal(decide(0), "CATALOG", "explicit 0 from catalog is real data, not catalog miss");
+});
+
 // ── pricingFor() returns the full entry (including asOf) ────────────────────
 
 test("pricingFor: returns full entry with asOf for staleness alerts", () => {

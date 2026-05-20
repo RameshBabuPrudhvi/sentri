@@ -178,7 +178,17 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // signal to enforce caps, and the midpoint estimate is the documented
   // pre-AI-003 behaviour. Already-counted via `recordAiTokens()` when
   // catalog-derived; we increment the counter ourselves only on fallback.
-  const catalogCost = Number(usage?.costUsd);
+  //
+  // BUGFIX: `Number(null) === 0` and `Number.isFinite(0) === true`, so the
+  // old `Number(usage?.costUsd)` coerced catalog-miss `costUsd: null` into
+  // `0`, took the if-branch with `costUsd = 0`, and never recorded the
+  // MNT-001 fallback estimate. Net effect: the per-project monthly USD
+  // cap (`visionHealMaxCostUsdPerMonth`) silently never tripped for any
+  // vision model that wasn't in the catalog (e.g. operator-set
+  // `VISION_MODEL`). Now we null-check FIRST so the fallback path runs
+  // whenever the catalog produced `null` (or undefined / NaN).
+  const rawCatalogCost = usage?.costUsd;
+  const catalogCost = (rawCatalogCost == null) ? NaN : Number(rawCatalogCost);
   let costUsd;
   if (Number.isFinite(catalogCost)) {
     costUsd = catalogCost;
