@@ -120,7 +120,19 @@ export { resolveVisionModel, hasVisionProvider, callVisionModel } from "./vision
 export async function generateText(prompt, options) {
   const agentRole = options?.agentRole || null;
   const workspaceId = options?.workspaceId || null;
-  const { provider, config } = resolveProvider({ agentRole, workspaceId });
+  // AI-005c: `effectiveAgentRole` is the role used for breaker / sticky /
+  // metrics keying. When `resolveProvider` returns `effectiveAgentRole: null`
+  // (single-agent fallback path — no `agent_configs` row for the workspace),
+  // all downstream state keys collapse to the bare `provider` key,
+  // preserving pre-AI-005 single-agent behaviour: ONE breaker per provider,
+  // shared across stages, so a 429 on stage 1 immediately diverts every
+  // subsequent stage in the same pipeline run to the sticky fallback —
+  // exactly the pre-AI-005 wasted-call profile. The original `agentRole`
+  // is still forwarded to `callProvider` for OTel span attribution + the
+  // metric label so per-stage observability works without changing the
+  // underlying breaker behaviour. Multi-agent mode (agent_configs rows
+  // present) keeps full per-(provider, role) isolation as the spec requires.
+  const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
   if (!provider) {
     throw new Error(
       "No AI provider configured. Options:\n" +
@@ -136,7 +148,7 @@ export async function generateText(prompt, options) {
       ? { system: config.systemPromptOverride, user: prompt }
       : prompt;
     const result = await callProvider(provider, effectivePrompt, config?.maxTokens || options?.maxTokens, options?.signal, options?.responseFormat, { agentRole });
-    recordProviderSuccess(provider, agentRole);
+    recordProviderSuccess(provider, effectiveAgentRole);
     return result;
   } catch (err) {
     // Only fall back on retriable errors (rate limits or transient server errors).
@@ -153,8 +165,8 @@ export async function generateText(prompt, options) {
     // and try fallbacks. Transient 5xx errors don't trip the circuit breaker because
     // the quota is fine; the provider's backend is just temporarily overloaded.
     const errType = isRateLimitError(err) ? "rate-limited" : "transient server error (5xx)";
-    if (isRateLimitError(err)) recordProviderFailure(provider, agentRole);
-    const fallbacks = getFallbackProviders(provider, agentRole);
+    if (isRateLimitError(err)) recordProviderFailure(provider, effectiveAgentRole);
+    const fallbacks = getFallbackProviders(provider, effectiveAgentRole);
 
     if (fallbacks.length === 0) {
       // No fallbacks available — log why and rethrow so the caller (and user)
@@ -168,12 +180,16 @@ export async function generateText(prompt, options) {
       console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} — falling back to ${fallbackProvider}`));
       try {
         const result = await callProvider(fallbackProvider, effectivePrompt, config?.maxTokens || options?.maxTokens, options?.signal, options?.responseFormat, { agentRole });
-        recordProviderSuccess(fallbackProvider, agentRole);
+        recordProviderSuccess(fallbackProvider, effectiveAgentRole);
         // ── Sticky fallback: pin this provider so subsequent calls in the same
         // pipeline skip the failing primary entirely. Expires after
         // STICKY_FALLBACK_TTL_MS so normal selection resumes once the
         // quota/outage window closes.
-        setStickyFallback(fallbackProvider, agentRole);
+        // AI-005c: keyed by `effectiveAgentRole` so single-agent workspaces
+        // pin a SINGLE sticky fallback shared across stages (the pre-PR shape).
+        // Multi-agent workspaces (with agent_configs rows) get per-role sticky
+        // entries so a planner's rate-limit doesn't divert the author.
+        setStickyFallback(fallbackProvider, effectiveAgentRole);
         console.log(formatLogLine("info", null, `[aiProvider] Pinned ${fallbackProvider} as sticky fallback for ${STICKY_FALLBACK_TTL_MS / 1000}s`));
         return result;
       } catch (fallbackErr) {
@@ -182,7 +198,7 @@ export async function generateText(prompt, options) {
           // providers. Transient 5xx errors don't disable the provider — the
           // backend is temporarily overloaded, not permanently broken.
           if (isRateLimitError(fallbackErr) && fallbackProvider !== "local") {
-            recordProviderFailure(fallbackProvider, agentRole);
+            recordProviderFailure(fallbackProvider, effectiveAgentRole);
           }
           const fallbackErrType = isRateLimitError(fallbackErr) ? "rate-limited" : "transient server error (5xx)";
           console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} ${fallbackErrType} — trying next`));
@@ -244,9 +260,12 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   // AI-005: thread agentRole + workspaceId so per-role provider configs,
   // sticky-fallback isolation, and metric labels apply to the streaming
   // path on parity with generateText().
+  // AI-005c: `effectiveAgentRole` mirrors the generateText semantics —
+  // null when no `agent_configs` row exists, so single-agent workspaces
+  // collapse to the bare-provider state key path.
   const agentRole = options?.agentRole || null;
   const workspaceId = options?.workspaceId || null;
-  const { provider, config } = resolveProvider({ agentRole, workspaceId });
+  const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
   if (!provider) throw new Error("No AI provider configured.");
   const { signal, responseFormat } = options;
   // Apply the agent-config systemPromptOverride when the caller passed a

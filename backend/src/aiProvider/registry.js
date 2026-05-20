@@ -230,18 +230,29 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
     for (const [key, entry] of stickyFallbacks) {
       if (!key.endsWith(`::${agentRole}`)) continue;
       if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) {
-        return { provider: entry.provider, config: null };
+        return { provider: entry.provider, config: null, effectiveAgentRole: agentRole };
       }
       if (Date.now() >= entry.expiry) stickyFallbacks.delete(key);
     }
   }
   if (agentRole && workspaceId) {
     const cfg = agentConfigRepo.getByRole(workspaceId, agentRole);
-    if (cfg?.provider && isProviderUsable(cfg.provider)) return { provider: cfg.provider, config: cfg };
+    if (cfg?.provider && isProviderUsable(cfg.provider)) {
+      return { provider: cfg.provider, config: cfg, effectiveAgentRole: agentRole };
+    }
   }
+  // AI-005c (single-agent preservation): when no per-role agent_config row
+  // exists for this workspace+role, the call falls back to the workspace
+  // default provider. In that case it is **not** a multi-agent call — it's
+  // a single-agent call that happens to carry an `agentRole` label for
+  // future routing. Return `effectiveAgentRole: null` so downstream
+  // breakers, sticky-fallback, and metrics all collapse to the bare-provider
+  // key path, preserving pre-AI-005 wasted-call counts during 429 incidents.
+  // Multi-agent mode lights up automatically the moment a workspace adds an
+  // `agent_configs` row for the role.
   const provider = detectProvider({ agentRole });
-  if (!provider) return { provider: null, config: null };
-  return { provider, config: null };
+  if (!provider) return { provider: null, config: null, effectiveAgentRole: null };
+  return { provider, config: null, effectiveAgentRole: null };
 }
 
 export function detectProvider({ agentRole = null } = {}) {

@@ -116,6 +116,49 @@ test("unconfigured role falls back to env detection", () => {
   assert.equal(config, null, "config should be null for env-fallback path");
 });
 
+// AI-005c — single-agent preservation. When a workspace has no `agent_configs`
+// row for a role, `resolveProvider` returns `effectiveAgentRole: null` so
+// downstream breakers / sticky-fallback / fallback enumeration all collapse
+// to the bare-provider key. This pins the invariant that single-agent
+// workspaces don't pay the per-role wasted-call tax during 429 incidents —
+// the explicit user requirement that gated PR #22's merge (free-tier
+// workspaces with 20-call/day caps would have burned 3 calls per incident
+// before the fix).
+test("AI-005c: unconfigured role returns effectiveAgentRole=null (single-agent collapse)", () => {
+  const workspaceId = seedWorkspace();
+  // No agent_configs rows at all — pure single-agent workspace.
+  const result = resolveProvider({ agentRole: "planner", workspaceId });
+  assert.equal(result.effectiveAgentRole, null,
+    "single-agent workspaces must collapse to bare-provider breaker key");
+});
+
+test("AI-005c: configured role returns effectiveAgentRole=role (multi-agent isolation)", () => {
+  const workspaceId = seedWorkspace();
+  upsertConfig(workspaceId, "planner", { provider: "openai" });
+  const result = resolveProvider({ agentRole: "planner", workspaceId });
+  assert.equal(result.effectiveAgentRole, "planner",
+    "multi-agent workspaces keep per-role breaker isolation");
+});
+
+test("AI-005c: single-agent shares ONE breaker across roles (no wasted-call amplification)", () => {
+  // Pre-PR shape: anthropic 429 on stage 1 → bare `anthropic` breaker trips →
+  // stages 2+3 skip Anthropic and route to OpenAI fallback. Post-PR with
+  // AI-005c the same shape holds for workspaces without agent_configs rows
+  // because every stage's `effectiveAgentRole` collapses to null →
+  // `breakerKey("anthropic", null) === "anthropic"` → ONE breaker, shared.
+  // Simulate a stage-1 failure under the collapsed key.
+  recordProviderFailure("anthropic", null);
+  assert.equal(isCircuitBreakerOpen("anthropic", null), true,
+    "bare-provider breaker tripped");
+  assert.equal(isCircuitBreakerOpen("anthropic"), true,
+    "bare-provider breaker also visible via 1-arg call");
+  // Stage 2 in a single-agent workspace passes effectiveAgentRole=null too,
+  // so its breaker check sees the same tripped state — no second wasted call.
+  // (The multi-agent-mode regression test 'rate-limiting anthropic::planner
+  // does NOT trip anthropic::author' above pins the opposite invariant.)
+  recordProviderSuccess("anthropic", null);
+});
+
 test("sticky fallback for the role WINS over agent_configs (tripwire #1)", () => {
   const workspaceId = seedWorkspace();
   upsertConfig(workspaceId, "planner", { provider: "anthropic" });
