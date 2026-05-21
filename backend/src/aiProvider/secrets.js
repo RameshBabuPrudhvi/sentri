@@ -47,13 +47,11 @@ function resolveMasterKey() {
   const raw = process.env.SENTRI_MASTER_KEY;
   const isProd = process.env.NODE_ENV === "production";
   if (raw) {
-    let buf;
-    try { buf = Buffer.from(raw, "base64"); }
-    catch {
-      const err = new Error("SENTRI_MASTER_KEY is not valid base64");
-      err.code = "ERR_MASTER_KEY_INVALID";
-      throw err;
-    }
+    // `Buffer.from(str, "base64")` in Node never throws — it silently strips
+    // invalid base64 characters and decodes the rest. So a malformed value
+    // (e.g. `SENTRI_MASTER_KEY=garbage`) always falls through to the length
+    // check below; the catch block we used to have here was unreachable.
+    const buf = Buffer.from(raw, "base64");
     if (buf.length !== MASTER_KEY_LEN_BYTES) {
       const err = new Error(
         `SENTRI_MASTER_KEY must decode to exactly ${MASTER_KEY_LEN_BYTES} bytes ` +
@@ -225,6 +223,16 @@ export function getDecryptedKey(workspaceId, routeId) {
  * @internal
  */
 export function _reloadMasterKeyForTests() {
+  // Hard guard — even though the `@internal` JSDoc says "NEVER call this from
+  // product code", nothing structural enforces it. A live process running
+  // under `NODE_ENV=production` must never have its master key mutated mid-
+  // flight: every plaintext API key in `provider_routes` would become
+  // un-decryptable until the next process restart, and an attacker with code-
+  // execution could rotate the in-memory key to one they control. Throw
+  // immediately so even an accidental call fails loudly.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("_reloadMasterKeyForTests is forbidden in production");
+  }
   _warnedDevMode = false;
   _masterKey = resolveMasterKey();
   plaintextCache.clear();

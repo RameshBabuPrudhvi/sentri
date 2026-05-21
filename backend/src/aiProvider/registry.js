@@ -29,6 +29,49 @@ export const STICKY_FALLBACK_TTL_MS = 10 * 60 * 1000;
 const CIRCUIT_BREAKER_THRESHOLD = 1;
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
 
+/**
+ * Does `key` belong to the given `agentRole`?
+ *
+ * Replaces ad-hoc `key.endsWith(`::${agentRole}`)` checks scattered through
+ * this module. The old check had two failure modes:
+ *
+ *   1. Substring collision — a provider id ending in the role string
+ *      (e.g. provider `"compat:my::planner"`) would falsely match an
+ *      `agentRole="planner"` filter even though it has no role suffix.
+ *   2. Empty / multi-`::` roles — admin-controlled role names could embed
+ *      `::` and slip through validation, again polluting the filter.
+ *
+ * The split form here makes the suffix comparison exact: we split on the
+ * first `::` from the right and require the right-hand side to equal
+ * `agentRole`. Keys with no `::` (bare-provider stickies) never match.
+ */
+function keyHasRole(key, agentRole) {
+  if (!agentRole) return false;
+  const idx = key.lastIndexOf("::");
+  if (idx < 0) return false;
+  return key.slice(idx + 2) === agentRole;
+}
+
+/**
+ * Sweep every expired entry from `stickyFallbacks` regardless of role.
+ *
+ * Without this, the per-role iterations in `clearStickyFallback`,
+ * `stickyFallbackActive`, `resolveProvider`, `resolveRoute`, and
+ * `detectProvider` only delete expired entries that ALSO happen to match
+ * the role filter. Expired entries for other roles sit in the Map until
+ * something else triggers a sweep — a slow memory leak proportional to
+ * `STICKY_FALLBACK_TTL_MS × write rate × role count`.
+ *
+ * Cheap: O(n) over a tiny Map (sticky entries are bounded by active role
+ * count, ~8 in practice).
+ */
+function sweepExpiredStickies() {
+  const now = Date.now();
+  for (const [k, v] of stickyFallbacks) {
+    if (now >= v.expiry) stickyFallbacks.delete(k);
+  }
+}
+
 /** @type {Object<string, {failures: number, disabledUntil: number}>} */
 const circuitBreakers = {};
 /**
@@ -223,12 +266,13 @@ export function setStickyFallback(provider, agentRole = null) {
 
 export function clearStickyFallback(agentRole = null) {
   if (!agentRole) return stickyFallbacks.clear();
-  for (const [k] of stickyFallbacks) if (k.endsWith(`::${agentRole}`)) stickyFallbacks.delete(k);
+  for (const [k] of stickyFallbacks) if (keyHasRole(k, agentRole)) stickyFallbacks.delete(k);
 }
 
 export function stickyFallbackActive(agentRole = null) {
+  sweepExpiredStickies();
   for (const [k, v] of stickyFallbacks) {
-    if ((agentRole ? k.endsWith(`::${agentRole}`) : true) && Date.now() < v.expiry) return true;
+    if ((agentRole ? keyHasRole(k, agentRole) : true) && Date.now() < v.expiry) return true;
   }
   return false;
 }
@@ -312,9 +356,12 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
     try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole) || null; }
     catch { /* DB unavailable — fall through to detection */ }
   }
+  // Unconditional sweep so expired entries for OTHER roles also get cleaned
+  // up here — not just the ones that match the current role filter.
+  sweepExpiredStickies();
   if (agentRole) {
     for (const [key, entry] of stickyFallbacks) {
-      if (!key.endsWith(`::${agentRole}`)) continue;
+      if (!keyHasRole(key, agentRole)) continue;
       if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) {
         // Preserve the agent_configs row here so `systemPromptOverride`
         // and `maxTokens` keep applying during the sticky-fallback window.
@@ -322,7 +369,6 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
         // but the role-specific config still drives prompt + token budget.
         return { provider: entry.provider, config: cfg, effectiveAgentRole: agentRole };
       }
-      if (Date.now() >= entry.expiry) stickyFallbacks.delete(key);
     }
   }
   if (cfg?.provider && isProviderUsable(cfg.provider)) {
@@ -409,9 +455,12 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
   // against", interpreted by the caller). Route-shaped stickies
   // populate the synthetic-route shape so downstream code never has
   // to know it's looking at a fallback.
+  // Unconditional sweep so expired entries for OTHER roles also get cleaned
+  // up here — not just the ones that match the current role filter.
+  sweepExpiredStickies();
   if (agentRole) {
     for (const [key, entry] of stickyFallbacks) {
-      if (!key.endsWith(`::${agentRole}`)) continue;
+      if (!keyHasRole(key, agentRole)) continue;
       if (Date.now() < entry.expiry) {
         // Sticky entries written by `resolveProvider`'s fallback path
         // carry a `provider` (not a route id). Synthesise a transient
@@ -427,7 +476,6 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
           };
         }
       }
-      if (Date.now() >= entry.expiry) stickyFallbacks.delete(key);
     }
   }
 
@@ -553,10 +601,10 @@ export function detectProvider({ agentRole = null } = {}) {
   // Sticky fallback first — a successful rate-limit fallback pins the working
   // provider until the TTL expires, even if the user has the original
   // (rate-limited) provider selected in the dropdown.
+  sweepExpiredStickies();
   for (const [key, entry] of stickyFallbacks) {
-    if (agentRole && !key.endsWith(`::${agentRole}`)) continue;
+    if (agentRole && !keyHasRole(key, agentRole)) continue;
     if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) return entry.provider;
-    if (Date.now() >= entry.expiry) stickyFallbacks.delete(key);
   }
 
   if (runtimeActiveProvider) {

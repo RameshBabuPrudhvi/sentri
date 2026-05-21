@@ -77,15 +77,23 @@ export const METRIC_AGENT_ROLES = Object.freeze([...AGENT_ROLES, "default"]);
  * @returns {Promise<{ok: boolean, reason: string|null, provider: string|null}>}
  */
 async function probeRole(workspaceId, role, signal) {
-  // First resolve so we can report which provider would have been used even
-  // when the probe call fails. `resolveProvider` returns `{ provider: null }`
-  // when nothing is usable — surface that as a config error, not a network
-  // failure.
-  const { provider } = resolveProvider({ agentRole: role, workspaceId });
-  if (!provider) {
-    return { ok: false, reason: "no_provider_configured", provider: null };
-  }
+  // The try/catch wraps BOTH `resolveProvider` and `generateText` because
+  // `resolveProvider` itself can throw (e.g. forced `AI_PROVIDER` pointing
+  // at an unknown id surfaces as a synchronous throw from `detectProvider`).
+  // Without this wrapper, the throw would propagate through `Promise.all`
+  // in `validateAgentConfigs` and abandon the probe results for every
+  // other role — converting a one-role config error into a total
+  // health-check failure for the workspace.
+  let provider = null;
   try {
+    // Resolve first so we can report which provider would have been used
+    // even when the probe call fails. `resolveProvider` returns
+    // `{ provider: null }` when nothing is usable — surface that as a
+    // config error, not a network failure.
+    ({ provider } = resolveProvider({ agentRole: role, workspaceId }));
+    if (!provider) {
+      return { ok: false, reason: "no_provider_configured", provider: null };
+    }
     // `responseFormat: "text"` is critical here. `generateText` →
     // `buildAdapterOpts` defaults `responseFormat` to `"json_object"`
     // (see `dispatcher.js#buildAdapterOpts`). Sending a bare "ping" prompt
@@ -135,6 +143,14 @@ export async function validateAgentConfigs(workspaceId, { signal, roles } = {}) 
       return { ok: true, agentRoles: {} };
     }
   }
+  // Defence-in-depth: clamp to the canonical `AGENT_ROLES` allowlist + dedupe.
+  // The settings route validates this on save (`backend/src/routes/settings.js`)
+  // but the repo itself has no `role IN (...)` constraint — a future migration
+  // or hand-written script could backfill rows with off-list roles. Clamping
+  // here keeps the parallel-probe fanout bounded at `AGENT_ROLES.length` and
+  // prevents an unbounded `Promise.all` from spawning a probe per junk row.
+  const allowed = new Set(AGENT_ROLES);
+  probeRoles = [...new Set(probeRoles.filter((r) => allowed.has(r)))];
   if (probeRoles.length === 0) return { ok: true, agentRoles: {} };
   // Run probes in parallel — bounded by `probeRoles.length` which is capped at
   // AGENT_ROLES.length so there's no need for a concurrency limiter.

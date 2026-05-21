@@ -333,11 +333,21 @@ export function remove(workspaceId, id, { userId } = {}) {
     const deleted = db.prepare(
       "DELETE FROM provider_routes WHERE id = ? AND workspaceId = ?"
     ).run(id, workspaceId);
-    auditRepo.append({
-      workspaceId, routeId: id, userId,
-      action: "delete",
-      metadata: { name: existing.name, family: existing.family },
-    });
+    // Concurrent-delete guard. Even though better-sqlite3 serialises writes,
+    // two `remove()` calls can both pass the `getById` check above before
+    // either of their DELETEs runs — the second one's DELETE would then
+    // affect zero rows, but the unconditional audit append below would
+    // still write a duplicate "delete" row. Gate the audit on
+    // `deleted.changes > 0` so only the real deleter audits. The cache
+    // invalidation is intentionally NOT gated: it's idempotent and dropping
+    // the cache entry on a tombstoned route is harmless.
+    if (deleted.changes > 0) {
+      auditRepo.append({
+        workspaceId, routeId: id, userId,
+        action: "delete",
+        metadata: { name: existing.name, family: existing.family },
+      });
+    }
     // B1.4 — drop the cached plaintext for the deleted route so a stale
     // dispatch call that races the delete doesn't continue using a
     // tombstoned key for up to 5 minutes after the row is gone.
