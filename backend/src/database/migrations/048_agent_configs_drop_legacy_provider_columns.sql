@@ -1,0 +1,43 @@
+-- B2.1 — Drop legacy `provider` + `model` columns from `agent_configs`.
+--
+-- Both columns are now superseded by `agent_configs.routeId` (added in
+-- migration 037) which points at a `provider_routes` row carrying
+-- `family`, `protocol`, `baseUrl`, `model`, and the encrypted API key.
+-- Operators must run `backend/src/database/migrations/scripts/backfill-routes.js`
+-- BEFORE this migration applies — the backfill script reads the legacy
+-- `provider` + `model` columns and writes `routeId`. If this migration
+-- runs against a deployment that hasn't been backfilled, every
+-- `agent_configs` row with a non-null `provider` loses its dispatch
+-- target permanently. Operators are protected by the order:
+--   1. Deploy code with migration 037 (routeId column added).
+--   2. Run `node backfill-routes.js --dry-run` then for-real.
+--   3. Deploy code with migration 048 (this file) — the legacy columns
+--      are now safe to drop because every row has a `routeId`.
+--
+-- ## Why only `provider` + `model`
+--
+-- The roadmap (`docs/roadmap/ai-provider-bundle.md` B2.1) explicitly
+-- preserves `systemPromptOverride`, `temperature`, `maxTokens`, and
+-- `fallbackRole` for one release because they don't have route-level
+-- equivalents yet. Bundle 3 / 4 may eventually move them or replace
+-- the AI-005 fallback chain with the route-level `fallbackRouteId`,
+-- at which point those columns get their own drop migration.
+--
+-- ## Compatibility
+--
+-- SQLite has supported `ALTER TABLE ... DROP COLUMN` since 3.35
+-- (March 2021). The minimum SQLite version baked into better-sqlite3
+-- in this project is well above 3.35, so the bare statement is safe
+-- on the SQLite path.
+--
+-- PostgreSQL has supported it since 7.3. The `translateSql` helper
+-- in `backend/src/database/adapters/postgres-adapter.js` does not
+-- need a special case — `DROP COLUMN` is identical syntax on both
+-- backends.
+--
+-- The `IF EXISTS` guard makes the statement idempotent on re-run
+-- (which `migrationRunner.js` already prevents at the ledger level
+-- via `schema_migrations`, but belt-and-braces).
+
+ALTER TABLE agent_configs DROP COLUMN IF EXISTS provider;
+ALTER TABLE agent_configs DROP COLUMN IF EXISTS model;

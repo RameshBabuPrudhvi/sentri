@@ -279,7 +279,11 @@ router.get("/settings/agent-roles", requireRole("admin"), (req, res) => {
 });
 
 router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
-  const { role, provider = null, model = null, systemPromptOverride = null, temperature = 0.2, maxTokens = null, fallbackRole = null } = req.body || {};
+  // B2.1 — `provider` + `model` columns dropped (migration 048). Workspaces
+  // now pin dispatch by `routeId` (a `provider_routes` row carries family +
+  // model + encrypted key). The route validates `routeId` exists in this
+  // workspace via `agentConfigRepo.upsert` (throws `ERR_AGENT_ROUTE_NOT_FOUND`).
+  const { role, routeId = null, systemPromptOverride = null, temperature = 0.2, maxTokens = null, fallbackRole = null } = req.body || {};
   if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
   if (fallbackRole && !AGENT_ROLES.includes(fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
   if (fallbackRole && hasFallbackCycle(req.workspaceId, role, fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
@@ -288,20 +292,27 @@ router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
   }
   const now = new Date().toISOString();
   const existing = agentConfigRepo.getByRole(req.workspaceId, role);
-  const saved = agentConfigRepo.upsert({
-    id: existing?.id || `AGC-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,
-    workspaceId: req.workspaceId, role, provider, model, systemPromptOverride,
-    temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
-    maxTokens: maxTokens == null ? null : (Number.isFinite(Number(maxTokens)) ? Number(maxTokens) : null), fallbackRole,
-    createdAt: existing?.createdAt || now, updatedAt: now,
-  });
-  res.status(existing ? 200 : 201).json(saved);
+  try {
+    const saved = agentConfigRepo.upsert({
+      id: existing?.id || `AGC-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,
+      workspaceId: req.workspaceId, role, routeId, systemPromptOverride,
+      temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
+      maxTokens: maxTokens == null ? null : (Number.isFinite(Number(maxTokens)) ? Number(maxTokens) : null), fallbackRole,
+      createdAt: existing?.createdAt || now, updatedAt: now,
+    });
+    res.status(existing ? 200 : 201).json(saved);
+  } catch (err) {
+    if (err?.code === "ERR_AGENT_ROUTE_NOT_FOUND") return res.status(400).json({ error: err.message });
+    throw err;
+  }
 });
 
 // Only these fields are PATCH-able. id/createdAt/role/workspaceId are
-// pinned from `existing` so a malicious body can't override the primary key
-// or stamp a different workspace onto the row.
-const PATCHABLE_AGENT_FIELDS = ["provider", "model", "systemPromptOverride", "temperature", "maxTokens", "fallbackRole"];
+// pinned from `existing` so a malicious body can't override the primary
+// key or stamp a different workspace onto the row. B2.1 — `provider` and
+// `model` were dropped (migration 048); `routeId` is the new dispatch
+// pin and replaces both.
+const PATCHABLE_AGENT_FIELDS = ["routeId", "systemPromptOverride", "temperature", "maxTokens", "fallbackRole"];
 
 router.patch("/settings/agent-roles/:role", requireRole("admin"), (req, res) => {
   const role = req.params.role;
@@ -323,8 +334,15 @@ router.patch("/settings/agent-roles/:role", requireRole("admin"), (req, res) => 
   payload.temperature = Number.isFinite(Number(payload.temperature)) ? Number(payload.temperature) : existing.temperature;
   payload.maxTokens = payload.maxTokens == null ? null : (Number.isFinite(Number(payload.maxTokens)) ? Number(payload.maxTokens) : existing.maxTokens);
   payload.updatedAt = new Date().toISOString();
-  const saved = agentConfigRepo.upsert(payload);
-  res.json(saved);
+  try {
+    const saved = agentConfigRepo.upsert(payload);
+    res.json(saved);
+  } catch (err) {
+    // B2.1 — surface route-validation failure as a 400 instead of a 500
+    // so the Settings UI can render a usable error to the admin.
+    if (err?.code === "ERR_AGENT_ROUTE_NOT_FOUND") return res.status(400).json({ error: err.message });
+    throw err;
+  }
 });
 
 router.delete("/settings/agent-roles/:role", requireRole("admin"), (req, res) => {

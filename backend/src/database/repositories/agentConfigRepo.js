@@ -92,18 +92,19 @@ export function upsert(config) {
     throw err;
   }
   const db = getDatabase();
-  // B1.6 — include `routeId` (migration 037) so workspaces can pin a
-  // specific `provider_routes` row to a role. `routeId` defaults to null
-  // when callers omit it, which keeps the AI-005 `provider`-column shim
-  // path intact: `resolveRoute` synthesises a transient route from the
-  // legacy `provider` column when no routeId is set.
+  // B2.1 — `provider` + `model` columns dropped in migration 048.
+  // Workspaces now pin dispatch by `routeId` exclusively; the
+  // `provider_routes` row carries the family + protocol + model +
+  // encrypted API key. Callers that still pass `provider`/`model` in
+  // the config payload have those values silently ignored at the SQL
+  // layer (excluded from the INSERT column list) — no error, no
+  // partial write. `temperature`, `systemPromptOverride`, `maxTokens`,
+  // and `fallbackRole` are kept for one release per the B2.1 roadmap.
   db.prepare(`
-    INSERT INTO agent_configs (id, workspaceId, role, provider, routeId, model, systemPromptOverride, temperature, maxTokens, fallbackRole, createdAt, updatedAt)
-    VALUES (@id, @workspaceId, @role, @provider, @routeId, @model, @systemPromptOverride, @temperature, @maxTokens, @fallbackRole, @createdAt, @updatedAt)
+    INSERT INTO agent_configs (id, workspaceId, role, routeId, systemPromptOverride, temperature, maxTokens, fallbackRole, createdAt, updatedAt)
+    VALUES (@id, @workspaceId, @role, @routeId, @systemPromptOverride, @temperature, @maxTokens, @fallbackRole, @createdAt, @updatedAt)
     ON CONFLICT(workspaceId, role) DO UPDATE SET
-      provider=excluded.provider,
       routeId=excluded.routeId,
-      model=excluded.model,
       systemPromptOverride=excluded.systemPromptOverride,
       temperature=excluded.temperature,
       maxTokens=excluded.maxTokens,
