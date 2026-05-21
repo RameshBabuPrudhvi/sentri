@@ -62,6 +62,9 @@ let _aiCacheJanitorTask = null;
 /** @type {Object|null} B3.9 — daily provider-routes audit retention sweep. */
 let _providerAuditRetentionTask = null;
 
+/** @type {Object|null} B2.5 — daily AI request-log retention sweep. */
+let _aiRequestLogRetentionTask = null;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -489,23 +492,39 @@ export function initScheduler() {
     }
   }, { timezone: "UTC", scheduled: true });
 
-  // B2.5: daily AI request-log retention sweep — default 30 days.
-  schedules.push(schedule(
-    "30 4 * * *",
-    () => {
-      try {
-        const days = Number(process.env.AI_REQUEST_LOG_RETENTION_DAYS || 30);
-        if (!Number.isFinite(days) || days <= 0) return;
-        const deleted = aiRequestLogRepo.purgeOlderThan(days);
-        if (deleted > 0) {
-          console.log(formatLogLine("info", null, `[scheduler] AI request-log retention sweep deleted ${deleted} row(s) older than ${days} days`));
-        }
-      } catch (err) {
-        console.warn(formatLogLine("warn", null, `[scheduler] AI request-log retention sweep failed: ${err.message}`));
+  // B2.5: daily AI request-log retention sweep — runs at 04:45 UTC,
+  // slotted between the B3.8 response-cache janitor (04:30) and the
+  // B3.9 provider-routes audit sweep (05:00) so all four daily AI
+  // maintenance tasks stay staggered on a single SQLite writer and
+  // never contend for the write lock on the same minute.
+  // Honours `AI_REQUEST_LOG_RETENTION_DAYS`:
+  //   • unset / empty → default 30 days
+  //   • 0            → never delete (task is armed but is a no-op)
+  //   • > 0          → delete rows older than the configured window
+  //
+  // Bugfix from the original B2.5 wiring: this block previously called
+  // `schedules.push(schedule(...))` which threw `ReferenceError:
+  // schedule is not defined` at boot (no such helper exists in this
+  // module — `schedules` at this scope is the SQL result array from
+  // `scheduleRepo.getAllEnabled`, not a task registry). Converted to
+  // the same `cron.schedule()` shape as the sibling daily tasks above
+  // and stored on `_aiRequestLogRetentionTask` so graceful shutdown
+  // can stop it via `stopAllTasks()` below.
+  _aiRequestLogRetentionTask = cron.schedule("45 4 * * *", () => {
+    try {
+      const raw = process.env.AI_REQUEST_LOG_RETENTION_DAYS;
+      const days = raw === undefined || raw === "" ? 30 : Number.parseInt(raw, 10);
+      if (!Number.isFinite(days) || days <= 0) return; // disabled
+      const deleted = aiRequestLogRepo.purgeOlderThan(days);
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] AI request-log retention sweep deleted ${deleted} row(s) older than ${days} days`));
       }
-    },
-    "ai-request-log-retention"
-  ));
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[scheduler] AI request-log retention sweep failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
 
   console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded), stale detection + audit retention + coverage retention armed`));
 }
@@ -567,6 +586,11 @@ export function stopAllTasks() {
   if (_providerAuditRetentionTask) {
     _providerAuditRetentionTask.stop();
     _providerAuditRetentionTask = null;
+  }
+  // B2.5 — graceful shutdown of the AI request-log retention sweep.
+  if (_aiRequestLogRetentionTask) {
+    _aiRequestLogRetentionTask.stop();
+    _aiRequestLogRetentionTask = null;
   }
 }
 

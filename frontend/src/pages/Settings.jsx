@@ -580,8 +580,21 @@ function AdminLockedSection({ feature, role }) {
 
 
 function AgentRolesTab() {
-  const empty = { role: AGENT_ROLES[0], provider: "", model: "", systemPromptOverride: "", temperature: 0.2, maxTokens: "", fallbackRole: "" };
+  // B2.1 — migration 048 dropped `agent_configs.provider` and
+  // `agent_configs.model`. Roles now pin dispatch via `routeId` →
+  // `provider_routes` row. The form mirrors that contract: a single
+  // route picker replaces the legacy free-text provider + model inputs.
+  // The backend's `agentConfigRepo.upsert` validates that `routeId`
+  // exists in the same workspace (throws `ERR_AGENT_ROUTE_NOT_FOUND`
+  // → HTTP 400), so an empty value means "use workspace default"
+  // (the dispatcher's env-detection fallback path in `resolveRoute`).
+  const empty = { role: AGENT_ROLES[0], routeId: "", systemPromptOverride: "", temperature: 0.2, maxTokens: "", fallbackRole: "" };
   const [rows, setRows] = useState([]);
+  // Provider routes for the dropdown — loaded once and refetched only
+  // when a role save succeeds, since admins editing roles rarely also
+  // edit routes in the same session. Empty array on load failure so
+  // the form still renders (with a disabled-state hint inline).
+  const [routes, setRoutes] = useState([]);
   const [form, setForm] = useState(empty);
   const [editingRole, setEditingRole] = useState("");
   const [error, setError] = useState("");
@@ -592,10 +605,28 @@ function AgentRolesTab() {
   // `api.testAgentRole(role)` call without blocking the rest of the form.
   const [probes, setProbes] = useState({});
   const load = useCallback(async () => {
-    try { const r = await api.getAgentRoles(); setRows(r.roles || []); }
-    catch (err) { setError(err.message || "Failed to load agent roles."); }
+    try {
+      const [r, routesRes] = await Promise.all([
+        api.getAgentRoles(),
+        // Defensive: route list failure must not blank the agent-roles
+        // table. The form falls back to "workspace default" only.
+        api.listProviderRoutes().catch(() => ({ routes: [] })),
+      ]);
+      setRows(r.roles || []);
+      setRoutes(routesRes?.routes || []);
+    } catch (err) { setError(err.message || "Failed to load agent roles."); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Lookup helper for rendering row meta — converts a saved `routeId`
+  // back to a human-readable `name · family · model` string. Falls back
+  // to the raw id when the route was deleted (FK is ON DELETE SET NULL,
+  // but the cfg row may still carry a stale id until re-saved).
+  const routeById = useMemo(() => {
+    const m = new Map();
+    for (const r of routes) m.set(r.id, r);
+    return m;
+  }, [routes]);
 
   async function save(e) {
     e.preventDefault();
@@ -603,10 +634,14 @@ function AgentRolesTab() {
     setBusy(true);
     try {
       const payload = {
-        ...form,
-        provider: form.provider || null,
-        model: form.model || null,
+        role: form.role,
+        // Empty string → null so the backend treats it as "use
+        // workspace default" (no per-role route override). Non-empty
+        // values are validated server-side against the workspace's
+        // provider_routes rows.
+        routeId: form.routeId || null,
         systemPromptOverride: form.systemPromptOverride || null,
+        temperature: form.temperature,
         maxTokens: form.maxTokens ? Number(form.maxTokens) : null,
         // B3.2 — `fallbackRole` UI is deprecated. Always send `null`
         // for new saves so the DB column drifts toward unused while we
@@ -630,7 +665,7 @@ function AgentRolesTab() {
   function edit(row) {
     setError("");
     setEditingRole(row.role);
-    setForm({ role: row.role, provider: row.provider || "", model: row.model || "", systemPromptOverride: row.systemPromptOverride || "", temperature: row.temperature ?? 0.2, maxTokens: row.maxTokens ?? "", fallbackRole: row.fallbackRole || "" });
+    setForm({ role: row.role, routeId: row.routeId || "", systemPromptOverride: row.systemPromptOverride || "", temperature: row.temperature ?? 0.2, maxTokens: row.maxTokens ?? "", fallbackRole: row.fallbackRole || "" });
   }
   async function del(role) {
     setError("");
@@ -674,8 +709,31 @@ function AgentRolesTab() {
     )}
     <form onSubmit={save} className="st-agent-form">
       <select className="input" value={form.role} onChange={(e) => setForm((s) => ({ ...s, role: e.target.value }))} disabled={!!editingRole}>{AGENT_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
-      <input className="input" placeholder="provider (optional)" value={form.provider} onChange={(e) => setForm((s) => ({ ...s, provider: e.target.value }))} />
-      <input className="input" placeholder="model (optional)" value={form.model} onChange={(e) => setForm((s) => ({ ...s, model: e.target.value }))} />
+      {/* B2.1 — Route picker replaces the legacy free-text provider +
+          model inputs that the backend silently discarded post-048.
+          Empty value → "use workspace default" (dispatcher's
+          env-detection fallback via `resolveRoute`). When the workspace
+          has no routes configured yet, the dropdown is empty and the
+          hint below points admins at the Provider Routes tab. */}
+      <select
+        className="input"
+        value={form.routeId}
+        onChange={(e) => setForm((s) => ({ ...s, routeId: e.target.value }))}
+        title="The provider route this role dispatches against. Leave empty to use the workspace default."
+      >
+        <option value="">Workspace default (no per-role override)</option>
+        {routes.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.name} · {r.family} · {r.model || "model?"}{!r.enabled ? " (disabled)" : ""}
+          </option>
+        ))}
+      </select>
+      {routes.length === 0 && (
+        <div className="hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Info size={11} />
+          <span>No provider routes configured yet — create one in the <strong>Provider Routes</strong> tab.</span>
+        </div>
+      )}
       <textarea className="input" placeholder="system prompt override" value={form.systemPromptOverride} onChange={(e) => setForm((s) => ({ ...s, systemPromptOverride: e.target.value }))} />
       <input className="input" type="number" step="0.1" value={form.temperature} onChange={(e) => setForm((s) => ({ ...s, temperature: Number(e.target.value) }))} />
       <input className="input" type="number" placeholder="max tokens" value={form.maxTokens} onChange={(e) => setForm((s) => ({ ...s, maxTokens: e.target.value }))} />
@@ -702,9 +760,18 @@ function AgentRolesTab() {
     </form>
     <div className="st-agent-rows">{rows.map((r) => {
       const probe = probes[r.role];
+      // B2.1 — resolve the row's routeId back to a display string.
+      // Stale routeId (route deleted, FK set null but cfg not re-saved)
+      // falls back to the raw id so admins can still identify the row.
+      const linkedRoute = r.routeId ? routeById.get(r.routeId) : null;
+      const routeLabel = linkedRoute
+        ? `${linkedRoute.name} · ${linkedRoute.family} · ${linkedRoute.model || "model?"}`
+        : r.routeId
+        ? `${r.routeId} (route missing)`
+        : "workspace-default";
       return (
         <div key={r.role} className="card-padded-sm st-agent-row">
-          <span className="st-agent-row-meta">{r.role} · {r.provider || "workspace-default"} · {r.model || "provider-default"} · temp {r.temperature}</span>
+          <span className="st-agent-row-meta">{r.role} · {routeLabel} · temp {r.temperature}</span>
           {probe && probe.status !== "running" && (
             <span
               className={`${probe.status === "ok" ? "st-status-ok" : "st-status-err"} st-agent-row-badge`}

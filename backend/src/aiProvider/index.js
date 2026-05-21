@@ -263,7 +263,17 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   // `buildAdapterOpts` and ignore the role-specific token budget the
   // workspace admin configured, violating the JSDoc contract in
   // `dispatcher.js#resolveAgentCall`.
-  const { provider, effectiveAgentRole, effectivePrompt, maxTokens } =
+  //
+  // B2.4 — also pull `route` + `callOpts` out so the streaming-path
+  // `recordAiTokens` call below can compute cost from `route.pricing`
+  // (with `MODEL_PRICING` as catalog fallback) and emit the per-route
+  // metric labels. Without `route` + `callOpts.routeName`, every
+  // streamed call lands with `costUsd: null` (recordAiTokens's
+  // route-less branch) and `route_name: "unknown"` — silently dropping
+  // cost data for the entire native-streaming path (Anthropic + OpenAI
+  // + OpenRouter). Non-streaming paths already get this via
+  // `callProvider`; here we wire the missing dimension.
+  const { provider, effectiveAgentRole, effectivePrompt, maxTokens, route, callOpts } =
     resolveAgentCall(promptOrMessages, options);
   if (!provider) throw new Error("No AI provider configured.");
   const { signal, responseFormat } = options;
@@ -296,7 +306,24 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
       // `recordAiTokens`'s signature defaults agentRole to `"default"`, so
       // pass the original `agentRole` directly — null collapses to the
       // signature default at the function boundary, single source of truth.
-      if (res?.usage) recordAiTokens(provider, res.usage, "generation", agentRole);
+      //
+      // B2.4 — `recordAiTokens(provider, usage, operation, agentRole,
+      // routeName, route)`. The two trailing params are required for
+      // the per-route cost metric + the `route_name` Prometheus label
+      // to fire. Without them, every native-streaming call (Anthropic
+      // / OpenAI / OpenRouter) lands with `costUsd: null` and
+      // `route_name: "unknown"`. `callOpts.routeName` and `route` are
+      // sourced from `resolveAgentCall` above.
+      if (res?.usage) {
+        recordAiTokens(
+          provider,
+          res.usage,
+          "generation",
+          agentRole,
+          callOpts?.routeName || "unknown",
+          route || null,
+        );
+      }
       return res?.text ?? "";
     }
   } catch (err) {
