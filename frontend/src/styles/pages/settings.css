@@ -396,6 +396,40 @@
   display: none;
 }
 
+/* B3.7 — Workspace spend caps panel above the create-route form.
+   Reuses `.st-pr-form-grid` semantics (3-column on desktop) so the
+   visual weight matches the per-route fields below. */
+.st-pr-spend-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.st-pr-spend-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+}
+.st-pr-spend-sub {
+  line-height: 1.5;
+}
+.st-pr-spend-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.st-pr-spend-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
   /* Provider cards: tighten padding */
@@ -465,6 +499,9 @@
 
   /* Provider Routes: single-column form on phones */
   .st-pr-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .st-pr-spend-grid {
     grid-template-columns: 1fr;
   }
   .st-pr-field--wide {

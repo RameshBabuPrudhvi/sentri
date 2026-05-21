@@ -368,6 +368,11 @@ const _COL_MAP = buildColumnMap([
   // `AI_REQUEST_LOG_STORAGE_MODE` env-default path. Tracked alongside
   // the other camelCase entries here.
   "ownerId", "aiRequestLogMode", "aiRequestLogCustomRedactionRules",
+  // B3.7 — workspace AI spend caps. Same case-folding concern as the
+  // B2.5 columns above: without these entries PostgreSQL returns
+  // `undefined` for `workspace.dailySpendCapUsd` etc, silently
+  // disabling the cap-enforcement path on Postgres-backed deployments.
+  "dailySpendCapUsd", "monthlySpendCapUsd", "spendAlertThresholdPct",
   // workspace_members (ACL-001)
   "joinedAt",
   // agent_configs (AI-004 schema, migration 037 — see fix note in the

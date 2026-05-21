@@ -32,6 +32,12 @@ import { pricingFor } from "./modelCatalog.js";
 // repo's `getAiRequestLogSettings` returns `{ mode: "none", customRules: [] }`
 // for unknown workspace ids so callers always get a usable shape.
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
+// B3.7 — pre-call quota gate + post-call drift correction. Runs before
+// any provider SDK is touched so a rejected call doesn't burn vendor
+// quota. Errors carry typed `.code` strings (`ERR_RATE_LIMIT_LOCAL` /
+// `ERR_SPEND_CAP_EXCEEDED`) so the orchestrator can render an actionable
+// message to the operator instead of a generic 500.
+import { checkAndReserve, reportActual, checkSpendCap } from "./quotaGuard.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -655,10 +661,71 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
  */
 export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions = {}) {
   const messages = normaliseMessages(promptOrMessages);
+  const effectiveMaxTokens = maxTokens || DEFAULT_MAX_TOKENS;
+
+  // B3.7 — pre-call gates. Run BEFORE the SDK so a rejected call never
+  // touches vendor quota. Order matters:
+  //   1. Spend cap (cheap DB read, no I/O round-trip in the no-cap path).
+  //   2. Token-bucket reserve (Redis round-trip when configured).
+  // Both gates are skipped when their input data is missing — the env-
+  // default dispatch path (no route, no workspace) gets the legacy
+  // unconditional dispatch behaviour so operators not opted into B3.7
+  // see no semantic change.
+  const route = callOptions.route || null;
+  const routeId = route?.id || callOptions.routeId || null;
+  const workspaceId = callOptions.workspaceId || null;
+  if (workspaceId) {
+    const spend = checkSpendCap(workspaceId);
+    if (!spend.ok) {
+      const err = new Error(
+        `Spend cap exceeded (${spend.exceeded}). ` +
+        `Dispatch blocked until next ${spend.exceeded === "day" ? "24h window" : "month boundary"}.`,
+      );
+      err.code = "ERR_SPEND_CAP_EXCEEDED";
+      err.exceeded = spend.exceeded;
+      err.remainingUsd = spend.remainingUsd;
+      throw err;
+    }
+    // B3.7 — alert path. Fire-and-forget: spend alerts never block the
+    // dispatch call, even when the alert sink (Slack/webhook) is down.
+    if (spend.alertTriggered) {
+      try {
+        // Minimal stub — log + activity entry. Slack/webhook integration
+        // lands in a follow-up commit alongside the workspace
+        // `notifications.spendWebhookUrl` column. Logging here so the
+        // alert is at least visible in the operator's log feed today.
+        console.warn(formatLogLine("warn", null,
+          `[quotaGuard] spend alert: workspace=${workspaceId} ` +
+          `daily=${spend.dailySpent}/${spend.dailyCap} ` +
+          `monthly=${spend.monthlySpent}/${spend.monthlyCap} ` +
+          `threshold=${spend.thresholdPct}%`));
+      } catch { /* alert path is best-effort */ }
+    }
+  }
+  // Token-bucket reserve. `estimatedTokens` is the caller's `maxTokens`
+  // — a generous upper bound; the post-call `reportActual` corrects
+  // drift with the real count from `usage.input + usage.output`.
+  if (routeId && route) {
+    const reserved = await checkAndReserve(routeId, effectiveMaxTokens, {
+      rpmLimit: route.rpmLimit,
+      tpmLimit: route.tpmLimit,
+    });
+    if (!reserved.ok) {
+      const err = new Error(
+        `Local rate limit reached on route ${callOptions.routeName || routeId}. ` +
+        `Retry after ${reserved.retryAfterMs}ms.`,
+      );
+      err.code = "ERR_RATE_LIMIT_LOCAL";
+      err.retryAfterMs = reserved.retryAfterMs;
+      err.reason = reserved.reason;
+      throw err;
+    }
+  }
+
   // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
   // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
   // also derives `useJson` for adapters that haven't migrated yet.
-  const opts = buildAdapterOpts(provider, messages, maxTokens || DEFAULT_MAX_TOKENS, signal, responseFormat);
+  const opts = buildAdapterOpts(provider, messages, effectiveMaxTokens, signal, responseFormat);
   const { text, usage } = await adapterFor(provider).generate(opts);
   // Token telemetry is the orchestrator's responsibility — adapters return
   // raw usage and don't know about the metrics registry. Keeps adapters
@@ -674,6 +741,14 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
       callOptions.agentRole, callOptions.routeName || "unknown",
       callOptions.route || null,
     );
+  }
+  // B3.7 — drift correction. Post-call so the bucket converges to the
+  // real token count after the SDK returns, regardless of how generous
+  // or stingy the pre-call estimate was. Fire-and-forget — failures are
+  // logged inside `reportActual` and never propagate.
+  if (routeId && route && usage) {
+    const actualTokens = (Number(usage.input) || 0) + (Number(usage.output) || 0);
+    reportActual(routeId, effectiveMaxTokens, actualTokens, costResult.costUsd).catch(() => {});
   }
   return { text, usage: usage || null, costResult };
 }
