@@ -28,6 +28,14 @@ import { AUTH_COOKIE } from "./authenticate.js";
 import { redis, isRedisAvailable } from "../utils/redisClient.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { isS3Storage, signS3ArtifactUrl, s3PublicOrigin } from "../utils/objectStorage.js";
+import { requestContext, createRequestId } from "../utils/observability.js";
+import {
+  register as metricsRegister,
+  httpRequestDurationSeconds,
+  httpRequestsTotal,
+  queueDepth,
+} from "../utils/metrics.js";
+import { getQueueStats } from "../queue.js";
 
 // Load .env before reading any env vars below (CORS_ORIGIN, etc.).
 // ESM imports execute before module-level code in index.js, so the
@@ -110,6 +118,109 @@ app.use(cors({
   // set by the backend domain, so the token is echoed in this header instead.
   exposedHeaders: ["X-CSRF-Token"],
 }));
+
+
+
+// Observability: per-request correlation id
+app.use((req, res, next) => {
+  const requestId = req.headers["x-request-id"] || createRequestId();
+  res.setHeader("X-Request-Id", requestId);
+  requestContext.run({ requestId }, () => next());
+});
+
+// INF-007: HTTP RED metrics (Rate / Errors / Duration) — the platform-wide
+// latency SLI + error-rate SLI that drive the top-line uptime dashboard.
+//
+// Cardinality discipline: `route` is the matched Express route TEMPLATE
+// (e.g. `/api/v1/projects/:id`), never the raw URL. Raw URLs would explode
+// cardinality and bankrupt the Prometheus TSDB — `/api/v1/projects/PRJ-1`,
+// `/api/v1/projects/PRJ-2`, … would each be a distinct series. We capture
+// the template AFTER routing has resolved (in the `res.on("finish", …)`
+// handler) by reading `req.route?.path` and prepending `req.baseUrl` so
+// nested routers (`/api/v1` mount + per-router `/projects/:id`) surface
+// the full template.
+//
+// Fallbacks:
+//   - `req.route` is undefined for 404s (no route matched) → label `__not_found__`.
+//   - `req.route` is undefined for the OPTIONS preflight short-circuit and the
+//     SPA catch-all (`app.get("*")`) → labelled `__other__`.
+// Both fallbacks are constant-cardinality so they're safe.
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+  res.on("finish", () => {
+    try {
+      let route = "__other__";
+      if (req.route?.path) {
+        // Concatenate the mount baseUrl (`/api/v1`) with the per-router path
+        // template (`/projects/:id`) for the canonical match key. Trim
+        // trailing slash so `/api/v1/projects/:id` and `/api/v1/projects/:id/`
+        // collapse into one series.
+        const composed = `${req.baseUrl || ""}${req.route.path || ""}`;
+        route = composed.replace(/\/$/, "") || "/";
+      } else if (res.statusCode === 404) {
+        route = "__not_found__";
+      }
+      const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
+      const labels = {
+        method: req.method,
+        route,
+        status: String(res.statusCode),
+      };
+      httpRequestDurationSeconds.observe(labels, seconds);
+      httpRequestsTotal.inc(labels);
+    } catch { /* best-effort */ }
+  });
+  next();
+});
+
+// INF-007: Prometheus scrape endpoint. The registry + custom counters live
+// in `utils/metrics.js` so call-sites (testRunner, crawler, runRepo) can
+// increment them without importing this middleware module. The endpoint is
+// effectively disabled (401 to every caller) when `METRICS_SCRAPE_KEY` is
+// unset, so this is safe to mount unconditionally.
+//
+// Bearer-token comparison uses `crypto.timingSafeEqual` over a SHA-256 digest
+// so an attacker cannot derive the token via the response-time side channel.
+// Length-mismatched tokens short-circuit BEFORE the buffer comparison (the
+// digest collapses both sides to a fixed 32 bytes) so the timing signal is
+// constant regardless of how close the candidate is to the real token. This
+// matches the established pattern used elsewhere in the codebase for HMAC /
+// CSRF / artifact-token comparisons (`appSetup.js:574`,
+// `routes/trigger.js:854-857`).
+app.get("/metrics", async (req, res) => {
+  const key = process.env.METRICS_SCRAPE_KEY;
+  const header = req.headers.authorization;
+  if (!key || !header) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const expected = `Bearer ${key}`;
+  const candidate = crypto.createHash("sha256").update(header).digest();
+  const expectedDigest = crypto.createHash("sha256").update(expected).digest();
+  if (!crypto.timingSafeEqual(candidate, expectedDigest)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // INF-007: Refresh the queue-depth gauge synchronously on each scrape so
+  // Prometheus sees the live BullMQ counters rather than a stale snapshot.
+  // Best-effort: when BullMQ isn't available (no Redis, in-process mode),
+  // `getQueueStats()` returns null and the gauge is left at its previous
+  // value — operators reading `app_queue_depth` in single-process mode will
+  // see zeros, which is the correct signal (nothing is queued; everything
+  // runs inline).
+  try {
+    const stats = await getQueueStats();
+    if (stats) {
+      queueDepth.set({ state: "waiting" },   Number(stats.waiting   || 0));
+      queueDepth.set({ state: "active" },    Number(stats.active    || 0));
+      queueDepth.set({ state: "delayed" },   Number(stats.delayed   || 0));
+      queueDepth.set({ state: "failed" },    Number(stats.failed    || 0));
+      queueDepth.set({ state: "completed" }, Number(stats.completed || 0));
+    }
+  } catch { /* best-effort — BullMQ unavailable */ }
+
+  res.set("Content-Type", metricsRegister.contentType);
+  res.end(await metricsRegister.metrics());
+});
 
 // ─── Cross-origin cookie helper ──────────────────────────────────────────────
 // When the frontend and backend live on different origins (e.g. GitHub Pages +

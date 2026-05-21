@@ -1,0 +1,8 @@
+{
+  "id": "case-028",
+  "category": "modal",
+  "description": "Multi-step wizard modal next/back.",
+  "url": "https://eval.local/import",
+  "snapshot": "<button>Import data</button><div role='dialog' aria-label='Import wizard' hidden><h2>Step 1 of 2</h2><button>Next</button><button>Cancel</button></div>",
+  "expected": "await page.getByRole('button', { name: 'Import data' }).click();\nawait expect(page.getByRole('dialog', { name: 'Import wizard' })).toBeVisible();\nawait page.getByRole('button', { name: 'Next' }).click();\nawait expect(page.getByText('Step 2 of 2')).toBeVisible();"
+}

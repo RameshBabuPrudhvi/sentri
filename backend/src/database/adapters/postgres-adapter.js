@@ -22,6 +22,7 @@
  * - `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`
  * - `INSERT OR REPLACE` → upsert via `ON CONFLICT DO UPDATE SET`
  * - `LIKE` → `ILIKE` (case-insensitive matching)
+ * - `BLOB` column type → `BYTEA` (binary data; MNT-001b element baselines)
  * - `PRAGMA table_info(t)` → `information_schema.columns` query
  *
  * ### Column name case mapping
@@ -134,6 +135,21 @@ function translateSingleStatement(stmt) {
   // SQLite LIKE is case-insensitive by default; PostgreSQL LIKE is case-sensitive.
   // Case-insensitive flag so both `LIKE` and `like` are translated.
   out = out.replace(/\bLIKE\b/gi, "ILIKE");
+
+  // BLOB column type → BYTEA. SQLite uses BLOB for binary columns;
+  // PostgreSQL has no BLOB type and the migration would fail with
+  // `type "blob" does not exist`. Used by migration 036_element_baselines
+  // (MNT-001b) for the `cropPng` baseline crop column. Word-bounded so
+  // `BLOB` inside an identifier (unlikely but possible) is untouched.
+  // Case-insensitive flag matches the adjacent LIKE→ILIKE translation so
+  // a future migration using lowercase `blob` doesn't silently break on
+  // PostgreSQL. String literals are already masked at this point, so a
+  // comment like `-- BLOB column: ...` won't trigger because comments
+  // are stripped at the statement-splitter level (not inside
+  // maskStringLiterals), and because translation runs per-statement on
+  // DDL bodies — comments landing inside the same statement get the
+  // regex applied but a stray BLOB → BYTEA inside a comment is harmless.
+  out = out.replace(/\bBLOB\b/gi, "BYTEA");
 
   return restore(out);
 }
@@ -343,10 +359,55 @@ const _COL_MAP = buildColumnMap([
   "column_name", "data_type",
   // notification_settings (FEA-001)
   "teamsWebhookUrl", "emailRecipients", "webhookUrl",
-  // workspaces (ACL-001)
-  "ownerId",
+  // workspaces (ACL-001 + B2.5 ai-request-log settings).
+  // PostgreSQL folds unquoted identifiers to lowercase, so without
+  // these entries `workspace.aiRequestLogMode` /
+  // `aiRequestLogCustomRedactionRules` would both be `undefined` on
+  // Postgres — silently breaking `getAiRequestLogSettings()` and
+  // forcing every workspace to fall back to the
+  // `AI_REQUEST_LOG_STORAGE_MODE` env-default path. Tracked alongside
+  // the other camelCase entries here.
+  "ownerId", "aiRequestLogMode", "aiRequestLogCustomRedactionRules",
+  // B3.7 — workspace AI spend caps. Same case-folding concern as the
+  // B2.5 columns above: without these entries PostgreSQL returns
+  // `undefined` for `workspace.dailySpendCapUsd` etc, silently
+  // disabling the cap-enforcement path on Postgres-backed deployments.
+  "dailySpendCapUsd", "monthlySpendCapUsd", "spendAlertThresholdPct",
+  // B4.0.1 — spend-alert webhook delivery columns (migration 052).
+  // `spendAlert.js#fireSpendAlert` reads `row.spendAlertWebhookUrl` and
+  // `row.spendAlertLastFiredAt` directly. Without these case-mapping
+  // entries Postgres returns `spendalertwebhookurl` /
+  // `spendalertlastfiredat`, the camelCase reads return `undefined`,
+  // the `!row?.spendAlertWebhookUrl` guard always fires, and webhook
+  // delivery silently degrades to console.warn on every PG deployment.
+  "spendAlertWebhookUrl", "spendAlertLastFiredAt",
   // workspace_members (ACL-001)
   "joinedAt",
+  // agent_configs (AI-004 schema, migration 037 — see fix note in the
+  // migration file). PostgreSQL folds unquoted identifiers to lowercase,
+  // so without these entries `agentConfig.systemPromptOverride` /
+  // `fallbackRole` / `maxTokens` / `routeId` would all be `undefined` on
+  // Postgres — silently breaking the AI-005 per-role provider lookup,
+  // the AI-005 fallback chain, the per-role token budget, and the B1.6
+  // route-driven dispatch path. `provider` / `model` / `temperature` /
+  // `role` are already single-case and don't need an entry. `id` /
+  // `workspaceId` / `createdAt` / `updatedAt` are covered above.
+  "systemPromptOverride", "maxTokens", "fallbackRole", "routeId",
+  // provider_routes (B1.1, migration 035). Same rationale — these all
+  // need lowercase→camelCase remap so dispatch reads work on Postgres.
+  // `id` / `workspaceId` / `name` / `family` / `protocol` / `baseUrl` /
+  // `model` / `pricing` / `capabilities` / `enabled` / `createdAt` /
+  // `updatedAt` are already covered or single-case. The encrypted blobs
+  // (`apiKeyEncrypted`, `apiKeyNonce`) only flow through `getSecretById`
+  // and must round-trip as Buffers; PostgreSQL `BYTEA` columns return
+  // Buffers natively via pg-native + node-pg, so no extra remap is
+  // required for the byte payload — only the key spellings below.
+  "apiKeyEncrypted", "apiKeyNonce", "apiKeyLastFour",
+  "rpmLimit", "tpmLimit",
+  "cacheEnabled", "cacheTtlSec",
+  "fallbackRouteId",
+  // provider_route_audit (B1.2, migration 036). `routeId` / `userId` are
+  // covered above; `action` / `metadata` are single-case.
 ]);
 
 /**

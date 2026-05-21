@@ -163,6 +163,343 @@
   display: flex; align-items: center; gap: 14px;
 }
 
+/* ── Agent Roles tab (AI-005) ───────────────────────────────────────────────── */
+/* Per-row form + result row inside the AgentRolesTab. Class names follow the
+   `.st-agent-*` prefix to stay scoped to the Settings page; no inline styles
+   so the same look survives theme changes and the AGENT.md "no inline CSS"
+   rule (§127-128). */
+.st-agent-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.st-agent-form-actions {
+  display: flex;
+  gap: 8px;
+}
+.st-agent-error {
+  margin-bottom: 12px;
+}
+.st-agent-rows {
+  display: grid;
+  gap: 8px;
+}
+.st-agent-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.st-agent-row-meta {
+  font-family: var(--font-mono);
+}
+.st-agent-row-actions {
+  display: flex;
+  gap: 6px;
+}
+.st-agent-row-badge {
+  /* Override the default `.st-status-ok` / `.st-status-err` `margin-top: 8px`
+     so the badge sits flush with the row meta + actions on a single line. */
+  margin-top: 0;
+}
+
+/* ── Provider Routes tab (B3.1) ─────────────────────────────────────────────── */
+/* Per-row form + list inside the ProviderRoutesTab. Class names follow the
+   `.st-pr-*` prefix to stay scoped to the Settings page; no inline styles so
+   the same look survives theme changes and the AGENT.md "no inline CSS" rule. */
+.st-pr-form {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.st-pr-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.st-pr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.st-pr-field--wide {
+  grid-column: span 2;
+}
+.st-pr-field-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text2);
+}
+.st-pr-form-checks {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.st-pr-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.st-pr-loading,
+.st-pr-empty {
+  padding: 18px 4px;
+  text-align: center;
+}
+
+.st-pr-rows {
+  display: grid;
+  gap: 10px;
+}
+.st-pr-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+.st-pr-row-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.st-pr-row-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.st-pr-row-meta {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.st-pr-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.st-pr-row-error {
+  margin-top: 4px;
+}
+
+.st-pr-rotate-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  flex-wrap: wrap;
+}
+.st-pr-rotate-input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.st-pr-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 0;
+}
+.st-pr-badge--unprobed {
+  background: var(--bg3);
+  color: var(--text3);
+  border: 1px solid var(--border);
+}
+.st-pr-badge--disabled {
+  background: rgba(255, 165, 2, 0.1);
+  color: var(--amber);
+  border: 1px solid rgba(255, 165, 2, 0.25);
+}
+
+/* B3.2 — Inline cycle warning rendered under the fallback dropdown.
+   Reuses `.st-status-err` for colour + icon alignment; this rule just
+   tightens the spacing so it visually anchors to the dropdown above
+   rather than floating in the form grid gap. */
+.st-pr-cycle-warning {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* B3.2 — Deprecation hint that replaces the old `fallbackRole` dropdown
+   in `AgentRolesTab`. Looks like a muted form-row note so admins
+   editing role configs see WHY the field is gone without us having to
+   ship a separate migration UI. */
+.st-agent-fallback-deprecation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text3);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+/* B3.5 — Export / import action bar above the create-form. Mirrors the
+   visual weight of `.st-pr-form-checks` so the two action surfaces
+   read as siblings, not competing primary CTAs. The native file input
+   is hidden + driven by a button click so the styling stays uniform
+   with the rest of the action bar. */
+.st-pr-io-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.st-pr-io-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.st-pr-io-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.st-pr-io-mode-select {
+  height: 30px;
+  font-size: 0.82rem;
+  padding: 0 8px;
+}
+.st-pr-io-file {
+  display: none;
+}
+
+/* B3.7 — Workspace spend caps panel above the create-route form.
+   Reuses `.st-pr-form-grid` semantics (3-column on desktop) so the
+   visual weight matches the per-route fields below. */
+.st-pr-spend-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.st-pr-spend-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+}
+.st-pr-spend-sub {
+  line-height: 1.5;
+}
+.st-pr-spend-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.st-pr-spend-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* B3.9 — Audit log subtab. Compact 4-column grid (timestamp / action
+   badge / route name / metadata summary) so a long history fits
+   on-screen without horizontal scroll. The `metadata` column flexes
+   so its summary text claims any leftover width. */
+.st-pr-audit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.st-pr-audit-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+}
+.st-pr-audit-sub {
+  line-height: 1.5;
+}
+.st-pr-audit-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.st-pr-audit-empty {
+  padding: 14px 4px;
+  text-align: center;
+}
+.st-pr-audit-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.st-pr-audit-row {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(80px, auto) minmax(120px, 1fr) 2fr;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px dashed var(--border);
+  min-width: 0;
+}
+.st-pr-audit-row:last-child {
+  border-bottom: none;
+}
+.st-pr-audit-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.st-pr-audit-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+/* Per-action colour cues. Keep low-saturation so the table reads as
+   a continuous list instead of a kindergarten poster. */
+.st-pr-audit-action--create   { background: rgba(46, 204, 113, 0.15); color: var(--green); }
+.st-pr-audit-action--update   { background: rgba(52, 152, 219, 0.15); color: var(--accent); }
+.st-pr-audit-action--delete   { background: rgba(231, 76, 60, 0.15);  color: var(--red); }
+.st-pr-audit-action--rotate_key { background: rgba(255, 165, 2, 0.15); color: var(--amber); }
+.st-pr-audit-action--probe    { background: rgba(155, 89, 182, 0.15); color: var(--purple); }
+.st-pr-audit-action--export,
+.st-pr-audit-action--import   { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
   /* Provider cards: tighten padding */
@@ -189,6 +526,20 @@
   .st-data-action .btn {
     align-self: flex-start;
   }
+
+  /* Provider Routes: collapse form to 2 columns + stack action bar */
+  .st-pr-form-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .st-pr-field--wide {
+    grid-column: span 2;
+  }
+  .st-pr-row {
+    grid-template-columns: 1fr;
+  }
+  .st-pr-row-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
@@ -214,6 +565,37 @@
     align-items: flex-start;
     gap: 8px;
     padding: 12px 16px;
+  }
+
+  /* Provider Routes: single-column form on phones */
+  .st-pr-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .st-pr-spend-grid {
+    grid-template-columns: 1fr;
+  }
+  /* B3.9 — collapse audit filters + row layout on phones. The 4-col
+     row grid becomes flex-column so each entry stacks vertically
+     instead of overflowing the viewport. */
+  .st-pr-audit-filters {
+    grid-template-columns: 1fr;
+  }
+  .st-pr-audit-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .st-pr-audit-meta {
+    white-space: normal;
+  }
+  .st-pr-field--wide {
+    grid-column: span 1;
+  }
+  .st-pr-rotate-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .st-pr-rotate-input {
+    min-width: 0;
   }
 
   /* Tour card: stack */

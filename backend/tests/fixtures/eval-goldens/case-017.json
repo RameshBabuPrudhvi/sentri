@@ -1,0 +1,8 @@
+{
+  "id": "case-017",
+  "category": "list-click",
+  "description": "Pagination next page click.",
+  "url": "https://eval.local/orders",
+  "snapshot": "<ul data-testid='order-list'><li>Order #1001</li></ul><nav><button>Previous</button><span>Page 1 of 3</span><button>Next</button></nav>",
+  "expected": "await page.getByRole('button', { name: 'Next' }).click();\nawait expect(page.getByText('Page 2 of 3')).toBeVisible();"
+}

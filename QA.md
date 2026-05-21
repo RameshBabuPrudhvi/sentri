@@ -855,6 +855,75 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🧩 Agent Roles (AI-004)
+
+**Preconditions:** User A (admin) logged in; at least one extra workspace member at `qa_lead` or `viewer` role for the negative checks. A second workspace + admin (User D in a separate workspace) for the cross-workspace isolation check.
+
+**Surfaces covered:** Settings → **Agent Roles** tab (admin-only). Backed by `backend/src/routes/settings.js` (`GET` / `POST` / `PATCH` / `DELETE /api/v1/settings/agent-roles[/:role]`), persisted in the `agent_configs` table (`backend/src/database/migrations/046_agent_configs.sql`). Each workspace/role pair stores `provider`, `model`, `systemPromptOverride`, `temperature`, `maxTokens`, and `fallbackRole`. Canonical roles allowlist (8): `explorer`, `planner`, `author`, `oracle`, `executor`, `healer`, `reviewer`, `triager` (`backend/src/routes/settings.js:242`).
+
+> ⚠️ **AI-004 is dormant** — saving a config does NOT yet change crawl / generate / run behaviour. The pipeline still uses the workspace-default provider and built-in prompts. AI-005 will wire dispatch. Verify that runs behave identically before and after configuring any role.
+
+**A. Visibility (admin-only gate)**
+
+1. As User A (admin), open Settings → the **Agent Roles** tab is visible in the tab strip.
+2. As User B (`qa_lead`) or User C (`viewer`), open Settings → the **Agent Roles** tab is NOT rendered (`frontend/src/pages/Settings.jsx:544` — `adminOnly: true`).
+3. As `viewer`, directly hit `GET /api/v1/settings/agent-roles` via DevTools → **403** (server-side `requireRole("admin")`). Same for `POST` / `PATCH` / `DELETE` (`backend/src/middleware/permissions.json` agent-roles entries).
+
+**B. CRUD round-trip**
+
+4. Pick `planner` from the role dropdown, enter `provider: "openai"`, `model: "gpt-4o-mini"`, `temperature: 0.2`, leave the rest blank → **Save role config** → row appears in the list below with `planner · openai · gpt-4o-mini · temp 0.2`. HTTP returns **201** on first create (`backend/src/routes/settings.js:286`).
+5. POST the same role again with a different `model` → **200** (upsert; row's `model` updates, `id` and `createdAt` preserved).
+6. Click **Edit** on the `planner` row → form pre-fills with the saved values; the role dropdown is disabled (cannot rename a row by editing).
+7. Change `temperature: 0.5`, click **Update role config** → toast clears, row reflects new temperature.
+8. Click **Delete** on the `planner` row → row disappears; subsequent `GET` does not return it.
+
+**C. Cross-workspace isolation**
+
+9. As User A (admin in WS-1), save a `reviewer` config with `provider: "anthropic"`.
+10. As User D (admin in WS-2 — separate workspace), open Settings → Agent Roles → the list does NOT include the `reviewer` row from WS-1. Direct `GET /api/v1/settings/agent-roles` returns only WS-2's rows.
+11. Reverse the check from WS-1 → User D's configs are not leaked back.
+
+**D. Role-name allowlist (negative)**
+
+12. Via DevTools, `POST /api/v1/settings/agent-roles` with `{ role: "hacker" }` → **400 "Invalid role"** (`backend/src/routes/settings.js:269`). The frontend dropdown only exposes canonical names, so this branch is reachable only by direct API callers.
+13. Same check on `fallbackRole`: POST `{ role: "planner", fallbackRole: "hacker" }` → **400 "Invalid fallbackRole"**.
+
+**E. Fallback cycle detection (negative)**
+
+14. Create `planner` with `fallbackRole: "reviewer"` → 201.
+15. Create `reviewer` with `fallbackRole: "author"` → 201.
+16. Attempt to create `author` with `fallbackRole: "planner"` (closing the cycle A→B→C→A) → **400 "fallbackRole creates a cycle"** (`hasFallbackCycle` walks the chain at `backend/src/routes/settings.js:250-262`).
+17. PATCH path: with no cycle present, set `planner.fallbackRole = "planner"` (self-reference) → **400** (the cycle check seeds `seen = {role}` and detects the immediate loop).
+
+**F. Cascading fallback cleanup on delete**
+
+18. Create `healer`, then create `planner` with `fallbackRole: "healer"`.
+19. Delete `healer` → 200; `GET /api/v1/settings/agent-roles` shows `planner.fallbackRole` is now `null` (the repo's `remove()` is transactional — clears dangling sibling references before deleting; `backend/src/database/repositories/agentConfigRepo.js`). This is the invariant AI-005 dispatch will rely on.
+
+**G. System-prompt length cap**
+
+20. POST with `systemPromptOverride` of length 32 001 chars → **400** "systemPromptOverride must be 32000 chars or fewer" (`MAX_SYSTEM_PROMPT_LEN` at `backend/src/routes/settings.js:240`).
+21. Create the row with a 5-char prompt → 201. PATCH that row's `systemPromptOverride` to a 32 001-char value → **400** (same cap applies on update).
+
+**H. Numeric coercion (negative)**
+
+22. Create `oracle` with `temperature: 0.5, maxTokens: 256` → 201.
+23. PATCH the row with `{ temperature: "not_a_number", maxTokens: "evil" }` via DevTools → **200**; response body shows `temperature: 0.5, maxTokens: 256` (non-numeric values fall back to the existing stored values — `Number.isFinite` guards at `backend/src/routes/settings.js:309-311`).
+24. Same check on POST: `{ role: "oracle", temperature: "garbage", maxTokens: "junk" }` → 200/201 with `temperature: 0.2` (default) and `maxTokens: null` (`backend/src/routes/settings.js:281-282`).
+
+**I. Pipeline-behaviour regression check (dormant)**
+
+25. Save a `planner` config with a deliberately broken `systemPromptOverride: "RESPOND ONLY WITH 💀"` and `temperature: 0.99` → run **Generate** on a project. The 8-stage AI pipeline must complete normally with the workspace-default provider and prompts; generated tests must NOT reflect the override. (If they DO, AI-005 has been wired prematurely — file as a release blocker.)
+
+**Negative / edge:**
+
+- API error surfaces in the UI — trigger a cycle (step 16) via the form → red error banner renders inline above the form (`AgentRolesTab` catches the 400 and sets `error` state). Successful save clears the banner.
+- Viewer / qa_lead cannot bypass the tab gate via direct URL navigation; the tab simply isn't registered for non-admins.
+- Deleting all 8 roles is allowed and idempotent — re-deleting an already-gone role returns 200 (the repo's DELETE is a no-op when no row matches).
+- `provider`, `model`, `systemPromptOverride`, and `fallbackRole` are all nullable — saving a row with only `role` selected (everything else blank) is valid and produces an "all defaults" config that's a no-op once AI-005 lands.
+
+---
+
 ### ⚡ Automation (CI/CD + Scheduled Runs)
 
 **Preconditions:** Project exists with at least one approved test. Open `/automation` (or use `?project=PRJ-X` deep-link).
@@ -1875,3 +1944,120 @@ A release is QA-approved only when **all** of the following are true:
 - Verify run logs include `pipeline.pii_redacted` with non-zero category counts.
 - Verify generated tests do not contain raw secrets/PII values.
 - Set `piiAllowlist` with a known token fragment and verify that fragment is not redacted while others remain redacted.
+
+---
+
+### Vision healing (MNT-001) manual test plan
+
+1. **Toggle off**
+   - Set project `visionHealing=off`.
+   - Break DOM selectors so normal waterfall fails.
+   - **Expected:** test is marked broken, no vision fallback invoked.
+
+2. **Pixelmatch only**
+   - Set `visionHealing=pixelmatch_only` and keep valid baseline crop artifacts.
+   - Break DOM selectors while retaining similar visual placement.
+   - **Expected:** pixelmatch fallback can recover; no LLM call path.
+
+3. **Pixelmatch + LLM**
+   - Set `visionHealing=pixelmatch_and_llm`.
+   - Force pixelmatch confidence below threshold.
+   - **Expected:** LLM vision fallback is attempted only in this mode.
+
+4. **Provider not configured guard**
+   - Clear `VISION_MODEL` and `AI_MODEL` server-side.
+   - Attempt `pixelmatch_and_llm`.
+   - **Expected:** backend rejects update with `VISION_PROVIDER_NOT_CONFIGURED`.
+
+5. **Daily call budget circuit breaker**
+   - Set `visionHealMaxCallsPerDay` to a very low value (e.g. 1).
+   - Run two failure scenarios requiring stage 8.
+   - **Expected:** first may call LLM, second soft-disables stage 8 and falls back to pixelmatch-only behavior.
+
+6. **Monthly cost budget circuit breaker**
+   - Set `visionHealMaxCostUsdPerMonth` to a very low value.
+   - Trigger LLM vision calls until threshold is exceeded.
+   - **Expected:** subsequent stage 8 usage is disabled for current window.
+
+7. **Healing summary surface**
+   - Open Healing dashboard after runs.
+   - **Expected:** vision panel renders with `visionHealCount`, `visionHealCostUsd`, and strategy split.
+
+8. **Zero-state rendering**
+   - Use a workspace with no vision heals.
+   - **Expected:** Healing dashboard vision panel renders without error at zero values.
+
+9. **Auditability**
+   - Inspect activity/audit views during vision heals and budget exhaustion.
+   - **Expected:** vision healing activity is attributable and visible for compliance review.
+
+---
+
+### Vision healing (MNT-001) — release verification checklist
+
+Once-per-release smoke. Pass all 8 sections before tagging.
+
+**Backend wiring:**
+- [ ] `STRATEGY_VERSION === 4` in `backend/src/selfHealing.js` (grep confirms)
+- [ ] `pixelmatch` + `pngjs` resolve in `backend/node_modules` (run `node -e "require('pixelmatch'); require('pngjs')"` → no `MODULE_NOT_FOUND`)
+- [ ] Migrations 035 / 036 / 037 applied (`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('element_baselines', 'vision_budget_counters')` returns 2 rows; `projects.visionHealing` column exists)
+- [ ] `GET /api/v1/system/vision-provider-status` returns `{ available: boolean, model: string|null }` when `VISION_MODEL` is set; `{ available: false, model: null }` when unset
+
+**Runtime integration:**
+- [ ] `executeTest.js` passes real `pixelmatchHeal` + `llmVisionHeal` + `isBudgetExhausted` deps to `tryVisionHeal` (grep `tryVisionHeal(` → second arg is non-empty `{ pixelmatchHeal, llmVisionHeal, isBudgetExhausted }`)
+- [ ] `codeExecutor.js` runtime helper exposes `__requestVisionLocator` in the sandbox context
+- [ ] Green run captures baselines (run a test, check `SELECT COUNT(*) FROM element_baselines WHERE projectId = '<PRJ>'` increments)
+- [ ] Failing run with `visionHealing="pixelmatch_only"` against a moved-but-visually-identical element passes on the **second** attempt (first run records the heal; second run uses the cached hint)
+
+**Audit + telemetry:**
+- [ ] `healing.vision_pixelmatch` row appears in `activities` after a stage-7 heal (column `meta` carries `confidence`, `strategyIndex: 7`, `box`)
+- [ ] `healing.vision_llm` row appears after a stage-8 heal (column `meta` adds `model` + `costUsd`)
+- [ ] `healing.vision_budget_exhausted` row appears when daily-call cap is hit (column `meta.reason` is `daily_calls` or `monthly_cost`)
+- [ ] `GET /metrics` (with `METRICS_SCRAPE_KEY` Bearer) returns:
+  - `app_ai_provider_tokens_total{operation="vision_heal"}` non-zero after a stage-8 heal
+  - `app_ai_cost_usd_total{operation="vision_heal"}` non-zero after a stage-8 heal
+  - `app_vision_heal_budget_exhausted_total{projectId,reason}` non-zero after triggering the cap
+- [ ] `AUDIT_HASH_CHAIN=true; POST /api/v1/system/verify-audit-chain` returns `{ verified: true }` after a run that produced vision-heal rows
+
+**Frontend:**
+- [ ] Quality card → **Vision Healing** tab reachable on `/automation`
+- [ ] `pixelmatch_and_llm` radio is disabled with tooltip "VISION_MODEL not configured server-side" when backend reports `available: false`
+- [ ] `pixelmatch_and_llm` radio shows `via <model>` hint when backend reports a vision-capable model
+- [ ] Daily / monthly cap inputs accept values, save via `PATCH /projects/:id`, persist on reload
+- [ ] Healing dashboard → **Vision-based healing** panel renders: zero-state when no heals; with stats + sparkline + audit-log link when heals exist
+- [ ] Audit log deep-link from the panel filters activities to `healing.vision_*` types
+
+**Tests:**
+- [ ] `cd backend && npm test` passes — includes `self-healing-vision.test.js`, `vision-heal-pixelmatch.test.js`, `element-baseline-repo.test.js`, `vision-budget-repo.test.js`, and the `app_ai_cost_usd_total` + `app_vision_heal_budget_exhausted_total` regression assertions in `observability.test.js`
+- [ ] `cd frontend && npm test` passes — includes `vision-healing-toggle.test.js`
+- [ ] All five new backend test files registered in `backend/tests/run-tests.js`
+- [ ] Frontend test file registered in `frontend/tests/run-tests.js` (or picked up by glob)
+
+**Docs + sprint hand-off:**
+- [ ] `docs/changelog.md` MNT-001 entry under `## [Unreleased]` no longer carries "deferred to MNT-001b" caveats
+- [ ] `docs/guide/vision-healing.md` covers debugging low-confidence pixelmatch matches + cost-ceiling guidance + incident-disable runbook + audit-log fields reference
+- [ ] `ROADMAP.md` MNT-001 section flipped to ✅ Complete with the PR number; Phase Summary `Ongoing — Maintenance` row updated; Completed Work Summary table row added
+- [ ] `NEXT.md` slot-1 is something other than MNT-001 (or carries a "promote next item" placeholder)
+
+**Manual debugging recipes** — operator skill that catches the 80% of low-confidence stage-7 issues. Run each at least once before signing off:
+
+1. **"I have baselines but pixelmatch never matches"** — `SELECT projectId, healingKey, cropWidth, cropHeight, capturedAt FROM element_baselines WHERE projectId = '<PRJ>' ORDER BY capturedAt DESC LIMIT 20;`. If `cropWidth`/`cropHeight` < 10 px the element was captured mid-render (skeleton state) — add `await page.waitForLoadState("networkidle")` before the affected step in the green test, re-run, verify next capture has larger dimensions.
+2. **"Confidence hovers around 0.7"** — drop `VISION_HEAL_PIXEL_CONFIDENCE=0.75` for a week, watch `app_ai_cost_usd_total{operation="vision_heal"}` rate. If LLM-fallback rate drops without false positives in the audit log (look for `healing.vision_pixelmatch` rows where the next step then fails), keep the lower threshold.
+3. **"LLM heal returned a bbox but click landed on the wrong element"** — overlay (modal/tooltip/dropdown) intercepted the coordinate click. Inspect the run's `result.network` for unexpected requests after the heal; add `page.locator("[role=dialog]").waitFor({ state: "detached" })` before the failed step so the overlay is closed before stage 7 captures the failure screenshot.
+4. **Visual debug** — set `VISION_HEAL_DEBUG=1` on the worker process. After every stage-7 attempt, the runner writes `artifacts/vision-debug/<runId>-<stepIndex>-bbox.png` (red rectangle drawn on the failure screenshot at the match coordinates). View via the run detail page → Artifacts. Disable in production (~50 ms per heal overhead).
+5. **Cost ceiling recommendations:**
+
+   | Use case | `visionHealMaxCallsPerDay` | `visionHealMaxCostUsdPerMonth` |
+   |---|---|---|
+   | Dev / staging | 10 | 1 |
+   | Small prod project | 100 (default) | 50 (default) |
+   | Large multi-tenant SaaS | 500 | 200 |
+   | Tight enterprise hard-cap | 20 | 10 |
+
+6. **Emergency global disable (SRE path)** — `kubectl set env deployment/sentri-backend VISION_HEAL_DISABLED=1`. Bypasses every per-project setting; `tryVisionHeal` returns `null` immediately. Use only during active incidents.
+
+## Browser code coverage (AUTO-009)
+1. Enable Coverage in Automation → Quality card → Coverage tab.
+2. Run tests twice and verify dashboard Coverage section shows 30-day points.
+3. Verify project with coverage disabled shows empty-state prompt.
+4. Verify run coverage summary includes sourceMapStatus fallback when no sourcemaps.

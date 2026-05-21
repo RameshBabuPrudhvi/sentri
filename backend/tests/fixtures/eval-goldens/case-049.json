@@ -1,0 +1,8 @@
+{
+  "id": "case-049",
+  "category": "assertion-heavy",
+  "description": "Empty-state rendering.",
+  "url": "https://eval.local/projects",
+  "snapshot": "<div data-testid='empty-state'><h2>No projects yet</h2><p>Create your first project to get started.</p><a href='/projects/new'>New project</a></div>",
+  "expected": "await expect(page.getByTestId('empty-state')).toBeVisible();\nawait expect(page.getByRole('heading', { name: 'No projects yet' })).toBeVisible();\nawait expect(page.getByText('Create your first project to get started.')).toBeVisible();\nawait expect(page.getByRole('link', { name: 'New project' })).toHaveAttribute('href', '/projects/new');"
+}

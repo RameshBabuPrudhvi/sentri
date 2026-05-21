@@ -20,6 +20,10 @@
 .badge-purple { background: var(--purple-bg); color: var(--purple); }
 .badge-gray   { background: var(--bg3);       color: var(--text2);  }
 .badge-accent { background: var(--accent-bg); color: var(--accent); }
+/* Small inline badge variant — used by the per-test coverage delta
+   badge (AUTO-009c) so `+47L · +12B · +3F` renders as a compact
+   inline-flex row without per-element inline style. */
+.badge-sm-inline { font-size: 0.62rem; display: inline-flex; gap: 4px; }
 
 /* ── Buttons ────────────────────────────────────────────────────────────────── */
 .btn {

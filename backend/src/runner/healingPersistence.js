@@ -17,7 +17,9 @@ import { recordHealing, recordHealingFailure } from "../selfHealing.js";
 import { trackTelemetry } from "../utils/telemetry.js";
 import { recordMetric } from "../utils/recordMetric.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { logActivity } from "../utils/activityLogger.js";
 import * as testRepo from "../database/repositories/testRepo.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
 
 /**
  * persistHealingEvents(testId, events)
@@ -38,16 +40,88 @@ export function persistHealingEvents(testId, events) {
   // already captured in the healing_history table.
   let succeededCount = 0;
   let failedCount = 0;
+  let visionHealCount = 0;
+  let visionHealCostUsd = 0;
+  const visionHealStrategy = { pixelmatch: 0, llm: 0 };
   // Histogram of which strategy index actually succeeded — index 0 means
   // "primary selector worked, no healing needed", >0 means a fallback won.
   const strategyHistogram = {};
 
   for (const evt of events) {
-    // Guard: a bug in findElement could push an event with a missing key
-    // (e.g. if hintKey was null but the event was still emitted). Without
-    // this check, evt.key.split("::") throws TypeError and halts persistence
-    // of all subsequent events in the loop.
-    if (!evt || typeof evt.key !== "string") continue;
+    if (!evt) continue;
+    // MNT-001b — budget-exhausted sentinel never reaches persistence in
+    // practice (executeTest.js filters it before pushing onto visionEvents),
+    // but guard defensively so a future caller can't accidentally count a
+    // skipped stage 8 as a "heal". The audit row + Prometheus counter are
+    // the canonical record for budget-exhausted events.
+    if (evt.kind === "vision_budget_exhausted") continue;
+    if (evt.kind === "vision_pixelmatch" || evt.kind === "vision_llm") {
+      visionHealCount += 1;
+      if (evt.kind === "vision_pixelmatch") visionHealStrategy.pixelmatch += 1;
+      if (evt.kind === "vision_llm") visionHealStrategy.llm += 1;
+      if (Number.isFinite(evt.costUsd)) visionHealCostUsd += Number(evt.costUsd);
+
+      // MNT-001b — SEC-007-compatible audit row, one per heal. Routed
+      // through logActivity so workspace scoping + hash-chain continuation
+      // happen automatically. The `kind` translates 1:1 to the activity
+      // `type` (`healing.vision_pixelmatch` / `healing.vision_llm`) so SIEM
+      // filters and the dashboard's audit-log drill-down can match on
+      // `healing.vision_*`.
+      //
+      // No request context is available here (this runs from the test
+      // runner, not an HTTP handler) — meta fields come from the event
+      // itself + the test row's denormalised projectId / workspaceId.
+      // workspaceId is the load-bearing field for multi-tenant scoping;
+      // a row without it is invisible to `/api/v1/activities`, so we
+      // skip the write rather than silently leak across workspaces.
+      try {
+        const baseTestId = String(testId).replace(/@v\d+$/, "");
+        const test = testRepo.getById(baseTestId);
+        if (test?.projectId && test?.workspaceId) {
+          // Look up project name lazily — testRepo doesn't denormalise it.
+          // Failure here is non-fatal; we'll log the row without it.
+          let projectName = null;
+          try {
+            const project = projectRepo.getById(test.projectId);
+            projectName = project?.name || null;
+          } catch { /* projectRepo down — log without name */ }
+
+          const confidencePct = Number.isFinite(evt.confidence)
+            ? (evt.confidence * 100).toFixed(1)
+            : "?";
+          const detail = evt.kind === "vision_pixelmatch"
+            ? `Vision healed via pixelmatch (confidence ${confidencePct}%)`
+            : `Vision healed via LLM ${evt.model || "(unknown model)"} (confidence ${confidencePct}%, $${Number(evt.costUsd || 0).toFixed(4)})`;
+
+          logActivity({
+            type: `healing.${evt.kind}`,
+            projectId: test.projectId,
+            projectName,
+            testId: baseTestId,
+            testName: test.name || null,
+            workspaceId: test.workspaceId,
+            detail,
+            meta: {
+              key: evt.key,
+              confidence: Number.isFinite(evt.confidence) ? evt.confidence : null,
+              strategyIndex: evt.strategyIndex,
+              box: evt.box || null,
+              model: evt.model || null,
+              costUsd: Number.isFinite(evt.costUsd) ? evt.costUsd : 0,
+            },
+          });
+        }
+      } catch (err) {
+        // Audit write failure must not break heal recording — the heal
+        // already happened; losing the audit row is a separate concern.
+        console.warn(formatLogLine("warn", null,
+          `[healing] Failed to write vision audit row for ${evt.key}: ${err.message}`));
+      }
+      continue;
+    }
+    // Guard: malformed non-vision entries without a key are ignored so one
+    // bad event does not block persistence of the rest.
+    if (typeof evt.key !== "string") continue;
     // Use bounded split so labels containing '::' don't corrupt args
     const [action, ...rest] = evt.key.split("::");
     const label = rest.join("::");
@@ -75,6 +149,9 @@ export function persistHealingEvents(testId, events) {
     // PostHog accepts nested objects on `properties` — surfaces nicely as a
     // breakdown chart in the UI ("how often does strategy 2 win?").
     strategyHistogram,
+    visionHealCount,
+    visionHealCostUsd,
+    visionHealStrategy,
   });
 
   // MET-001: record a savings sample so the healing dashboard's TrendChart

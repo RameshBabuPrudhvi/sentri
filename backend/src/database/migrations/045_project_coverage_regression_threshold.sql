@@ -1,0 +1,14 @@
+-- AUTO-009i — Per-project coverage regression alerting threshold.
+--
+-- `coverageRegressionThresholdPct` is the minimum coverage-drop percentage
+-- (0–100) that triggers a notification via the FEA-001 pipeline. When NULL
+-- or 0, regression alerting is disabled (default — zero regression for
+-- existing projects). Example: setting 5 means a drop from 80% to 74%
+-- (6% drop > 5% threshold) fires a Teams / email / webhook alert.
+--
+-- Stored on the project row (not inside `qualityGates` JSON) because:
+--   1. It's a notification trigger, not a pass/fail gate — conflating the
+--      two would confuse operators who want alerts without failing CI.
+--   2. The `qualityGates` shape already has `maxCoverageRegressionPct`
+--      which FAILS the run; this field ALERTS without failing.
+ALTER TABLE projects ADD COLUMN coverageRegressionThresholdPct REAL DEFAULT NULL;

@@ -1,0 +1,27 @@
+-- AUTO-009d — PR-scoped coverage diff (the Codecov play).
+--
+-- Two new JSON-TEXT columns on `runs`:
+--
+--   `changedFileRanges` — populated at trigger time when the run is launched
+--     from a GitHub PR webhook. Carries the output of
+--     `getChangedFileRangesForPr()` so the post-run finalizer can ask
+--     `computePrCoverage` to filter `coveredLinesByFile` against the PR's
+--     touched line ranges. Shape: `{ [filename]: Array<[startLine, endLine]> }`.
+--
+--   `prCoverageDiff` — populated by `finalizeCoverage` after aggregation.
+--     Carries the output of `computePrCoverage`. Shape: see
+--     `pipeline/coveragePrDiff.js` JSDoc. NULL on non-PR runs (manual UI,
+--     scheduled, crawl-only) so the persisted shape stays unchanged for
+--     legacy callers.
+--
+-- Both columns are nullable and have no DEFAULT — pre-AUTO-009d rows
+-- render the new RunDetail PR-coverage panel as hidden, and the
+-- `minPrCoveragePct` gate evaluator falls back to overall coveragePct
+-- (matching the pre-AUTO-009d behaviour) until a PR run produces a
+-- non-null `prCoverageDiff`.
+--
+-- SQLite-compatible separate ALTERs (no multi-column ALTER TABLE syntax
+-- in SQLite, vs Postgres which supports it but is happy to run sequential
+-- ALTERs too).
+ALTER TABLE runs ADD COLUMN changedFileRanges TEXT;
+ALTER TABLE runs ADD COLUMN prCoverageDiff TEXT;

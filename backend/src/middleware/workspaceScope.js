@@ -20,6 +20,39 @@
  */
 
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
+import * as Sentry from "@sentry/node";
+
+/**
+ * INF-007 — Attach the authenticated user + workspace identity to the current
+ * Sentry scope so any error captured during this request carries the tenant
+ * identifier as searchable tags / user context.
+ *
+ * Without this, multi-tenant Sentry inboxes look like undifferentiated
+ * noise — operators cannot answer "which customer is impacted?" without
+ * cross-referencing every event by hand. With it:
+ *
+ *   - `Sentry.setUser({ id })` — populates the standard `user.id` field so
+ *     Sentry's "users affected" rollup is accurate. Email / username are NOT
+ *     attached (PII minimisation per GDPR / SOC 2).
+ *   - `Sentry.setTag("workspace_id", …)` — searchable tag so the on-call can
+ *     filter "errors in workspace WS-7" with one click.
+ *   - `Sentry.setTag("user_role", …)` — distinguishes admin / qa_lead /
+ *     viewer impact (a viewer-only crash is lower priority than admin).
+ *
+ * Safe to call when Sentry has not been init'd — `setUser` / `setTag` are
+ * documented no-ops in that case. Wrapped in `try/catch` as defence-in-depth
+ * so any SDK throw never breaks the auth middleware chain.
+ *
+ * @param {Object} req - The Express request after workspaceScope has set req.workspaceId.
+ */
+function attachSentryContext(req) {
+  if (!process.env.SENTRY_DSN) return;
+  try {
+    Sentry.setUser({ id: req.authUser?.sub || null });
+    if (req.workspaceId) Sentry.setTag("workspace_id", req.workspaceId);
+    if (req.userRole) Sentry.setTag("user_role", req.userRole);
+  } catch { /* best-effort */ }
+}
 
 /**
  * Express middleware that injects workspace context onto the request.
@@ -41,6 +74,7 @@ export function workspaceScope(req, res, next) {
     if (membership) {
       req.workspaceId = jwtWorkspaceId;
       req.userRole = membership.role;
+      attachSentryContext(req);
       return next();
     }
     // Membership was revoked since the JWT was issued — fall through to
@@ -59,5 +93,6 @@ export function workspaceScope(req, res, next) {
   const ws = workspaces[0];
   req.workspaceId = ws.id;
   req.userRole = ws.role;
+  attachSentryContext(req);
   next();
 }

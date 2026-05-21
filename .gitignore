@@ -24,6 +24,9 @@ backend/data/
 backend/artifacts/
 tests/e2e/artifacts/
 tests/e2e/EXECUTION_REPORT.md
+backend/tests/fixtures/eval-goldens/.cache/*
+!backend/tests/fixtures/eval-goldens/.cache/*.txt
+!backend/tests/fixtures/eval-goldens/.cache/.gitkeep
 
 # OS files
 .DS_Store

@@ -18,11 +18,18 @@
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
-import { getHealingHistoryForTest } from "../selfHealing.js";
+import { getHealingHistoryForTest, tryVisionHeal } from "../selfHealing.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as elementBaselineRepo from "../database/repositories/elementBaselineRepo.js";
+import * as visionBudgetRepo from "../database/repositories/visionBudgetRepo.js";
+import { pixelmatchHeal, llmVisionHeal } from "./visionHealAdapters.js";
+import { visionHealBudgetExhaustedTotal } from "../utils/metrics.js";
+import { logActivity } from "../utils/activityLogger.js";
 import { extractTestBody, isApiTest } from "./codeParsing.js";
 import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
-import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes, captureWebVitals, registerWebVitalsInitScript } from "./pageCapture.js";
+import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes, captureWebVitals, registerWebVitalsInitScript, captureElementCrop } from "./pageCapture.js";
+import { PNG } from "pngjs";
 import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR, SHOTS_DIR, resolveDevice } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -30,6 +37,7 @@ import { injectCursorOverlay } from "./cursorOverlay.js";
 import { diffScreenshot } from "./visualDiff.js";
 import { applyNetworkCondition } from "./networkConditions.js";
 import { writeArtifactBuffer } from "../utils/objectStorage.js";
+import { snapshotServerCoverage, diffServerCoverage } from "../pipeline/serverCoverageProxy.js"; // AUTO-009h — opt-in server-side coverage capture for API tests.
 
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
@@ -85,6 +93,229 @@ function endsWithNonVisualAction(playwrightCode) {
     return NON_VISUAL_PATTERNS.some(re => re.test(trimmed));
   }
   return false;
+}
+
+/**
+ * MNT-001b — best-effort locator reconstruction for green-run baseline
+ * captures. The runtime helper's full waterfall lives inside the vm
+ * sandbox; here we only need to find ONE working locator to crop, so we
+ * try the most common label-based forms in priority order. Returns the
+ * first locator that resolves to a visible element, or null.
+ *
+ * We deliberately do NOT use the full healing waterfall — a baseline
+ * capture failure is fine (next green run will retry); the risk of a
+ * locator factory hanging the post-test cleanup path is not.
+ *
+ * @param {Object} page    Playwright Page.
+ * @param {string} action  "click" | "fill" | "check" | "expect" | …
+ * @param {string} label   Human-readable target text / label.
+ * @returns {Promise<Object|null>}
+ */
+async function resolveLocatorForBaseline(page, action, label) {
+  if (!page || !label) return null;
+  // Per-action shortlist. Mirrors the top-of-waterfall strategies the
+  // runtime helper tries first (selfHealing.js:500+). Each candidate is a
+  // factory; we resolve to the first match that's actually visible.
+  const candidates = (() => {
+    switch (action) {
+      case "click":
+      case "dblclick":
+      case "tap":
+      case "hover":
+      case "rightclick":
+      case "press":
+        return [
+          () => page.getByRole("button", { name: label }),
+          () => page.getByRole("link",   { name: label }),
+          () => page.getByText(label, { exact: true }),
+          () => page.getByText(label),
+        ];
+      case "fill":
+      case "focus":
+        return [
+          () => page.getByLabel(label),
+          () => page.getByPlaceholder(label),
+          () => page.getByRole("textbox",   { name: label }),
+          () => page.getByRole("searchbox", { name: label }),
+        ];
+      case "check":
+      case "uncheck":
+        return [
+          () => page.getByRole("checkbox", { name: label }),
+          () => page.getByLabel(label),
+        ];
+      case "select":
+        return [
+          () => page.getByLabel(label),
+          () => page.getByRole("combobox", { name: label }),
+        ];
+      case "expect":
+        return [
+          () => page.getByRole("heading", { name: label }),
+          () => page.getByText(label, { exact: true }),
+          () => page.getByText(label),
+        ];
+      default:
+        return [
+          () => page.getByText(label, { exact: true }),
+          () => page.getByText(label),
+        ];
+    }
+  })();
+  for (const factory of candidates) {
+    try {
+      const locator = factory();
+      // `isVisible()` returns false (no throw) for missing / hidden
+      // elements; either way we move on without raising.
+      const visible = await locator.first().isVisible().catch(() => false);
+      if (visible) return locator.first();
+    } catch { /* selector engine threw — try next */ }
+  }
+  return null;
+}
+
+/**
+ * MNT-001 — perform the originally-failed verb at the coordinates returned
+ * by a successful vision heal. Exported for unit testing; callers in
+ * `executeTest` invoke this only after confirming the heal returned a
+ * finite bbox.
+ *
+ * ### IMPORTANT: this is record-keeping, not rescue
+ *
+ * The test body has already thrown and the vm sandbox has unwound by the
+ * time we reach this helper — re-actioning won't resurrect downstream
+ * steps in the SAME run. The real win is the NEXT run:
+ *
+ *   - `recordHealing()` inside `tryVisionHeal` already promoted index 7/8
+ *     into the adaptive hint map, so the next run starts there.
+ *   - The persisted baseline crop lets stage 7 fire faster + cheaper than
+ *     stage 8 on subsequent failures.
+ *
+ * We perform the re-action anyway so the audit log captures a "we did try
+ * to recover" entry, which matters for compliance and for operators
+ * investigating why a vision heal "succeeded" but the run still failed.
+ *
+ * ### Verb coverage
+ *
+ * Implemented:
+ * - `click` / `press` / `tap` → `page.mouse.click(x, y)`
+ * - `dblclick`                → `page.mouse.dblclick(x, y)`
+ * - `hover`                   → `page.mouse.move(x, y)`
+ * - `rightclick`              → `page.mouse.click(x, y, { button: "right" })`
+ * - `fill`                    → focus via `mouse.click`, select existing
+ *                                text via `keyboard.press("Control+a")`,
+ *                                then `keyboard.type(value)`. Requires the
+ *                                caller to pass `intent.value` — sourced
+ *                                from the sandbox's `__valueIntents` map
+ *                                via `err.__valueIntents` in the catch arm.
+ *
+ * Documented limitations (NOT implemented — concrete justification):
+ *
+ * - `select` — Playwright's `selectOption()` distinguishes between native
+ *   `<select>` (where Playwright sets `.value` programmatically and fires
+ *   the `change` event) and ARIA-role custom comboboxes (which need a
+ *   click-to-open + click-option-by-text sequence). Telling the two apart
+ *   from a bbox alone requires an `elementFromPoint()` round-trip back
+ *   into the DOM — which re-introduces exactly the brittleness vision
+ *   healing exists to bypass.
+ *
+ * - `check` / `uncheck` — A coordinate click TOGGLES current state rather
+ *   than setting it. An already-checked checkbox getting a `safeCheck`
+ *   re-action would UNCHECK it (and vice versa), corrupting every
+ *   downstream assertion. Verifying the resulting `.checked` state needs
+ *   an `elementFromPoint()` round-trip — same DOM brittleness problem as
+ *   `select`. Leaving the test marked failed is the honest outcome until
+ *   we have state-aware re-action.
+ *
+ * - `focus` — Pure coordinate `mouse.click` already lands focus on most
+ *   focusable elements; if the test specifically needed `.focus()` for an
+ *   element the mouse can't reach (e.g. inside a custom widget with a
+ *   `tabindex`), the heal can't help anyway.
+ *
+ * Coordinate clicks are safer than re-resolving the locator: the pixelmatch
+ * / LLM result IS the locator. Going through `elementFromPoint` would
+ * re-introduce the DOM brittleness vision healing is meant to bypass.
+ *
+ * Best-effort: any error is swallowed so a re-action failure can't make
+ * an already-failing run any worse.
+ *
+ * @param {Object} page  Playwright Page (or any object with the same `mouse` / `keyboard` shape — for tests).
+ * @param {string} action  Original verb from the healing event key.
+ * @param {{x: number, y: number, width: number, height: number}} box
+ * @param {string} label  Human-readable label (logged for traceability).
+ * @param {string} key    Composite healing key (`action::label`) — logged on error.
+ * @param {Object} [intent]  Value-intent for value-bearing verbs.
+ *   `{ value: string }` for `fill`. When `fill` is dispatched without a
+ *   `value` field, the branch is skipped (audit row still records `verb`
+ *   + center coords, `dispatched: false`) so a missing intent never lands
+ *   an empty string in the field.
+ * @returns {Promise<{verb: string, x: number, y: number, dispatched: boolean}>}
+ *   Resolves with the dispatched verb + center coords + whether a method
+ *   was actually invoked (false for unsupported verbs / non-finite box /
+ *   missing value intent). Never throws.
+ */
+export async function performVisionHealReaction(page, action, box, label, key, intent = {}) {
+  const verbLower = String(action || "").toLowerCase();
+  const result = { verb: verbLower, x: 0, y: 0, dispatched: false };
+
+  if (!box || !Number.isFinite(box.x) || !Number.isFinite(box.y) ||
+      !Number.isFinite(box.width) || !Number.isFinite(box.height)) {
+    return result;
+  }
+  const centerX = Math.round(box.x + box.width / 2);
+  const centerY = Math.round(box.y + box.height / 2);
+  result.x = centerX;
+  result.y = centerY;
+
+  if (!page?.mouse) return result;
+
+  try {
+    if (verbLower === "click" || verbLower === "press" || verbLower === "tap") {
+      await page.mouse.click(centerX, centerY).catch(() => {});
+      result.dispatched = true;
+    } else if (verbLower === "dblclick") {
+      await page.mouse.dblclick(centerX, centerY).catch(() => {});
+      result.dispatched = true;
+    } else if (verbLower === "hover") {
+      await page.mouse.move(centerX, centerY).catch(() => {});
+      result.dispatched = true;
+    } else if (verbLower === "rightclick") {
+      await page.mouse.click(centerX, centerY, { button: "right" }).catch(() => {});
+      result.dispatched = true;
+    } else if (verbLower === "fill" && intent && typeof intent.value === "string" && page.keyboard) {
+      // MNT-001 — value-aware fill re-action. Three-step sequence:
+      //   1. mouse.click(x, y) lands focus on the input that vision matched.
+      //   2. keyboard.press("Control+a") selects existing text so the
+      //      subsequent type() replaces rather than appends. Playwright maps
+      //      Control+a to Cmd+a on macOS automatically.
+      //   3. keyboard.type(value) writes the original intended value (sourced
+      //      from the sandbox's __valueIntents map at the catch arm).
+      // This pattern works for native <input>/<textarea> + most ARIA textbox
+      // widgets without re-introducing DOM-locator brittleness. Custom
+      // contenteditable rich-text editors may not honour select-all but the
+      // worst case is "test stays broken" — same as the no-heal path.
+      await page.mouse.click(centerX, centerY).catch(() => {});
+      await page.keyboard.press("Control+a").catch(() => {});
+      await page.keyboard.type(intent.value).catch(() => {});
+      result.dispatched = true;
+    }
+    // select / check / uncheck / focus intentionally fall through — see
+    // "Documented limitations" in the JSDoc above for the concrete
+    // reasons each verb is not implemented (NOT because it's deferred to
+    // a follow-up ticket — because state-aware re-action requires an
+    // elementFromPoint() round-trip that defeats vision healing's purpose).
+    if (result.dispatched) {
+      console.log(formatLogLine("info", null,
+        `[executeTest] Vision heal re-action completed: ${verbLower} at (${centerX},${centerY}) for "${label}"`));
+    }
+  } catch (reactionErr) {
+    // Belt-and-braces — the `.catch(() => {})` inside the if-branches
+    // absorbs the typical case. This handles weirdness like the page
+    // being closed mid-call (cleanup race).
+    console.warn(formatLogLine("warn", null,
+      `[executeTest] Vision heal re-action failed for ${key}: ${reactionErr.message}`));
+  }
+  return result;
 }
 
 /**
@@ -184,6 +415,16 @@ function formatTestError(err) {
  * @param {string}  [opts.timezoneId] - AUTO-007: IANA timezone (e.g. `"Europe/Paris"`).
  * @param {Object}  [opts.geolocation] - AUTO-007: `{ latitude, longitude }`.
  * @param {string}  [opts.networkCondition] - AUTO-006: `fast|slow3g|offline`.
+ * @param {boolean} [opts.coverageEnabled] - AUTO-009 / AUTO-009k: project's
+ *   coverage capture toggle, forwarded from `testRunner.js` so the per-test
+ *   path doesn't re-issue `projectRepo.getById()` once per test (N+1 SQLite
+ *   read on parallel runs). When omitted, falls back to a per-test repo
+ *   lookup for backward compatibility with callers that bypass the runner
+ *   (legacy tests, future direct callsites). Treat `undefined` as "not
+ *   supplied" so the fallback path engages; `false` means "explicitly off".
+ * @param {string}  [opts.serverCoverageEndpoint] - AUTO-009h: per-project
+ *   endpoint for server-side coverage capture, same forwarding pattern as
+ *   `coverageEnabled`. Only consumed by `executeApiTest`.
  */
 export async function executeTest(test, browser, runId, stepIndex, runStart, opts = {}) {
   // ── API-only test path: no browser context needed ──────────────────────
@@ -191,7 +432,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   // Fall back to isApiTest() for callers that bypass the runner (e.g. tests).
   const isApi = test._isApi ?? (test.playwrightCode && isApiTest(test.playwrightCode));
   if (isApi) {
-    return executeApiTest(test, runId, stepIndex, runStart);
+    return executeApiTest(test, runId, stepIndex, runStart, opts);
   }
 
   // ── Browser-based test path — browser must be available ────────────────
@@ -309,10 +550,31 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     boundingBoxes: [],
     stepCaptures: [],   // DIF-016: per-step screenshots
     stepTimings: [],    // DIF-016: per-step timing data
+    stepStatuses: [],   // INF-007/UX: authoritative per-step status (passed/failed/running) emitted by the sandbox via __beginStep/__captureStep — replaces the frontend's brittle keyword-matching heuristic.
     visualDiff: null,   // DIF-001: final-screenshot visual-regression result
     browser: opts.browser || "chromium", // DIF-002: browser engine this test ran under
     webVitals: null,
+    jsCoverage: null,
   };
+
+  // AUTO-009 — start V8 JS coverage BEFORE the test navigates so the first
+  // byte of the SUT bundle is instrumented. Opt-in per project; failures
+  // are best-effort and never flip a passing test.
+  //
+  // Prefer `opts.coverageEnabled` (forwarded from testRunner.js once per
+  // run) to avoid a per-test `projectRepo.getById()` round-trip — on a
+  // 200-test parallel run that's 200 SQLite reads saved. Falls back to
+  // the repo lookup for callers that don't forward (backward compat).
+  let coverageStarted = false;
+  try {
+    const covEnabled = opts.coverageEnabled !== undefined
+      ? opts.coverageEnabled
+      : (() => { try { return projectRepo.getById(test.projectId)?.coverageEnabled; } catch { return false; } })();
+    if (covEnabled && page?.coverage?.startJSCoverage) {
+      await page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: false });
+      coverageStarted = true;
+    }
+  } catch { /* best-effort */ }
 
   const start = Date.now();
   result.startedAt = start;
@@ -375,9 +637,59 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         });
         persistHealingEvents(healingScopeId, codeResult.healingEvents);
 
+        // ── MNT-001b: capture per-element baseline crops on green runs ────
+        // For every healing event with a healingKey, re-resolve the element
+        // via a best-effort locator factory and persist a tight PNG crop.
+        // Stage 7 (pixelmatch) reads these on the next failure.
+        //
+        // Strictly best-effort: any error is swallowed so a baseline-capture
+        // failure can never flip an otherwise-passing test. De-duped by key
+        // so a multi-action loop touching the same element doesn't trigger
+        // N upserts per run.
+        if (test.projectId && Array.isArray(codeResult.healingEvents) && codeResult.healingEvents.length > 0) {
+          const seenKeys = new Set();
+          for (const evt of codeResult.healingEvents) {
+            if (!evt || evt.failed || typeof evt.key !== "string") continue;
+            if (seenKeys.has(evt.key)) continue;
+            seenKeys.add(evt.key);
+            const [action, ...rest] = evt.key.split("::");
+            const label = rest.join("::");
+            try {
+              const locator = await resolveLocatorForBaseline(page, action, label);
+              if (!locator) continue;
+              const cropPng = await captureElementCrop(page, locator);
+              if (!cropPng) continue;
+              // Parse dimensions from the PNG header so the DB row has
+              // dimensions ready for stage-7 fit checks without re-decoding.
+              let cropWidth = 0;
+              let cropHeight = 0;
+              try {
+                const meta = PNG.sync.read(cropPng);
+                cropWidth = meta.width;
+                cropHeight = meta.height;
+              } catch { /* malformed → skip persistence */ continue; }
+              elementBaselineRepo.upsert({
+                projectId: test.projectId,
+                healingKey: `${healingScopeId}::${evt.key}`,
+                cropPng,
+                cropWidth,
+                cropHeight,
+                capturedAt: new Date().toISOString(),
+              });
+            } catch (baselineErr) {
+              // Single-event failure must never propagate. Log at debug
+              // level (warn) so operators can investigate hot keys without
+              // it dominating run logs.
+              console.warn(formatLogLine("warn", null,
+                `[executeTest] Baseline capture failed for ${evt.key}: ${baselineErr.message}`));
+            }
+          }
+        }
+
         // Collect per-step captures and timings from the instrumented run
         result.stepCaptures = codeResult.stepCaptures || [];
         result.stepTimings = codeResult.stepTimings || [];
+        result.stepStatuses = codeResult.stepStatuses || [];
 
       } else {
         // ── FALLBACK: No parseable code — run a basic smoke test ───────────
@@ -463,21 +775,159 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
     // Persist healing events from the failed run
     const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
-    persistHealingEvents(healingScopeId, err.__healingEvents);
 
     // Collect any per-step captures/timings gathered before the failure
     result.stepCaptures = err.__stepCaptures || [];
     result.stepTimings = err.__stepTimings || [];
+    result.stepStatuses = err.__stepStatuses || [];
 
-    // Screenshot the failure state
+    // Screenshot the failure state — also feeds the vision-healing waterfall below.
+    let failureShot = null;
     try {
       const shot = await captureScreenshot(page, runId, stepIndex, { failed: true });
       result.screenshot = shot.base64;
       result.screenshotPath = shot.artifactPath;
+      failureShot = Buffer.from(shot.base64, "base64");
     } catch { /* page may be closed */ }
+
+    // ── MNT-001: host-side vision-healing waterfall (stages 7-8) ───────────
+    // Invoked AFTER the runtime helper waterfall (stages 0-6) failed.
+    // Best-effort: any internal error is swallowed; a vision-heal never
+    // *causes* a test failure that wouldn't already have happened.
+    //
+    // The failing locator is the last "failed" event in __healingEvents
+    // (every run emits exactly one failed entry per broken element thanks
+    // to the runtime helper). We attempt heal on each failed event so a
+    // multi-step test that breaks on more than one selector gets a heal
+    // attempt per breakage.
+    const visionEvents = [];
+    try {
+      const failedEvents = (err.__healingEvents || []).filter((e) => e?.failed && typeof e.key === "string");
+      if (failedEvents.length > 0 && failureShot) {
+        // Load project's vision config once; null-safe so a misconfigured
+        // run (project deleted mid-execution, db blip) skips stages 7-8.
+        let project = null;
+        try { project = test.projectId ? projectRepo.getById(test.projectId) : null; } catch { /* ignore */ }
+        if (project && project.visionHealing && project.visionHealing !== "off") {
+          for (const evt of failedEvents) {
+            const [action, ...rest] = evt.key.split("::");
+            const label = rest.join("::");
+            // MNT-001b — load the last-known baseline crop for stage 7 by
+            // the same composite key the green-run capture hook writes
+            // (`${healingScopeId}::${evt.key}`). Missing rows are normal
+            // (first-ever failure for this element) and degrade gracefully:
+            // `tryVisionHeal` skips stage 7 when baselineCrop is null.
+            let baselineCrop = null;
+            try {
+              const row = test.projectId
+                ? elementBaselineRepo.get(test.projectId, `${healingScopeId}::${evt.key}`)
+                : null;
+              baselineCrop = row?.cropPng ?? null;
+            } catch { /* repo blip — fall through to no baseline */ }
+
+            const heal = await tryVisionHeal({
+              testId: healingScopeId,
+              action, label, project,
+              failureScreenshot: failureShot,
+              baselineCrop,
+            }, {
+              pixelmatchHeal,
+              llmVisionHeal,
+              isBudgetExhausted: visionBudgetRepo.isBudgetExhausted,
+            });
+            if (heal?.kind === "vision_budget_exhausted") {
+              // MNT-001b — stage 8 soft-disable. Emit audit + Prometheus
+              // BEFORE filtering out so operators can attribute the skip
+              // (intentional cap hit? raise the cap? provider misconfig?).
+              // NOT pushed onto visionEvents — persistHealingEvents would
+              // either undercount the failed-event arm or, worse, ignore
+              // it entirely; the dedicated audit row + counter ARE the
+              // record for budget-exhausted events.
+              try {
+                visionHealBudgetExhaustedTotal.inc({
+                  projectId: test.projectId || "unknown",
+                  reason: heal.reason,
+                });
+              } catch (metricErr) {
+                console.warn(formatLogLine("warn", null,
+                  `[executeTest] Failed to bump vision budget metric: ${metricErr.message}`));
+              }
+              try {
+                logActivity({
+                  type: "healing.vision_budget_exhausted",
+                  projectId: test.projectId,
+                  projectName: project.name,
+                  workspaceId: project.workspaceId,
+                  testId: test.id,
+                  testName: test.name,
+                  detail: `Vision-heal stage 8 skipped — ${heal.reason} cap reached`,
+                  meta: { reason: heal.reason, key: heal.key },
+                });
+              } catch (auditErr) {
+                console.warn(formatLogLine("warn", null,
+                  `[executeTest] Failed to log vision budget audit row: ${auditErr.message}`));
+              }
+              console.warn(formatLogLine("warn", null,
+                `[executeTest] Vision heal budget exhausted for ${test.projectId} (${heal.reason}) — stage 8 skipped for "${label}"`));
+            } else if (heal) {
+              visionEvents.push(heal);
+              // Record LLM-vision spend against the project's budget so
+              // the next stage-8 attempt sees the increment. Pixelmatch
+              // is free (cost = 0) and skipped automatically.
+              if (heal.kind === "vision_llm" && test.projectId) {
+                try {
+                  visionBudgetRepo.record(test.projectId, heal.costUsd || 0);
+                } catch (budgetErr) {
+                  console.warn(formatLogLine("warn", null,
+                    `[executeTest] Failed to record vision-heal budget for ${test.projectId}: ${budgetErr.message}`));
+                }
+              }
+              console.log(formatLogLine("info", null,
+                `[executeTest] Vision heal succeeded for ${test.id} (${heal.kind}, confidence=${heal.confidence?.toFixed?.(2) ?? heal.confidence})`));
+
+              // MNT-001 — coordinate re-action. See `performVisionHealReaction`
+              // jsdoc above for the design rationale (record-keeping vs.
+              // rescue-the-run semantics).
+              //
+              // Value-bearing verbs (currently just `fill`) need the original
+              // intended value, which the sandboxed safe* helpers recorded
+              // into __valueIntents keyed by "<action>::<label>" — i.e. evt.key.
+              // The map is surfaced onto the thrown error in codeExecutor.js.
+              // Missing intent (e.g. click verb, or fill without a recorded
+              // value) falls through harmlessly: the reaction skips the fill
+              // branch and the audit row records `dispatched: false`.
+              if (heal.box && Number.isFinite(heal.box.x) && Number.isFinite(heal.box.y)) {
+                const valueIntent = (err.__valueIntents || {})[evt.key];
+                await performVisionHealReaction(page, action, heal.box, label, evt.key, valueIntent);
+              }
+            }
+          }
+        }
+      }
+    } catch (visionErr) {
+      console.warn(formatLogLine("warn", null,
+        `[executeTest] Vision-healing waterfall failed for ${test.id}: ${visionErr.message}`));
+    }
+
+    // Combine runtime + vision events for persistence. Vision events are
+    // distinguished by `kind: "vision_pixelmatch" | "vision_llm"` so
+    // `persistHealingEvents` can route them to the vision counters.
+    persistHealingEvents(healingScopeId, [
+      ...(err.__healingEvents || []),
+      ...visionEvents,
+    ]);
 
   } finally {
     clearTimeout(testTimeoutHandle);
+
+    // AUTO-009 — stop V8 coverage before the page closes so the collector
+    // returns the script range list intact. Best-effort: a stop failure
+    // (page already closed, CDP detached) leaves `result.jsCoverage` at
+    // its initial null and the run-level aggregator degrades to "no
+    // coverage data for this test".
+    if (coverageStarted && page?.coverage?.stopJSCoverage) {
+      try { result.jsCoverage = await page.coverage.stopJSCoverage(); } catch { result.jsCoverage = null; }
+    }
 
     // Capture the final page URL for the frontend BrowserChrome
     try { result.url = page.url(); } catch { /* page already closed */ }
@@ -564,7 +1014,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
  * spinning up a browser page. Skips screenshots, video, DOM snapshots,
  * and screencast — none of which apply to API tests.
  */
-async function executeApiTest(test, runId, stepIndex, runStart) {
+async function executeApiTest(test, runId, stepIndex, runStart, opts = {}) {
   const result = {
     testId: test.id,
     testName: test.name,
@@ -582,10 +1032,34 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
     boundingBoxes: [],
     url: test.sourceUrl || "",
     isApiTest: true,
+    // AUTO-009h — server-side coverage diff captured from the SUT's
+    // Istanbul / NYC `__coverage__` endpoint. Null when the project hasn't
+    // configured `serverCoverageEndpoint` or the snapshot failed.
+    serverCoverage: null,
   };
 
   const start = Date.now();
   result.startedAt = start;
+
+  // AUTO-009h — snapshot the SUT's coverage BEFORE the API test fires so
+  // the post-test diff isolates exactly what this test exercised. Opt-in
+  // per project; failures are best-effort and never flip a passing test
+  // (the snapshot can timeout, the SUT can be down, the endpoint can
+  // return non-JSON — all degrade silently to `serverCoverage: null`).
+  //
+  // Prefer `opts.serverCoverageEndpoint` (forwarded from testRunner.js
+  // once per run) to avoid a per-test `projectRepo.getById()` round-trip.
+  // Falls back to the repo lookup for callers that don't forward.
+  let serverCoverageEndpoint = null;
+  let serverCoverageBefore = null;
+  try {
+    serverCoverageEndpoint = opts.serverCoverageEndpoint !== undefined
+      ? (opts.serverCoverageEndpoint || null)
+      : (() => { try { return projectRepo.getById(test.projectId)?.serverCoverageEndpoint || null; } catch { return null; } })();
+    if (serverCoverageEndpoint) {
+      serverCoverageBefore = await snapshotServerCoverage(serverCoverageEndpoint);
+    }
+  } catch { /* best-effort */ }
 
   // AbortController lets us forcibly dispose Playwright request contexts
   // inside runApiTestCode when the timeout fires, preventing lingering
@@ -617,8 +1091,37 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
     result.network = err.__apiLogs || [];
   } finally {
     clearTimeout(timeoutHandle);
+
+    // AUTO-009h — capture `durationMs` BEFORE the post-test coverage
+    // snapshot so the reported test duration reflects only the test
+    // itself, not the snapshot round-trip. A 50-MB coverage JSON over a
+    // staging-network HTTP GET can take 100-200ms; without this hoist
+    // every API test would appear ~200ms slower than it actually was on
+    // any project with `serverCoverageEndpoint` configured, and the
+    // p95 / p99 latency dashboards would silently drift.
     result.durationMs = Date.now() - start;
     result.runTimestamp = start - runStart;
+
+    // AUTO-009h — snapshot the SUT's coverage AFTER the API test and diff
+    // against the pre-snapshot so `result.serverCoverage` carries exactly
+    // the statements / branches / functions this test newly exercised.
+    // Best-effort: any snapshot failure leaves `result.serverCoverage` as
+    // whatever the pre-snapshot logic set it to (typically null), so a
+    // SUT outage mid-test doesn't fail an otherwise-passing run.
+    if (serverCoverageEndpoint) {
+      try {
+        const after = await snapshotServerCoverage(serverCoverageEndpoint);
+        if (after) {
+          const delta = diffServerCoverage(serverCoverageBefore, after);
+          // Only attach when the diff has data — otherwise `null` keeps the
+          // aggregator's "no server-side coverage for this test" branch
+          // identical to the opt-out path.
+          if (delta && Object.keys(delta).length > 0) {
+            result.serverCoverage = delta;
+          }
+        }
+      } catch { /* best-effort */ }
+    }
   }
 
   return result;

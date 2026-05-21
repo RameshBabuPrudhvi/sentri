@@ -32,6 +32,7 @@ import { formatLogLine } from "../utils/logFormatter.js";
 import { activeTaskCount } from "../scheduler.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { SYSTEM_WORKSPACE_ID } from "../constants/systemWorkspace.js";
+import { hasVisionProvider, resolveVisionModel } from "../aiProvider.js";
 
 const router = Router();
 
@@ -748,6 +749,37 @@ router.get("/system", async (req, res) => {
     memoryMB:      Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
     activeSchedules: activeTaskCount(),
   });
+});
+
+// ─── MNT-001 — vision provider status ─────────────────────────────────────────
+/**
+ * GET /api/v1/system/vision-provider-status
+ *
+ * Reports whether a vision-capable LLM is configured server-side. Powers the
+ * `pixelmatch_and_llm` radio gating in `VisionHealingPanel` (so the option can
+ * render disabled with a tooltip on initial page load, without waiting for a
+ * save-time error response) and the QA.md MNT-001 release-verification
+ * checklist (line ~1935).
+ *
+ * Any-authenticated-member read — the underlying capability is deployment-
+ * wide so the reply is identical across workspaces. Routed under
+ * `/api/v1/system/*` to mirror the other system-info endpoints.
+ *
+ * @route GET /api/v1/system/vision-provider-status
+ */
+router.get("/system/vision-provider-status", (req, res) => {
+  try {
+    const available = hasVisionProvider();
+    const model = available ? resolveVisionModel() : null;
+    res.json({ available, model });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[system/vision-provider-status] ${err.message}`));
+    // Conservative fallback: report "not available" rather than 500.
+    // The frontend uses this signal to enable/disable a UI control; a 500
+    // would surface as a noisy error toast on every page load when the
+    // aiProvider module has a transient issue (e.g. mid-config-reload).
+    res.json({ available: false, model: null });
+  }
 });
 
 // ─── Client error reporting ───────────────────────────────────────────────────

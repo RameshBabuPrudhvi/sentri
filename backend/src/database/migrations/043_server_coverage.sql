@@ -1,0 +1,24 @@
+-- AUTO-009h — Server-side coverage capture for API tests.
+--
+-- Sentri runs API tests (`result.isApiTest === true`) via Playwright's
+-- `request.newContext()` — no browser, so `page.coverage.startJSCoverage()`
+-- captures nothing. AUTO-009h adds a separate code path that snapshots the
+-- SUT's Istanbul/NYC coverage object via an HTTP endpoint (or shared-FS
+-- file) before / after each API test and persists the diff alongside the
+-- browser-side `coverageSummary`.
+--
+-- `projects.serverCoverageEndpoint` carries the configured URL:
+--   - HTTPS / HTTP URL → snapshot mode (preferred, GET request).
+--   - `file://<path>`  → file-watch mode (requires shared filesystem;
+--                         documented in `docs/guide/coverage-server-side.md`).
+--   - NULL             → opt-out (default, zero regression).
+--
+-- SSRF-guarded at the route layer (`routes/projects.js` PATCH handler)
+-- via the same `validateUrl` helper that protects `sourcemapBaseUrl`
+-- and notification webhooks.
+--
+-- `DEFAULT NULL` is explicit (SQLite would default to NULL anyway on a
+-- nullable column added via ALTER) so the operator-facing schema is
+-- self-documenting: new projects opt-out by default, zero regression for
+-- pre-AUTO-009h rows.
+ALTER TABLE projects ADD COLUMN serverCoverageEndpoint TEXT DEFAULT NULL;

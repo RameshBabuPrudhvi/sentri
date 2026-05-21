@@ -17,6 +17,8 @@
  * - {@link LOG_LEVEL} — Configured minimum log level (numeric).
  */
 
+import { getRequestId } from "./observability.js";
+
 // ─── Log levels ───────────────────────────────────────────────────────────────
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 
@@ -86,38 +88,18 @@ const jsonMode = (process.env.LOG_JSON || "false").toLowerCase() === "true";
 export function formatLogLine(level, runId, msg) {
   const ts = formatTimestamp();
   if (jsonMode) {
-    return JSON.stringify({ ts, level, runId: runId || undefined, msg });
+    return JSON.stringify({ ts, level, runId: runId || undefined, requestId: getRequestId() || undefined, msg });
   }
   const tag = level.toUpperCase().padEnd(5);
   const rid = runId ? ` [${runId}]` : "";
-  return `[${ts}] [${tag}]${rid} ${msg}`;
+  const req = getRequestId();
+  const reqTag = req ? ` [req:${req}]` : "";
+  return `[${ts}] [${tag}]${rid}${reqTag} ${msg}`;
 }
 
-/**
- * Emit a structured lifecycle event to stdout.
- *
- * When LOG_JSON=true, emits a JSON line with the event name and all props:
- *   {"ts":"...","event":"run.start","runId":"RUN-42","tests":5}
- *
- * When LOG_JSON=false, emits a human-readable line:
- *   [2025-04-03T12:34:56.789Z] [EVENT] run.start runId=RUN-42 tests=5
- *
- * Use this for machine-filterable lifecycle events (run start/end, browser
- * launch, pipeline stage transitions). Use `formatLogLine()` for free-form
- * human-readable messages.
- *
- * @param {string} event — semantic event name (e.g. `"run.start"`, `"browser.launched"`)
- * @param {Object} [props] — structured key-value pairs to include
- */
-export function structuredLog(event, props = {}) {
-  if (!shouldLog("info")) return;
-  const ts = formatTimestamp();
-  if (jsonMode) {
-    console.log(JSON.stringify({ ts, event, ...props }));
-  } else {
-    const kvPairs = Object.entries(props)
-      .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
-      .join(" ");
-    console.log(`[${ts}] [EVENT] ${event}${kvPairs ? " " + kvPairs : ""}`);
-  }
-}
+// INF-007: `structuredLog` is owned by `./structuredLog.js` (NEXT.md INF-007
+// "Files to change" lists it as a separate module). Re-exported here so the
+// many existing `import { structuredLog } from "./utils/logFormatter.js"`
+// call sites (crawler, testRunner, pipeline/*, runner/*, index.js, …) keep
+// working unchanged. New code should import directly from `./structuredLog.js`.
+export { structuredLog } from "./structuredLog.js";

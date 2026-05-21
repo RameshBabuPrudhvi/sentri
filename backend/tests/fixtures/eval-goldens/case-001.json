@@ -1,0 +1,8 @@
+{
+  "id": "case-001",
+  "category": "form-fill",
+  "description": "Single-button save form — clicks Save and asserts the success toast.",
+  "url": "https://eval.local/forms/save-toast",
+  "snapshot": "<form><label>Name<input name='name'/></label><button type='submit'>Save</button></form><div role='status' aria-live='polite'></div>",
+  "expected": "await page.getByLabel('Name').fill('Eval');\nawait page.getByRole('button', { name: 'Save' }).click();\nawait expect(page.getByText('Saved')).toBeVisible();"
+}

@@ -30,6 +30,8 @@
 
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest, executeTestIterations } from "./runner/executeTest.js";
+import { finalizeCoverage, aggregateShardCoverage } from "./pipeline/finalizeCoverage.js";
+import { detectCoverageRegression, fireCoverageRegressionAlert } from "./pipeline/coverageRegressionDetector.js"; // AUTO-009i
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { clusterFailures } from "./pipeline/failureClusterer.js";
@@ -48,9 +50,28 @@ import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 import { recordMetric } from "./utils/recordMetric.js";
 import { isNonExecutedSkip } from "./utils/skipReasons.js";
+import { testsExecutedTotal, testDurationSeconds, recordRunOutcome } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry.
 
 
-function evaluateQualityGates(gates, run) {
+/**
+ * Evaluate per-project quality gates against a finalised run.
+ *
+ * @param {Object} gates - Validated `project.qualityGates` payload (see
+ *   `validateQualityGates` in `routes/projects.js`). Coverage thresholds
+ *   (`minCoveragePct`, `minBranchPct`, `minPrCoveragePct`,
+ *   `maxCoverageRegressionPct`) are AUTO-009d additions; all four are
+ *   expressed as percentages (0–100) and compared against `run.coverageSummary`
+ *   ratios after a single ×100 conversion.
+ * @param {Object} run   - Run record. `run.coverageSummary` must be populated
+ *   BEFORE this is called (mutated in-place by `aggregateRunCoverage`).
+ * @param {Object} [opts]
+ * @param {Object|null} [opts.priorRunCoverage] - Previous run's
+ *   `coverageSummary` for regression-gate comparison. Pass `null` (no prior
+ *   run) and the regression rule short-circuits to a no-op — first-ever
+ *   coverage-enabled run can't regress against something that doesn't exist.
+ * @returns {{ passed: boolean, violations: Array }|null}
+ */
+function evaluateQualityGates(gates, run, { priorRunCoverage = null } = {}) {
   // Defense-in-depth: `validateQualityGates` in `backend/src/routes/projects.js`
   // already rejects payloads that produce an empty object, but a corrupted DB
   // row or direct DB manipulation could still surface `{}` here. Treat any
@@ -102,6 +123,92 @@ function evaluateQualityGates(gates, run) {
   }
   if (Number.isFinite(gates.maxFailures) && failed > gates.maxFailures) {
     violations.push({ rule: "maxFailures", threshold: gates.maxFailures, actual: failed });
+  }
+
+  // AUTO-009d — coverage gates. Only evaluated when (a) the project has at
+  // least one coverage threshold configured AND (b) the run actually
+  // produced a `coverageSummary` (`project.coverageEnabled === true` and
+  // aggregation didn't no-op). When coverage is enabled on the project but
+  // a transient capture failure left `coverageSummary` null, the gates
+  // short-circuit rather than failing the run on missing data — same
+  // best-effort philosophy as `evaluateWebVitalsBudgets` (`anyMeasured`
+  // guard). The single source of truth for the rule names + percent
+  // semantics is `validateQualityGates` in `routes/projects.js`.
+  const cov = run.coverageSummary;
+  const hasCoverageGate =
+    Number.isFinite(gates.minCoveragePct) ||
+    Number.isFinite(gates.minBranchPct) ||
+    Number.isFinite(gates.minPrCoveragePct) ||
+    Number.isFinite(gates.maxCoverageRegressionPct);
+  if (hasCoverageGate && cov && typeof cov === "object") {
+    // Line / overall coverage — `coveragePct` is a 0–1 ratio on the summary.
+    if (Number.isFinite(gates.minCoveragePct) && Number.isFinite(cov.coveragePct)) {
+      const actualPct = Number((cov.coveragePct * 100).toFixed(2));
+      if (actualPct < gates.minCoveragePct) {
+        violations.push({ rule: "minCoveragePct", threshold: gates.minCoveragePct, actual: actualPct });
+      }
+    }
+    // Branch coverage — only present when AUTO-009c v8-to-istanbul produced
+    // data. Missing key (line-only coverage runs) → rule no-ops, NOT a
+    // violation — operator's gate is moot when there's nothing to measure.
+    if (Number.isFinite(gates.minBranchPct) && Number.isFinite(cov.branchPct)) {
+      const actualPct = Number((cov.branchPct * 100).toFixed(2));
+      if (actualPct < gates.minBranchPct) {
+        violations.push({ rule: "minBranchPct", threshold: gates.minBranchPct, actual: actualPct });
+      }
+    }
+    // PR coverage — reads `run.prCoverageDiff.prCoveragePct` when the run
+    // was triggered from a GitHub PR and `finalizeCoverage` populated the
+    // PR-scoped diff (AUTO-009d). **Skipped entirely on non-PR runs**
+    // (manual UI, scheduled, crawl-only) — the gate is semantically "PR
+    // coverage", so firing it on runs that have no PR context would
+    // surprise operators who set `minCoveragePct: 60` (overall) and
+    // `minPrCoveragePct: 80` (PR-only) expecting the second gate to be
+    // dormant on scheduled runs. Matches the "first run" regression-rule
+    // pattern at the `maxCoverageRegressionPct` block below, which also
+    // short-circuits when the comparison data is unavailable.
+    //
+    // When `prCoverageDiff` is present but `prTotalLines === 0` (the PR
+    // touched only files outside the test suite's coverage scope),
+    // `prCoveragePct` is the structured-zero `0` from `computePrCoverage`.
+    // We additionally guard `prTotalLines > 0` so the gate doesn't fire
+    // a false-positive "0% vs 80%" on a PR that had zero analyzable lines.
+    {
+      const prDiff = run.prCoverageDiff;
+      const hasPrData = prDiff && typeof prDiff === "object"
+        && Number.isFinite(prDiff.prCoveragePct)
+        && (prDiff.prTotalLines || 0) > 0;
+      if (Number.isFinite(gates.minPrCoveragePct) && hasPrData) {
+        const actualPct = Number((prDiff.prCoveragePct * 100).toFixed(2));
+        if (actualPct < gates.minPrCoveragePct) {
+          violations.push({ rule: "minPrCoveragePct", threshold: gates.minPrCoveragePct, actual: actualPct });
+        }
+      }
+    }
+    // Regression — drop relative to the previous coverage-enabled run.
+    // Skipped when no prior run exists (first-ever coverage run) so a
+    // brand-new project doesn't fail its first coverage gate on missing
+    // history.
+    if (
+      Number.isFinite(gates.maxCoverageRegressionPct) &&
+      priorRunCoverage &&
+      Number.isFinite(priorRunCoverage.coveragePct) &&
+      Number.isFinite(cov.coveragePct)
+    ) {
+      const dropPct = Number(((priorRunCoverage.coveragePct - cov.coveragePct) * 100).toFixed(2));
+      if (dropPct > gates.maxCoverageRegressionPct) {
+        violations.push({
+          rule: "maxCoverageRegressionPct",
+          threshold: gates.maxCoverageRegressionPct,
+          actual: dropPct,
+          // Surface the comparison context so the violation message in the
+          // GitHub Check summary / RunDetail panel can read "coverage
+          // dropped 12% (from 80% to 68%)" — without this, the operator
+          // sees the delta but not the baseline.
+          priorCoveragePct: Number((priorRunCoverage.coveragePct * 100).toFixed(2)),
+        });
+      }
+    }
   }
 
   return { passed: violations.length === 0, violations };
@@ -530,6 +637,27 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       shardFailed++;
       logError(run, `FAILED: ${result.error}`);
     }
+    // INF-007: count every executed result (passed + warning + failed) AND
+    // record per-test duration so dashboards get p50/p95/p99 latency split by
+    // browser engine + outcome. Skipped results never reach `processResult` —
+    // they're pre-seeded into `run.results` at the route layer before this
+    // function runs — so the counter cleanly captures "tests that actually
+    // executed in a browser". Best-effort: a metrics hiccup must never fail
+    // the run. `durationMs` is set by `executeTest.js` for every result; the
+    // `?? 0` defence covers synth crash rows that didn't carry timing.
+    //
+    // Browser label: prefer `result.browser` (always populated by
+    // `executeTest.js` from the test's actual launch options) over
+    // `run.browser` (set once at the run level). They agree today, but
+    // preferring the per-result value future-proofs the metric against any
+    // change that lets individual tests override the run-level browser
+    // (e.g. cross-browser sharding in a single run).
+    try {
+      const labels = { status: result.status || "unknown", browser: result.browser || run?.browser || "unknown" };
+      testsExecutedTotal.inc(labels);
+      const seconds = Number(result.durationMs ?? 0) / 1000;
+      if (Number.isFinite(seconds) && seconds >= 0) testDurationSeconds.observe(labels, seconds);
+    } catch { /* best-effort */ }
 
     // Emit result event (without the heavy base64 screenshot)
     const { screenshot: _ss, ...resultLean } = result;
@@ -609,7 +737,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           const attemptResults = await executeTestIterations(
             test,
             fixtureRows,
-            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition }),
+            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition, coverageEnabled: !!project.coverageEnabled, serverCoverageEndpoint: project.serverCoverageEndpoint || null }),
           );
           const lastResult = attemptResults[attemptResults.length - 1] || null;
           // Retry semantics:
@@ -781,6 +909,48 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // Returns the shard's stats delta so the worker can compose them onto the
   // parent `runs` row atomically.
   if (isShardMode) {
+    // AUTO-009k — pre-aggregate this shard's coverage slice and persist the
+    // mergeable per-shard summary so the boundary-crossing finalizer can
+    // set-union across shards instead of re-processing megabytes of raw V8
+    // ranges from `runs.results`. Matches the industry pattern (c8 / nyc /
+    // Istanbul `libCoverage.merge()` / Codecov upload-then-merge): each
+    // shard emits a compact Istanbul-shaped summary; the finalizer merges
+    // via id-set union. Naive count-summing across shards is wrong (proven
+    // counter-example: see `mergeShardSummaries` JSDoc).
+    //
+    // Pre-aggregation also lets us strip raw `jsCoverage` from this shard's
+    // results BEFORE they're persisted to `runs.results` — saving 10s of MB
+    // per row on large-bundle SUTs. The boundary-crossing finalizer
+    // (`runWorker.js#finalizeShardedRun`) detects the persisted summaries
+    // via `runRepo.getById(runId).shardCoverageSummaries` and uses
+    // `mergeShardSummaries` instead of the legacy AUTO-009f re-aggregation
+    // path. Fallback path remains so a partial-deploy / migration race
+    // (some shards on old code without persistence) still produces a
+    // correct summary via the raw-results aggregator.
+    //
+    // Best-effort: any failure in pre-aggregation OR persistence falls back
+    // to the AUTO-009f re-aggregation path. Coverage capture must never
+    // fail a shard.
+    try {
+      const shardCoverage = await aggregateShardCoverage(project, run.results);
+      if (shardCoverage) {
+        runRepo.setShardCoverageSummary(run.id, shardIndex, shardCoverage);
+        // Strip raw jsCoverage from this shard's in-memory results — the
+        // per-shard summary now carries the mergeable id-set state, and
+        // the boundary-crossing finalizer reads `shardCoverageSummaries`
+        // (not raw `runs.results`) when AUTO-009k payloads are present.
+        // The strip prevents megabytes of raw V8 ranges from landing in
+        // `runs.results` via the route layer's eventual save.
+        for (const r of run.results) {
+          if (r && "jsCoverage" in r) delete r.jsCoverage;
+        }
+      }
+    } catch (err) {
+      // Swallow + log — fall back to AUTO-009f re-aggregation at finalizer.
+      console.warn(formatLogLine("warn", runId,
+        `[testRunner] AUTO-009k pre-aggregation failed: ${err?.message || err}`));
+    }
+
     const elapsed = ((Date.now() - runStart) / 1000).toFixed(1);
     structuredLog("run.shard_execution_done", {
       runId, shardIndex,
@@ -801,9 +971,78 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   run.retryCount = run.results.reduce((sum, r) => sum + (r.retryCount || 0), 0);
   run.failedAfterRetry = run.results.filter(r => r.failedAfterRetry).length;
 
-  run.gateResult = evaluateQualityGates(project.qualityGates, run);
   run.webVitalsResult = evaluateWebVitalsBudgets(project.webVitalsBudgets, run);
   run.rootCauses = clusterFailures({ results: run.results });
+  // AUTO-009f — `finalizeCoverage` is the single source of truth for the
+  // post-run coverage tail. Same helper is invoked from
+  // `workers/runWorker.js#finalizeShardedRun` so sharded runs get an
+  // identical `coverageSummary` shape (parity bug fix — previously every
+  // multi-shard run with coverage enabled persisted `null`). The helper
+  // runs the aggregator + source-map resolver (AUTO-009b), enforces the
+  // AUTO-009g memory ceiling, and strips raw `jsCoverage` payloads from
+  // `run.results` AFTER aggregation so the persisted JSON column stays lean.
+  // AUTO-009d — pass changedFileRanges (populated at trigger time by
+  // routes/trigger.js when the run was launched from a GitHub PR webhook)
+  // so finalizeCoverage can compute the PR-scoped coverage diff. The diff
+  // lands as `summary.prCoverageDiff`; we lift it onto `run.prCoverageDiff`
+  // for the dedicated column, then strip it from the summary so the
+  // persisted `coverageSummary` shape stays unchanged.
+  run.coverageSummary = await finalizeCoverage(project, run.results, {
+    changedFileRanges: run.changedFileRanges || null,
+  });
+  if (run.coverageSummary?.prCoverageDiff) {
+    run.prCoverageDiff = run.coverageSummary.prCoverageDiff;
+    delete run.coverageSummary.prCoverageDiff;
+  }
+  // Stamp the merge-source marker so the Dashboard CoveragePanel and
+  // RunDetail can render a tooltip distinguishing single-process runs from
+  // the sharded merge path. All three variants (`"single_process"`,
+  // `"shards"`, `"fallback"`) are set at the boundary between aggregation
+  // and persistence so a downstream consumer never sees a coverageSummary
+  // without the marker on coverage-enabled runs.
+  if (run.coverageSummary) run.coverageSummary.mergeSource = "single_process";
+
+  // AUTO-009d — gate evaluation runs AFTER coverage aggregation so the
+  // coverage rules see this run's freshly-computed `coverageSummary`. The
+  // regression rule needs the previous coverage-enabled run's summary; we
+  // pull it via the lean `getRunsWithCoverage` accessor (added for the
+  // dashboard) and pick the most-recent row that isn't `run.id` itself
+  // (the row at-hand is mid-flight and not yet persisted). Best-effort —
+  // a repo failure falls back to `priorRunCoverage: null` which short-
+  // circuits the regression rule (same first-run-ever semantics).
+  let priorRunCoverage = null;
+  if (project?.coverageEnabled) {
+    try {
+      const history = runRepo.getRunsWithCoverage([project.id], { windowDays: 0, limit: 50 });
+      // Newest-last per the accessor's contract; walk backwards skipping
+      // the current run id so the lookup is correct even if `save(run)`
+      // wrote `run.coverageSummary` to disk between aggregation and gate
+      // eval (single-process path saves on every result via `processResult`).
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].id !== run.id && history[i].coverageSummary) {
+          priorRunCoverage = history[i].coverageSummary;
+          break;
+        }
+      }
+    } catch { /* best-effort — null prior degrades cleanly */ }
+  }
+
+  // AUTO-009i — coverage regression alerting. Fires AFTER priorRunCoverage
+  // is resolved and BEFORE gate evaluation so the audit row + notification
+  // land even when the gate itself doesn't include a regression threshold.
+  // The detector is a pure function; the alert dispatcher is best-effort
+  // (same contract as `fireNotifications`).
+  try {
+    const regression = detectCoverageRegression(run.coverageSummary, priorRunCoverage, project);
+    if (regression) await fireCoverageRegressionAlert(regression, run, project);
+  } catch { /* best-effort — regression alert failure must never block finalize */ }
+
+  run.gateResult = evaluateQualityGates(project.qualityGates, run, { priorRunCoverage });
+
+  // AUTO-009f — raw `jsCoverage` payloads are already stripped by
+  // `finalizeCoverage` (above), so we don't need a second cleanup loop here.
+  // The strip happens AFTER aggregation in the helper so the persisted
+  // `run.results` JSON column never carries the heavy V8 ranges.
 
   // AUTO-017.3: persist per-run Web Vitals samples for MET-001 trend charts.
   // Best-effort only — telemetry failures must never fail the run.
@@ -867,6 +1106,13 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     // "Shards N-1/N" badge on the completed run.
     if ((run.shardsCompleted || 0) < shardCount) run.shardsCompleted = shardCount;
     run.duration = Date.now() - runStart;
+    // INF-007: emit run-level outcome + duration histograms via the shared
+    // helper. The label shape (`type`, `status`) drives both the per-type
+    // success-rate panel and the per-type p99 latency SLO panel from a single
+    // PromQL query. See `utils/metrics.js#recordRunOutcome` for the full
+    // contract — falls back to `test_run` for the type label, and is fully
+    // best-effort so a metrics-registry hiccup never blocks finalize.
+    recordRunOutcome(run, "test_run");
     logSuccess(run, `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
     structuredLog("run.complete", {
       runId, projectId: project.id,
@@ -899,4 +1145,3 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     emitRunEvent(run.id, "done", { status: run.status, passed: run.passed, failed: run.failed, total: run.total });
   }
 }
-

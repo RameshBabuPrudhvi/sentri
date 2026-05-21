@@ -1,0 +1,8 @@
+{
+  "id": "case-033",
+  "category": "multi-page-nav",
+  "description": "Sign up \u2192 email-verification \u2192 dashboard.",
+  "url": "https://eval.local/signup",
+  "snapshot": "<form><label>Email<input type='email' name='email'/></label><label>Password<input type='password' name='password'/></label><button>Create account</button></form>",
+  "expected": "await page.getByLabel('Email').fill('new@example.com');\nawait page.getByLabel('Password').fill('hunter2!');\nawait page.getByRole('button', { name: 'Create account' }).click();\nawait expect(page).toHaveURL(/\\/verify-email/);\nawait expect(page.getByRole('heading', { name: 'Verify your email' })).toBeVisible();"
+}

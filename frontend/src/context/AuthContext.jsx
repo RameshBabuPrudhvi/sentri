@@ -20,8 +20,37 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
+import * as Sentry from "@sentry/react";
 import { API_PATH } from "../utils/apiBase.js";
 import { getCsrfToken, setCsrfToken } from "../utils/csrf.js";
+
+/**
+ * INF-007: Keep the Sentry scope's user / workspace context in sync with the
+ * AuthContext lifecycle. `main.jsx` populates the scope once at boot from
+ * `localStorage`, but for single-page sessions that span login → logout →
+ * re-login (or workspace switches via the picker), that initial snapshot
+ * goes stale and crash reports get attributed to the wrong tenant.
+ *
+ * This helper is a no-op when `VITE_SENTRY_DSN` is unset (the SDK's setUser /
+ * setTag are documented no-ops in that case, but we early-return to avoid
+ * the call overhead). Only the anonymous `id` + `workspaceId` are forwarded
+ * — never email / name — matching the backend's `Sentry.setUser({ id })`-only
+ * pattern in `middleware/workspaceScope.js`.
+ *
+ * @param {object|null} profile - Sanitised user profile or null on logout.
+ */
+function syncSentryUser(profile) {
+  if (!import.meta.env.VITE_SENTRY_DSN) return;
+  try {
+    if (!profile) {
+      Sentry.setUser(null);
+      Sentry.setTag("workspace_id", null);
+      return;
+    }
+    Sentry.setUser(profile.id ? { id: profile.id } : null);
+    Sentry.setTag("workspace_id", profile.workspaceId || null);
+  } catch { /* best-effort */ }
+}
 
 const AuthContext = createContext(null);
 
@@ -109,6 +138,7 @@ export function AuthProvider({ children }) {
             const safe = sanitiseUser(data.user);
             localStorage.setItem(USER_KEY, JSON.stringify(safe));
             setUser(safe);
+            syncSentryUser(safe);
             schedule();
           } else {
             doLogout(false);
@@ -128,6 +158,7 @@ export function AuthProvider({ children }) {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     localStorage.removeItem(USER_KEY);
     setUser(null);
+    syncSentryUser(null);
     if (shouldRedirect) {
       const path = window.location.pathname;
       if (!path.endsWith("/login") && !path.endsWith("/forgot-password")) {
@@ -160,6 +191,7 @@ export function AuthProvider({ children }) {
           const safe = sanitiseUser(data);
           localStorage.setItem(USER_KEY, JSON.stringify(safe));
           setUser(safe);
+          syncSentryUser(safe);
           scheduleRefresh();
         } else {
           doLogout(false);
@@ -181,6 +213,7 @@ export function AuthProvider({ children }) {
     const safe = sanitiseUser(userData);
     localStorage.setItem(USER_KEY, JSON.stringify(safe));
     setUser(safe);
+    syncSentryUser(safe);
     scheduleRefresh();
   }
 

@@ -1,0 +1,19 @@
+-- AUTO-009c — Coverage granularity (statements / branches / functions).
+--
+-- `runs.coverageSummary` is a TEXT column holding a JSON blob (migration
+-- 038), so extending the shape with new keys
+-- (`totalStatements`, `coveredStatements`, `statementPct`,
+--  `totalBranches`, `coveredBranches`, `branchPct`,
+--  `totalFunctions`, `coveredFunctions`, `functionPct`,
+--  per-test `deltaStatements` / `deltaBranches` / `deltaFunctions`,
+--  per-file `uncoveredBranches` / `uncoveredFunctions`)
+-- does NOT require any DDL change — JSON readers tolerate the new keys
+-- and missing keys on pre-AUTO-009c rows default to `undefined`, which
+-- the frontend renders as "—" / hidden.
+--
+-- This migration file exists as a no-op marker so the bump is recorded
+-- in `schema_migrations` and ROADMAP.md / changelog references can point
+-- at a real migration version. Future granularity additions (e.g.
+-- mutation score) should extend the same JSON blob; we only need a new
+-- migration when a hard column is added.
+SELECT 1;

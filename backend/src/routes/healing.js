@@ -22,6 +22,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import * as metricSamplesRepo from "../database/repositories/metricSamplesRepo.js";
+import * as visionBudgetRepo from "../database/repositories/visionBudgetRepo.js";
 import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();
@@ -76,6 +77,7 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
   const byStrategy = new Map();
   const selectorAgg = new Map(); // selector → { selector, healCount, totalCount }
   let wouldFail = 0;
+  const visionHealStrategy = { pixelmatch: 0, llm: 0 };
 
   for (const r of rows) {
     const key = r.strategyIndex >= 0 ? String(r.strategyIndex) : "failed";
@@ -84,6 +86,8 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
     if (r.strategyIndex >= 0 && r.succeededAt) prev.successes += 1;
     byStrategy.set(key, prev);
     if (r.strategyIndex > 0) wouldFail += 1;
+    if (r.strategyIndex === 7) visionHealStrategy.pixelmatch += 1;
+    if (r.strategyIndex === 8) visionHealStrategy.llm += 1;
 
     // Healing keys are formatted "<testId>::<action>::<label>" (see
     // selfHealing.js:48). The selector aggregation should preserve both
@@ -105,8 +109,13 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
     .sort((a, b) => b.healCount - a.healCount)
     .slice(0, 10);
 
-  // Aggregate savings trend across ALL workspace projects, merging by timestamp.
+  // Aggregate savings trend AND vision-heal cost across ALL workspace
+  // projects in a single loop. `visionHealCostUsd` is the workspace-wide
+  // current-month LLM spend — read from `vision_budget_counters` (the
+  // table the budget circuit-breaker writes to). Best-effort: if the repo
+  // throws for one project we skip it rather than dark the whole summary.
   const merged = new Map();
+  let visionHealCostUsd = 0;
   for (const pid of projectIds) {
     const series = metricSamplesRepo.getSeries(pid, "healing.savings", { limit: 90 });
     for (const s of series) {
@@ -114,9 +123,13 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
       cur.value += Number(s.value || 0);
       merged.set(s.ts, cur);
     }
+    try {
+      visionHealCostUsd += Number(visionBudgetRepo.getMonthlyCost(pid) || 0);
+    } catch { /* per-project blip — skip */ }
   }
   const savingsTrend = [...merged.values()].sort((a, b) => a.ts - b.ts);
 
+  const visionHealCount = visionHealStrategy.pixelmatch + visionHealStrategy.llm;
   res.json({
     strategies: [...byStrategy.values()].map((s) => ({
       ...s,
@@ -125,6 +138,9 @@ router.get("/healing/summary", requireRole("viewer"), (req, res) => {
     topSelectors,
     estimates: { testsThatWouldHaveFailed: wouldFail },
     savingsTrend,
+    visionHealCount,
+    visionHealCostUsd,
+    visionHealStrategy,
   });
 });
 

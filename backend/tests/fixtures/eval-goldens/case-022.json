@@ -1,0 +1,8 @@
+{
+  "id": "case-022",
+  "category": "list-click",
+  "description": "Bulk-select checkbox + action.",
+  "url": "https://eval.local/inbox",
+  "snapshot": "<table><thead><tr><th><input type='checkbox' aria-label='Select all'/></th><th>Subject</th></tr></thead><tbody><tr><td><input type='checkbox' aria-label='Select row 1'/></td><td>Welcome</td></tr></tbody></table><button>Archive selected</button>",
+  "expected": "await page.getByLabel('Select row 1').check();\nawait page.getByRole('button', { name: 'Archive selected' }).click();\nawait expect(page.getByText('1 archived')).toBeVisible();"
+}

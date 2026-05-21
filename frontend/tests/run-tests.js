@@ -16,6 +16,8 @@ const files = [
   "tests/extractCodeBlock.test.js",
   "tests/automation-status.test.js",
   "tests/approval-provenance.test.js",
+  // AUTO-022 — score-format helpers powering the EvalPanel ScoreBadge.
+  "tests/eval-score-format.test.js",
 ];
 
 let passed = 0;

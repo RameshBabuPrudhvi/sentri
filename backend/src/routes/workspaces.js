@@ -51,7 +51,11 @@ router.get("/current", (req, res) => {
  * @route PATCH /api/workspaces/current
  */
 router.patch("/current", requireRole("admin"), (req, res) => {
-  const { name, slug, mfaRequired, mfaGracePeriodDays } = req.body;
+  // B3.7 — `dailySpendCapUsd`, `monthlySpendCapUsd`,
+  // `spendAlertThresholdPct` accept REAL / INTEGER values from the
+  // Settings Provider Routes UI. Validation lives below alongside the
+  // MFA fields so all cap edits go through one ACL boundary.
+  const { name, slug, mfaRequired, mfaGracePeriodDays, dailySpendCapUsd, monthlySpendCapUsd, spendAlertThresholdPct } = req.body;
   const updates = {};
   if (name && typeof name === "string") updates.name = name.trim().slice(0, 100);
   if (slug && typeof slug === "string") {
@@ -85,6 +89,42 @@ router.patch("/current", requireRole("admin"), (req, res) => {
       return res.status(400).json({ error: "mfaGracePeriodDays must be between 0 and 90." });
     }
     updates.mfaGracePeriodDays = n;
+  }
+
+  // B3.7 — workspace AI spend caps. Each accepts:
+  //   • a positive number → set the cap
+  //   • `null` (explicit) → clear the cap (back to "unlimited")
+  // Negative / NaN / non-finite values are rejected at the HTTP
+  // boundary; the migration documented this contract instead of using
+  // a CHECK constraint to keep the schema dialect-portable.
+  if (dailySpendCapUsd !== undefined) {
+    if (dailySpendCapUsd === null) {
+      updates.dailySpendCapUsd = null;
+    } else {
+      const n = Number(dailySpendCapUsd);
+      if (!Number.isFinite(n) || n < 0) {
+        return res.status(400).json({ error: "dailySpendCapUsd must be a non-negative number or null" });
+      }
+      updates.dailySpendCapUsd = n;
+    }
+  }
+  if (monthlySpendCapUsd !== undefined) {
+    if (monthlySpendCapUsd === null) {
+      updates.monthlySpendCapUsd = null;
+    } else {
+      const n = Number(monthlySpendCapUsd);
+      if (!Number.isFinite(n) || n < 0) {
+        return res.status(400).json({ error: "monthlySpendCapUsd must be a non-negative number or null" });
+      }
+      updates.monthlySpendCapUsd = n;
+    }
+  }
+  if (spendAlertThresholdPct !== undefined) {
+    const n = Number.parseInt(spendAlertThresholdPct, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      return res.status(400).json({ error: "spendAlertThresholdPct must be between 0 and 100" });
+    }
+    updates.spendAlertThresholdPct = n;
   }
 
   if (Object.keys(updates).length === 0) {

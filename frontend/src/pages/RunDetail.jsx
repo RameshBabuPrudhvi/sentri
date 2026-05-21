@@ -928,7 +928,12 @@ export default function RunDetail() {
               {run.gateResult.violations.map((v, i) => (
                 <div key={i} style={{ fontSize: "0.78rem" }}>
                   <strong style={{ fontFamily: "var(--font-mono)" }}>{v.rule}</strong>
-                  : actual <strong>{v.actual}</strong> vs threshold <strong>{v.threshold}</strong>
+                  : actual <strong>{v.actual}{v.rule.includes("Pct") ? "%" : ""}</strong> vs threshold <strong>{v.threshold}{v.rule.includes("Pct") ? "%" : ""}</strong>
+                  {/* AUTO-009d — regression gate carries the baseline so operators
+                      see "dropped from 80% to 68%" not just "12% > 5%". */}
+                  {v.priorCoveragePct != null && (
+                    <span style={{ color: "var(--text3)" }}> (prior run: {v.priorCoveragePct}%)</span>
+                  )}
                 </div>
               ))}
             </div>

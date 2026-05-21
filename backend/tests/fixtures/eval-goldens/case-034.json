@@ -1,0 +1,8 @@
+{
+  "id": "case-034",
+  "category": "multi-page-nav",
+  "description": "Top-nav navigate to settings \u2192 tab.",
+  "url": "https://eval.local/",
+  "snapshot": "<nav><a href='/settings'>Settings</a></nav><main><h1>Home</h1></main>",
+  "expected": "await page.getByRole('link', { name: 'Settings' }).click();\nawait expect(page).toHaveURL(/\\/settings$/);\nawait expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();"
+}

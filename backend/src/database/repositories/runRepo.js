@@ -23,6 +23,7 @@ import { getDatabase, getDatabaseDialect } from "../sqlite.js";
 import { parsePagination } from "../../utils/pagination.js";
 import * as runLogRepo from "./runLogRepo.js";
 import { filterShardRetrySurvivors, countShardRetrySurvivors } from "../../utils/shardRetryFilter.js";
+import { runsTotal as metricsRunsTotal } from "../../utils/metrics.js"; // INF-007 — bump on every run-row creation.
 
 export { parsePagination };
 
@@ -40,6 +41,10 @@ const JSON_FIELDS = [
   "githubCheck", // INT-002: GitHub Check Run metadata
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
+  "coverageSummary", // AUTO-009: aggregated per-run JS coverage summary (migration 038)
+  "shardCoverageSummaries", // AUTO-009f: per-shard pre-aggregated coverage (migration 042) — sparse array indexed by shardIndex; merged into `coverageSummary` by the boundary-crossing finalizer.
+  "changedFileRanges", // AUTO-009d: per-file head-side line ranges from the PR diff (migration 044)
+  "prCoverageDiff", // AUTO-009d: PR-scoped coverage diff output from computePrCoverage (migration 044)
 ];
 
 // Fields whose canonical empty shape is an array, not null. Keeping them as
@@ -107,6 +112,10 @@ const INSERT_COLS = [
   "shardCount", "shardsCompleted", // CAP-002: distributed shard telemetry (migration 025)
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
+  "coverageSummary", // AUTO-009: aggregated per-run JS coverage summary (migration 038)
+  "shardCoverageSummaries", // AUTO-009f: per-shard pre-aggregated coverage (migration 042)
+  "changedFileRanges", // AUTO-009d: PR diff hunk ranges (migration 044)
+  "prCoverageDiff", // AUTO-009d: PR-scoped coverage diff (migration 044)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -424,6 +433,87 @@ export function getRecentCompletedWithResults(projectId, limit = 20) {
 }
 
 /**
+ * AUTO-009 / AUTO-009k: Lean accessor for runs that carry a persisted
+ * `coverageSummary` JSON blob. Used by the dashboard's 30-day coverage
+ * trend (and the per-run granularity surface for AUTO-009c) so the trend
+ * can read `coveragePct`, `branchPct`, `functionPct` without bloating
+ * `LEAN_COLS` — `coverageSummary` is potentially multi-KB JSON and the
+ * rest of the dashboard payload doesn't need it.
+ *
+ * Selects only the columns the trend consumer reads:
+ *   - `id`, `projectId`, `startedAt`, `type` — windowing / grouping
+ *   - `coverageSummary` — parsed below
+ *
+ * Workspace-scoped via the same `projectIds` set the dashboard already
+ * resolves; never reads cross-workspace rows.
+ *
+ * **SQL-side bounds** (added per Lifeguard ANALYSIS-0011):
+ *   - `windowDays` (default 60) applies a `startedAt >= cutoff` filter so
+ *     long-lived projects don't load every historical coverage row —
+ *     previously we read every non-deleted coverage row and the JS layer
+ *     sliced to the last 30, paying full O(n) JSON.parse cost on each.
+ *     60d is wider than the dashboard's 30d trend window so the same
+ *     accessor can serve callers that need additional headroom (e.g.
+ *     the regression detector at `testRunner.js:957` walks history newest-
+ *     last looking for the most recent prior coverage run — bounded by
+ *     60d still gives ~2 months of priors before the lookup returns null).
+ *   - `limit` (default 200) caps the absolute row count at the SQL layer
+ *     too, defending against a SUT that emits hundreds of coverage-
+ *     enabled runs per day within the window. Bound is per-query, not
+ *     per-project, but since the dashboard's per-project slice in
+ *     `routes/dashboard.js#coverageTrend` then caps at 30 per project,
+ *     the practical visible payload stays bounded.
+ *
+ * Filters `coverageSummary IS NOT NULL` at the SQL layer so projects that
+ * never enabled capture never round-trip an empty column.
+ *
+ * @param {string[]} projectIds
+ * @param {Object}   [opts]
+ * @param {number}   [opts.windowDays=60] - SQL-side `startedAt >= now-N days` cutoff.
+ *   Set to `0` to disable the time filter (use sparingly — only when a caller
+ *   genuinely needs the full history).
+ * @param {number}   [opts.limit=200]     - Absolute row-count cap at the SQL layer.
+ * @returns {Object[]} Newest-last (chronological), `coverageSummary` parsed.
+ */
+export function getRunsWithCoverage(projectIds, { windowDays = 60, limit = 200 } = {}) {
+  if (!projectIds || projectIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  const params = [...projectIds];
+  let dateFilter = "";
+  if (Number.isFinite(windowDays) && windowDays > 0) {
+    const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+    dateFilter = " AND startedAt >= ?";
+    params.push(cutoff);
+  }
+  // ORDER BY DESC + LIMIT is portable; reverse client-side to preserve
+  // the documented "newest-last (chronological)" contract callers depend on
+  // (dashboard's per-project bucketing relies on chronological-asc order so
+  // `slice(-N)` keeps the most recent N points per project).
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 200;
+  params.push(safeLimit);
+  const rows = db.prepare(
+    `SELECT id, projectId, startedAt, type, coverageSummary FROM runs
+     WHERE projectId IN (${placeholders})
+       AND deletedAt IS NULL
+       AND coverageSummary IS NOT NULL
+       AND type IN ('test_run', 'run')${dateFilter}
+     ORDER BY startedAt DESC LIMIT ?`
+  ).all(...params);
+  // SELECT was DESC for LIMIT correctness; reverse to chronological asc here.
+  rows.reverse();
+  return rows.map((row) => {
+    if (row.coverageSummary) {
+      try { row.coverageSummary = JSON.parse(row.coverageSummary); }
+      catch { row.coverageSummary = null; }
+    } else {
+      row.coverageSummary = null;
+    }
+    return row;
+  });
+}
+
+/**
  * INT-002: Lean accessor for recent completed test runs that posted a GitHub
  * Check Run. Used by `concludeGithubCheck` to find a green base run for
  * regressed-test diff rendering without loading every project run's heavy
@@ -523,6 +613,14 @@ export function create(run) {
   // (runToRow already normalised any boolean value to 0/1).
   if (params.secretScanBlocked == null) params.secretScanBlocked = 0;
   db.prepare(INSERT_SQL).run(params);
+  // INF-007: bump the Prometheus counter for every persisted run row, labelled
+  // by run type so dashboards can split crawl vs. test_run vs. generate vs.
+  // record volume. `run.type` is set by every route that builds a run record;
+  // fall back to "unknown" as defence-in-depth so a future write path without
+  // a type doesn't pollute the series with `undefined`. Wrapped in try/catch
+  // so a metrics-registry hiccup never fails the actual run creation — the
+  // counter is observability, not load-bearing.
+  try { metricsRunsTotal.inc({ type: run?.type || "unknown" }); } catch { /* best-effort */ }
 }
 
 // Set of valid column names for filtering unknown properties in update().
@@ -826,6 +924,55 @@ export function incrementRunStats(runId, { passedDelta = 0, failedDelta = 0, tot
  * @param {number} shardIndex - 0-based shard index.
  * @param {string} path       - Public artifact URL for this shard's trace.
  */
+/**
+ * AUTO-009f / AUTO-009k — Atomically write a per-shard pre-aggregated
+ * coverage summary into the sparse `shardCoverageSummaries` JSON array.
+ *
+ * Each shard calls this at the runTests-tail (`testRunner.js`, shard mode)
+ * with the output of `pipeline/finalizeCoverage.js#aggregateShardCoverage` —
+ * a compact mergeable payload containing per-bundle covered-id arrays
+ * (`Set<"s:id"|"b:id:arm"|"f:id">` projected to sorted strings), per-source
+ * line-set arrays, server-side diffs, and the shard's per-test deltas.
+ * The boundary-crossing finalizer (`runWorker.js#finalizeShardedRun`)
+ * reads `runs.shardCoverageSummaries` and calls
+ * `pipeline/finalizeCoverage.js#mergeShardSummaries` to take set union
+ * across shards — matching the industry pattern (c8 / nyc / Istanbul
+ * `libCoverage.createCoverageMap().merge()` / Codecov upload-then-merge).
+ *
+ * Naively summing per-shard count totals is wrong (proven counter-example:
+ * shard 0 covers lines [1,2,3], shard 1 covers lines [3,4,5] → naive
+ * 3+3=6 vs true union 5). The merge consumer's set-union semantics is what
+ * makes this correct; see `coverage-shard-merge.test.js` for the proof.
+ *
+ * **Concurrency contract:** mirrors `setShardTracePath` — transaction-
+ * wrapped read-modify-write with a dialect-conditional `FOR UPDATE` lock
+ * on Postgres so two concurrent shards writing different array slots
+ * cannot lose each other's writes. Best-effort by contract: a write
+ * failure must be swallowed by the caller so coverage capture never
+ * fails a run (the finalizer's AUTO-009f fallback path re-aggregates
+ * from raw `runs.results` when this column is partial / null).
+ *
+ * @param {string} runId
+ * @param {number} shardIndex - 0-based shard index.
+ * @param {Object} summary    - This shard's `aggregateShardCoverage` output.
+ */
+export function setShardCoverageSummary(runId, shardIndex, summary) {
+  if (!runId || shardIndex == null || !summary || typeof summary !== "object") return;
+  const db = getDatabase();
+  const lockClause = getDatabaseDialect() === "postgres" ? " FOR UPDATE" : "";
+  db.transaction(() => {
+    const row = db.prepare(`SELECT shardCoverageSummaries FROM runs WHERE id = ?${lockClause}`).get(runId);
+    if (!row) return;
+    let arr = [];
+    if (row.shardCoverageSummaries) {
+      try { arr = JSON.parse(row.shardCoverageSummaries) || []; } catch { arr = []; }
+    }
+    if (!Array.isArray(arr)) arr = [];
+    arr[shardIndex] = summary;
+    db.prepare("UPDATE runs SET shardCoverageSummaries = ? WHERE id = ?").run(JSON.stringify(arr), runId);
+  })();
+}
+
 export function setShardTracePath(runId, shardIndex, path) {
   if (!runId || shardIndex == null || typeof path !== "string") return;
   const db = getDatabase();
@@ -1124,6 +1271,59 @@ export function restore(id) {
  * @param {string} deletedAfter — ISO timestamp (inclusive lower bound).
  * @returns {number} Number of runs restored.
  */
+/**
+ * AUTO-009j — Retention sweep: null out every coverage-related JSON column
+ * on runs older than `days` days. Preserves the lightweight `coveragePct`
+ * in the dashboard trend via `getRunsWithCoverage` (which reads the column
+ * before this sweep clears it — the trend query's `IS NOT NULL` filter
+ * means cleared rows drop out of the trend naturally on the next dashboard
+ * load).
+ *
+ * ### Columns cleared
+ *
+ * - `coverageSummary` (migration 038) — the public aggregate (multi-KB JSON
+ *   carrying `perTest[]` + `topUncoveredFiles[]`).
+ * - `prCoverageDiff` (migration 044) — PR-scoped coverage diff
+ *   (`uncoveredChangedLines[]` capped at 200, but still per-file rows).
+ * - `shardCoverageSummaries` (migration 042) — per-shard mergeable
+ *   pre-aggregated payloads (per-bundle covered-id arrays, per-source line
+ *   arrays, server diffs). Tens-of-MB on large-bundle SUTs × N shards;
+ *   ONLY read by `finalizeShardedRun` so safe to purge once the run is
+ *   terminal. Previously left behind → storage-leak bug surfaced by
+ *   Lifeguard ANALYSIS-0001 (`backend/src/database/repositories/runRepo.js:1293`).
+ * - `changedFileRanges` (migration 044) — PR diff hunk ranges. ONLY read
+ *   by `finalizeCoverage` during the post-run tail; never read again
+ *   after the run completes. Same storage-leak rationale.
+ *
+ * The `WHERE coverageSummary IS NOT NULL` predicate keeps the sweep
+ * indexable on the most common column (coverage-enabled runs always have
+ * a non-null summary if AUTO-009f / AUTO-009k landed); we also clear
+ * `shardCoverageSummaries` / `changedFileRanges` on the same row whether
+ * or not THEY are non-null, which is cheap (idempotent UPDATE to NULL).
+ *
+ * Returns the number of rows cleared. Best-effort — a failure must never
+ * block the scheduler.
+ *
+ * @param {number} days
+ * @returns {number}
+ */
+export function purgeCoverageSummaryOlderThan(days) {
+  if (!Number.isFinite(days) || days <= 0) return 0;
+  const db = getDatabase();
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const info = db.prepare(
+    `UPDATE runs
+        SET coverageSummary = NULL,
+            prCoverageDiff = NULL,
+            shardCoverageSummaries = NULL,
+            changedFileRanges = NULL
+      WHERE coverageSummary IS NOT NULL
+        AND startedAt < ?
+        AND deletedAt IS NULL`
+  ).run(cutoff);
+  return info.changes || 0;
+}
+
 export function restoreByProjectIdAfter(projectId, deletedAfter) {
   const db = getDatabase();
   const info = db.prepare(

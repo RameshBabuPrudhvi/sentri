@@ -122,7 +122,7 @@ export function classifyElement(element) {
 
 const AI_THRESHOLD = parseInt(process.env.AI_CLASSIFY_THRESHOLD, 10) || 40;
 
-async function aiClassifyPage(snapshot, signal) {
+async function aiClassifyPage(snapshot, signal, workspaceId = null) {
   const elements = (snapshot.elements || []).slice(0, 15).map(e => ({
     tag: e.tag, text: (e.text || "").slice(0, 40), role: e.role, type: e.type,
   }));
@@ -155,7 +155,7 @@ Return ONLY valid JSON (no markdown):
   "reason": "one-sentence explanation"
 }`;
 
-  const text = await generateText(prompt, { maxTokens: 256, signal });
+  const text = await generateText(prompt, { maxTokens: 256, signal, agentRole: "explorer", workspaceId });
   const result = parseJSON(text);
   const intent = (result.intent || "").toUpperCase();
   const validIntents = ["AUTH", "CHECKOUT", "SEARCH", "FORM_SUBMISSION", "CRUD", "NAVIGATION", "CONTENT"];
@@ -218,7 +218,7 @@ export function classifyPage(snapshot, filteredElements) {
  *
  * @param {AbortSignal} [signal] — forwarded to AI calls so abort stops classification
  */
-export async function classifyPageWithAI(snapshot, filteredElements, { signal } = {}) {
+export async function classifyPageWithAI(snapshot, filteredElements, { signal, workspaceId } = {}) {
   // AI fallback disabled to conserve LLM API quota (Gemini free tier: 20 calls/day).
   // The heuristic classifier has been improved with better keyword scoring and
   // element-type weighting, so AI assistance is not needed for typical pages.
@@ -231,7 +231,7 @@ export async function classifyPageWithAI(snapshot, filteredElements, { signal } 
   try {
     if (!hasProvider()) return heuristic;
     if (signal?.aborted) return heuristic;
-    const aiResult = await aiClassifyPage(snapshot, signal);
+    const aiResult = await aiClassifyPage(snapshot, signal, workspaceId || null);
     if (!aiResult) return heuristic;
     const isHighPriority = HIGH_PRIORITY_INTENTS.has(aiResult.intent);
     return {

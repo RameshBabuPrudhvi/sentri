@@ -189,7 +189,12 @@ console.log("\n🔢 STRATEGY_VERSION consistency");
 test("STRATEGY_VERSION equals expected value (bump this when strategies change)", () => {
   // If this test fails, you changed the strategies array in selfHealing.js.
   // Bump STRATEGY_VERSION in selfHealing.js and update the expected value here.
-  assert.equal(STRATEGY_VERSION, 3, "STRATEGY_VERSION changed — update this test after verifying the bump is intentional");
+  //
+  // MNT-001 bumped 3 → 4 when host-side vision-healing stages 7
+  // (pixelmatch) and 8 (LLM vision) were introduced. Indices 7/8 are
+  // reserved by `STRATEGY_INDEX_PIXELMATCH` / `STRATEGY_INDEX_LLM_VISION`
+  // and emitted by `tryVisionHeal()`, not by the runtime helper waterfall.
+  assert.equal(STRATEGY_VERSION, 4, "STRATEGY_VERSION changed — update this test after verifying the bump is intentional");
 });
 
 test("STRATEGY_VERSION is used server-side for hint scoping", () => {

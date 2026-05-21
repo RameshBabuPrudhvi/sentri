@@ -8,6 +8,18 @@ import { spawnSync } from "node:child_process";
 const files = [
   "tests/code-parsing.test.js",
   "tests/self-healing.test.js",
+  // MNT-001 — host-side vision-healing waterfall (stages 7 pixelmatch + 8 LLM).
+  // Stub-driven via dependency injection; no real CV / no real network in CI.
+  "tests/self-healing-vision.test.js",
+  // MNT-001b — real pixelmatch CV adapter, baseline crop persistence repo,
+  // and per-project budget circuit breaker. Real SQLite + real pixelmatch
+  // (no stubs); each fixture is synthesised in-memory.
+  "tests/vision-heal-pixelmatch.test.js",
+  "tests/element-baseline-repo.test.js",
+  "tests/vision-budget-repo.test.js",
+  // MNT-001b — coordinate re-action after a successful vision heal.
+  // Unit-tested against a fake Playwright page; no real browser.
+  "tests/vision-heal-reaction.test.js",
   "tests/pipeline.test.js",
   "tests/api-flow.test.js",
   "tests/project-edit.test.js",
@@ -60,7 +72,37 @@ const files = [
   "tests/ai-fallback.test.js",
   "tests/openrouter-provider.test.js",
   "tests/openai-compat-provider.test.js",
+  "tests/aiProvider-adapter-contract.test.js",
+  "tests/ai-provider-cost-tracking.test.js",
   "tests/compat-config-cache.test.js",
+  "tests/agent-config-routes.test.js",
+  // AI-005 — Multi-agent dispatch unit tests (resolveProvider, breakerKey,
+  // per-role circuit breakers, fallbackRole cycle guard, sticky-fallback priority).
+  "tests/agent-dispatch.test.js",
+  // B1.8 — Per-workspace provider-routes (the route-driven dispatch path).
+  // Each file pins one slice of the B1.x contract so a regression in one
+  // module surfaces in isolation rather than as a cascade across files.
+  "tests/provider-routes.test.js",       // B1.3 — repo CRUD + cycle guard + JSON round-trip + audit emission.
+  "tests/secrets.test.js",               // B1.4 — AES-256-GCM encrypt/decrypt + master-key fail-fast + lastFour.
+  "tests/protocol-adapter.test.js",      // B1.5 — protocol switch + streaming-parity fallback.
+  "tests/resolve-route.test.js",         // B1.6 — resolveRoute priority chain + AI-005c collapse + shim.
+  "tests/migration-routeid.test.js",
+  "tests/request-log.test.js",
+  "tests/migration-rollback.test.js",
+  "tests/capability-probe.test.js",
+  // B3.7 — Token-bucket reserve + spend-cap enforcement.
+  "tests/quota-guard.test.js",
+  // B3.8 — Exact-match response cache + thundering-herd coalescing + janitor.
+  "tests/response-cache.test.js",
+  // B4.1 / B4.4 — "no code edits to add a vendor" contract test. Registers
+  // a `family: "custom"` route at runtime, points it at a mock OpenAI
+  // server, and asserts dispatch reaches the mock with the operator-set
+  // apiKey + baseUrl + model. Pins the central guarantee from the
+  // roadmap's "Definition of done" — passes once `_callProviderUnsafe`
+  // dispatches real routes through `protocolAdapter.generate(route, …)`
+  // (B4.1) instead of the legacy `adapterFor(provider)` switch.
+  "tests/no-code-edits-contract.test.js",
+  "tests/chaos-provider.test.js",        // B1.8 — error-injection: 500s, malformed JSON, mid-stream abort, breaker.
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",
   "tests/openapi.test.js",
@@ -113,6 +155,26 @@ const files = [
   "tests/run-shard-finalizer.test.js",
   "tests/failure-clusterer.test.js",
   "tests/worker-pool-dashboard.test.js",
+  "tests/coverage-aggregator.test.js",
+  "tests/run-coverage-integration.test.js",
+  "tests/run-shard-coverage.test.js",        // AUTO-009f — sharded-run parity regression
+  "tests/coverage-shard-merge.test.js",      // AUTO-009k — two-stage per-shard pre-aggregation + set-union merge
+  "tests/coverage-memory-ceiling.test.js",   // AUTO-009g — memory-ceiling enforcement
+  "tests/coverage-pr-diff.test.js",          // AUTO-009d — PR-scoped coverage diff (the Codecov play)
+  "tests/source-map-resolver.test.js",
+  "tests/server-coverage-proxy.test.js", // AUTO-009h — server-side coverage capture for API tests
+  "tests/observability.test.js",
+  // AUTO-022 — AI eval harness scorer + regression-detection + metric_samples persistence.
+  "tests/eval-pipeline.test.js",
+  "tests/eval-regression.test.js",
+  "tests/eval-persistence.test.js",
+  // AUTO-022 — CLI E2E subprocess tests for run-eval.mjs exit codes + report artifact.
+  "tests/eval-cli-e2e.test.js",
+    // B3.11 — Integration tests for the new operator surface.
+  "tests/provider-routes-api.test.js",
+  "tests/routes-import-export.test.js",
+  "tests/compat-migration.test.js",
+  "tests/concurrent-dispatch.test.js",
 ];
 
 let passed = 0;

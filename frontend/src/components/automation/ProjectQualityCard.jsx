@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Globe, ShieldCheck, Gauge, Bot, Database, Lock } from "lucide-react";
+import { ChevronDown, Globe, ShieldCheck, Gauge, Bot, Database, Lock, Eye } from "lucide-react";
 import QualityGatesPanel from "../project/QualityGatesPanel.jsx";
 import WebVitalsBudgetsPanel from "../project/WebVitalsBudgetsPanel.jsx";
 import TrendChart from "../shared/TrendChart.jsx";
@@ -46,12 +46,111 @@ function WebVitalTrend({ projectId, metricKey, title, threshold }) {
 }
 
 const INNER_TABS = [
-  { id: "gates",       label: "Quality Gates", icon: ShieldCheck },
-  { id: "webvitals",   label: "Web Vitals",    icon: Gauge       },
-  { id: "autoapprove", label: "Auto-Approval", icon: Bot         },
-  { id: "iterations",  label: "Iterations",    icon: Database    },
-  { id: "piifirewall", label: "PII Firewall",  icon: Lock        },
+  { id: "gates",       label: "Quality Gates",  icon: ShieldCheck },
+  { id: "webvitals",   label: "Web Vitals",     icon: Gauge       },
+  { id: "autoapprove", label: "Auto-Approval",  icon: Bot         },
+  { id: "iterations",  label: "Iterations",     icon: Database    },
+  { id: "piifirewall", label: "PII Firewall",   icon: Lock        },
+  { id: "visionheal",  label: "Vision Healing", icon: Eye         },
+  { id: "coverage",    label: "Coverage",       icon: Globe       },
 ];
+
+function CoveragePanel({ project, canEdit, onToast }) {
+  const [enabled, setEnabled] = useState(!!project.coverageEnabled);
+  const [sourcemapBaseUrl, setSourcemapBaseUrl] = useState(project.sourcemapBaseUrl || "");
+  const [regressionThreshold, setRegressionThreshold] = useState(
+    project.coverageRegressionThresholdPct != null ? String(project.coverageRegressionThresholdPct) : "",
+  );
+  const [saving, setSaving] = useState(false);
+
+  // AUTO-009 — per-project coverage trend. `api.getCoverageTrend(projectId)`
+  // narrows the dashboard's `coverageTrend` series to this project so the
+  // Coverage tab shows a mini sparkline + latest-% badge without the operator
+  // needing to navigate to the Dashboard. Fetched on mount; null when coverage
+  // is disabled or no runs have produced data yet.
+  const [trend, setTrend] = useState(null);
+  useEffect(() => {
+    if (!project.coverageEnabled) { setTrend(null); return; }
+    let cancelled = false;
+    api.getCoverageTrend(project.id)
+      .then((t) => { if (!cancelled) setTrend(t); })
+      .catch(() => { /* best-effort — settings tab still works without the sparkline */ });
+    return () => { cancelled = true; };
+  }, [project.id, project.coverageEnabled]);
+
+  const save = async () => {
+    const trimmedThreshold = regressionThreshold.trim();
+    const thresholdVal = trimmedThreshold === "" ? null : Number(trimmedThreshold);
+    if (thresholdVal !== null && (!Number.isFinite(thresholdVal) || thresholdVal < 0 || thresholdVal > 100)) {
+      onToast?.({ type: "error", message: "Regression alert threshold must be empty (disabled) or a number between 0 and 100." });
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.updateProject(project.id, {
+        coverageEnabled: enabled,
+        sourcemapBaseUrl: sourcemapBaseUrl.trim() || null,
+        coverageRegressionThresholdPct: thresholdVal,
+      });
+      onToast?.({ type: "success", message: "Coverage settings saved." });
+    } catch (err) {
+      onToast?.({ type: "error", message: err?.message || "Failed to save coverage settings." });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="aap-panel">
+      <label className="aap-stats">
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={!canEdit || saving} />
+        {" "}Enable browser JS coverage capture
+      </label>
+      <input className="aap-input" placeholder="Optional source-map base URL" value={sourcemapBaseUrl} onChange={(e) => setSourcemapBaseUrl(e.target.value)} disabled={!canEdit || saving} />
+      <div className="aap-section">
+        <label className="aap-field-label">
+          Regression alert threshold (%) — leave empty to disable
+        </label>
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="0.1"
+          className="aap-input"
+          placeholder="e.g. 5"
+          value={regressionThreshold}
+          onChange={(e) => setRegressionThreshold(e.target.value)}
+          disabled={!canEdit || saving}
+        />
+        <div className="aap-stats aap-stats--hint">
+          Fires a Teams / email / webhook notification when coverage drops more than
+          this percentage vs. the prior run. Does NOT fail the run — use Quality Gates
+          → Max coverage regression for that. Example: 5 alerts on any drop &gt; 5%.
+        </div>
+      </div>
+      <button className="btn btn-primary btn-sm" onClick={save} disabled={!canEdit || saving}>{saving ? "Saving…" : "Save"}</button>
+      {/* AUTO-009 — per-project coverage sparkline + latest-% badge.
+          Only renders when coverage is enabled AND at least one run has
+          produced data (trend !== null). Gives operators immediate feedback
+          on their project's coverage trajectory without navigating to the
+          Dashboard. */}
+      {trend && trend.series && trend.series.length > 0 && (() => {
+        const latest = trend.series[trend.series.length - 1];
+        const latestPct = Math.round((latest?.coveragePct || 0) * 100);
+        return (
+          <div className="aap-section">
+            <div className="aap-stats">
+              <strong>Latest coverage: {latestPct}%</strong>
+              <span className="text-muted"> · {trend.series.length} run{trend.series.length !== 1 ? "s" : ""} in last {trend.windowDays}d</span>
+            </div>
+            <div className="aap-stats aap-stats--hint">
+              {trend.series.map((p, i) => `${Math.round((p.coveragePct || 0) * 100)}%`).join(" → ")}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
 
 /**
  * CAP-001: configures `project.iterationCap` — the per-project ceiling on
@@ -405,6 +504,191 @@ function PiiFirewallPanel({ project, canEdit, onToast }) {
   );
 }
 
+/**
+ * MNT-001: configures `project.visionHealing` (tri-state: off / pixelmatch_only /
+ * pixelmatch_and_llm), `visionHealMaxCallsPerDay`, and `visionHealMaxCostUsdPerMonth`.
+ *
+ * `pixelmatch_and_llm` is gated server-side by `aiProvider.hasVisionProvider()`;
+ * the backend returns `VISION_PROVIDER_NOT_CONFIGURED` when no vision-capable
+ * model is configured. We surface that as a disabled option with an inline
+ * tooltip rather than letting the save fail with a generic error.
+ *
+ * Mirrors `PiiFirewallPanel`'s save / dirty / disabled-when-not-canEdit pattern
+ * so the panel feels native alongside the other Quality tabs.
+ */
+function VisionHealingPanel({ project, canEdit, onToast }) {
+  const initialMode = project.visionHealing || "off";
+  const initialCalls = project.visionHealMaxCallsPerDay ?? 100;
+  const initialCost = project.visionHealMaxCostUsdPerMonth ?? 50;
+
+  const [mode, setMode] = useState(initialMode);
+  const [callsCap, setCallsCap] = useState(String(initialCalls));
+  const [costCap, setCostCap] = useState(String(initialCost));
+  const [saving, setSaving] = useState(false);
+  // Server-side LLM-provider availability — fetched on mount via
+  // `GET /api/v1/system/vision-provider-status` so the `pixelmatch_and_llm`
+  // radio renders disabled (with the tooltip) BEFORE the user tries to save,
+  // fulfilling the QA.md MNT-001 acceptance criterion. The save-time
+  // VISION_PROVIDER_NOT_CONFIGURED fallback below is a defence-in-depth path
+  // for the case where the provider config changes between mount and save.
+  //
+  // Default `true` (optimistic) so the radio isn't briefly disabled during
+  // the first paint before the status fetch resolves — the worst case if
+  // the fetch fails is the previous behaviour (save-time error).
+  const [llmAvailable, setLlmAvailable] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getVisionProviderStatus()
+      .then((s) => { if (!cancelled) setLlmAvailable(Boolean(s?.available)); })
+      .catch(() => { /* keep optimistic default — save-time error path catches it */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const dirty = mode !== initialMode
+    || String(initialCalls) !== callsCap
+    || String(initialCost) !== costCap;
+
+  const save = async () => {
+    const callsN = Number(callsCap);
+    const costN = Number(costCap);
+    if (!Number.isInteger(callsN) || callsN < 1 || callsN > 10000) {
+      onToast?.({ type: "error", message: "Daily call cap must be an integer between 1 and 10000." });
+      return;
+    }
+    if (!Number.isFinite(costN) || costN < 0 || costN > 100000) {
+      onToast?.({ type: "error", message: "Monthly cost cap must be a number between 0 and 100000." });
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.updateProject(project.id, {
+        visionHealing: mode,
+        visionHealMaxCallsPerDay: callsN,
+        visionHealMaxCostUsdPerMonth: costN,
+      });
+      const summary = mode === "off"
+        ? "Vision healing disabled."
+        : mode === "pixelmatch_only"
+          ? `Pixelmatch fallback enabled · caps ${callsN}/day, $${costN}/month.`
+          : `Pixelmatch + LLM fallback enabled · caps ${callsN}/day, $${costN}/month.`;
+      onToast?.({ type: "success", message: summary });
+    } catch (err) {
+      // Distinguish the LLM-not-configured failure from a generic save error
+      // so the user gets a concrete remediation step instead of "save failed".
+      const msg = err?.message || "Failed to save vision-healing settings.";
+      if (msg.includes("VISION_PROVIDER_NOT_CONFIGURED")) {
+        setLlmAvailable(false);
+        setMode("pixelmatch_only");
+        onToast?.({ type: "error", message: "LLM vision is unavailable — no vision-capable model is configured server-side. Falling back to pixelmatch-only." });
+      } else {
+        onToast?.({ type: "error", message: msg });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="aap-panel">
+      <div>
+        <label className="aap-field-label">Healing mode</label>
+        <div className="aap-stats aap-stats--inline">
+          Adds a vision-based fallback when every DOM selector strategy fails.
+          Stage 7 (pixelmatch) is deterministic and free. Stage 8 (LLM vision)
+          is paid; both per-project caps below soft-disable it when exceeded.
+        </div>
+        <div className="aap-field-row aap-field-row--column">
+          <label className="aap-toggle-label">
+            <input
+              type="radio"
+              name={`vision-mode-${project.id}`}
+              checked={mode === "off"}
+              onChange={() => setMode("off")}
+              disabled={!canEdit || saving}
+            />
+            Off — DOM-only healing (current behaviour)
+          </label>
+          <label className="aap-toggle-label">
+            <input
+              type="radio"
+              name={`vision-mode-${project.id}`}
+              checked={mode === "pixelmatch_only"}
+              onChange={() => setMode("pixelmatch_only")}
+              disabled={!canEdit || saving}
+            />
+            Pixelmatch only — free CV fallback, no LLM spend
+          </label>
+          <label
+            className="aap-toggle-label"
+            title={llmAvailable ? undefined : "VISION_MODEL not configured server-side"}
+          >
+            <input
+              type="radio"
+              name={`vision-mode-${project.id}`}
+              checked={mode === "pixelmatch_and_llm"}
+              onChange={() => setMode("pixelmatch_and_llm")}
+              disabled={!canEdit || saving || !llmAvailable}
+            />
+            Pixelmatch + LLM — paid; bounded by caps below
+            {!llmAvailable && <span className="aap-stats aap-stats--muted">(provider not configured)</span>}
+          </label>
+        </div>
+      </div>
+
+      <div className="aap-section">
+        <label className="aap-field-label">Daily LLM call cap (1–10000)</label>
+        <div className="aap-field-row">
+          <input
+            type="number"
+            min="1"
+            max="10000"
+            step="1"
+            value={callsCap}
+            onChange={(e) => setCallsCap(e.target.value)}
+            disabled={!canEdit || saving || mode !== "pixelmatch_and_llm"}
+            className="aap-input"
+          />
+        </div>
+        <div className="aap-stats aap-stats--hint">
+          Stage 8 (LLM) soft-disables for the rest of the UTC day once this is hit.
+          Stage 7 (pixelmatch) keeps running.
+        </div>
+      </div>
+
+      <div className="aap-section">
+        <label className="aap-field-label">Monthly LLM cost cap (USD, 0–100000)</label>
+        <div className="aap-field-row">
+          <input
+            type="number"
+            min="0"
+            max="100000"
+            step="1"
+            value={costCap}
+            onChange={(e) => setCostCap(e.target.value)}
+            disabled={!canEdit || saving || mode !== "pixelmatch_and_llm"}
+            className="aap-input"
+          />
+        </div>
+        <div className="aap-stats aap-stats--hint">
+          Cumulative LLM-vision spend in the current calendar month. Stage 8
+          soft-disables when exceeded; resets at the month boundary.
+        </div>
+      </div>
+
+      <div className="aap-field-row aap-actions">
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={save}
+          disabled={!canEdit || saving || !dirty}
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectQualityCard({
   project,
   defaultExpanded = false,
@@ -508,6 +792,20 @@ export default function ProjectQualityCard({
                 onToast={onToast}
               />
             )}
+            {innerTab === "visionheal" && (
+              <VisionHealingPanel
+                project={project}
+                canEdit={canEdit}
+                onToast={onToast}
+              />
+            )}
+            {innerTab === "coverage" && (
+              <CoveragePanel
+                project={project}
+                canEdit={canEdit}
+                onToast={onToast}
+              />
+            )}
             {innerTab === "webvitals" && (
               <>
                 <WebVitalsBudgetsPanel
@@ -518,14 +816,7 @@ export default function ProjectQualityCard({
                 {/* AUTO-017.3: per-metric trend charts. Threshold lines are
                     sourced from the project's `webVitalsBudgets` so users see
                     violations in context (PR checklist NEXT.md:67). */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                    gap: 12,
-                    marginTop: 16,
-                  }}
-                >
+                <div className="aap-webvitals-grid">
                   {WEB_VITAL_METRICS.map((m) => (
                     <WebVitalTrend
                       key={m.key}

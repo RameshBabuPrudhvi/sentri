@@ -13,8 +13,21 @@ import { escapeHtml } from "../../utils/markdown.js";
 import { api } from "../../api.js";
 
 // ─── Infer per-step status ────────────────────────────────────────────────────
+// Preferred path: `result.stepStatuses` is the authoritative array emitted by
+// the backend sandbox (codeExecutor.js `__beginStep` / `__captureStep`). Each
+// entry has `{ step, status }` where status ∈ {passed, failed, running}. When
+// present we map it 1:1 onto the step list — no guesswork. The keyword-matching
+// fallback below only runs for legacy runs that pre-date the per-step tracker,
+// or for runs where step injection couldn't find `// Step N:` markers.
 function inferStepStatuses(steps = [], result = {}) {
   if (!steps.length) return [];
+
+  // Authoritative path — backend told us exactly what passed/failed.
+  if (Array.isArray(result.stepStatuses) && result.stepStatuses.length > 0) {
+    const byStep = new Map(result.stepStatuses.map(s => [s.step, s.status]));
+    return steps.map((_, i) => byStep.get(i + 1) || "pending");
+  }
+
   const status = result.status || "pending";
   const error  = (result.error || "").toLowerCase();
 
@@ -413,7 +426,7 @@ export default function StepResultsView({ result, run, onBack }) {
                     {/* Error inline */}
                     {stepStatus === "failed" && result?.error && (
                       <div className="srv-step-error">
-                        {result.error.length > 300 ? result.error.slice(0, 300) + "…" : result.error}
+                        {result.error.length > 450 ? result.error.slice(0, 450) + "…" : result.error}
                       </div>
                     )}
 

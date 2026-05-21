@@ -13,6 +13,7 @@ import StatCard from "../components/shared/StatCard.jsx";
 import PassFailChart from "../components/charts/PassFailChart.jsx";
 import SparklineChart from "../components/charts/SparklineChart.jsx";
 import StackedBar from "../components/charts/StackedBar.jsx";
+import EvalPanel from "../components/dashboard/EvalPanel.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,6 +32,233 @@ function RunningBadge() {
       <span className="spin dash-spinner" />
       Running
     </span>
+  );
+}
+
+// AUTO-009c — Coverage panel hoisted into its own component so it can own
+// the line/branch/function tab state via `useState`. The whole panel is
+// driven off the `coverageTrend` + `recentRuns` slices of the dashboard
+// payload — no extra fetches.
+const COVERAGE_METRICS = [
+  { key: "line",     label: "Lines",     seriesKey: "coveragePct",  summaryPctKey: "coveragePct",  summaryUncoveredKey: "uncoveredLines",     summaryTotalKey: "totalLines"     },
+  { key: "branch",   label: "Branches",  seriesKey: "branchPct",    summaryPctKey: "branchPct",    summaryUncoveredKey: "uncoveredBranches",  summaryTotalKey: "totalBranches"  },
+  { key: "function", label: "Functions", seriesKey: "functionPct",  summaryPctKey: "functionPct",  summaryUncoveredKey: "uncoveredFunctions", summaryTotalKey: "totalFunctions" },
+];
+
+function CoveragePanel({ data, Activity, SparklineChart }) {
+  // Default to "line" so behaviour matches the pre-AUTO-009c panel. The
+  // toggle is hidden when no run has branch/function data so the empty
+  // state for a line-only SUT looks identical to before.
+  const [metricKey, setMetricKey] = useState("line");
+  const series = data?.coverageTrend?.series || [];
+
+  // Per-project series grouping — same as before, but the y-value is now
+  // pulled from whichever metric is selected. Missing values (older
+  // backends, or runs that didn't generate granularity data) fall back to
+  // `coveragePct` so the sparkline never has a hole.
+  const byProject = new Map();
+  for (const point of series) {
+    if (!byProject.has(point.projectId)) byProject.set(point.projectId, []);
+    byProject.get(point.projectId).push(point);
+  }
+  // AUTO-009 — `coverageSummary` is no longer denormalised onto `recentRuns`
+  // (it bloated the dashboard payload and required the LEAN_COLS bump that
+  // was missing in the original implementation). The backend now ships the
+  // per-project latest summary in a dedicated `latestCoverageByProject` map.
+  const latestSummaryByProject = new Map(
+    Object.entries(data?.latestCoverageByProject || {}),
+  );
+
+  // Show the metric tabs only when at least one series point carries the
+  // granularity field — otherwise the tabs would all read 0% on a pre-009c
+  // backend or a SUT where v8-to-istanbul never produced output.
+  const granularityAvailable = series.some((p) => p.branchPct != null || p.functionPct != null);
+
+  // AUTO-009h — Browser / Server / Combined tab toggle. Only renders when
+  // at least one project has surfaced server-side coverage data
+  // (`latestSummaryByProject` entry with `serverLayer: true` OR a
+  // `topUncoveredFiles[]` row carrying `layer: "server"`); otherwise we
+  // default to browser-only and hide the tabs so pre-AUTO-009h SUTs look
+  // identical to before.
+  //
+  // Intentional UI behavior: once `serverLayerAvailable` flips true for
+  // ANY project in the workspace, the toggle stays rendered across
+  // subsequent dashboard reads — even if the latest run on every
+  // project is browser-only. This is by design: operators expect the
+  // segmented control to be stable, not to disappear-and-reappear as
+  // the most-recent run rotates between browser and API suites. The
+  // toggle defaults to `"browser"` so a browser-only latest run is
+  // rendered correctly without an explicit user toggle.
+  const [layerKey, setLayerKey] = useState("browser");
+  const serverLayerAvailable = Array.from(latestSummaryByProject.values()).some((s) =>
+    s?.serverLayer === true ||
+    (Array.isArray(s?.topUncoveredFiles) && s.topUncoveredFiles.some((f) => f.layer === "server"))
+  );
+  const LAYER_TABS = [
+    { key: "browser",  label: "Browser"  },
+    { key: "server",   label: "Server"   },
+    { key: "combined", label: "Combined" },
+  ];
+  const metric = COVERAGE_METRICS.find((m) => m.key === metricKey) || COVERAGE_METRICS[0];
+
+  return (
+    <div className="card card-padded mb-md">
+      <div className="flex-between dash-cov-header">
+        <div className="dash-cov-header-left">
+          <Activity size={14} color="var(--accent)" />
+          <span className="section-title dash-cov-section-title">Coverage</span>
+        </div>
+        <div className="dash-cov-header-right">
+          {serverLayerAvailable && (
+            // AUTO-009h — Browser / Server / Combined layer toggle. Only
+            // rendered when at least one project's coverage summary
+            // carries server-side data; otherwise pre-AUTO-009h SUTs see
+            // no UI delta. Mirrors the metric-tab style below.
+            <div role="tablist" aria-label="Coverage layer" className="dash-cov-tablist">
+              {LAYER_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  role="tab"
+                  aria-selected={layerKey === t.key}
+                  onClick={() => setLayerKey(t.key)}
+                  className={`dash-cov-tab ${layerKey === t.key ? "dash-cov-tab--active" : ""}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {granularityAvailable && (
+            // AUTO-009c — three-way toggle. Mirrors the eval-panel tab style
+            // to stay visually consistent. Uses `role="tablist"` so the
+            // segmented control is announced as a tabbed selector by screen
+            // readers.
+            <div role="tablist" aria-label="Coverage metric" className="dash-cov-tablist">
+              {COVERAGE_METRICS.map((m) => (
+                <button
+                  key={m.key}
+                  role="tab"
+                  aria-selected={metricKey === m.key}
+                  onClick={() => setMetricKey(m.key)}
+                  className={`dash-cov-tab ${metricKey === m.key ? "dash-cov-tab--active" : ""}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {series.length > 0 && (
+            <span className="text-xs text-muted">{`30-day · ${series.length} run${series.length !== 1 ? "s" : ""}`}</span>
+          )}
+        </div>
+      </div>
+      {series.length === 0 ? (
+        <div className="text-sm text-muted">
+          Enable coverage on a project to start tracking. Go to <strong>Automation → Quality → Coverage</strong> and toggle <em>Enable browser JS coverage capture</em>.
+        </div>
+      ) : (
+        <div className="flex-col gap-sm">
+          {Array.from(byProject.entries()).map(([projectId, points]) => {
+            // Pull the metric value with a line-pct fallback so the
+            // sparkline never has a hole. `getValue()` returns a number in
+            // [0,1] or null when neither the selected metric nor coveragePct
+            // is present.
+            const getValue = (p) => {
+              const v = p[metric.seriesKey];
+              if (typeof v === "number") return v;
+              if (typeof p.coveragePct === "number") return p.coveragePct;
+              return null;
+            };
+            const latestPoint = points[points.length - 1];
+            const latestPct = (latestPoint && getValue(latestPoint)) || 0;
+            const projectName = latestSummaryByProject.get(projectId)?.projectName || (data?.recentRuns || []).find((r) => r.projectId === projectId)?.projectName || projectId.slice(0, 8);
+            const summary = latestSummaryByProject.get(projectId);
+            // AUTO-009h — filter topUncoveredFiles by the selected layer
+            // tab. `layer` is `"browser"` or `"server"`; rows without
+            // a `layer` key are pre-AUTO-009h browser rows and default to
+            // browser. The "combined" tab shows every row regardless.
+            const allTopUncovered = Array.isArray(summary?.topUncoveredFiles) ? summary.topUncoveredFiles : [];
+            const topUncovered = (layerKey === "combined"
+              ? allTopUncovered
+              : allTopUncovered.filter((f) => (f.layer || "browser") === layerKey)
+            ).slice(0, 5);
+            // AUTO-009b — fallback / partial badge stays metric-independent.
+            const sourceMapStatus = summary?.sourceMapStatus || "fallback";
+            const isFallback = sourceMapStatus !== "resolved";
+            const statusBadgeColor = sourceMapStatus === "resolved" ? "var(--green)"
+              : sourceMapStatus === "partial" ? "var(--amber)"
+              : "var(--text3)";
+            // Data-driven badge background / foreground — derived from the
+            // pct band (≥80 green, ≥50 amber, <50 red). Inlined as
+            // `style={{...}}` deliberately per AGENT.md §127's data-
+            // driven carve-out (used by `dash-env-rate` etc): N CSS
+            // classes per threshold band wouldn't be cleaner.
+            const latestPctBadgeStyle = {
+              background: latestPct >= 0.8 ? "var(--green-bg)" : latestPct >= 0.5 ? "var(--amber-bg)" : "var(--red-bg)",
+              color:      latestPct >= 0.8 ? "var(--green)"    : latestPct >= 0.5 ? "var(--amber)"    : "var(--red)",
+            };
+            return (
+              <div key={projectId} className="list-row dash-cov-project-row">
+                <div className="flex-between dash-cov-project-header">
+                  <div className="dash-cov-project-name">{projectName}</div>
+                  <span
+                    className="badge dash-cov-project-pct"
+                    style={latestPctBadgeStyle}
+                    title={`${metric.label}: ${Math.round(latestPct * 100)}%`}
+                  >
+                    {`${Math.round(latestPct * 100)}%`}
+                  </span>
+                </div>
+                <SparklineChart
+                  data={points.map((p, i) => ({ name: `#${i + 1}`, value: Math.round(((getValue(p)) || 0) * 100) }))}
+                  height={40}
+                  color="var(--accent)"
+                  tooltipFn={(d) => `${d.name}: ${d.value}% ${metric.label.toLowerCase()}`}
+                />
+                {topUncovered.length > 0 && (
+                  <div className="dash-cov-files">
+                    <div className="dash-cov-files-header">
+                      <span>Top uncovered files</span>
+                      {isFallback && (
+                        <span
+                          className="badge dash-cov-files-status-badge"
+                          style={{ color: statusBadgeColor }}
+                          title={sourceMapStatus === "partial"
+                            ? "Source maps partially resolved — some entries show original source paths, others show bundle URLs."
+                            : "Source maps unavailable — file labels are bundle URLs, not original source paths. Configure project.sourcemapBaseUrl to enable resolution."}
+                        >
+                          {sourceMapStatus === "partial" ? "partial maps" : "fallback mode"}
+                        </span>
+                      )}
+                    </div>
+                    {topUncovered.map((f) => {
+                      // AUTO-009c — per-file uncovered count follows the
+                      // selected metric. Backends without granularity
+                      // surface `uncoveredBranches`/`uncoveredFunctions` as
+                      // 0 (or undefined) so the row degrades cleanly to
+                      // line-only.
+                      const uncovered = metricKey === "line" ? f.uncoveredLines
+                        : metricKey === "branch" ? (f.uncoveredBranches ?? 0)
+                        : (f.uncoveredFunctions ?? 0);
+                      const unit = metricKey === "line" ? "lines"
+                        : metricKey === "branch" ? "branches"
+                        : "functions";
+                      return (
+                        <div key={`${f.file}::${f.bundleUrl || ""}`} className="truncate" title={f.bundleUrl ? `${f.file}\nbundle: ${f.bundleUrl}` : f.file}>
+                          <code className="dash-cov-file-code">{f.file}</code>
+                          <span className="dash-cov-file-uncovered">{uncovered}</span>
+                          <span className="dash-cov-file-meta">{` uncovered ${unit}`}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -174,6 +402,8 @@ export default function Dashboard() {
             <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<SquareCheckBig size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
           </div>
+          {/* ── AUTO-009 / AUTO-009b / AUTO-009c: Coverage panel with metric toggle ── */}
+          <CoveragePanel data={data} Activity={Activity} SparklineChart={SparklineChart} />
 
           {/* ── Row 2: Duration / Created / Fixed / Healing ── */}
           <div className="stat-grid">
@@ -374,6 +604,9 @@ export default function Dashboard() {
               </table>
             </div>
           )}
+
+          {/* ── AUTO-022: AI eval-harness trend + drill-down ── */}
+          <EvalPanel evalTrend={data?.evalTrend ?? null} />
 
           {(data?.topAccessibilityOffenders?.length ?? 0) > 0 && (
             <div className="card card-padded mb-md">

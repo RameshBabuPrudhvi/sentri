@@ -120,6 +120,7 @@ Per-feature happy paths that aren't part of the Golden journey. Can ship indepen
 | 🔒 Security | IDOR + cross-workspace 403 | 🟥 (UI: outsider hitting another workspace URL → redirect / 403 page) |
 | 🚦 Quality Gates (AUTO-012) | CRUD + evaluator + trigger response | ✅ (UI: `quality-gates-ui.spec.mjs` covers Settings panel save round-trip + RunDetail gate badge + inline violation panel via `page.route()` mock of `/api/v1/runs/:runId`) |
 | 📊 Data-driven fixtures (CAP-001) | TestFixturePanel CSV upload + RunDetail iteration badges + ProjectQualityCard iteration cap | ✅ (UI: `test-fixtures-ui.spec.mjs` covers CSV upload round-trip with history table + RunDetail `iteration #N` badges via `page.route()` mock of `/api/v1/runs/:runId` + Automation → Iterations panel save round-trip) |
+| 📈 Browser code coverage (AUTO-009) | Dashboard CoveragePanel sparkline + RunDetail `+N lines` per-test badge + ProjectQualityCard Coverage tab toggle | ✅ (UI: `coverage-ui.spec.mjs` covers Dashboard panel via `page.route()` mock of `/api/v1/dashboard` (sparkline + Top Uncovered Files) + RunDetail delta badge via `page.route()` mock of `/api/v1/runs/:runId` with synthetic `coverageSummary.perTest` + ProjectQualityCard → Coverage inner tab toggles `coverageEnabled` via PATCH observer) |
 | 📑 Reports / PDF | Dashboard PDF export | 🟥 |
 | 🆕 New Project page | SSRF block on private URLs | 🟥 |
 | 📋 Runs list | Filter by status / project | 🟥 |

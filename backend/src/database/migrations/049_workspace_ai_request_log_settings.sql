@@ -1,0 +1,56 @@
+-- B2.5 — Per-workspace AI request-log settings.
+--
+-- Adds two columns to `workspaces` so each workspace can independently
+-- choose how AI request logs are stored. Roadmap requirement
+-- (`docs/roadmap/ai-provider-bundle.md` B2.5):
+--
+--   "Storage modes (per workspace): `none` (default, metadata only) |
+--    `redacted` | `full` (admin opt-in)"
+--
+-- ## Why two columns, not a JSON blob
+--
+-- The mode is the hot-path read — every AI call resolves it before
+-- writing to `ai_request_log`. A bare TEXT column with a CHECK
+-- constraint is faster than parsing a JSON blob on every call and
+-- keeps the dispatch path zero-allocation. Custom regex rules ship
+-- as a separate JSON column because they're admin-edited rarely and
+-- read only in the redaction pipeline (`requestLog.js#redactText`).
+--
+-- ## Mode semantics (from `requestLog.js#logRequest`)
+--
+--   • `none` — only metadata persists (hash, tokens, cost, latency,
+--     outcome). Both `promptRedacted` and `responseRedacted` stay NULL.
+--     Default — minimum-viable observability without persisting any
+--     prompt content. Replay endpoint refuses with HTTP 400.
+--
+--   • `redacted` — the redaction pipeline strips email / phone / SSN /
+--     card patterns plus `aiRequestLogCustomRedactionRules` then
+--     persists the result. Replay endpoint refuses with HTTP 400
+--     because replaying a redacted prompt is meaningless (LLM sees
+--     `[REDACTED_EMAIL]` instead of the actual address).
+--
+--   • `full` — raw prompt + response stored. Required for replay.
+--     Admin opt-in; expectation is that an operator has signed a
+--     compliance acknowledgement (per the roadmap risk register at
+--     `docs/roadmap/ai-provider-bundle.md:443`).
+--
+-- ## Default model
+--
+-- Default is `'none'` so the migration is non-disruptive — every
+-- existing workspace stays at metadata-only logging unless an admin
+-- opts into `redacted` or `full`. The `AI_REQUEST_LOG_STORAGE_MODE`
+-- env var (read by `dispatcher.js#resolveRequestLogMode`) acts as a
+-- single-tenant fallback when this column is null/empty.
+--
+-- ## Compatibility
+--
+-- SQLite + PostgreSQL both accept this `ALTER TABLE ... ADD COLUMN`
+-- syntax unchanged. The CHECK constraint enforces the enum at write
+-- time on both backends.
+--
+-- The runner-level `schema_migrations` ledger guarantees this file
+-- runs exactly once (matches migration 028's pattern for `mfaRequired`
+-- + `mfaGracePeriodDays` + `mfaPolicyUpdatedAt`).
+
+ALTER TABLE workspaces ADD COLUMN aiRequestLogMode TEXT NOT NULL DEFAULT 'none' CHECK (aiRequestLogMode IN ('none', 'redacted', 'full'));
+ALTER TABLE workspaces ADD COLUMN aiRequestLogCustomRedactionRules TEXT;

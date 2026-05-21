@@ -49,6 +49,25 @@ useDefault = true
     # workspace `hmacSecret`. The string is a literal test fixture asserted
     # against round-tripped encryption, never a real credential.
     "backend/tests/audit-siem-forwarder.test.js",
+    # INF-007 — exercises the /metrics Bearer-token auth path. The current
+    # tip generates the token at runtime via `crypto.randomBytes`, but the
+    # earlier PR commit (791c74d5) contained a literal `"test-scrape-key-…"`
+    # placeholder that the scanner still walks via the per-commit log diff.
+    # Allowlisted so the historical commit doesn't fail CI; the production
+    # `METRICS_SCRAPE_KEY` is generated via the documented `randomBytes(32)`
+    # recipe in `docs/guide/env-vars.md`, never a literal in source.
+    "backend/tests/observability.test.js",
+    # B2.1 — backfill-routes correctness tests carry fake provider keys
+    # (`sk-ant-test-…`, `sk-openai-test-…`) that exercise the `apiKeyRepo`
+    # encryption + `apiKeyLastFour` extraction. The current tip uses
+    # `fake-test-key-…` shaped to NOT trigger Gitleaks heuristics, but
+    # an earlier PR commit (70fa7b21) used `sk-compat-test-…` on the
+    # property literally named `apiKey`, which the `generic-api-key` rule
+    # flags. Allowlisted so the historical commit doesn't fail CI;
+    # production code never reads test-fixture key strings.
+    "backend/tests/migration-routeid.test.js",
+    "backend/tests/routes-import-export.test.js",
+    "backend/tests/provider-routes-api.test.js"
   ]
 
   # Test fixtures and seed data may contain fake credentials for testing auth

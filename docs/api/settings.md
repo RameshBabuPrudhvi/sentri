@@ -184,3 +184,18 @@ Deleted projects, tests, and runs are soft-deleted (moved to the Recycle Bin) ra
 - Restoring a **test** or **run** whose parent project is deleted returns `409` — restore the project first.
 
 **Note:** The recycle bin endpoint returns all soft-deleted items (capped at 200 per type) without pagination. For paginated listing of live entities, see the [Tests](/api/tests) and [Runs](/api/runs) API docs.
+
+
+## Agent Roles
+
+Admin-only endpoints for workspace-scoped, dormant role config.
+
+- `GET /api/v1/settings/agent-roles` — list all role configs in current workspace.
+- `POST /api/v1/settings/agent-roles` — create/upsert a role config.
+- `PATCH /api/v1/settings/agent-roles/:role` — partially update a role config.
+- `DELETE /api/v1/settings/agent-roles/:role` — delete one role config.
+
+Validation:
+- `role` and `fallbackRole` must match the canonical role allowlist.
+- `fallbackRole` cycle detection is enforced server-side.
+- Responses are always scoped to the authenticated workspace.

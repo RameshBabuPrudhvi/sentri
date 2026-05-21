@@ -1,0 +1,8 @@
+{
+  "id": "case-044",
+  "category": "assertion-heavy",
+  "description": "Form validation error states.",
+  "url": "https://eval.local/signup",
+  "snapshot": "<form><label>Email<input type='email' name='email' aria-invalid='true'/></label><p id='email-err'>Email is required</p><label>Password<input type='password' name='password' aria-invalid='true'/></label><p id='pw-err'>Password too short</p><button>Create account</button></form>",
+  "expected": "await page.getByRole('button', { name: 'Create account' }).click();\nawait expect(page.getByText('Email is required')).toBeVisible();\nawait expect(page.getByText('Password too short')).toBeVisible();\nawait expect(page.getByLabel('Email')).toHaveAttribute('aria-invalid', 'true');\nawait expect(page.getByLabel('Password')).toHaveAttribute('aria-invalid', 'true');"
+}
