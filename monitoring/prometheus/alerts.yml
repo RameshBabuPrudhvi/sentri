@@ -127,6 +127,16 @@ groups:
       # `route_name` label is operator-controlled free-text from
       # `provider_routes.name`; cardinality is bounded per workspace by
       # `routes-per-workspace` admin policy (see `docs/guide/observability.md`).
+      #
+      # B4.2 — group by (provider, route_name) so a single bad route on a
+      # workspace surfaces independently of the rest of the family. A
+      # workspace running 3 anthropic routes (prod / staging / experimental)
+      # whose `staging` key got rotated should fire one alert tagged
+      # route_name="anthropic-staging" — not a vague provider="anthropic"
+      # alert that the on-call engineer has to triage by hand. The
+      # `route_name` label is operator-controlled free-text from
+      # `provider_routes.name`; cardinality is bounded per workspace by
+      # `routes-per-workspace` admin policy (see `docs/guide/observability.md`).
       - alert: AiProviderHighErrorRate
         expr: |
           (
