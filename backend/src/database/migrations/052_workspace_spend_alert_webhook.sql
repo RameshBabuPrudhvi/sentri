@@ -1,0 +1,49 @@
+-- B4.0.1 (lifted forward from Bundle 4) — Per-workspace spend-alert
+-- webhook delivery.
+--
+-- Migration 050 shipped `dailySpendCapUsd` / `monthlySpendCapUsd` /
+-- `spendAlertThresholdPct` and the dispatcher fired the alert as a
+-- `console.warn` only — the roadmap (`docs/roadmap/ai-provider-bundle.md`
+-- B3.7) called for "emit notification (Slack/webhook if configured) +
+-- log event", which the original PR deferred. This migration adds the
+-- two columns the dispatcher needs to deliver the webhook + suppress
+-- duplicate fires.
+--
+-- ## Why two columns
+--
+--   • `spendAlertWebhookUrl TEXT` — admin-set Slack / generic webhook
+--     endpoint. NULL means "log only" (the current behaviour, preserved
+--     for workspaces that don't opt in). The route layer validates the
+--     URL via the existing `utils/ssrfGuard.validateUrl` so an admin
+--     can't point the alert at a private/loopback/cloud-metadata IP.
+--
+--   • `spendAlertLastFiredAt TEXT` — ISO timestamp of the last alert
+--     dispatch. Without this, every AI call past the threshold would
+--     re-POST the webhook (potentially hundreds per minute on a
+--     sustained-high-spend workspace). The dispatcher applies a
+--     `SPEND_ALERT_COOLDOWN_MS` cooldown (default 1 hour, env-tunable)
+--     and only fires when `lastFiredAt` is older than that. Storing
+--     the timestamp on the workspace row keeps the cooldown durable
+--     across process restarts and shared across multi-replica
+--     deployments — an in-memory map would let every replica re-fire
+--     independently after a restart.
+--
+-- ## Default model
+--
+-- Both columns default to NULL (preserves pre-052 behaviour). The
+-- dispatcher's existing `console.warn` log line stays as a fallback
+-- when no webhook is configured, so log-aggregation alerts that key
+-- on `[quotaGuard] spend alert:` keep working unchanged.
+--
+-- ## Compatibility
+--
+-- SQLite + PostgreSQL both accept the bare ALTER TABLE syntax. No
+-- CHECK constraint on the URL — defensive validation in the routes
+-- layer rejects malformed URLs at the HTTP boundary, matching the
+-- pattern from `mfaGracePeriodDays` (no SQL CHECK; route validates).
+--
+-- Idempotency at the runner level — `schema_migrations` tracks applied
+-- versions, so re-running this file is a no-op.
+
+ALTER TABLE workspaces ADD COLUMN spendAlertWebhookUrl TEXT;
+ALTER TABLE workspaces ADD COLUMN spendAlertLastFiredAt TEXT;
