@@ -430,6 +430,76 @@
   flex-wrap: wrap;
 }
 
+/* B3.9 — Audit log subtab. Compact 4-column grid (timestamp / action
+   badge / route name / metadata summary) so a long history fits
+   on-screen without horizontal scroll. The `metadata` column flexes
+   so its summary text claims any leftover width. */
+.st-pr-audit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.st-pr-audit-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+}
+.st-pr-audit-sub {
+  line-height: 1.5;
+}
+.st-pr-audit-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.st-pr-audit-empty {
+  padding: 14px 4px;
+  text-align: center;
+}
+.st-pr-audit-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.st-pr-audit-row {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(80px, auto) minmax(120px, 1fr) 2fr;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px dashed var(--border);
+  min-width: 0;
+}
+.st-pr-audit-row:last-child {
+  border-bottom: none;
+}
+.st-pr-audit-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.st-pr-audit-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+/* Per-action colour cues. Keep low-saturation so the table reads as
+   a continuous list instead of a kindergarten poster. */
+.st-pr-audit-action--create   { background: rgba(46, 204, 113, 0.15); color: var(--green); }
+.st-pr-audit-action--update   { background: rgba(52, 152, 219, 0.15); color: var(--accent); }
+.st-pr-audit-action--delete   { background: rgba(231, 76, 60, 0.15);  color: var(--red); }
+.st-pr-audit-action--rotate_key { background: rgba(255, 165, 2, 0.15); color: var(--amber); }
+.st-pr-audit-action--probe    { background: rgba(155, 89, 182, 0.15); color: var(--purple); }
+.st-pr-audit-action--export,
+.st-pr-audit-action--import   { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
   /* Provider cards: tighten padding */
@@ -503,6 +573,19 @@
   }
   .st-pr-spend-grid {
     grid-template-columns: 1fr;
+  }
+  /* B3.9 — collapse audit filters + row layout on phones. The 4-col
+     row grid becomes flex-column so each entry stacks vertically
+     instead of overflowing the viewport. */
+  .st-pr-audit-filters {
+    grid-template-columns: 1fr;
+  }
+  .st-pr-audit-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .st-pr-audit-meta {
+    white-space: normal;
   }
   .st-pr-field--wide {
     grid-column: span 1;

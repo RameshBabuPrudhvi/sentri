@@ -266,6 +266,30 @@ export const api = {
     catch { throw new Error("Selected file is not valid JSON."); }
     return req("POST", "/settings/provider-routes/import", { ...payload, mode });
   },
+  /**
+   * B3.9 — Paginated, filterable provider-routes audit log. Workspace-
+   * scoped on the backend; admins see every mutation across every
+   * route in the workspace. `metadata` round-trips as a JSON string;
+   * the UI parses on render.
+   *
+   * @param {Object} [filters]
+   * @param {string} [filters.routeId]  - Filter to one route's history.
+   * @param {string} [filters.action]   - One of {create, update, delete, rotate_key, probe, export, import}.
+   * @param {string} [filters.since]    - ISO timestamp; rows with `createdAt >= since`.
+   * @param {string} [filters.before]   - ISO timestamp cursor; rows with `createdAt < before`.
+   * @param {number} [filters.limit=50]
+   * @returns {Promise<{ items: Array, nextCursor: string|null }>}
+   */
+  listProviderRouteAudit: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.routeId) params.set("routeId", filters.routeId);
+    if (filters.action) params.set("action", filters.action);
+    if (filters.since) params.set("since", filters.since);
+    if (filters.before) params.set("before", filters.before);
+    if (filters.limit != null) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    return req("GET", `/settings/provider-routes/audit${qs ? `?${qs}` : ""}`);
+  },
 
 // ── Projects ────────────────────────────────────────────────────────────────
   /** @param {Object} data - `{ name, url, credentials? }` */

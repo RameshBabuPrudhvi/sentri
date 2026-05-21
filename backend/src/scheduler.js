@@ -31,6 +31,7 @@ import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import * as aiRequestLogRepo from "./database/repositories/aiRequestLogRepo.js";
 import { purgeExpired as purgeExpiredCacheRows } from "./aiProvider/responseCache.js";
+import * as providerRouteAuditRepo from "./database/repositories/providerRouteAuditRepo.js";
 import * as activityRepo from "./database/repositories/activityRepo.js";
 import { generateRunId } from "./utils/idGenerator.js";
 import { runWithAbort } from "./utils/runWithAbort.js";
@@ -57,6 +58,9 @@ let _coverageRetentionTask = null;
 
 /** @type {Object|null} B3.8 — daily AI response-cache janitor task. */
 let _aiCacheJanitorTask = null;
+
+/** @type {Object|null} B3.9 — daily provider-routes audit retention sweep. */
+let _providerAuditRetentionTask = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -459,6 +463,32 @@ export function initScheduler() {
     }
   }, { timezone: "UTC", scheduled: true });
 
+  // B3.9 — daily provider-routes audit retention sweep. Runs at 05:00
+  // UTC, after the cache janitor, so the morning maintenance window
+  // stays staggered on a single SQLite writer. Honours
+  // `SENTRI_AUDIT_RETENTION_DAYS`:
+  //   • unset / empty → default 90 days (roadmap baseline)
+  //   • 0            → never delete (task is armed but is a no-op)
+  //   • > 0          → delete rows older than the configured window
+  // Operators who need longer retention for compliance can bump the
+  // env var without redeploying — `purgeOlderThan` reads the cutoff
+  // on every fire.
+  _providerAuditRetentionTask = cron.schedule("0 5 * * *", () => {
+    try {
+      const raw = process.env.SENTRI_AUDIT_RETENTION_DAYS;
+      const days = raw === undefined || raw === "" ? 90 : Number.parseInt(raw, 10);
+      if (!Number.isFinite(days) || days <= 0) return; // disabled
+      const deleted = providerRouteAuditRepo.purgeOlderThan(days);
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] Provider-routes audit retention swept ${deleted} row(s) older than ${days} days`));
+      }
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[scheduler] Provider-routes audit retention failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
   // B2.5: daily AI request-log retention sweep — default 30 days.
   schedules.push(schedule(
     "30 4 * * *",
@@ -532,6 +562,11 @@ export function stopAllTasks() {
   if (_aiCacheJanitorTask) {
     _aiCacheJanitorTask.stop();
     _aiCacheJanitorTask = null;
+  }
+  // B3.9 — graceful shutdown of the provider-routes audit retention sweep.
+  if (_providerAuditRetentionTask) {
+    _providerAuditRetentionTask.stop();
+    _providerAuditRetentionTask = null;
   }
 }
 

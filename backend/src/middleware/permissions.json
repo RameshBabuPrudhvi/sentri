@@ -395,6 +395,11 @@
       "source": "backend/src/routes/settings.js",
       "$comment": "B3.5 — three-phase import: (1) upsert rows resolving name collisions per mode (skip|overwrite|rename), (2) rewire fallbackRouteId via source→destination id map, (3) bounded-parallel capability probe (IMPORT_PROBE_PARALLELISM=3). Audit row appended as action=import."
     },
+    "GET /api/v1/settings/provider-routes/audit": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "B3.9 — paginated workspace-scoped audit log viewer. Filterable by routeId / action / since / before. Cursor pagination via `before` matching the AI request log endpoint. Retention sweep is daily at 05:00 UTC, configurable via SENTRI_AUDIT_RETENTION_DAYS (default 90)."
+    },
     "GET /api/v1/settings/ai-requests": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"

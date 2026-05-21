@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Check, Eye, EyeOff, ExternalLink, AlertTriangle,
@@ -1170,6 +1170,165 @@ function ProviderRoutesTabView(props) {
               onRotate={onRotate}
             />
           ))}
+        </div>
+      )}
+      {/* B3.9 — audit log viewer at the bottom of the tab. Below the
+          route list because admins read it last (after seeing the
+          current state); above the next tab boundary so it stays
+          discoverable without a separate menu entry. */}
+      <AuditLogSubtab rows={rows} />
+    </div>
+  );
+}
+
+// B3.9 — Audit log viewer subtab. Renders below the route list inside
+// the Provider Routes tab so admins can see every mutation in
+// chronological order without leaving the page.
+//
+// Filters: action enum + free-form routeId. Pagination is cursor-based
+// via `before` (matches the backend repo's keyset). The "Load more"
+// button stays visible whenever the previous page returned `limit`
+// rows — an empty page or a partial page hides it.
+//
+// `metadata` is a JSON string on the wire (per repo contract). We
+// parse defensively per row so a malformed entry never blanks the
+// whole list.
+const AUDIT_ACTIONS = ["create", "update", "delete", "rotate_key", "probe", "export", "import"];
+const AUDIT_PAGE_SIZE = 50;
+
+function fmtAuditTimestamp(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+  } catch { return iso; }
+}
+
+function AuditLogSubtab({ rows: routeRows }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [filterAction, setFilterAction] = useState("");
+  const [filterRouteId, setFilterRouteId] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+
+  // Build a routeId → name lookup so the table can render route names
+  // instead of opaque `pr-...` ids. Falls back to the id when the
+  // route has been deleted (audit rows survive route deletion by
+  // design — the FK is nullable).
+  const routeNameById = useMemo(() => {
+    const m = new Map();
+    for (const r of (routeRows || [])) m.set(r.id, r.name);
+    return m;
+  }, [routeRows]);
+
+  const load = useCallback(async ({ before, append } = {}) => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.listProviderRouteAudit({
+        action: filterAction || undefined,
+        routeId: filterRouteId || undefined,
+        before: before || undefined,
+        limit: AUDIT_PAGE_SIZE,
+      });
+      const next = res?.items || [];
+      setItems((prev) => append ? [...prev, ...next] : next);
+      setHasMore(next.length >= AUDIT_PAGE_SIZE);
+    } catch (err) {
+      setError(err.message || "Failed to load audit log.");
+    } finally {
+      setLoading(false);
+    }
+  }, [filterAction, filterRouteId]);
+
+  // Reload when filters change. `load` is stable per-filter via
+  // useCallback dependencies, so this fires exactly once per filter
+  // edit.
+  useEffect(() => { load({}); }, [load]);
+
+  function loadMore() {
+    if (!items.length) return;
+    load({ before: items[items.length - 1].createdAt, append: true });
+  }
+
+  // Defensive metadata parse — repo stores JSON-as-string, but a
+  // hand-edited row or a future schema change shouldn't blank the row.
+  function renderMetadata(row) {
+    if (!row.metadata) return "—";
+    try {
+      const obj = typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata;
+      // Compact one-line summary for the most common audit shapes.
+      // Full payload visible on hover via title.
+      const summary = [];
+      if (obj.changed && Array.isArray(obj.changed)) summary.push(`changed: ${obj.changed.join(", ")}`);
+      if (obj.lastFour) summary.push(`lastFour: ${obj.lastFour}`);
+      if (obj.reachable != null) summary.push(`reachable: ${obj.reachable}`);
+      if (obj.errorReason) summary.push(`error: ${obj.errorReason}`);
+      if (obj.count != null) summary.push(`count: ${obj.count}`);
+      if (obj.mode) summary.push(`mode: ${obj.mode}`);
+      const text = summary.length ? summary.join(" · ") : JSON.stringify(obj).slice(0, 80);
+      return <span title={JSON.stringify(obj, null, 2)}>{text}</span>;
+    } catch {
+      return <span className="text-mono">{String(row.metadata).slice(0, 80)}</span>;
+    }
+  }
+
+  return (
+    <div className="card-padded-sm st-pr-audit-panel">
+      <div className="font-semi st-pr-audit-title">
+        <FileText size={13} /> Audit log
+      </div>
+      <div className="text-xs text-muted st-pr-audit-sub">
+        Every mutation to provider routes (create / update / delete / rotate-key) plus reads with side effects (probe / export / import). Retention defaults to 90 days; tune via <code>SENTRI_AUDIT_RETENTION_DAYS</code>.
+      </div>
+      <div className="st-pr-audit-filters">
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Action</span>
+          <select className="input" value={filterAction} onChange={(e) => setFilterAction(e.target.value)}>
+            <option value="">All actions</option>
+            {AUDIT_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Route</span>
+          <select className="input" value={filterRouteId} onChange={(e) => setFilterRouteId(e.target.value)}>
+            <option value="">All routes</option>
+            {(routeRows || []).map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {error && (
+        <div className="st-status-err"><AlertCircle size={12} /> {error}</div>
+      )}
+      {loading && items.length === 0 ? (
+        <div className="text-sm text-muted st-pr-audit-empty">Loading audit log…</div>
+      ) : items.length === 0 ? (
+        <div className="text-sm text-muted st-pr-audit-empty">
+          No audit entries match the current filters.
+        </div>
+      ) : (
+        <div className="st-pr-audit-table">
+          {items.map((row) => (
+            <div key={row.id} className="st-pr-audit-row">
+              <span className="text-xs text-muted text-mono">{fmtAuditTimestamp(row.createdAt)}</span>
+              <span className={`st-pr-badge st-pr-audit-action st-pr-audit-action--${row.action}`}>{row.action}</span>
+              <span className="text-xs text-mono">{routeNameById.get(row.routeId) || row.routeId || "—"}</span>
+              <span className="text-xs text-muted st-pr-audit-meta">{renderMetadata(row)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {hasMore && (
+        <div className="st-pr-audit-actions">
+          <button className="btn btn-ghost btn-sm" onClick={loadMore} disabled={loading}>
+            {loading ? <RefreshCw size={13} className="spin" /> : null}
+            Load more
+          </button>
         </div>
       )}
     </div>

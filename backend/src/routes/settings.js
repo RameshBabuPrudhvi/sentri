@@ -772,6 +772,48 @@ router.post("/settings/provider-routes/:id/probe", requireRole("admin"), async (
   return res.json({ ok: true, route: updated, capabilities: updated.capabilities });
 });
 
+/**
+ * B3.9 — Provider routes audit log viewer.
+ *
+ * Workspace-scoped, paginated, filterable. Mirrors the cursor-pagination
+ * shape of `GET /settings/ai-requests` so the frontend's audit subtab
+ * can reuse the same "load more" pattern. `metadata` round-trips as a
+ * JSON string per the repo contract — frontend `JSON.parse`s on render.
+ *
+ * Query params (all optional):
+ *   • `routeId`  — filter to a single route's history
+ *   • `action`   — one of {create, update, delete, rotate_key, probe, export, import}
+ *   • `since`    — ISO timestamp; rows with `createdAt >= since`
+ *   • `before`   — ISO timestamp; rows with `createdAt < before` (cursor)
+ *   • `limit`    — clamped to [1, 500] by the repo
+ *
+ * `since` is a B3.9-specific filter (the repo's `list` only supports
+ * `before`). We intersect it via post-filter rather than extend the
+ * repo because the workspace-scoped `(workspaceId, createdAt)` index
+ * already narrows the working set to days-of-data per workspace —
+ * a JS-side filter on a few hundred rows is cheaper than adding
+ * another SQL clause that complicates the repo's typed surface.
+ */
+router.get("/settings/provider-routes/audit", requireRole("admin"), (req, res) => {
+  const opts = {
+    routeId: typeof req.query.routeId === "string" ? req.query.routeId : undefined,
+    action: typeof req.query.action === "string" ? req.query.action : undefined,
+    before: typeof req.query.before === "string" ? req.query.before : undefined,
+    limit: Number.isFinite(Number(req.query.limit)) ? Number(req.query.limit) : 50,
+  };
+  let rows = providerRouteAuditRepo.list(req.workspaceId, opts);
+  // Optional `since` post-filter — see JSDoc above for why we don't
+  // push this into the repo. ISO compare is lexicographically correct
+  // for fixed-format timestamps so we don't need to parse to Date.
+  if (typeof req.query.since === "string" && req.query.since) {
+    rows = rows.filter((r) => r.createdAt >= req.query.since);
+  }
+  res.json({
+    items: rows,
+    nextCursor: rows.length ? rows[rows.length - 1].createdAt : null,
+  });
+});
+
 // ─── Provider Routes export / import (B3.5) ──────────────────────────────────
 //
 // Portable JSON representation of a workspace's `provider_routes` rows.
