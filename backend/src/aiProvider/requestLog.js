@@ -6,7 +6,11 @@ const PHONE_RE = /\+?\d[\d\s().-]{7,}\d/g;
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
 const CARD_RE = /\b(?:\d[ -]*?){13,19}\b/g;
 
-function redactText(text, customRules = []) {
+// B2.5 — Exported for direct unit testing. Production callers should use
+// `logRequest()` which handles storage-mode gating + async write; this
+// is the bare redaction primitive that the storage pipeline applies in
+// `"redacted"` mode.
+export function redactText(text, customRules = []) {
   if (!text) return null;
   let out = String(text);
   out = out.replace(EMAIL_RE, "[REDACTED_EMAIL]");

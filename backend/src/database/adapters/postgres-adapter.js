@@ -359,8 +359,15 @@ const _COL_MAP = buildColumnMap([
   "column_name", "data_type",
   // notification_settings (FEA-001)
   "teamsWebhookUrl", "emailRecipients", "webhookUrl",
-  // workspaces (ACL-001)
-  "ownerId",
+  // workspaces (ACL-001 + B2.5 ai-request-log settings).
+  // PostgreSQL folds unquoted identifiers to lowercase, so without
+  // these entries `workspace.aiRequestLogMode` /
+  // `aiRequestLogCustomRedactionRules` would both be `undefined` on
+  // Postgres — silently breaking `getAiRequestLogSettings()` and
+  // forcing every workspace to fall back to the
+  // `AI_REQUEST_LOG_STORAGE_MODE` env-default path. Tracked alongside
+  // the other camelCase entries here.
+  "ownerId", "aiRequestLogMode", "aiRequestLogCustomRedactionRules",
   // workspace_members (ACL-001)
   "joinedAt",
   // agent_configs (AI-004 schema, migration 037 — see fix note in the

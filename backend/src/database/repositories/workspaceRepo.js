@@ -104,6 +104,49 @@ export function getOwnedWorkspaceIds(userId) {
     .map((w) => w.id);
 }
 
+/**
+ * B2.5 — Resolve a workspace's AI request-log storage policy.
+ *
+ * Returns the workspace's stored mode + custom redaction rules. The
+ * dispatcher's `_callProviderUnsafe` calls this once per AI call to
+ * decide what `requestLog.js#logRequest` persists.
+ *
+ * Hot-path SELECT — workspaces are 1 row each, indexed on `id`. The
+ * read happens on every AI call, so we keep it minimal: two columns,
+ * one row, no JSON parsing here. Custom rules are JSON-decoded by the
+ * caller because the rules are arrays of `{ pattern, flags,
+ * replacement }` objects that the redaction pipeline already iterates.
+ *
+ * @param {string} workspaceId
+ * @returns {{ mode: "none"|"redacted"|"full", customRules: Array<{pattern: string, flags?: string, replacement?: string}> }}
+ *   When the workspace has never been migrated through B2.5 the row
+ *   has the column DEFAULT `'none'` so callers always get a usable
+ *   shape — never `undefined`.
+ */
+export function getAiRequestLogSettings(workspaceId) {
+  if (!workspaceId) {
+    return { mode: "none", customRules: [] };
+  }
+  const db = getDatabase();
+  const row = db.prepare(
+    "SELECT aiRequestLogMode, aiRequestLogCustomRedactionRules FROM workspaces WHERE id = ?",
+  ).get(workspaceId);
+  if (!row) return { mode: "none", customRules: [] };
+  let customRules = [];
+  // Defensive parse — admin-written JSON, may be malformed. Empty array
+  // is the safe fallback (no extra rules; built-in redactors still run).
+  if (row.aiRequestLogCustomRedactionRules) {
+    try {
+      const parsed = JSON.parse(row.aiRequestLogCustomRedactionRules);
+      if (Array.isArray(parsed)) customRules = parsed;
+    } catch { /* malformed → no extra rules */ }
+  }
+  return {
+    mode: row.aiRequestLogMode || "none",
+    customRules,
+  };
+}
+
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 /**

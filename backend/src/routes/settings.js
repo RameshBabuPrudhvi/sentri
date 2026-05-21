@@ -742,14 +742,112 @@ router.post("/settings/provider-routes/:id/probe", requireRole("admin"), async (
 });
 
 
+/**
+ * B2.5 — Replay a logged AI request against a route.
+ *
+ * Three layers of validation before the LLM is called:
+ *
+ *   1. **Log row exists in this workspace** (404). Cross-workspace
+ *      replay would leak prompts, so `aiRequestLogRepo.getById` is
+ *      workspace-scoped and we never widen here.
+ *   2. **Storage mode is `"full"`** (400). Replaying redacted prompts
+ *      (`[REDACTED_EMAIL]` placeholders) is meaningless — the LLM sees
+ *      sentinel strings instead of the actual values and the response
+ *      is not informative for debugging. Metadata-only (`"none"`) rows
+ *      have no prompt at all. The roadmap risk register (B2.5) ties
+ *      `"full"` mode to an explicit compliance acknowledgement; the
+ *      replay endpoint enforces that contract here.
+ *   3. **`routeId` (when provided) exists in this workspace** (400).
+ *      Lets operators replay against a DIFFERENT route than the
+ *      original — useful for "did the gpt-4o-mini call actually need
+ *      claude-sonnet?" debugging. When `routeId` is null the replay
+ *      uses the same `agentRole` resolution the original call did
+ *      (via `generateText`).
+ *
+ * The replay forces `requestLogMode: "full"` on the recursive call so
+ * the replay itself lands in `ai_request_log` with a fresh row — admins
+ * can chain "replay → see the new row → compare diff" without flipping
+ * workspace settings between attempts.
+ *
+ * Cost note: replays charge the operator's account at the route's
+ * regular billing rate. There's no "replay discount" — if the original
+ * call cost $0.04, the replay costs $0.04 too. The roadmap's spend cap
+ * (B3.7) covers this without special-casing.
+ */
 router.post("/settings/ai-requests/:id/replay", requireRole("admin"), async (req, res) => {
   const row = aiRequestLogRepo.getById(req.workspaceId, req.params.id);
   if (!row) return res.status(404).json({ error: "Request log not found" });
-  const prompt = row.promptRedacted || "";
-  if (!prompt) return res.status(400).json({ error: "Prompt payload unavailable for replay in current storage mode" });
-  const routeId = req.body?.routeId || null;
-  const text = await generateText(prompt, { workspaceId: req.workspaceId, agentRole: row.agentRole || undefined, routeId });
-  return res.json({ ok: true, replayedFrom: row.id, routeId, text });
+
+  // The row's `promptRedacted` column is named after the storage mode
+  // semantics — under `"full"` mode it carries the RAW prompt, under
+  // `"redacted"` it carries the redacted text, under `"none"` it's
+  // NULL. Distinguish "no prompt" (`"none"`) from "redacted prompt"
+  // (`"redacted"`) by checking the stored prompt for redaction
+  // sentinels rather than guessing from mode (we don't store the
+  // mode-at-write-time on the row). Anything containing `[REDACTED_`
+  // came from the redaction pipeline; anything else is either full
+  // or empty.
+  if (!row.promptRedacted) {
+    return res.status(400).json({
+      error: "Prompt unavailable for replay — workspace storage mode was 'none' at write time. Switch to 'full' and capture a new call before replaying.",
+    });
+  }
+  if (/\[REDACTED_(EMAIL|PHONE|SSN|CARD|CUSTOM)\]/.test(row.promptRedacted)) {
+    return res.status(400).json({
+      error: "Prompt is redacted — replay would send sentinel strings to the LLM instead of the original values. Switch the workspace to 'full' storage mode and capture a new call to replay against.",
+    });
+  }
+
+  const prompt = row.promptRedacted;
+  const overrideRouteId = req.body?.routeId || null;
+
+  // Validate route override (when supplied) belongs to this workspace —
+  // mirrors `agentConfigRepo.upsert`'s cross-workspace guard.
+  if (overrideRouteId) {
+    const route = providerRouteRepo.getById(req.workspaceId, overrideRouteId);
+    if (!route) {
+      return res.status(400).json({ error: "routeId not found in workspace: " + overrideRouteId });
+    }
+  }
+
+  // Replay path A: `routeId` override → dispatch directly against the
+  // specified route via the protocol adapter, bypassing role resolution.
+  // Replay path B: no override → `generateText` resolves the agent role's
+  // configured route the same way the original call did.
+  let text;
+  try {
+    if (overrideRouteId) {
+      // Direct route dispatch: build the messages, resolve the key from
+      // the route, and call the protocol adapter. The route may belong
+      // to a different family than the original call — fine, replay
+      // is explicit about that.
+      const route = providerRouteRepo.getById(req.workspaceId, overrideRouteId);
+      const { generate: protocolGenerate } =
+        await import("../aiProvider/adapters/protocolAdapter.js");
+      const result = await protocolGenerate(
+        route,
+        { system: null, user: prompt, combined: prompt },
+        { maxTokens: 4096, responseFormat: "text" },
+      );
+      text = result?.text || "";
+    } else {
+      text = await generateText(prompt, {
+        workspaceId: req.workspaceId,
+        agentRole: row.agentRole || undefined,
+        // Force "full" mode on the recursive call so the replay
+        // surface in `ai_request_log` is itself replayable later.
+        requestLogMode: "full",
+      });
+    }
+  } catch (err) {
+    return res.status(502).json({
+      error: "Replay failed: " + (err?.message?.slice(0, 200) || "unknown error"),
+      replayedFrom: row.id,
+      routeId: overrideRouteId,
+    });
+  }
+
+  return res.json({ ok: true, replayedFrom: row.id, routeId: overrideRouteId, text });
 });
 
 router.get("/settings/ai-requests", requireRole("admin"), (req, res) => {

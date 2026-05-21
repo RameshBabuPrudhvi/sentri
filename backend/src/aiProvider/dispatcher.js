@@ -28,6 +28,10 @@ import { logRequest } from "./requestLog.js";
 // to compute a non-null cost for the metric — never to overwrite an
 // operator-set route price. See `computeCostForRoute` JSDoc below.
 import { pricingFor } from "./modelCatalog.js";
+// B2.5 — Per-workspace request-log policy lookup. Hot-path read; the
+// repo's `getAiRequestLogSettings` returns `{ mode: "none", customRules: [] }`
+// for unknown workspace ids so callers always get a usable shape.
+import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -319,6 +323,14 @@ export function resolveAgentCall(prompt, options = {}) {
       // JSON column (already hydrated by `providerRouteRepo.hydrate`),
       // so no extra DB read on the cost path.
       route,
+      // B2.5 — explicit per-call override of the workspace's
+      // request-log mode. Lets the replay endpoint force `"full"`
+      // logging on its recursive `generateText` call so the replay
+      // itself ends up in `ai_request_log` regardless of the
+      // workspace's default policy. Resolved by
+      // `resolveRequestLogConfig(callOpts)` in callProvider before
+      // the LLM call fires.
+      requestLogMode: options.requestLogMode || null,
     },
     useRoutes: true,
   };
@@ -455,6 +467,79 @@ export function recordAiTokens(provider, usage, operation = "generation", agentR
   return costResult;
 }
 
+// ── Request-log policy resolution (B2.5) ──────────────────────────────────────
+
+/**
+ * Resolve the AI request-log storage policy for a single dispatch
+ * call. Returns the `{ mode, customRules }` shape `requestLog.js#logRequest`
+ * expects.
+ *
+ * ## Resolution order
+ *
+ *   1. **`callOptions.requestLogMode`** — explicit per-call override
+ *      (used by tests + the replay endpoint to force `"full"`).
+ *   2. **Workspace setting** (`workspaces.aiRequestLogMode`) when a
+ *      `workspaceId` is in `callOptions`. Operator-controlled.
+ *   3. **`AI_REQUEST_LOG_STORAGE_MODE`** env var — single-tenant
+ *      fallback for deployments that haven't migrated past the env-only
+ *      configuration model. Validates against the same enum.
+ *   4. **`"none"`** — final fallback. Metadata-only logging.
+ *
+ * Custom redaction rules merge: workspace-supplied rules from the
+ * `aiRequestLogCustomRedactionRules` column AND the in-built regexes
+ * (email / phone / SSN / card) from `requestLog.js`. Per-call
+ * `callOptions.customRedactionRules` is **not** supported — that would
+ * let untrusted call sites bypass workspace policy.
+ *
+ * Hot-path: one in-memory cache lookup + one indexed SELECT per AI
+ * call. Could be cached more aggressively in a future PR if profiling
+ * shows it; current cost is negligible against the AI call itself.
+ *
+ * @param {Object} callOptions - The dispatcher's `callOpts` object.
+ * @returns {{ mode: "none"|"redacted"|"full", customRules: Array }}
+ */
+function resolveRequestLogConfig(callOptions = {}) {
+  const VALID_MODES = ["none", "redacted", "full"];
+  // 1. Explicit per-call override (tests, replay endpoint).
+  if (callOptions.requestLogMode && VALID_MODES.includes(callOptions.requestLogMode)) {
+    return { mode: callOptions.requestLogMode, customRules: [] };
+  }
+  // 2. Workspace setting.
+  if (callOptions.workspaceId) {
+    try {
+      const settings = workspaceRepo.getAiRequestLogSettings(callOptions.workspaceId);
+      // Workspace rows always exist with a `'none'` default after
+      // migration 049 — but a workspace created BEFORE the migration
+      // applies has a row that lacks the column entirely (older
+      // SQLite ALTER semantics). The repo defends with `|| "none"`,
+      // so we only override here when the workspace explicitly opted
+      // in to redacted/full.
+      if (settings.mode && settings.mode !== "none" && VALID_MODES.includes(settings.mode)) {
+        return { mode: settings.mode, customRules: settings.customRules || [] };
+      }
+      // Workspace mode is "none" — fall through to env-default check.
+      // We still carry the workspace's customRules forward so admins
+      // can preview rule effects without flipping the mode bit.
+      const envMode = (process.env.AI_REQUEST_LOG_STORAGE_MODE || "").toLowerCase();
+      if (VALID_MODES.includes(envMode) && envMode !== "none") {
+        return { mode: envMode, customRules: settings.customRules || [] };
+      }
+      return { mode: "none", customRules: settings.customRules || [] };
+    } catch {
+      // DB unavailable — fall through to env-default. Best-effort
+      // logging mirrors the rest of this file's defensive try/catch
+      // pattern around DB reads.
+    }
+  }
+  // 3. Env-var fallback (single-tenant deployments).
+  const envMode = (process.env.AI_REQUEST_LOG_STORAGE_MODE || "").toLowerCase();
+  if (VALID_MODES.includes(envMode)) {
+    return { mode: envMode, customRules: [] };
+  }
+  // 4. Final default.
+  return { mode: "none", customRules: [] };
+}
+
 // ── Instrumented provider call ────────────────────────────────────────────────
 
 /**
@@ -487,8 +572,16 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
     console.log(formatLogLine("debug", null, `[aiProvider] traceId=${traceId} provider=${provider} role=${agentRole}`));
   }
   const startedAt = process.hrtime.bigint();
+  // B2.5 — resolve the workspace's request-log policy ONCE per call
+  // and reuse the result on both the success and failure paths. Avoids
+  // a second DB read in the catch block (which would also fail when
+  // the original error WAS the DB going down). `cfg.mode` drives both
+  // the storage mode and which custom redaction rules apply.
+  const logCfg = resolveRequestLogConfig(callOptions);
   try {
-    const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions);
+    const { text, usage, costResult } = await _callProviderUnsafe(
+      provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions,
+    );
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome: "success", operation, route_name: callOptions.routeName || "unknown" }, seconds);
@@ -500,14 +593,23 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
         agentRole: callOptions.agentRole || null,
         userId: callOptions.userId || null,
         prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
-        response: typeof result === "string" ? result : "",
+        response: typeof text === "string" ? text : "",
+        // B2.5 — populate token + cost fields so per-request log rows
+        // carry the same data as the Prometheus metric. Operators can
+        // now reconcile dashboard spend against per-call records and
+        // run "show me my $20+ calls" queries against `ai_request_log`.
+        inputTokens: Number.isFinite(usage?.input) ? usage.input : null,
+        outputTokens: Number.isFinite(usage?.output) ? usage.output : null,
+        costUsd: Number.isFinite(costResult?.costUsd) ? costResult.costUsd : null,
         latencyMs: Date.now() - startedMs,
         outcome: "success",
         traceId: getCurrentTraceId(),
-        storageMode: callOptions.requestLogMode || "none",
+        storageMode: logCfg.mode,
+        customRedactionRules: logCfg.customRules,
       });
     } catch {}
-    return result;
+    // Preserve the legacy public contract — callers expect a string.
+    return text;
   } catch (err) {
     const reason = classifyAiError(err);
     const outcome = reason === "rate_limit" ? "rate_limited" : "error";
@@ -524,17 +626,36 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
         userId: callOptions.userId || null,
         prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
         response: "",
+        // No usage on the error path — token + cost fields stay null.
+        // Failed calls still cost something on rate-limited paths
+        // (depending on provider), but the SDK doesn't expose tokens
+        // when the call rejected — the `outcome: "error"` field is
+        // the only signal the operator gets.
         latencyMs: Date.now() - startedMs,
         outcome: outcome,
         errorReason: reason,
         traceId: getCurrentTraceId(),
-        storageMode: callOptions.requestLogMode || "none",
+        storageMode: logCfg.mode,
+        customRedactionRules: logCfg.customRules,
       });
     } catch {}
     throw err;
   }
 }
 
+/**
+ * Raw provider call — adapter dispatch + token telemetry. Wrapped by
+ * {@link callProvider} which adds latency / outcome metrics and the
+ * post-call request-log hook.
+ *
+ * Returns the full `{ text, usage, costResult }` triple so `callProvider`
+ * can populate the AI request log's `inputTokens` / `outputTokens` /
+ * `costUsd` columns without re-computing or re-decoding the usage block.
+ * The legacy contract (callers expect a `string`) is preserved by
+ * `callProvider` extracting `.text` before returning to its callers.
+ *
+ * @returns {Promise<{ text: string, usage: Object|null, costResult: { costUsd: number|null, source: string } }>}
+ */
 export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions = {}) {
   const messages = normaliseMessages(promptOrMessages);
   // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
@@ -545,13 +666,17 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // Token telemetry is the orchestrator's responsibility — adapters return
   // raw usage and don't know about the metrics registry. Keeps adapters
   // self-contained and testable in isolation.
-  // `recordAiTokens`'s signature defaults agentRole + the function body
-  // OR-defaults `null` → `"default"` for the metric label, so pass the
-  // original `callOptions.agentRole` directly without re-applying the OR.
   // B2.4 — pass `route` through so cost is computed from `route.pricing`
   // (operator-set) when available, with `MODEL_PRICING` as catalog
   // fallback. Adapters no longer compute `usage.costUsd` themselves;
   // the dispatcher owns cost via `computeCostForRoute`.
-  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole, callOptions.routeName || "unknown", callOptions.route || null);
-  return text;
+  let costResult = { costUsd: null, source: "none" };
+  if (usage) {
+    costResult = recordAiTokens(
+      provider, usage, "generation",
+      callOptions.agentRole, callOptions.routeName || "unknown",
+      callOptions.route || null,
+    );
+  }
+  return { text, usage: usage || null, costResult };
 }
