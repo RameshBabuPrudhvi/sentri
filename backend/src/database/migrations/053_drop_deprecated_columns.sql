@@ -1,5 +1,4 @@
--- B4.3 — Drop deprecated columns from agent_configs and clean up
--- legacy compat-slot data from api_keys.
+-- B4.3 — Drop deprecated columns from agent_configs.
 --
 -- ## What's dropped
 --
@@ -9,14 +8,25 @@
 --     one release per the rollback contract; that window has now closed
 --     (Bundle 3 shipped in the same PR).
 --
--- ## Compat slot cleanup
+-- ## Compat slot cleanup — NOT done here (data-loss hazard)
 --
---   The `compat-to-routes.js` migration script (B3.10) converts every
---   `compat:<id>` row in `api_keys` into a proper `provider_routes` row.
---   After that script has run, the `api_keys` rows with
---   `provider LIKE 'compat:%'` are orphaned — nothing reads them at
---   runtime. We delete them here so operators don't see stale entries
---   in any direct-DB tooling.
+-- An earlier revision of this migration also issued
+-- `DELETE FROM api_keys WHERE provider LIKE 'compat:%'` to clean up rows
+-- orphaned by `compat-to-routes.js`. That was unsafe: the migration
+-- runner auto-applies every pending SQL migration on boot, but
+-- `compat-to-routes.js` is a manual operator script that must be run
+-- out-of-band. Operators who deploy this version without first running
+-- the script lose every compat-slot API key with NO migration path —
+-- the keys are AES-encrypted, the plaintext is gone, and there's no
+-- recovery.
+--
+-- Compat slot cleanup now lives in `compat-to-routes.js` itself via the
+-- `--delete-source` flag, which only fires AFTER the script has
+-- successfully re-encrypted each slot's plaintext into a new
+-- `provider_routes` row. Operators who don't run the script keep their
+-- legacy `api_keys` rows untouched — `apiKeyRepo` still reads them at
+-- runtime via the existing compat-slot path, so dispatch keeps working
+-- until the operator explicitly migrates.
 --
 -- ## Compatibility
 --
@@ -24,8 +34,3 @@
 -- PostgreSQL has supported it since 7.3. Idempotency is guaranteed
 -- at the runner level via `schema_migrations`.
 ALTER TABLE agent_configs DROP COLUMN fallbackRole;
--- Clean up orphaned compat-slot rows from api_keys. The
--- compat-to-routes.js script already migrated the data; these rows
--- are dead weight. DELETE (not DROP TABLE) so the api_keys table
--- itself survives for cloud-provider key storage.
-DELETE FROM api_keys WHERE provider LIKE 'compat:%';

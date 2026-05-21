@@ -903,7 +903,9 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   }
 
   // B3.8 race fix — fold gates + dispatch + telemetry + cache populate
-  // into one IIFE and register it SYNCHRONOUSLY before any `await`.
+  // into one IIFE, then register it SYNCHRONOUSLY (no `await` between
+  // creation and registration) so concurrent callers past the cache
+  // miss share one vendor dispatch.
   //
   // The original layout checked `coalesceInFlight`, then awaited
   // `checkAndReserve` (a Redis round-trip), and only registered the
@@ -923,7 +925,15 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // synchronous throw before the IIFE would skip the cleanup; here
   // the throw lands on the promise, both `.finally` and the awaiter
   // observe it, and the next call for the same key starts fresh.
-  const dispatchPromise = (async () => {
+  //
+  // CRITICAL: `registerInFlight` MUST run before the IIFE body yields
+  // on its first `await`. The IIFE body runs synchronously from creation
+  // until its first `await` (inside `checkAndReserve`), so we register
+  // immediately after the IIFE expression below. Do not insert any
+  // synchronous code between the IIFE creation and `registerInFlight`
+  // — that would re-open the race window the comment above closed.
+  let dispatchPromise;
+  dispatchPromise = (async () => {
     // B3.7 — pre-call gates. Run BEFORE the SDK so a rejected call never
     // touches vendor quota. Order matters:
     //   1. Spend cap (cheap DB read, no I/O round-trip in the no-cap path).

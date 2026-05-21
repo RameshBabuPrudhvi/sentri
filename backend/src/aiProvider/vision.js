@@ -31,8 +31,8 @@
  */
 
 import { getProvider, getProviderMeta } from "./providerInfo.js";
-import { resolveRoute, isProviderUsable } from "./registry.js";
-import { VISION_CAPABLE_MODELS } from "./modelCatalog.js";
+import { resolveRoute, isProviderUsable, isCompatProvider, getCompatConfig, getKey } from "./registry.js";
+import { VISION_CAPABLE_MODELS, CLOUD_KEY_MAP } from "./modelCatalog.js";
 import {
   providerMetricLabel,
   recordAiTokens,
@@ -298,11 +298,22 @@ ${String(contextHtml).slice(0, 800)}` : "");
   let raw = "";
   let usage = null;
   try {
+    // B4.1 follow-up — resolve env-derived apiKey for transient routes
+    // so vision-heal on env-default deployments doesn't fail with a null
+    // key. Real routes decrypt via `secrets.getDecryptedKey` inside
+    // `protocolAdapter.buildOpts` and ignore this fallback. Mirrors the
+    // `apiKey` branch in `_callProviderUnsafe`'s `protocolOpts`.
+    const transientApiKey = dispatchRoute._transient
+      ? (isCompatProvider(provider)
+        ? getCompatConfig(provider)?.apiKey
+        : getKey(CLOUD_KEY_MAP[provider] || ""))
+      : undefined;
     const res = await protocolAdapter.generateVision(dispatchRoute, {
       base64,
       dataUrl,
       userPrompt,
       signal,
+      apiKey: transientApiKey,
     });
     if (!res) return null; // Ollama protocol returns null — no vision support.
     raw = res.text || "";

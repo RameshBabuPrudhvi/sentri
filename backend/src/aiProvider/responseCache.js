@@ -188,9 +188,28 @@ export function setCached(routeId, model, params, response, usage, ttlSec) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlSec * 1000).toISOString();
   try {
+    // SQLite's `INSERT OR REPLACE` is delete-then-insert semantics: the
+    // conflicting row is DELETED before the VALUES clause evaluates, so
+    // a `COALESCE((SELECT hitCount FROM ... WHERE cacheKey = ?), 0)`
+    // subquery in the values list ALWAYS sees zero — the row we'd be
+    // reading from is already gone. The hitCount counter therefore
+    // resets to 0 on every cache refresh, defeating the
+    // "which entries are actually paying their keep" observability
+    // contract. Use `INSERT ... ON CONFLICT(cacheKey) DO UPDATE`
+    // (UPSERT) instead — supported on SQLite ≥ 3.24 and PostgreSQL.
+    // The UPDATE clause omits `hitCount` so the existing column value
+    // survives the upsert. New rows get `hitCount = 0` from the
+    // VALUES list; upserts preserve whatever value `getCached`
+    // accumulated.
     getDatabase().prepare(
-      "INSERT OR REPLACE INTO ai_response_cache (cacheKey, routeId, response, usage, createdAt, expiresAt, hitCount) " +
-      "VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT hitCount FROM ai_response_cache WHERE cacheKey = ?), 0))",
+      "INSERT INTO ai_response_cache (cacheKey, routeId, response, usage, createdAt, expiresAt, hitCount) " +
+      "VALUES (?, ?, ?, ?, ?, ?, 0) " +
+      "ON CONFLICT(cacheKey) DO UPDATE SET " +
+      "  routeId = excluded.routeId, " +
+      "  response = excluded.response, " +
+      "  usage = excluded.usage, " +
+      "  createdAt = excluded.createdAt, " +
+      "  expiresAt = excluded.expiresAt",
     ).run(
       cacheKey,
       routeId,
@@ -198,7 +217,6 @@ export function setCached(routeId, model, params, response, usage, ttlSec) {
       usage ? JSON.stringify(usage) : null,
       now.toISOString(),
       expiresAt,
-      cacheKey,
     );
   } catch { /* DB unavailable — best-effort */ }
 }

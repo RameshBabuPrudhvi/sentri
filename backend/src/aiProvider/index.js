@@ -89,6 +89,16 @@ import * as protocolAdapter from "./adapters/protocolAdapter.js";
 // provider id") so the env-default transient-route fallback in
 // streamText reads naturally.
 import { protocolForProvider as protocolForLegacyProvider } from "./protocolForProvider.js";
+// B4.1 follow-up — env-derived API key resolution for transient routes.
+// `protocolAdapter.buildOpts` calls `secrets.getDecryptedKey(workspaceId,
+// routeId)` which returns null for transient routes (no DB row to
+// decrypt), then falls back to `callerOpts.apiKey`. Streaming + vision
+// dispatch must mirror `_callProviderUnsafe`'s transient-route key
+// resolution (see `dispatcher.js#_callProviderUnsafe` apiKey branch) or
+// every native-streaming and vision-heal call on env-default
+// deployments fails with a null-key auth error.
+import { isCompatProvider, getCompatConfig, getKey } from "./registry.js";
+import { CLOUD_KEY_MAP } from "./modelCatalog.js";
 
 // Re-export the full public API so external callers that import from
 // `aiProvider.js` (which re-exports from this file) continue to work after
@@ -368,12 +378,24 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
     ? promptOrMessages
     : JSON.stringify(promptOrMessages);
   const startedMs = Date.now();
+  // B4.1 follow-up — resolve env-derived apiKey for transient routes so
+  // native streaming on env-default deployments doesn't fail with a null
+  // key. Mirrors the `apiKey` branch in `_callProviderUnsafe`'s
+  // `protocolOpts`. Real routes (route._transient !== true) decrypt their
+  // key inside `protocolAdapter.buildOpts` via `secrets.getDecryptedKey`
+  // and ignore this fallback.
+  const transientApiKey = dispatchRoute._transient
+    ? (isCompatProvider(provider)
+      ? getCompatConfig(provider)?.apiKey
+      : getKey(CLOUD_KEY_MAP[provider] || ""))
+    : undefined;
   try {
     const res = await protocolAdapter.stream(dispatchRoute, messages, {
       maxTokens: effectiveMaxTokens,
       signal,
       responseFormat,
       onToken: wrappedOnToken,
+      apiKey: transientApiKey,
     });
     if (res !== null) {
       // `recordAiTokens`'s signature defaults agentRole to `"default"`, so
