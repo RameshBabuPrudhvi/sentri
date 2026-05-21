@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-05-21
+
 ### Breaking
 
 - **Bundle 2 — `agent_configs.provider` → `routeId` migration.** Migration 048 drops `agent_configs.provider` and `agent_configs.model` columns. Dispatch now keys on `agent_configs.routeId` → `provider_routes` row exclusively. **Operators must run `node backend/src/database/migrations/scripts/backfill-routes.js` BEFORE deploying this version** — the script find-or-creates `provider_routes` rows from legacy columns and writes `routeId`. Use `--dry-run` first. Re-runnable; rows already backfilled are skipped. Per-workspace API keys are inherited from the global `apiKeyRepo` store and encrypted into each route's `apiKeyEncrypted` blob — rotate per-workspace via Settings → Provider Routes → Rotate key post-migration. `resolveProvider` is deleted; `resolveRoute` is the single dispatch path. `MODEL_PRICING` is no longer read at runtime by adapters — cost is computed by the dispatcher from `route.pricing` (operator-set) with `MODEL_PRICING` as catalog fallback. The `AI_ROUTES_ENABLED` feature flag is removed.
