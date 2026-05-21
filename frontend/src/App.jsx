@@ -18,11 +18,10 @@ const RunDetail = lazy(() => import("./pages/RunDetail.jsx"));
 const TestDetail = lazy(() => import("./pages/TestDetail.jsx"));
 // GAP-002 (audit): Settings is now a feature-folder under
 // `features/settings/` with a sidebar-driven shell + per-section lazy
-// chunks. The legacy `pages/Settings.jsx` god-file remains in the tree
-// only as the source of the two largest tabs (Providers, Provider Routes)
-// which the new section wrappers re-render; GAP-002b finishes that
-// extraction. The old `/settings/:section` direct mount is replaced by
-// `<SettingsLayout>` parent route + `settingsRoutes` child collection.
+// chunks. The old `pages/Settings.jsx` god-file has been deleted — all 9
+// sections are physically extracted under `features/settings/sections/`.
+// `<SettingsLayout>` parent route + `settingsRoutes` child collection own
+// the URL contract; App.jsx never needs to change for new sections.
 const SettingsLayout = lazy(() => import("./features/settings/SettingsLayout.jsx"));
 const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));

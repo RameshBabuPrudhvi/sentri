@@ -30,7 +30,13 @@ export default function SettingsLayout() {
   const { user } = useAuth();
   const { fallback, isAdmin } = useSettingsSections();
 
-  const sectionParam = params.section;
+  // React Router v6/v7: when `/settings/members` matches the parent route
+  // `<Route path="/settings">` + child `<Route path="members">`, the parent's
+  // `useParams()` does NOT contain `:section` — the dynamic segment lives on
+  // the child. Extract the section from the pathname instead so the layout
+  // shell always knows which section is active for role-gating + redirects.
+  const pathSegments = location.pathname.split("/").filter(Boolean);
+  const sectionParam = pathSegments[0] === "settings" ? pathSegments[1] || null : params.section || null;
   const activeSection = sectionParam
     ? SETTINGS_SECTIONS.find((s) => s.key === sectionParam) || null
     : null;
