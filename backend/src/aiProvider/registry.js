@@ -592,7 +592,25 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
   // — those routes always supply an explicit model via
   // `getCompatConfig().model` higher up the stack.
   let effectiveModel = model || null;
-  if (!effectiveModel && !provider.startsWith("compat:")) {
+  let effectiveBaseUrl = null;
+  if (isCompatProvider(provider)) {
+    // Compat slots carry their own baseUrl + model on the slot config
+    // (not in the env). The dispatcher's SSRF-guardedFetch is gated on
+    // `route.baseUrl` (see `_callProviderUnsafe`), so dropping the
+    // compat baseUrl here would silently disable the SSRF guard for
+    // every transient compat dispatch — the OpenAI SDK would then fall
+    // through to `api.openai.com` (its hardcoded default) with the
+    // compat slot's apiKey, leaking it to a third party. Carry both
+    // fields on the synthetic route so dispatch reaches the configured
+    // endpoint and the SSRF guard fires.
+    try {
+      const slot = getCompatConfig(provider);
+      if (slot) {
+        effectiveBaseUrl = slot.baseUrl || null;
+        if (!effectiveModel) effectiveModel = slot.model || null;
+      }
+    } catch { /* DB unavailable — fall through to no baseUrl */ }
+  } else if (!effectiveModel) {
     try { effectiveModel = getCloudModel(provider) || null; } catch { /* unknown family */ }
   }
   return {
@@ -601,7 +619,7 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
     name: `transient:${provider}`,
     family: provider,
     protocol,
-    baseUrl: null,
+    baseUrl: effectiveBaseUrl,
     model: effectiveModel,
     apiKeyLastFour: null,
     capabilities: null,

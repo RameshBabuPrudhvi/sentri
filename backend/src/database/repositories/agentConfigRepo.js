@@ -56,12 +56,31 @@ export function upsert(config) {
   // walk on the same call. `providerRouteRepo.getById` is workspace-scoped,
   // so a route in another workspace returns undefined here and fails the
   // check — preventing cross-workspace route assignment.
+  //
+  // B4.6 — `cfg.routeId` may also point at a `route_groups` row (`rg-*`
+  // prefix). `resolveRoute` in `registry.js` delegates those to
+  // `resolveGroup` at call time; persisting them through this upsert
+  // requires a parallel existence + workspace-scope check against the
+  // groups table. Without this branch, every "assign role to route
+  // group" save throws `ERR_AGENT_ROUTE_NOT_FOUND` (the route-group id
+  // isn't in `provider_routes`) and the B4.6 feature is unreachable.
   if (config.routeId) {
-    const route = providerRouteRepo.getById(config.workspaceId, config.routeId);
-    if (!route) {
-      const err = new Error(`routeId not found in workspace: ${config.routeId}`);
-      err.code = "ERR_AGENT_ROUTE_NOT_FOUND";
-      throw err;
+    if (typeof config.routeId === "string" && config.routeId.startsWith("rg-")) {
+      const group = getDatabase().prepare(
+        "SELECT id FROM route_groups WHERE id = ? AND workspaceId = ?",
+      ).get(config.routeId, config.workspaceId);
+      if (!group) {
+        const err = new Error(`route group not found in workspace: ${config.routeId}`);
+        err.code = "ERR_AGENT_ROUTE_NOT_FOUND";
+        throw err;
+      }
+    } else {
+      const route = providerRouteRepo.getById(config.workspaceId, config.routeId);
+      if (!route) {
+        const err = new Error(`routeId not found in workspace: ${config.routeId}`);
+        err.code = "ERR_AGENT_ROUTE_NOT_FOUND";
+        throw err;
+      }
     }
   }
   const db = getDatabase();
