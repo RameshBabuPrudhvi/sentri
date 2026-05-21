@@ -191,8 +191,8 @@ function toWireValue(field, value) {
  * @param {string} input.workspaceId
  * @param {string} [input.userId]    — Audit actor; null for system writes.
  * @returns {Object} The freshly persisted row (re-read via getById).
- * @throws {Error & { code: "ERR_ROUTE_FALLBACK_CYCLE" }}
- * @throws {Error & { code: "ERR_ROUTE_MISSING_FIELD" }}
+ * @throws {Error} An Error with `code === "ERR_ROUTE_FALLBACK_CYCLE"`.
+ * @throws {Error} An Error with `code === "ERR_ROUTE_MISSING_FIELD"`.
  */
 export function upsert(input) {
   if (!input?.workspaceId) {

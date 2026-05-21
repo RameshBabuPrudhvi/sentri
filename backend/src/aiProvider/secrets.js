@@ -41,7 +41,7 @@ let _warnedDevMode = false;
  *   • Development: missing → log once, derive deterministic dev key.
  *
  * @returns {Buffer}
- * @throws {Error & { code: "ERR_MASTER_KEY_MISSING" | "ERR_MASTER_KEY_INVALID" }}
+ * @throws {Error} An Error with `code === "ERR_MASTER_KEY_MISSING"` or `"ERR_MASTER_KEY_INVALID"`.
  */
 function resolveMasterKey() {
   const raw = process.env.SENTRI_MASTER_KEY;
@@ -162,7 +162,7 @@ export function encryptKey(plaintext) {
  * @param {Buffer} ciphertext
  * @param {Buffer} nonce
  * @returns {string}
- * @throws {Error & { code: "ERR_SECRET_DECRYPT_FAILED" }}
+ * @throws {Error} An Error with `code === "ERR_SECRET_DECRYPT_FAILED"`.
  */
 export function decryptKey(ciphertext, nonce) {
   if (!Buffer.isBuffer(ciphertext) || !Buffer.isBuffer(nonce)) {
@@ -199,7 +199,7 @@ export function decryptKey(ciphertext, nonce) {
  * @param {string} routeId
  * @returns {string|null} Plaintext key, or `null` when the route has no
  *   stored secret (e.g. Ollama route with no auth).
- * @throws {Error & { code: "ERR_SECRET_DECRYPT_FAILED" }}
+ * @throws {Error} An Error with `code === "ERR_SECRET_DECRYPT_FAILED"`.
  */
 export function getDecryptedKey(workspaceId, routeId) {
   const cached = cacheGet(routeId);

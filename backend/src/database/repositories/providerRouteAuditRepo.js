@@ -56,8 +56,8 @@ export const AUDIT_ACTIONS = Object.freeze(new Set([
  * @param {string}  entry.action                - Required. One of {@link AUDIT_ACTIONS}.
  * @param {Object|string|null} [entry.metadata] - Optional. Object → JSON-stringified here; string → stored as-is (caller is responsible for valid JSON); null → stored as null. Plaintext secrets MUST be redacted by the caller before passing in.
  * @returns {{ id: string, createdAt: string }} The freshly persisted row's id + timestamp, for log correlation.
- * @throws {Error & { code: "ERR_AUDIT_INVALID_ACTION" }} When `action` is not in {@link AUDIT_ACTIONS}.
- * @throws {Error & { code: "ERR_AUDIT_MISSING_WORKSPACE" }} When `workspaceId` is falsy.
+ * @throws {Error} When `action` is not in {@link AUDIT_ACTIONS} (`code === "ERR_AUDIT_INVALID_ACTION"`).
+ * @throws {Error} When `workspaceId` is falsy (`code === "ERR_AUDIT_MISSING_WORKSPACE"`).
  */
 export function append(entry) {
   if (!entry?.workspaceId) {
