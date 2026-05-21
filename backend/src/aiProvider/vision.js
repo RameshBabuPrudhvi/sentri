@@ -173,10 +173,15 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal,
   // route should be threaded into a dedicated `logRequest` call here.
   let provider;
   let routeName = "unknown";
+  let resolvedRoute = null;
   if (workspaceId) {
     const { route } = resolveRoute({ agentRole, workspaceId });
     provider = route?._transientProvider || route?.family || null;
     routeName = route?.name || route?.id || "unknown";
+    // B2.4 — keep the route in scope so `recordAiTokens` can compute
+    // cost from `route.pricing`, and so the MNT-001 fallback estimator
+    // below knows whether the cost was already recorded.
+    resolvedRoute = route;
   } else {
     provider = getProvider();
   }
@@ -244,39 +249,36 @@ ${String(contextHtml).slice(0, 800)}` : "");
     return null;
   }
 
-  // AI-003 — recordAiTokens() now bumps the cost counter from
-  // `usage.costUsd` (catalog-derived) for every adapter call, including
-  // vision-heal. We let it run for tokens, but the cost increment here is
-  // gated below so we don't double-count when the catalog has pricing.
-  if (usage) recordAiTokens(provider, usage, "vision_heal", agentRole, routeName);
+  // B2.4 — `recordAiTokens` now owns cost computation via
+  // `computeCostForRoute(route, usage)` and returns `{ costUsd, source }`.
+  // Source priority (see dispatcher.js#computeCostForRoute JSDoc):
+  //   route.pricing > catalog (MODEL_PRICING[route.model]) > none
+  // When source === "none" (no route pricing AND no catalog entry, e.g.
+  // operator-set VISION_MODEL on a freshly-created compat route), we
+  // fall back to the MNT-001 $5/M input + $15/M output midpoint so the
+  // per-project monthly USD cap (`visionHealMaxCostUsdPerMonth`) still
+  // has a signal to enforce against. The midpoint is bumped into the
+  // metric here because recordAiTokens skipped it (cost source was
+  // "none"). On every other path the cost metric is already counted by
+  // recordAiTokens — no double-counting.
+  const tokenResult = usage
+    ? recordAiTokens(provider, usage, "vision_heal", agentRole, routeName, resolvedRoute)
+    : { costUsd: null, source: "none" };
   let parsed;
   try { parsed = parseJSON(raw); } catch { return null; }
   const confidence = Number(parsed?.confidence);
   if (!Number.isFinite(confidence) || confidence <= 0) return null;
   const x = Number(parsed?.x), y = Number(parsed?.y), width = Number(parsed?.width), height = Number(parsed?.height);
   const box = (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height)) ? { x, y, width, height } : null;
-  // Prefer the catalog-derived cost when available so vision-heal spend
-  // tracks the same per-model pricing as test generation. Fall back to the
-  // MNT-001 $5/M input + $15/M output midpoint estimate when the model
-  // isn't in the catalog — the budget circuit-breaker still needs *some*
-  // signal to enforce caps, and the midpoint estimate is the documented
-  // pre-AI-003 behaviour. Already-counted via `recordAiTokens()` when
-  // catalog-derived; we increment the counter ourselves only on fallback.
-  //
-  // BUGFIX: `Number(null) === 0` and `Number.isFinite(0) === true`, so the
-  // old `Number(usage?.costUsd)` coerced catalog-miss `costUsd: null` into
-  // `0`, took the if-branch with `costUsd = 0`, and never recorded the
-  // MNT-001 fallback estimate. Net effect: the per-project monthly USD
-  // cap (`visionHealMaxCostUsdPerMonth`) silently never tripped for any
-  // vision model that wasn't in the catalog (e.g. operator-set
-  // `VISION_MODEL`). Now we null-check FIRST so the fallback path runs
-  // whenever the catalog produced `null` (or undefined / NaN).
-  const rawCatalogCost = usage?.costUsd;
-  const catalogCost = (rawCatalogCost == null) ? NaN : Number(rawCatalogCost);
+
   let costUsd;
-  if (Number.isFinite(catalogCost)) {
-    costUsd = catalogCost;
+  if (Number.isFinite(tokenResult.costUsd)) {
+    // Cost already recorded by recordAiTokens (route or catalog).
+    costUsd = tokenResult.costUsd;
   } else {
+    // MNT-001 fallback estimator — route has no pricing AND catalog
+    // doesn't know this model. Compute a midpoint and emit the metric
+    // ourselves (recordAiTokens skipped it under source="none").
     const inK = (Number(usage?.input) || 0) / 1_000_000;
     const outK = (Number(usage?.output) || 0) / 1_000_000;
     costUsd = inK * 5 + outK * 15;

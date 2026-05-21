@@ -22,6 +22,12 @@ import {
 import { buildProviderMeta } from "./providerInfo.js";
 import { getCurrentTraceId, annotateAiCallSpan } from "../utils/observability.js";
 import { logRequest } from "./requestLog.js";
+// B2.4 — `pricingFor` is the catalog fallback when a route has no
+// explicit `pricing` JSON set. Routes own cost at runtime; the catalog
+// is consulted ONLY when the route's pricing column is null, and only
+// to compute a non-null cost for the metric — never to overwrite an
+// operator-set route price. See `computeCostForRoute` JSDoc below.
+import { pricingFor } from "./modelCatalog.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -302,35 +308,125 @@ export function resolveAgentCall(prompt, options = {}) {
     effectiveAgentRole,
     effectivePrompt,
     maxTokens: config?.maxTokens ?? options.maxTokens,
-    callOpts: { agentRole, routeName: route?.name || route?.id || "unknown", routeId: route?.id || null, workspaceId },
+    callOpts: {
+      agentRole,
+      routeName: route?.name || route?.id || "unknown",
+      routeId: route?.id || null,
+      workspaceId,
+      // B2.4 — pass the resolved route through so `_callProviderUnsafe`
+      // → `recordAiTokens` can compute cost from `route.pricing`
+      // without re-resolving. The route object includes the `pricing`
+      // JSON column (already hydrated by `providerRouteRepo.hydrate`),
+      // so no extra DB read on the cost path.
+      route,
+    },
     useRoutes: true,
   };
+}
+
+// ── Cost computation (B2.4) ───────────────────────────────────────────────────
+
+/**
+ * Compute the USD cost of a single AI call from the resolved route's
+ * `pricing` JSON, with `MODEL_PRICING` as a catalog fallback when the
+ * route has no explicit pricing.
+ *
+ * ## Source priority
+ *
+ *   1. **`route.pricing`** (operator-set, JSON column from B1.1) —
+ *      authoritative. An operator who configures a private vLLM proxy
+ *      against `claude-3-5-sonnet` at a discounted rate writes their
+ *      real rate here. Shape: `{ inputPerMtok, outputPerMtok, currency }`.
+ *      Returns `{ costUsd, source: "route" }` when set.
+ *
+ *   2. **`MODEL_PRICING[route.model]`** (catalog) — fallback when the
+ *      route has no `pricing` set yet (e.g. an operator just created
+ *      the route and hasn't filled in pricing). Shape:
+ *      `{ inputPer1k, outputPer1k }`. Returns
+ *      `{ costUsd, source: "catalog_fallback" }`.
+ *
+ *   3. **`null`** — neither source has data. Returns
+ *      `{ costUsd: null, source: "none" }`. The metric increment is
+ *      skipped so the cost counter shows "no data" rather than a
+ *      fake zero — matches the AI-003 "no fake zeros" contract from
+ *      `modelCatalog.js#computeCostUsd`.
+ *
+ * ## Unit conversion
+ *
+ * Routes store per-million-token rates (`inputPerMtok`) because that's
+ * the convention every cloud vendor's pricing page uses. The catalog
+ * stores per-thousand-token rates (`inputPer1k`) — that's a legacy
+ * shape from AI-003. Both are normalised to `cost = rate × tokens /
+ * <unit>` internally so the metric value is in USD regardless of
+ * which source fired.
+ *
+ * ## Why dispatcher (not adapter)
+ *
+ * Per B2.4: "MODEL_PRICING no longer read at runtime, only by UI for
+ * defaults." Adapters used to call `computeCostUsd(model, usage)` and
+ * attach `costUsd` to the returned `usage` block — that path is being
+ * retired. Adapters now return raw `{ input, output }`; this helper
+ * is the single place cost gets computed, with the route as the
+ * single source of truth.
+ *
+ * @param {Object|null} route - Resolved `provider_routes` row, or null
+ *   when the call wasn't route-driven (legacy/env-default path).
+ * @param {Object} usage - `{ input, output }` token counts.
+ * @returns {{ costUsd: number|null, source: "route"|"catalog_fallback"|"none" }}
+ */
+export function computeCostForRoute(route, usage) {
+  const inTokens = Number(usage?.input) || 0;
+  const outTokens = Number(usage?.output) || 0;
+
+  // Path 1: route-defined pricing wins.
+  const rp = route?.pricing;
+  if (rp && (Number.isFinite(rp.inputPerMtok) || Number.isFinite(rp.outputPerMtok))) {
+    const inRate = Number.isFinite(rp.inputPerMtok) ? rp.inputPerMtok : 0;
+    const outRate = Number.isFinite(rp.outputPerMtok) ? rp.outputPerMtok : 0;
+    // Per-million-token convention: cost = rate × (tokens / 1_000_000)
+    const costUsd = (inRate * inTokens + outRate * outTokens) / 1_000_000;
+    return { costUsd: Number.isFinite(costUsd) ? costUsd : null, source: "route" };
+  }
+
+  // Path 2: catalog fallback.
+  const catalog = route?.model ? pricingFor(route.model) : null;
+  if (catalog && (catalog.inputPer1k != null || catalog.outputPer1k != null)) {
+    const inRate = Number.isFinite(catalog.inputPer1k) ? catalog.inputPer1k : 0;
+    const outRate = Number.isFinite(catalog.outputPer1k) ? catalog.outputPer1k : 0;
+    // Per-thousand-token convention: cost = rate × (tokens / 1_000)
+    const costUsd = (inRate * inTokens + outRate * outTokens) / 1_000;
+    return { costUsd: Number.isFinite(costUsd) ? costUsd : null, source: "catalog_fallback" };
+  }
+
+  // Path 3: no data — null cost, skip the metric. Operator sees "no
+  // data" in dashboards rather than a misleading $0.
+  return { costUsd: null, source: "none" };
 }
 
 // ── Token telemetry ───────────────────────────────────────────────────────────
 
 /**
- * Record token usage from a provider response, bucketed by `kind` +
- * `operation`. Each provider's SDK exposes usage on a different shape;
- * the caller passes the normalised `{ input, output }` counts plus the
- * surface that made the call:
+ * Record token usage + cost for a single AI call.
  *
- *   - `"generation"` — test-generation pipeline (default for every
- *     call site in this file's generateText / streamText paths).
- *   - `"vision_heal"` — MNT-001 stage-8 vision-healing path. Bucketed
- *     separately so SaaS unit-economics dashboards can attribute spend
- *     to the healing surface vs. core test generation.
+ * Cost is computed from the resolved route's pricing (B2.4 contract —
+ * see `computeCostForRoute` JSDoc). When the route is null, the cost
+ * metric is skipped entirely (env-default path has no pricing source).
  *
- * Per-1k token cost varies by provider and model, so the dashboard layer
- * multiplies these counters by a pricing lookup to compute spend.
- *
- * @param {string} provider - Detected provider id (used as label after normalisation).
- * @param {object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
- * @param {"generation"|"vision_heal"} [operation="generation"] - Which surface initiated the call.
+ * @param {string} provider - Detected provider id (label after normalisation).
+ * @param {Object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
+ * @param {"generation"|"vision_heal"} [operation="generation"]
+ * @param {string} [agentRole="default"]
+ * @param {string} [routeName="unknown"]
+ * @param {Object} [route] - Resolved route (for B2.4 cost computation).
+ *   When null/undefined, only token metrics fire — no cost metric.
+ * @returns {{ costUsd: number|null, source: string }} The cost result so
+ *   B2.5 request-log code can persist `costUsd` + `pricingSource` on
+ *   each `ai_request_log` row.
  */
-export function recordAiTokens(provider, usage, operation = "generation", agentRole = "default", routeName = "unknown") {
-  if (!usage) return;
+export function recordAiTokens(provider, usage, operation = "generation", agentRole = "default", routeName = "unknown", route = null) {
+  if (!usage) return { costUsd: null, source: "none" };
   const label = providerMetricLabel(provider);
+  let costResult = { costUsd: null, source: "none" };
   try {
     const inTokens = Number(usage.input);
     if (Number.isFinite(inTokens) && inTokens > 0) {
@@ -340,17 +436,23 @@ export function recordAiTokens(provider, usage, operation = "generation", agentR
     if (Number.isFinite(outTokens) && outTokens > 0) {
       aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "output", operation, route_name: routeName || "unknown" }, outTokens);
     }
-    // AI-003 — generalised cost counter. Adapters compute `costUsd` from the
-    // catalog (see modelCatalog.js#computeCostUsd) and attach it to the
-    // usage block. `null` means the model isn't in the catalog → skip the
-    // increment so the counter shows "no data" rather than a fake zero.
-    // A literal `0` (catalog-known free model like Ollama) is also skipped
-    // because incrementing by 0 is a no-op anyway.
-    const costUsd = Number(usage.costUsd);
-    if (Number.isFinite(costUsd) && costUsd > 0) {
-      aiProviderCostUsdTotal.inc({ provider: label, agent_role: agentRole || "default", operation, route_name: routeName || "unknown" }, costUsd);
+    // B2.4 — route is the single source of truth for cost. When the
+    // route has explicit `pricing`, use it. Otherwise fall back to the
+    // catalog. When neither has data, skip the increment so the
+    // counter shows "no data" rather than a fake zero. Roadmap line
+    // 144: "Emit `app_ai_cost_usd_total` only when `route.pricing
+    // != null` — never error on missing pricing." We extend the
+    // contract: the metric also fires for catalog_fallback so
+    // pre-B2.4 deployments without route pricing still see cost data.
+    // Operators migrating to per-route pricing see source="route" on
+    // freshly-configured routes; source="catalog_fallback" on
+    // routes whose pricing hasn't been filled in yet.
+    costResult = computeCostForRoute(route, usage);
+    if (Number.isFinite(costResult.costUsd) && costResult.costUsd > 0) {
+      aiProviderCostUsdTotal.inc({ provider: label, agent_role: agentRole || "default", operation, route_name: routeName || "unknown" }, costResult.costUsd);
     }
   } catch { /* best-effort */ }
+  return costResult;
 }
 
 // ── Instrumented provider call ────────────────────────────────────────────────
@@ -446,6 +548,10 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // `recordAiTokens`'s signature defaults agentRole + the function body
   // OR-defaults `null` → `"default"` for the metric label, so pass the
   // original `callOptions.agentRole` directly without re-applying the OR.
-  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole, callOptions.routeName || "unknown");
+  // B2.4 — pass `route` through so cost is computed from `route.pricing`
+  // (operator-set) when available, with `MODEL_PRICING` as catalog
+  // fallback. Adapters no longer compute `usage.costUsd` themselves;
+  // the dispatcher owns cost via `computeCostForRoute`.
+  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole, callOptions.routeName || "unknown", callOptions.route || null);
   return text;
 }
