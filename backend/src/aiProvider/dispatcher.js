@@ -62,6 +62,10 @@ import {
 // "no apiKey" error. Removing the legacy path is gated on every workspace
 // running through the route-driven dispatch (separate cleanup PR).
 import * as protocolAdapter from "./adapters/protocolAdapter.js";
+// B4.0.1 — spend-alert webhook delivery. Fire-and-forget; never blocks
+// the dispatch call. Falls back to the `console.warn` log line below
+// when no webhook URL is configured or the POST fails.
+import { fireSpendAlert } from "./spendAlert.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -610,6 +614,7 @@ export async function runPreCallGates(workspaceId, routeId, route, estimatedToke
           `monthly=${spend.monthlySpent}/${spend.monthlyCap} ` +
           `threshold=${spend.thresholdPct}%`));
       } catch { /* best-effort */ }
+      fireSpendAlert(workspaceId, spend).catch(() => {});
     }
   }
   if (routeId && route) {
@@ -939,20 +944,27 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
         err.remainingUsd = spend.remainingUsd;
         throw err;
       }
-      // B3.7 — alert path. Fire-and-forget: spend alerts never block the
-      // dispatch call, even when the alert sink (Slack/webhook) is down.
+      // B4.0.1 — spend-alert webhook + log. Fire-and-forget: spend alerts
+      // never block the dispatch call, even when the webhook is down.
+      // `fireSpendAlert` reads `workspaces.spendAlertWebhookUrl` from the
+      // DB, applies a 1-hour cooldown via `spendAlertLastFiredAt` (migration
+      // 052), and POSTs a Slack-compatible JSON payload via SSRF-guarded
+      // fetch. When no webhook is configured, it no-ops and the
+      // `console.warn` below is the only signal. Both paths are best-effort.
       if (spend.alertTriggered) {
+        // Log unconditionally so log-aggregation alerts that key on
+        // `[quotaGuard] spend alert:` keep working regardless of webhook.
         try {
-          // Minimal stub — log + activity entry. Slack/webhook integration
-          // lands in a follow-up commit alongside the workspace
-          // `notifications.spendWebhookUrl` column. Logging here so the
-          // alert is at least visible in the operator's log feed today.
           console.warn(formatLogLine("warn", null,
             `[quotaGuard] spend alert: workspace=${workspaceId} ` +
             `daily=${spend.dailySpent}/${spend.dailyCap} ` +
             `monthly=${spend.monthlySpent}/${spend.monthlyCap} ` +
             `threshold=${spend.thresholdPct}%`));
-        } catch { /* alert path is best-effort */ }
+        } catch { /* best-effort */ }
+        // Webhook delivery — fire-and-forget. Never awaited so it can't
+        // block the dispatch call. Errors are swallowed inside
+        // `fireSpendAlert` and logged at warn level.
+        fireSpendAlert(workspaceId, spend).catch(() => {});
       }
     }
     // Token-bucket reserve. `estimatedTokens` is the caller's `maxTokens`
