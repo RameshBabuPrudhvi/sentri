@@ -440,15 +440,21 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
  * @param {string}        [opts.dialsPrompt]
  * @param {string}        [opts.testCount]
  * @param {AbortSignal}   [opts.signal]
+ * @param {string}        [opts.workspaceId] — AI-005: forwarded to `generateText`
+ *   so the `author` agent_config row drives provider + model selection (the
+ *   same role used by `generateIntentTests` / `generateFromDescription`).
+ *   Without this, API test generation always resolves to the workspace
+ *   default — silently bypassing any per-role provider override an admin
+ *   configured for the author stage.
  * @returns {Promise<object[]>}
  */
-export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
+export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
   if (!apiEndpoints || apiEndpoints.length === 0) return [];
 
   try {
     throwIfAborted(signal);
     const prompt = withDials(buildApiTestPrompt(apiEndpoints, appUrl, { testCount }), dialsPrompt);
-    const text = await generateText(prompt, { signal });
+    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId });
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);
     if (tests.length === 0) return [];

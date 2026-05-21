@@ -686,7 +686,7 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     throwIfAborted(signal);
     log(run, `🌐 Generating API tests from ${apiEndpoints.length} discovered endpoints...`);
     try {
-      const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal });
+      const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal, workspaceId: project.workspaceId || null });
       if (apiTests.length > 0) {
         for (const t of apiTests) rawTests.push(t);
         log(run, `📝 API tests generated: ${apiTests.length} (total raw: ${rawTests.length})`);
