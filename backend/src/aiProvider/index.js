@@ -256,7 +256,14 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   // identical, and a second resolution catches any agent_configs row that
   // landed between the stream attempt and the fallback retry.
   const agentRole = options?.agentRole || null;
-  const { provider, effectiveAgentRole, effectivePrompt } =
+  // AI-005 — destructure `maxTokens` too so the streaming path honours the
+  // agent-config precedence (`config.maxTokens` wins over `options.maxTokens`)
+  // that `resolveAgentCall` computes. Without this, `streamText` would silently
+  // pass the caller-supplied `options.maxTokens` (or `DEFAULT_MAX_TOKENS`) to
+  // `buildAdapterOpts` and ignore the role-specific token budget the
+  // workspace admin configured, violating the JSDoc contract in
+  // `dispatcher.js#resolveAgentCall`.
+  const { provider, effectiveAgentRole, effectivePrompt, maxTokens } =
     resolveAgentCall(promptOrMessages, options);
   if (!provider) throw new Error("No AI provider configured.");
   const { signal, responseFormat } = options;
@@ -283,7 +290,7 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   // try/catch below routes thrown errors through the FEA-003 fallback chain;
   // the `if (res !== null)` branch handles the no-streaming-support sentinel.
   try {
-    const opts = buildAdapterOpts(provider, messages, options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, responseFormat);
+    const opts = buildAdapterOpts(provider, messages, maxTokens ?? DEFAULT_MAX_TOKENS, signal, responseFormat);
     const res = await adapter.stream(opts, wrappedOnToken);
     if (res !== null) {
       // `recordAiTokens`'s signature defaults agentRole to `"default"`, so

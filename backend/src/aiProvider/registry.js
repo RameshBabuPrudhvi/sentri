@@ -236,10 +236,18 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
     }
   }
   if (agentRole && workspaceId) {
-    const cfg = agentConfigRepo.getByRole(workspaceId, agentRole);
-    if (cfg?.provider && isProviderUsable(cfg.provider)) {
-      return { provider: cfg.provider, config: cfg, effectiveAgentRole: agentRole };
-    }
+    // Defensive try/catch — the `agent_configs` table may not exist yet on
+    // fresh DBs where migrations haven't run, and we never want a transient
+    // SQLite error to crash every AI call. Falling through to env detection
+    // mirrors the single-agent path and matches the defensive pattern used
+    // elsewhere in this file (see `isProviderUsable` for compat slots, and
+    // `listCompatSlots` in `detectProvider`).
+    try {
+      const cfg = agentConfigRepo.getByRole(workspaceId, agentRole);
+      if (cfg?.provider && isProviderUsable(cfg.provider)) {
+        return { provider: cfg.provider, config: cfg, effectiveAgentRole: agentRole };
+      }
+    } catch { /* DB unavailable — fall through to detection */ }
   }
   // AI-005c (single-agent preservation): when no per-role agent_config row
   // exists for this workspace+role, the call falls back to the workspace
@@ -250,7 +258,15 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
   // key path, preserving pre-AI-005 wasted-call counts during 429 incidents.
   // Multi-agent mode lights up automatically the moment a workspace adds an
   // `agent_configs` row for the role.
-  const provider = detectProvider({ agentRole });
+  //
+  // We deliberately pass NO `agentRole` to `detectProvider` here — role-scoped
+  // sticky entries were already consulted above, and any sticky persisted via
+  // `setStickyFallback(provider, effectiveAgentRole)` during single-agent
+  // fallback collapses to the BARE-key path (effectiveAgentRole=null →
+  // breakerKey="openai"). Forwarding `agentRole` would filter those bare-key
+  // stickies out, regressing the AI-005c "ONE breaker shared across stages"
+  // contract and reintroducing the wasted-call amplification during 429s.
+  const provider = detectProvider();
   if (!provider) return { provider: null, config: null, effectiveAgentRole: null };
   return { provider, config: null, effectiveAgentRole: null };
 }
