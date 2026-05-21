@@ -39,7 +39,7 @@ import { resolveProvider } from "./registry.js";
  * configurable role. The combined cardinality enumeration (this list +
  * `"default"`) lives in {@link METRIC_AGENT_ROLES} below.
  *
- * @type {readonly string[]}
+ * @type {string[]}
  */
 export const AGENT_ROLES = Object.freeze([
   "explorer",
@@ -64,7 +64,7 @@ export const AGENT_ROLES = Object.freeze([
  * recommended ceiling. Adding a new role to `AGENT_ROLES` automatically
  * grows this list by one.
  *
- * @type {readonly string[]}
+ * @type {string[]}
  */
 export const METRIC_AGENT_ROLES = Object.freeze([...AGENT_ROLES, "default"]);
 
@@ -139,7 +139,7 @@ export async function validateAgentConfigs(workspaceId, { signal, roles } = {}) 
  * @param {Object} [opts]
  * @param {AbortSignal} [opts.signal]
  * @returns {Promise<{ok: true, agentRoles: Record<string, {ok: boolean, reason: string|null, provider: string|null}>}>}
- * @throws {Error & {code: "ERR_AGENT_HEALTH_CHECK_FAILED", agentRoles: object}}
+ * @throws {Error} An Error with `code === "ERR_AGENT_HEALTH_CHECK_FAILED"` and an `agentRoles` property carrying the per-role probe result map.
  */
 export async function assertAgentConfigsHealthy(workspaceId, opts = {}) {
   const result = await validateAgentConfigs(workspaceId, opts);

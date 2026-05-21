@@ -69,7 +69,7 @@ function wouldCreateCycle(workspaceId, startRole, proposedFallback) {
  *
  * @param {Object} config - Must include id, workspaceId, role, createdAt, updatedAt.
  * @returns {Object} The freshly persisted row (re-read via getByRole).
- * @throws {Error & {code: "ERR_AGENT_FALLBACK_CYCLE"}} If `fallbackRole` would create a cycle.
+ * @throws {Error} An Error with `code === "ERR_AGENT_FALLBACK_CYCLE"` if `fallbackRole` would create a cycle.
  */
 export function upsert(config) {
   if (wouldCreateCycle(config.workspaceId, config.role, config.fallbackRole)) {
