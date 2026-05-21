@@ -391,12 +391,26 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome: "success", operation, route_name: callOptions.routeName || "unknown" }, seconds);
     } catch { /* best-effort */ }
+    try {
+      logRequest({
+        workspaceId: callOptions.workspaceId || null,
+        routeId: callOptions.routeId || null,
+        agentRole: callOptions.agentRole || null,
+        userId: callOptions.userId || null,
+        prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
+        response: typeof result === "string" ? result : "",
+        latencyMs: Date.now() - startedMs,
+        outcome: "success",
+        traceId: getCurrentTraceId(),
+        storageMode: callOptions.requestLogMode || "none",
+      });
+    } catch {}
     return result;
   } catch (err) {
+    const reason = classifyAiError(err);
+    const outcome = reason === "rate_limit" ? "rate_limited" : "error";
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      const reason = classifyAiError(err);
-      const outcome = reason === "rate_limit" ? "rate_limited" : "error";
       aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome, operation, route_name: callOptions.routeName || "unknown" }, seconds);
       aiProviderErrorsTotal.inc({ provider: label, agent_role: agentRole, reason, operation, route_name: callOptions.routeName || "unknown" });
     } catch { /* best-effort */ }
