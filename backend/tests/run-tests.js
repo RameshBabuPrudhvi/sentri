@@ -86,6 +86,7 @@ const files = [
   "tests/secrets.test.js",               // B1.4 — AES-256-GCM encrypt/decrypt + master-key fail-fast + lastFour.
   "tests/protocol-adapter.test.js",      // B1.5 — protocol switch + streaming-parity fallback.
   "tests/resolve-route.test.js",         // B1.6 — resolveRoute priority chain + AI-005c collapse + shim.
+  "tests/migration-routeid.test.js",
   "tests/chaos-provider.test.js",        // B1.8 — error-injection: 500s, malformed JSON, mid-stream abort, breaker.
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",

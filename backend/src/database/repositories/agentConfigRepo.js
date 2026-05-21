@@ -7,6 +7,7 @@
  */
 
 import { getDatabase } from "../sqlite.js";
+import * as providerRouteRepo from "./providerRouteRepo.js";
 
 /**
  * Fetch a single role config for a workspace.
@@ -43,6 +44,15 @@ export function listByWorkspace(workspaceId) {
 function wouldCreateCycle(workspaceId, startRole, proposedFallback) {
   if (!proposedFallback) return false;
   if (proposedFallback === startRole) return true;
+
+  if (config.routeId) {
+    const route = providerRouteRepo.getById(config.workspaceId, config.routeId);
+    if (!route) {
+      const err = new Error(`routeId not found in workspace: ${config.routeId}`);
+      err.code = "ERR_AGENT_ROUTE_NOT_FOUND";
+      throw err;
+    }
+  }
   const db = getDatabase();
   const seen = new Set([startRole]);
   let next = proposedFallback;
