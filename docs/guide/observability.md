@@ -30,11 +30,46 @@ All metrics use the brand-neutral `app_` prefix (see [Rebranding](./rebranding.m
 | `app_test_duration_seconds` | Histogram | status, browser | Per-test latency percentiles |
 | `app_crawl_pages_total` | Counter | mode | Crawler throughput by mode |
 | `app_pipeline_stage_duration_seconds` | Histogram | stage | Which pipeline stage is slow |
-| `app_ai_provider_latency_seconds` | Histogram | provider, outcome | Per-provider p99 latency |
-| `app_ai_provider_tokens_total` | Counter | provider, kind | Token cost driver |
-| `app_ai_provider_errors_total` | Counter | provider, reason | Per-provider failure-mode breakdown |
+| `app_ai_provider_latency_seconds` | Histogram | provider, agent_role, outcome, operation, route_name | Per-route p99 latency |
+| `app_ai_provider_tokens_total` | Counter | provider, agent_role, kind, operation, route_name | Token cost driver |
+| `app_ai_provider_errors_total` | Counter | provider, agent_role, reason, operation, route_name | Per-route failure-mode breakdown |
+| `app_ai_cost_usd_total` | Counter | provider, agent_role, operation, route_name | Realised USD spend, route-attributed |
+| `app_ai_cache_hits_total` | Counter | route_name, agent_role | Response-cache hits per route |
+| `app_ai_cache_misses_total` | Counter | route_name, agent_role | Cache misses (cold + TTL-expired) |
+| `app_ai_cache_savings_usd_total` | Counter | route_name, agent_role | Cumulative USD saved by cache hits |
 | `app_queue_depth` | Gauge | state | BullMQ waiting, active, failed |
 | `app_active_runs` | Gauge | type | In-process active runs |
+
+### B4.2 — `route_name` cardinality budget
+
+The `route_name` label is operator-controlled free-text (`provider_routes.name`,
+`UNIQUE(workspaceId, name)`). Cardinality is bounded by the number of
+`provider_routes` rows across all workspaces — typically tens per
+deployment, never thousands. Concrete budget:
+
+| Deployment scale | Workspaces | Routes/workspace | `route_name` cardinality |
+| --- | --- | --- | --- |
+| Single-tenant | 1 | 1–3 | 1–3 |
+| Small SaaS | 10–50 | 1–5 | 10–250 |
+| Multi-tenant SaaS | 100–500 | 1–10 | 100–5,000 |
+
+Each AI metric carries `route_name` × `agent_role` × `provider` × … so
+the worst-case time-series count for `app_ai_provider_latency_seconds`
+on a 500-workspace deployment is roughly:
+
+```
+500 workspaces × 5 routes/ws × 7 agent roles × 2 outcomes × 2 operations × 12 histogram buckets
+≈ 1.7M series
+```
+
+Prometheus comfortably handles this with `--storage.tsdb.retention.time=15d`
+on a 16 GiB instance. Operators on tighter Prometheus budgets should
+either limit routes per workspace via admin policy, or set a recording
+rule that drops `route_name` for low-traffic routes.
+
+**Anti-pattern:** the cache metrics (`app_ai_cache_*`) deliberately omit
+the `provider` label. Cache effectiveness is per-route, not per-family —
+adding `provider` would inflate cardinality without information gain.
 
 Default Node.js metrics (`nodejs_eventloop_lag_seconds`, `nodejs_heap_*`, `process_cpu_*`) are also exposed via `prom-client.collectDefaultMetrics`.
 
@@ -135,33 +170,39 @@ Triage: open Bull Board. Common causes — poison-pill payload (one malformed ru
 
 Severity: warning.
 
-Means: a specific AI provider failing more than 15% of LLM calls over 5 min.
+Means: a specific `provider_routes` row failing more than 15% of LLM calls over 5 min. **B4.2 — alert is now keyed by `(provider, route_name)`** so a single bad route surfaces independently of the rest of the family.
 
 Triage:
 
-1. Check the vendor status page — Anthropic / OpenAI / Google all publish public status pages.
-2. Verify fallback — Sentri Settings: at least one OTHER provider needs a valid key, otherwise customers on that provider are stuck.
-3. Reason breakdown via `app_ai_provider_errors_total{provider="..."} by reason`. `rate_limit` = vendor throttling; `server_error` = vendor outage; `timeout` = network or vendor latency; `auth` = our key is invalid (see next).
+1. Identify the failing route via `app_ai_provider_errors_total{route_name="..."} by reason`. `rate_limit` = vendor throttling; `server_error` = vendor outage; `timeout` = network or vendor latency; `auth` = our key is invalid (see next).
+2. Check the vendor status page for the route's `provider` (Anthropic / OpenAI / Google all publish public status pages).
+3. Verify fallback — the route's `fallbackRouteId` (Settings → Provider Routes) needs to point at a healthy sibling, otherwise pipeline roles assigned to this route are stuck.
+4. For workspace-scoped triage, check the workspace's `ai_request_log` (Settings → AI Request Log) filtered by `routeId` and `outcome="error"` for the redacted prompts that triggered the failures.
 
 ### AiProviderAuthFailures
 
 Severity: critical. Page: yes.
 
-Means: ANY auth failure from a provider. Keys should not be invalid in production.
+Means: ANY auth failure on a `provider_routes` row. Keys should not be invalid in production. **B4.2 — `route_name` label tells you exactly which row's key needs rotating.**
 
 Triage:
 
-1. Identify which provider via `app_ai_provider_errors_total{reason="auth"}` by `provider`.
-2. Rotate the key in Sentri Settings (or update the env var and redeploy).
-3. Customer-visible — every workspace using this provider as primary is broken. Communicate via status page if outage above 10 min.
+1. Identify the failing route from the alert's `route_name` label, or via `app_ai_provider_errors_total{reason="auth"} by route_name`.
+2. Rotate the key in Settings → Provider Routes → Rotate key for the affected route. The endpoint runs a probe-before-persist gate so the new key is verified before it replaces the old ciphertext (B3.6).
+3. Customer-visible — every workspace assigning this route to a pipeline role is broken until the rotation completes. Communicate via status page if outage above 10 min.
+4. Pre-routes deployments (single env-var keys) still surface here with `route_name="unknown"` — for those, update the env var and redeploy.
 
 ### AiProviderHighLatencyP99
 
 Severity: warning.
 
-Means: per-provider p99 latency above 30s for successful calls.
+Means: per-route p99 latency above 30s for successful calls. **B4.2 — keyed by `(provider, route_name)` so a slow self-hosted vLLM proxy doesn't falsely indict the entire openai protocol family.**
 
-Triage: check the vendor status page. The FEA-003 fallback chain does not fire on slow calls (only hard errors), so this slowness is fully customer-visible. Consider pinning a faster provider via the Settings dropdown if the outage persists.
+Triage:
+
+1. Identify the slow route from the alert's `route_name` label. Check the vendor status page for the route's `provider`.
+2. For self-hosted / compat routes (`family: "custom"`), check the operator-set `baseUrl` — a misconfigured proxy can absorb minutes of latency before timing out.
+3. The FEA-003 fallback chain does not fire on slow calls (only hard errors), so this slowness is fully customer-visible. Configure `fallbackRouteId` on the slow route to a healthy sibling for automatic mitigation, or disable the route in Settings → Provider Routes if the outage persists.
 
 ### EventLoopLagHigh
 
@@ -197,6 +238,75 @@ Triage:
 1. Backend health — `curl https://backend/health`. If down, page the on-call engineer.
 2. Network — can Prometheus reach the backend? Firewall? mTLS rotation?
 3. Auth — did `METRICS_SCRAPE_KEY` rotate without updating Prometheus config?
+
+## Cache + quota dashboards (B4.2)
+
+Bundles 3.7 and 3.8 added per-route quota enforcement and exact-match
+response caching. Operators tuning either need a Grafana panel; the
+dashboards aren't checked into this repo (deployment-environment-specific
+— Grafana version, datasource UID, folder structure all vary), but the
+PromQL queries below drop straight into a panel.
+
+### Cache hit ratio per route
+
+```promql
+sum by (route_name) (rate(app_ai_cache_hits_total[5m]))
+/
+(
+  sum by (route_name) (rate(app_ai_cache_hits_total[5m]))
+  + sum by (route_name) (rate(app_ai_cache_misses_total[5m]))
+)
+```
+
+A hit ratio above ~30% on a deterministic-prompt workload (T=0,
+self-healing disabled) means caching is paying its keep. Below 5% means
+the route's `cacheTtlSec` is too short, the workload's prompts vary
+more than expected, or the route has `cacheEnabled = 0` and shouldn't
+appear at all (filter out via `app_ai_cache_hits_total{route_name=~".+"}`).
+
+### Cumulative cache savings (USD)
+
+```promql
+sum by (route_name) (increase(app_ai_cache_savings_usd_total[24h]))
+```
+
+Per-route, last 24h. Compare against `sum by (route_name)
+(increase(app_ai_cost_usd_total[24h]))` to see savings as a percentage
+of total spend.
+
+### Rate-limit rejections per route
+
+The dispatcher rejects calls that fail the per-route token-bucket gate
+with `code: ERR_RATE_LIMIT_LOCAL` (B3.7). These surface in
+`app_ai_provider_errors_total` with `reason="rate_limit_local"`:
+
+```promql
+sum by (route_name) (rate(app_ai_provider_errors_total{reason="rate_limit_local"}[5m]))
+```
+
+Spike on a single route → the route's `rpmLimit` or `tpmLimit` is too
+tight for the workload. Spike across every route → a workspace is
+being aggressively retried; check the orchestrator's backoff config.
+
+### Spend-cap utilization
+
+`checkSpendCap` reads from `ai_request_log` (B2.5), not Prometheus, so
+there's no direct gauge. The closest proxy is the `app_ai_cost_usd_total`
+counter against the workspace's `dailySpendCapUsd` — operators have to
+join the two manually. A recording rule helps:
+
+```yaml
+- record: workspace:ai_spend_24h_usd:sum
+  expr: sum by (workspace_id) (increase(app_ai_cost_usd_total[24h]))
+```
+
+Then alert on `workspace:ai_spend_24h_usd:sum >
+on(workspace_id) workspace_daily_cap_usd * 0.8` (where
+`workspace_daily_cap_usd` is exposed by a separate exporter that reads
+the `workspaces.dailySpendCapUsd` column). This is operator-environment
+specific — most deployments query the DB directly from a billing-ops
+script instead. The B3.7 alert path (`spendAlertThresholdPct` →
+`console.warn`) covers the common case without a dashboard.
 
 ## Verification checklist
 

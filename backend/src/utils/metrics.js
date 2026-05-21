@@ -143,7 +143,7 @@ export const aiProviderTokensTotal = new client.Counter({
 
 export const aiProviderErrorsTotal = new client.Counter({
   name: "app_ai_provider_errors_total",
-  help: "AI provider failures bucketed by category. `reason` ∈ {rate_limit, timeout, auth, server_error, network, unknown}; `operation` ∈ {generation, vision_heal}. Drives the AI provider health alert and the circuit-breaker (FEA-003) trip decisions.",
+  help: "AI provider failures bucketed by category. `reason` ∈ {rate_limit, rate_limit_local, spend_cap_exceeded, timeout, auth, server_error, network, unknown}; `operation` ∈ {generation, vision_heal}. `rate_limit` = vendor-side 429; `rate_limit_local` = B3.7 quotaGuard rejected before SDK; `spend_cap_exceeded` = B3.7 workspace USD cap reached. Drives the AI provider health alert and the circuit-breaker (FEA-003) trip decisions.",
   labelNames: ["provider", "agent_role", "reason", "operation", "route_name"],
   registers: [register],
 });
@@ -281,10 +281,24 @@ export function recordRunOutcome(run, defaultType = "unknown") {
  * emit raw error messages as labels (cardinality bomb).
  *
  * @param {unknown} err
- * @returns {"rate_limit"|"timeout"|"auth"|"server_error"|"network"|"unknown"}
+ * @returns {"rate_limit"|"rate_limit_local"|"spend_cap_exceeded"|"timeout"|"auth"|"server_error"|"network"|"unknown"}
  */
 export function classifyAiError(err) {
   if (!err) return "unknown";
+  // B4.2 — typed `.code` errors thrown by the dispatcher's pre-call gates
+  // (B3.7 `quotaGuard`) deserve their own reason buckets so dashboards can
+  // distinguish "we rejected the call locally" (operator config / workspace
+  // policy) from "the vendor rejected it" (rate_limit / auth / server_error).
+  // Without this branch every `ERR_RATE_LIMIT_LOCAL` lands under
+  // `reason="unknown"` alongside genuinely unclassifiable failures, which
+  // (a) hides the most actionable signal — a route's `rpmLimit`/`tpmLimit`
+  // is too tight — inside a noisy bucket, and (b) bankrupts the
+  // observability runbook recipe at `docs/guide/observability.md` (which
+  // documents `reason="rate_limit_local"` as the rate-limit-rejection key).
+  // Check `.code` BEFORE status / message heuristics so a typed error wins
+  // over any incidental status that happens to be set on the Error object.
+  if (err?.code === "ERR_RATE_LIMIT_LOCAL") return "rate_limit_local";
+  if (err?.code === "ERR_SPEND_CAP_EXCEEDED") return "spend_cap_exceeded";
   const status = Number(err?.status || err?.statusCode || err?.response?.status);
   if (status === 429) return "rate_limit";
   if (status === 401 || status === 403) return "auth";

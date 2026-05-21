@@ -124,24 +124,42 @@ groups:
       # ── AI provider error rate ─────────────────────────────────────────────
       # FEA-003 fallback chain should mask most transient failures — high
       # threshold (15%) keeps the alert signal-rich.
+      #
+      # B4.2 — group by (provider, route_name) so a single bad route on a
+      # workspace surfaces independently of the rest of the family. A
+      # workspace running 3 anthropic routes (prod / staging / experimental)
+      # whose `staging` key got rotated should fire one alert tagged
+      # route_name="anthropic-staging" — not a vague provider="anthropic"
+      # alert that the on-call engineer has to triage by hand. The
+      # `route_name` label is operator-controlled free-text from
+      # `provider_routes.name`; cardinality is bounded per workspace by
+      # `routes-per-workspace` admin policy (see `docs/guide/observability.md`).
       - alert: AiProviderHighErrorRate
         expr: |
           (
-            sum by (provider) (rate(app_ai_provider_errors_total[5m]))
+            sum by (provider, route_name) (rate(app_ai_provider_errors_total[5m]))
             /
-            sum by (provider) (rate(app_ai_provider_latency_seconds_count[5m]))
+            sum by (provider, route_name) (rate(app_ai_provider_latency_seconds_count[5m]))
           ) > 0.15
         for: 5m
         labels:
           severity: warning
           component: ai
         annotations:
-          summary: "AI provider {{ $labels.provider }} error rate above 15%"
-          description: "{{ $labels.provider }} is failing {{ $value | humanizePercentage }} of LLM calls. Check app_ai_provider_errors_total by reason to identify the failure mode (rate_limit / server_error / timeout / auth)."
+          summary: "AI route {{ $labels.provider }}/{{ $labels.route_name }} error rate above 15%"
+          description: "Route {{ $labels.route_name }} (family: {{ $labels.provider }}) is failing {{ $value | humanizePercentage }} of LLM calls. Check app_ai_provider_errors_total by reason to identify the failure mode (rate_limit / server_error / timeout / auth)."
           runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderhigherrorrate"
 
       # ── AI provider auth failures (security signal) ────────────────────────
       # ANY auth failure is critical — keys shouldn't be invalid in production.
+      #
+      # B4.2 — split by route_name so the on-call engineer sees WHICH route's
+      # key needs rotating. Pre-routes, every workspace's anthropic key
+      # came from one env var so `provider="anthropic"` was sufficient.
+      # Post-routes, each route holds its own encrypted key — an alert
+      # without `route_name` would force the operator to grep
+      # `app_ai_provider_errors_total{reason="auth"}` by hand to find the
+      # broken row.
       - alert: AiProviderAuthFailures
         expr: increase(app_ai_provider_errors_total{reason="auth"}[15m]) > 0
         for: 0m
@@ -149,23 +167,25 @@ groups:
           severity: critical
           component: ai
         annotations:
-          summary: "AI provider {{ $labels.provider }} returned auth errors"
-          description: "Provider {{ $labels.provider }} is rejecting our credentials. Likely a rotated / revoked API key. Customer-visible: every workspace using this provider as their primary is broken."
+          summary: "AI route {{ $labels.provider }}/{{ $labels.route_name }} returned auth errors"
+          description: "Route {{ $labels.route_name }} (family: {{ $labels.provider }}) is rejecting our credentials. Likely a rotated / revoked API key. Customer-visible: every workspace assigning this route to a pipeline role is broken until the key is rotated via Settings → Provider Routes → Rotate key."
           runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderauthfailures"
 
       # ── AI provider latency regression ─────────────────────────────────────
+      # B4.2 — group by route_name so a slow self-hosted vLLM proxy doesn't
+      # falsely indict the entire openai protocol family.
       - alert: AiProviderHighLatencyP99
         expr: |
           histogram_quantile(0.99,
-            sum by (provider, le) (rate(app_ai_provider_latency_seconds_bucket{outcome="success"}[5m]))
+            sum by (provider, route_name, le) (rate(app_ai_provider_latency_seconds_bucket{outcome="success"}[5m]))
           ) > 30
         for: 10m
         labels:
           severity: warning
           component: ai
         annotations:
-          summary: "AI provider {{ $labels.provider }} p99 latency above 30s"
-          description: "p99 latency for successful calls to {{ $labels.provider }} is {{ $value }}s. Check vendor status page."
+          summary: "AI route {{ $labels.provider }}/{{ $labels.route_name }} p99 latency above 30s"
+          description: "p99 latency for successful calls on route {{ $labels.route_name }} (family: {{ $labels.provider }}) is {{ $value }}s. Check the vendor status page or the operator-set baseUrl."
           runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderhighlatencyp99"
 
   - name: sentri-saas-runtime
