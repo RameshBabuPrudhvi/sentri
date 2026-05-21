@@ -358,3 +358,12 @@ Counter naming uses `app_*` rather than a product-name prefix so Prometheus dash
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | `0` | Fraction (0–1) of frontend transactions sampled for Sentry performance traces. Default `0` keeps Sentry to crash reporting + breadcrumbs only. |
 
 
+
+
+### Kubernetes + Backup
+
+- `WORKER_HEALTH_PORT`: Port for worker-local `/healthz` endpoint (default `3002`).
+- `S3_BACKUP_BUCKET`: S3 bucket for nightly database backups.
+- `S3_BACKUP_REGION`: Region for S3 backup bucket.
+- `S3_BACKUP_ACCESS_KEY_ID`: Access key used by backup workflow.
+- `S3_BACKUP_SECRET_ACCESS_KEY`: Secret key used by backup workflow.

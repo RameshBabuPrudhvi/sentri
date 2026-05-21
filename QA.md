@@ -2061,3 +2061,10 @@ Once-per-release smoke. Pass all 8 sections before tagging.
 2. Run tests twice and verify dashboard Coverage section shows 30-day points.
 3. Verify project with coverage disabled shows empty-state prompt.
 4. Verify run coverage summary includes sourceMapStatus fallback when no sourcemaps.
+
+
+## Kubernetes deployment + DR (INF-009)
+- [ ] `helm template helm/sentri --set ingress.host=test.local` renders manifests.
+- [ ] Worker `/healthz` returns 200 when queue is connected and 503 on Redis outage.
+- [ ] Nightly backup workflow configured with S3 secrets and uploads snapshot artifacts.
+- [ ] DR runbook restore steps verified with `pg_restore`.

@@ -17,6 +17,7 @@
  * rather than silently running no jobs).
  */
 import dotenv from "dotenv";
+import http from "http";
 import { getDatabase, closeDatabase } from "./database/sqlite.js";
 import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import { loadKeysFromDatabase } from "./aiProvider.js";
@@ -55,8 +56,24 @@ loadKeysFromDatabase();
 // 3. Workspace backfill — same one-shot as the web entry point.
 ensureDefaultWorkspaces();
 
+let _workerReady = false;
+
 // 4. Start the BullMQ Worker.
 startWorker();
+_workerReady = true;
+const healthPort = Number(process.env.WORKER_HEALTH_PORT || 3002);
+const healthServer = http.createServer((_req, res) => {
+  if (_workerReady) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  res.writeHead(503, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: false }));
+});
+healthServer.listen(healthPort, () => {
+  console.log(formatLogLine("info", null, `[worker] health endpoint listening on :${healthPort}`));
+});
 
 console.log(formatLogLine("info", null,
   `[worker] Standalone worker process started (REDIS_URL configured, WORKER_CONCURRENCY=${process.env.WORKER_CONCURRENCY || process.env.MAX_WORKERS || 2})`));
@@ -71,6 +88,7 @@ async function gracefulShutdown(signal) {
     await stopWorker();
     await closeQueue();
     await closeRedis();
+    await new Promise((resolve) => healthServer.close(resolve));
     await closeDatabase();
     process.exit(0);
   } catch (err) {

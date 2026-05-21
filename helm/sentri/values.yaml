@@ -1,0 +1,29 @@
+backend:
+  image: ghcr.io/example/sentri-backend:latest
+  replicas: 1
+worker:
+  image: ghcr.io/example/sentri-worker:latest
+  replicas: 1
+  healthPort: 3002
+postgres:
+  image: postgres:16
+  storage: 10Gi
+redis:
+  image: redis:7
+  cluster:
+    enabled: false
+ingress:
+  enabled: true
+  host: sentri.local
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 5
+  targetQueueDepth: 10
+env:
+  DATABASE_URL: postgres://sentri:sentri@sentri-postgres:5432/sentri
+  REDIS_URL: redis://sentri-redis:6379
+  WORKER_CONCURRENCY: "2"
+secrets:
+  JWT_SECRET: change-me
+  ENCRYPTION_KEY: change-me

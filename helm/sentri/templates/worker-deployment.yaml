@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentri-worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector: { matchLabels: { app: worker } }
+  template:
+    metadata: { labels: { app: worker } }
+    spec:
+      containers:
+        - name: worker
+          image: {{ .Values.worker.image }}
+          env:
+            - name: WORKER_HEALTH_PORT
+              value: {{ .Values.worker.healthPort | quote }}
+          envFrom:
+            - configMapRef: { name: sentri-config }
+            - secretRef: { name: sentri-secrets }
+          readinessProbe:
+            httpGet: { path: /healthz, port: {{ .Values.worker.healthPort }} }
+          livenessProbe:
+            httpGet: { path: /healthz, port: {{ .Values.worker.healthPort }} }

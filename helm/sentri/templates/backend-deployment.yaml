@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentri-backend
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector: { matchLabels: { app: backend } }
+  template:
+    metadata: { labels: { app: backend } }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: backend
+          image: {{ .Values.backend.image }}
+          ports: [{ containerPort: 3001 }]
+          envFrom:
+            - configMapRef: { name: sentri-config }
+            - secretRef: { name: sentri-secrets }
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: 3001 }
+          livenessProbe:
+            httpGet: { path: /api/v1/health, port: 3001 }

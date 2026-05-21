@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- INF-009 scaffold: initial `helm/sentri` chart, worker `/healthz` endpoint, Helm validation workflow, nightly Postgres backup workflow, and Kubernetes/DR docs.
+
+
 ## [1.8.0] — 2026-05-21
 
 ### Breaking

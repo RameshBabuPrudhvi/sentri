@@ -1,0 +1,19 @@
+name: Helm Validate
+on:
+  pull_request:
+    paths:
+      - 'helm/**'
+      - '.github/workflows/helm-validate.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm template helm/sentri --values tests/helm/values-overrides.yaml > /tmp/rendered.yaml
+      - uses: yannh/kubeconform-action@v0.1.17
+        with:
+          kubernetes-version: "1.30.0"
+          schema-location: default
+          strict: true
+          files: /tmp/rendered.yaml

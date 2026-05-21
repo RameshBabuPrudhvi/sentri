@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentri-config
+data:
+  DATABASE_URL: {{ .Values.env.DATABASE_URL | quote }}
+  REDIS_URL: {{ .Values.env.REDIS_URL | quote }}
+  WORKER_CONCURRENCY: {{ .Values.env.WORKER_CONCURRENCY | quote }}
