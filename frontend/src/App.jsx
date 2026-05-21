@@ -7,6 +7,7 @@ import ProtectedRoute from "./components/layout/ProtectedRoute.jsx";
 import Layout from "./components/layout/Layout.jsx";
 import ErrorBoundary from "./components/layout/ErrorBoundary.jsx";
 import PageSkeleton from "./components/layout/PageSkeleton.jsx";
+import { settingsRoutes } from "./features/settings/routes.jsx";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
@@ -15,7 +16,14 @@ const ProjectDetail = lazy(() => import("./pages/ProjectDetail.jsx"));
 const NewProject = lazy(() => import("./pages/NewProject.jsx"));
 const RunDetail = lazy(() => import("./pages/RunDetail.jsx"));
 const TestDetail = lazy(() => import("./pages/TestDetail.jsx"));
-const Settings = lazy(() => import("./pages/Settings.jsx"));
+// GAP-002 (audit): Settings is now a feature-folder under
+// `features/settings/` with a sidebar-driven shell + per-section lazy
+// chunks. The legacy `pages/Settings.jsx` god-file remains in the tree
+// only as the source of the two largest tabs (Providers, Provider Routes)
+// which the new section wrappers re-render; GAP-002b finishes that
+// extraction. The old `/settings/:section` direct mount is replaced by
+// `<SettingsLayout>` parent route + `settingsRoutes` child collection.
+const SettingsLayout = lazy(() => import("./features/settings/SettingsLayout.jsx"));
 const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
@@ -68,18 +76,19 @@ export default function App() {
                 <Route path="/projects/:id" element={<ProjectDetail />} />
                 <Route path="/runs/:runId" element={<RunDetail />} />
                 <Route path="/tests/:testId" element={<TestDetail />} />
-                {/* GAP-002 (audit): per-section routes under /settings/:section give
-                    each settings surface a bookmarkable URL, sidebar wayfinding via
-                    Sidebar's NavLink active-class matching, and the route scaffolding
-                    needed for a future per-section lazy chunk split. The component
-                    is still one file today — splitting Settings.jsx itself into
-                    feature-scoped lazy chunks is tracked separately (the audit
-                    recommends 6+ chunks; landing them here would balloon this PR
-                    past reviewable size). Legacy `/settings?tab=<key>` deep links
-                    continue to work — Settings.jsx redirects them to the new
-                    canonical URL on mount. */}
-                <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-                <Route path="/settings/:section" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                {/* GAP-002 (audit): Settings shell + per-section lazy children.
+                    `/settings` → `SettingsLayout` (sidebar + header + Outlet); each
+                    `/settings/:section` route is defined under `settingsRoutes` and
+                    renders inside the Outlet as its own lazy chunk. Industry-standard
+                    layout adopted by GitHub Settings / Vercel / Linear / Sentry.
+                    Legacy `/settings?tab=<key>` deep links keep working — SettingsLayout
+                    redirects them to the canonical URL on mount. */}
+                <Route path="/settings" element={<SettingsLayout />}>
+                  {settingsRoutes}
+                </Route>
+                <Route path="/settings/:section" element={<SettingsLayout />}>
+                  {settingsRoutes}
+                </Route>
                 {/* SEC-007: compliance audit log — admin-gated at the route
                     layer (defence-in-depth; backend also enforces admin
                     via requireRole). Mounted at `/audit-log` only — the

@@ -46,7 +46,7 @@ The ⌘K command palette (`CommandPalette.jsx`) provides command navigation but 
 ---
 
 ### GAP-002 — Settings.jsx God-File Anti-Pattern
-**Severity: Critical** · _Phase 1 landed in PR #25 — deep-linkable `/settings/:section` routes; component split still pending._
+**Severity: Critical** · _Landed in PR #25 — sidebar-driven shell + 9 per-section lazy chunks under `frontend/src/features/settings/`. 7 sections physically extracted; the two largest (Providers, Provider Routes) defer their internal subtree extraction to GAP-002b but ship behind the same URL + sidebar contract._
 
 `Settings.jsx` is 3,594 lines — one of the longest files in the codebase. It renders Provider configuration, Agent Roles, Team Members, MFA, Security, Integrations, AI Provider Routes, Workspace settings, Notification settings, Recycle Bin, and System info all within a single component with a single tab switcher. The file imports 30+ Lucide icons, 4 query hooks, and manages 40+ useState variables.
 
@@ -329,7 +329,7 @@ The design system has hover states but no standardised `:focus-visible` ring def
 ## 7. Accessibility Issues
 
 ### A11Y-001 — Missing Focus-Visible States
-**Severity: High**
+**Severity: High** · _Landed in PR #25 — global `:focus-visible` ring at `frontend/src/styles/components.css`. WCAG 2.4.7 + 2.4.11 satisfied._
 
 Interactive elements (buttons, nav links, form inputs) do not have visible `:focus-visible` styles beyond the browser default in most cases. `components.css` sets `outline: none` on some elements without providing a replacement focus indicator.
 

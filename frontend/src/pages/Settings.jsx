@@ -3276,54 +3276,79 @@ function IntegrationsTab({ isAdmin }) {
   );
 }
 
-export default function Settings() {
+/**
+ * Legacy Settings component (GAP-002).
+ *
+ * Phase 1 of the god-file decomposition (PR #25) extracted 7 of 9 sections
+ * into `frontend/src/features/settings/sections/*` and replaced the parent
+ * route with `SettingsLayout` + per-section lazy chunks. The two largest
+ * sections (`providers`, `provider_routes`) still source their JSX from
+ * this file — `ProvidersSection` and `ProviderRoutesSection` render
+ * `<Settings legacyTab="providers" />` / `legacyTab="provider_routes"`.
+ *
+ * When `legacyTab` is set:
+ *   - The header, back button, top-level tab bar, and restart-tour card
+ *     are all suppressed (the new SettingsLayout provides them).
+ *   - Only the requested tab body renders, embedded in the new
+ *     `.settings-main` content area inside `SettingsLayout`.
+ *
+ * When `legacyTab` is unset (someone directly imports + renders the old
+ * file outside the new shell — no current call site, but kept as a safety
+ * net), behaviour matches the pre-decomposition god-file exactly.
+ *
+ * GAP-002b finishes the extraction: physically split the providers and
+ * provider-routes JSX into their own feature/ files, then delete this
+ * file entirely.
+ */
+export default function Settings({ legacyTab = null } = {}) {
+  // When embedded inside the new SettingsLayout, suppress the standalone
+  // header / back / tab-bar / tour chrome — the shell already renders them.
+  // `usePageTitle` always fires (rules of hooks); the shell sets the same
+  // "Settings" title so the duplicate set is a no-op.
+  const embedded = !!legacyTab;
   usePageTitle("Settings");
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.workspaceRole === "admin";
   const visibleTabs = SETTINGS_TABS.filter(t => isAdmin || !t.adminOnly);
 
-  // GAP-002 (audit): tab state is now router-driven via `/settings/:section`.
-  // The legacy `/settings?tab=<key>` form is preserved as a one-shot redirect
-  // so existing deep links (MfaGraceBanner → `/settings?tab=security`, the
-  // GitHub App install callback → `/settings?tab=integrations&github=installed`)
-  // keep working without coordinated cross-file edits. Each section now has a
-  // bookmarkable URL, browser back/forward moves between sections, and the
-  // Sidebar's NavLink active-class lights up on the active section — laying
-  // the foundation for the per-section lazy-chunk split tracked separately.
+  // GAP-002 (audit): tab state.
+  //
+  // - When `embedded === true` (rendered from inside SettingsLayout via the
+  //   ProvidersSection / ProviderRoutesSection wrappers), use the `legacyTab`
+  //   prop directly. The new SettingsLayout owns the URL contract +
+  //   `?tab=` redirect; this branch is a pure consumer.
+  // - When `embedded === false` (someone routes here directly — currently no
+  //   call site, but kept as a safety net), keep the old URL-param behaviour
+  //   so the file remains self-contained.
   const params = useParams();
   const sectionParam = params.section;
   const fallbackTab = visibleTabs[0]?.key || "account";
-  // Resolve the active tab from the URL segment. Unknown / missing segments
-  // (legacy `/settings`, typo'd section) collapse to the first visible tab so
-  // non-admins never land on a locked section.
-  const tab = sectionParam && visibleTabs.some(t => t.key === sectionParam)
-    ? sectionParam
-    : fallbackTab;
+  const tab = embedded
+    ? legacyTab
+    : (sectionParam && visibleTabs.some(t => t.key === sectionParam)
+        ? sectionParam
+        : fallbackTab);
 
-  // Back-compat: `?tab=<key>` → `/settings/<key>` (preserve other query params
-  // like `github=installed` so IntegrationsTab's success banner still fires).
-  // Fires only when the legacy param is present so a user who lands on
-  // `/settings/security` directly never sees a URL flicker.
   useEffect(() => {
+    if (embedded) return;
     const search = new URLSearchParams(window.location.search);
-    const legacyTab = search.get("tab");
-    if (!legacyTab) return;
-    if (!visibleTabs.some(t => t.key === legacyTab)) return;
+    const legacy = search.get("tab");
+    if (!legacy) return;
+    if (!visibleTabs.some(t => t.key === legacy)) return;
     search.delete("tab");
     const qs = search.toString();
-    navigate(`/settings/${legacyTab}${qs ? `?${qs}` : ""}`, { replace: true });
-  }, [navigate, visibleTabs]);
+    navigate(`/settings/${legacy}${qs ? `?${qs}` : ""}`, { replace: true });
+  }, [embedded, navigate, visibleTabs]);
 
-  // Sidebar nav still points at `/settings` (no section). Redirect to the
-  // first visible tab so the URL is always canonical and the per-section
-  // sidebar wayfinding (future, GAP-002 follow-up) has a stable active state.
   useEffect(() => {
+    if (embedded) return;
     if (sectionParam) return;
     navigate(`/settings/${fallbackTab}`, { replace: true });
-  }, [sectionParam, fallbackTab, navigate]);
+  }, [embedded, sectionParam, fallbackTab, navigate]);
 
   function setTab(key) {
+    if (embedded) return; // sidebar owns navigation when embedded
     navigate(`/settings/${key}`);
   }
 
@@ -3379,36 +3404,50 @@ export default function Settings() {
     }
   }
 
+  // GAP-002: when embedded inside SettingsLayout, the outer chrome
+  // (back button, page header, top-level tab bar, restart-tour card) is
+  // rendered by the shell — we render only the tab body. When standalone
+  // (no current call site, but kept as a safety net), behaviour matches
+  // the pre-decomposition god-file exactly.
+  const Chrome = embedded ? React.Fragment : "div";
+  const chromeProps = embedded ? {} : { className: "fade-in page-container-md" };
+
   return (
-    <div className="fade-in page-container-md">
-      <button className="btn btn-ghost btn-sm mb-lg" onClick={() => navigate(-1)}>
-        <ArrowLeft size={14} /> Back
-      </button>
+    <Chrome {...chromeProps}>
+      {!embedded && (
+        <button className="btn btn-ghost btn-sm mb-lg" onClick={() => navigate(-1)}>
+          <ArrowLeft size={14} /> Back
+        </button>
+      )}
 
-      <div className="mb-lg">
-        <h1 style={{ fontWeight: 800, fontSize: "1.9rem" }}>Settings</h1>
-        <p className="page-subtitle" style={{ marginTop: 6 }}>
-          Configure AI providers, execution defaults, and manage data.
-        </p>
-      </div>
+      {!embedded && (
+        <div className="mb-lg">
+          <h1 className="settings-header__title">Settings</h1>
+          <p className="page-subtitle settings-header__sub">
+            Configure AI providers, execution defaults, and manage data.
+          </p>
+        </div>
+      )}
 
-      {/* ── Tab bar ── */}
-      <div className="tab-bar">
-        {visibleTabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`tab-btn${tab === t.key ? " tab-btn--active" : ""}`}
-          >
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
+      {!embedded && (
+        <div className="tab-bar">
+          {visibleTabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`tab-btn${tab === t.key ? " tab-btn--active" : ""}`}
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Defense-in-depth: if `tab` ever points at an admin-only section for a
           non-admin (stale state, deep link), short-circuit with a locked card
-          instead of rendering the admin UI. */}
-      {!isAdmin && SETTINGS_TABS.find(t => t.key === tab)?.adminOnly && (
+          instead of rendering the admin UI. SettingsLayout also does this at
+          the shell level, but we keep it here for the standalone path. */}
+      {!embedded && !isAdmin && SETTINGS_TABS.find(t => t.key === tab)?.adminOnly && (
         <AdminLockedSection
           feature={SETTINGS_TABS.find(t => t.key === tab)?.label}
           role={user?.workspaceRole}
@@ -3595,33 +3634,32 @@ export default function Settings() {
       {/* ── Tab: Account ── */}
       {tab === "account" && <AccountTab />}
 
-      {/* ── Restart onboarding tour ── */}
-      <div className="st-tour-card">
-        <div className="st-section-icon icon-box-accent shrink-0">
-          <Compass size={16} color="var(--accent)" />
-        </div>
-        <div className="flex-1">
-          <div className="font-bold" style={{ fontSize: "0.88rem" }}>Getting Started Tour</div>
-          <div className="text-xs text-muted" style={{ marginTop: 2 }}>
-            Re-run the onboarding walkthrough that guides you through setup.
+      {/* GAP-002: tour card moved to SettingsLayout so it renders once on
+          every section. Kept here for the standalone path only. */}
+      {!embedded && (
+        <div className="st-tour-card">
+          <div className="st-section-icon icon-box-accent shrink-0">
+            <Compass size={16} color="var(--accent)" />
           </div>
+          <div className="flex-1">
+            <div className="font-bold st-data-action__title">Getting Started Tour</div>
+            <div className="text-xs text-muted st-data-action__sub">
+              Re-run the onboarding walkthrough that guides you through setup.
+            </div>
+          </div>
+          <button
+            className="btn btn-ghost btn-sm st-data-action__btn"
+            onClick={() => {
+              resetOnboarding();
+              window.location.href = import.meta.env.BASE_URL + "dashboard";
+            }}
+          >
+            <RefreshCw size={13} /> Restart Tour
+          </button>
         </div>
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={() => {
-            resetOnboarding();
-            // Navigate away first (avoids beforeunload prompt from unsaved
-            // API key inputs), then reload so useOnboarding picks up the
-            // force flag from localStorage on fresh mount.
-            window.location.href = import.meta.env.BASE_URL + "dashboard";
-          }}
-          style={{ flexShrink: 0 }}
-        >
-          <RefreshCw size={13} /> Restart Tour
-        </button>
-      </div>
+      )}
 
-      <div style={{ height: 40 }} />
-    </div>
+      {!embedded && <div className="execution-gap" />}
+    </Chrome>
   );
 }

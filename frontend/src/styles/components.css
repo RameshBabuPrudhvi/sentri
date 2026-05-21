@@ -7,6 +7,33 @@
  * Layer: Components (ITCSS)
  */
 
+/* ── A11Y-001 (audit) — Global focus-visible ring ────────────────────────────
+   WCAG 2.4.7 (Focus Visible, Level AA) and 2.4.11 (Focus Appearance, WCAG 2.2
+   Level AA) require a visible focus indicator on every interactive element.
+   `:focus-visible` only fires on keyboard-driven focus (Tab, Shift+Tab, arrow
+   keys via Roving Tabindex) — mouse clicks suppress it, so the ring does NOT
+   appear on every button press. This matches the keyboard-first conventions
+   adopted by Linear, Vercel, GitHub, Datadog, and Radix UI primitives.
+
+   The 2px solid ring at the accent color + 2px offset is the de-facto standard
+   from the Radix design system. Border-radius matches the token used by
+   `.btn`, `.card`, `.input` so the ring hugs rounded corners. Specific
+   components (e.g. `.input:focus`) can still override with a tighter
+   indicator; this is the safety net. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* The `.input` family uses an inset accent box-shadow as its focus indicator
+   (see `.input:focus` below), so the outer outline ring would double up.
+   Suppress the global ring here — the box-shadow alone meets WCAG 2.4.7. */
+.input:focus-visible,
+.dial-textarea:focus-visible {
+  outline: none;
+}
+
 /* ── Badges ─────────────────────────────────────────────────────────────────── */
 .badge {
   display: inline-flex; align-items: center; gap: 4px;
