@@ -10,13 +10,32 @@ const CARD_RE = /\b(?:\d[ -]*?){13,19}\b/g;
 // `logRequest()` which handles storage-mode gating + async write; this
 // is the bare redaction primitive that the storage pipeline applies in
 // `"redacted"` mode.
+//
+// ## Pattern application order — DO NOT reorder
+//
+// Order is **rigid → loose**, not author-preference. The phone pattern
+// (`PHONE_RE`) is intentionally permissive — `\+?\d[\d\s().-]{7,}\d`
+// matches almost any 9+-digit run with separators. Run that first and
+// it consumes the SSN (`123-45-6789` → 9 digits + dashes → matches
+// `PHONE_RE`) and credit-card (`4111-1111-1111-1111` → 16 digits +
+// dashes → matches `PHONE_RE`) inputs before the dedicated patterns
+// can replace them with the correct sentinel. Reverse the order and
+// every SSN ends up tagged `[REDACTED_PHONE]` and every card ends up
+// tagged `[REDACTED_PHONE]` — same operator-visible field-name, but
+// dashboards aggregating "calls that contained SSNs" silently report 0.
+//
+// Conserve the contract: rigid-format patterns first (SSN, then card),
+// permissive patterns last (phone, then email). Email is last because
+// it doesn't overlap any other pattern's character class — order-
+// independent, but kept at the tail so the lifeguard rule above stays
+// terse.
 export function redactText(text, customRules = []) {
   if (!text) return null;
   let out = String(text);
-  out = out.replace(EMAIL_RE, "[REDACTED_EMAIL]");
-  out = out.replace(PHONE_RE, "[REDACTED_PHONE]");
   out = out.replace(SSN_RE, "[REDACTED_SSN]");
   out = out.replace(CARD_RE, "[REDACTED_CARD]");
+  out = out.replace(PHONE_RE, "[REDACTED_PHONE]");
+  out = out.replace(EMAIL_RE, "[REDACTED_EMAIL]");
   for (const rule of customRules) {
     try {
       const re = new RegExp(rule.pattern, rule.flags || "g");
