@@ -84,3 +84,38 @@ export async function stream(route, messages, opts) {
     },
   };
 }
+
+/**
+ * Route-driven multimodal generate (MNT-001 vision-healing).
+ *
+ * Mirrors `adapters/anthropic.js#generateVision` — image as a base64
+ * source block, 512 max output tokens. Anthropic's vision API uses the
+ * native `image` content type (NOT the OpenAI `image_url` shape), so
+ * `opts.base64` is the raw base64 string (no `data:` prefix); the
+ * media_type is fixed to `image/png` since the screenshot pipeline
+ * always emits PNG.
+ *
+ * Required `opts` fields:
+ *   • `apiKey`     — resolved by `protocolAdapter.generateVision`.
+ *   • `base64`     — raw base64 PNG (no `data:` URL prefix).
+ *   • `userPrompt` — the per-call instruction string.
+ *   • `signal`     — optional AbortSignal; honoured by the SDK.
+ */
+export async function generateVision(route, opts) {
+  const client = mkClient(route, opts);
+  const msg = await client.messages.create({
+    model: route.model,
+    max_tokens: 512,
+    messages: [{ role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/png", data: opts.base64 } },
+      { type: "text", text: opts.userPrompt },
+    ] }],
+  }, { signal: opts.signal });
+  return {
+    text: msg.content?.[0]?.text || "",
+    usage: {
+      input: msg?.usage?.input_tokens,
+      output: msg?.usage?.output_tokens,
+    },
+  };
+}

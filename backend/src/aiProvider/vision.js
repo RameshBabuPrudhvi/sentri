@@ -35,10 +35,21 @@ import { resolveRoute, isProviderUsable } from "./registry.js";
 import { VISION_CAPABLE_MODELS } from "./modelCatalog.js";
 import {
   providerMetricLabel,
-  buildAdapterOpts,
-  adapterFor,
   recordAiTokens,
 } from "./dispatcher.js";
+// B4.0.4 — route-driven dispatch. Vision-heal no longer routes through
+// the legacy `adapterFor(provider).generateVision()` path; it calls
+// `protocolAdapter.generateVision(route, opts)` which resolves the
+// decrypted key via `secrets.getDecryptedKey(workspaceId, routeId)` and
+// delegates to the route's protocol module (openai / anthropic / gemini
+// / ollama). Final caller of the legacy adapter surface — the
+// `adapterFor` / `buildAdapterOpts` imports are intentionally gone so
+// CI catches any re-introduction.
+import * as protocolAdapter from "./adapters/protocolAdapter.js";
+// B4.0.4 — same provider→protocol mapping used by `registry.synthesiseTransientRoute`
+// for the single-tenant no-workspace fallback. Aliased so the dispatch
+// site reads naturally ("protocol for the legacy provider id").
+import { protocolForProvider as protocolForLegacyProvider } from "./protocolForProvider.js";
 import {
   aiProviderLatencySeconds,
   aiProviderErrorsTotal,
@@ -176,21 +187,22 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal,
   if (!screenshot || !intent?.label) return null;
   const model = resolveVisionModel({ workspaceId });
   if (!model) return null;
-  // B2.3: switched from `resolveProvider` (broken post-048 — reads the
-  // dropped `cfg.provider` column) to `resolveRoute` so the per-role
-  // route assignment actually drives provider selection. Mirrors the
-  // pattern in `dispatcher.resolveAgentCall`: provider id comes from
-  // the route's `family` (real route) or `_transientProvider` (shim).
-  // `routeName` is captured for the `route_name` Prometheus label so
-  // vision-heal metrics stay split per-route alongside generation
-  // metrics (B2.4 — already added the label dimension to the four
-  // AI metric definitions).
+  // B4.0.4 — route-driven dispatch. `resolveRoute` produces the
+  // healer's `provider_routes` row (real or transient); `protocolAdapter.
+  // generateVision` resolves the decrypted key via the secrets module
+  // and delegates to the protocol module that owns the wire format.
+  //
+  // `provider` / `routeName` are still extracted for the `route_name`
+  // Prometheus label + the OTel span attribute so vision-heal metrics
+  // stay split per-route alongside generation metrics (B2.4 — already
+  // added the label dimension to the four AI metric definitions).
+  //
   // `routeId` (B2.5 request log linkage) is intentionally NOT captured
   // here — vision-heal doesn't route through `callProvider`'s
-  // `logRequest()` post-call hook (it dispatches via
-  // `adapterFor(provider).generateVision()` directly). When
-  // vision-heal request logging lands as a follow-up, the resolved
-  // route should be threaded into a dedicated `logRequest` call here.
+  // `logRequest()` post-call hook. When vision-heal request logging
+  // lands, the resolved route should be threaded into a dedicated
+  // `logRequest` call alongside the cost / outcome metric writes
+  // below.
   let provider;
   let routeName = "unknown";
   let resolvedRoute = null;
@@ -227,9 +239,11 @@ ${String(contextHtml).slice(0, 800)}` : "");
   const base64 = screenshot.toString("base64");
   const dataUrl = `data:image/png;base64,${base64}`;
 
-  // Local / unknown providers don't have a vision adapter (Ollama returns
-  // null from generateVision). Bail before the adapter call to keep the
-  // metric label clean.
+  // Local / unknown providers don't have a vision adapter (Ollama's
+  // protocol module returns null from generateVision). Bail before the
+  // adapter call to keep the metric label clean — same behaviour as
+  // the legacy `adapterFor("local").generateVision()` no-op, but now
+  // explicit at the dispatch site.
   if (provider === "local") return null;
 
   // AI-005 tripwire #3 — annotate the active OTel span with vision-heal
@@ -239,23 +253,58 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // and a "spans by role" Tempo / Jaeger query stay in sync.
   annotateAiCallSpan({ provider, agentRole, operation: "vision_heal", routeName });
 
-  // Build a vision-specific opts bag. We reuse buildAdapterOpts() shape
-  // for the auth/baseUrl/SSRF fields, then layer the image fields on top.
-  // AI-002: pass the `"json_object"` string (not the legacy `true` boolean)
-  // so `buildAdapterOpts` carries `responseFormat` through unchanged. The
-  // derived `useJson === true` is preserved for adapters that read either.
-  const baseOpts = buildAdapterOpts(provider, { system: null, user: userPrompt, combined: userPrompt }, 512, signal, "json_object");
-  // Override `model` with the vision-resolved model — buildAdapterOpts()
-  // returns the provider's default text model, which is wrong for vision
-  // (e.g. user picked claude-3-5-sonnet via VISION_MODEL but the active
-  // provider's default is the older claude-sonnet-4).
-  const visionOpts = { ...baseOpts, model, base64, dataUrl, userPrompt };
+  // B4.0.4 — build the `dispatchRoute` that the protocol adapter calls
+  // against. Two layers:
+  //   1. `resolvedRoute` (when workspaceId was passed) — already
+  //      carries `protocol` / `baseUrl` / `family` / `workspaceId` /
+  //      `id` so the secrets module can locate the encrypted key.
+  //   2. Otherwise synthesise a transient route from the env-default
+  //      `provider` so single-tenant deployments without per-workspace
+  //      routes still dispatch. Mirrors `synthesiseTransientRoute` in
+  //      `registry.js` but specialised for the no-workspace case
+  //      (transient routes from `registry.js` carry a fake workspaceId
+  //      that would break the secrets lookup; here we keep
+  //      `workspaceId: null` and the secrets module's null-guard
+  //      falls back to `null` which `protocolAdapter.generateVision`
+  //      treats as "no key — let the protocol module use its own
+  //      env-fallback chain"). The legacy `adapterFor(provider)` path
+  //      relied on `buildAdapterOpts(provider)` to read `process.env`
+  //      directly; with protocol modules we keep env reads out of the
+  //      dispatch hot path by routing them through the OpenAI compat
+  //      slot's `getCompatConfig()` only on the workspaceId-less
+  //      single-tenant fallback (used by `hasVisionProvider()` from
+  //      `routes/projects.js`).
+  //
+  // CRITICAL: `model` always comes from `resolveVisionModel` (which
+  // honours `VISION_MODEL` env override → workspace healer route →
+  // catalog floor). Without the explicit override `dispatchRoute.model
+  // = model`, the protocol module would dispatch against
+  // `route.model` (the healer's *text* model) instead of the
+  // operator-picked vision model.
+  const dispatchRoute = resolvedRoute && !resolvedRoute._transient
+    ? { ...resolvedRoute, model }
+    : {
+        id: `provider:${provider}`,
+        workspaceId: workspaceId || null,
+        name: routeName,
+        family: provider,
+        protocol: protocolForLegacyProvider(provider),
+        baseUrl: null,
+        model,
+        _transient: true,
+        _transientProvider: provider,
+      };
 
   let raw = "";
   let usage = null;
   try {
-    const res = await adapterFor(provider).generateVision(visionOpts);
-    if (!res) return null;
+    const res = await protocolAdapter.generateVision(dispatchRoute, {
+      base64,
+      dataUrl,
+      userPrompt,
+      signal,
+    });
+    if (!res) return null; // Ollama protocol returns null — no vision support.
     raw = res.text || "";
     usage = res.usage;
   } catch (err) {

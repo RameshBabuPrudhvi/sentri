@@ -163,3 +163,20 @@ export async function generate(route, messages, opts) {
  * the bundle scope tight.
  */
 export async function stream() { return null; }
+
+/**
+ * Ollama models served via `/api/generate` are predominantly text-only;
+ * vision-capable local models (LLaVA, Bakllava, etc.) exist but are
+ * niche enough that we don't ship a built-in adapter for them. Returning
+ * `null` signals {@link protocolAdapter#generateVision} to surface the
+ * "no vision on this protocol" path — vision-heal falls through to
+ * `null` and the caller degrades to non-LLM healing (the same behaviour
+ * as the pre-B2 legacy adapter, which also returned `null` here).
+ *
+ * Future work: an opt-in `vision: true` capability flag on the route
+ * row would let `protocolAdapter.generateVision` route the call through
+ * the OpenAI-protocol module instead (LLaVA via Ollama exposes an
+ * OpenAI-compatible `/v1/chat/completions` endpoint). That's a B4+
+ * feature gated on operator demand.
+ */
+export async function generateVision() { return null; }

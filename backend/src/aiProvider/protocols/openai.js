@@ -144,3 +144,44 @@ export async function stream(route, messages, opts) {
   }
   return { text: full, usage };
 }
+
+/**
+ * Route-driven multimodal generate (MNT-001 vision-healing).
+ *
+ * Mirrors `adapters/openai.js#generateVision` — image as `image_url` data
+ * URL, JSON-mode response, 512 max output tokens. The legacy adapter
+ * branched on `provider` to pick the OpenAI / OpenRouter / compat client;
+ * here the `route.baseUrl` + `opts.guardedFetch` already encode that
+ * choice, so the dispatch shape is uniform.
+ *
+ * Required `opts` fields:
+ *   • `apiKey`       — resolved by `protocolAdapter.generateVision` via
+ *                      `secrets.getDecryptedKey(workspaceId, routeId)`.
+ *   • `dataUrl`      — `data:image/png;base64,<…>` (what OpenAI / Anthropic
+ *                      compat vision endpoints accept).
+ *   • `userPrompt`   — the per-call instruction string.
+ *   • `signal`       — optional AbortSignal; honoured by the SDK.
+ *
+ * Returns the same `{ text, usage }` shape every other protocol module
+ * produces. Cost is computed downstream by
+ * `dispatcher.computeCostForRoute(route, usage)`.
+ */
+export async function generateVision(route, opts) {
+  const client = mkClient(route, opts);
+  const res = await client.chat.completions.create({
+    model: route.model,
+    max_tokens: 512,
+    response_format: { type: "json_object" },
+    messages: [{ role: "user", content: [
+      { type: "text", text: opts.userPrompt },
+      { type: "image_url", image_url: { url: opts.dataUrl } },
+    ] }],
+  }, { signal: opts.signal });
+  return {
+    text: res.choices?.[0]?.message?.content || "",
+    usage: {
+      input: res?.usage?.prompt_tokens,
+      output: res?.usage?.completion_tokens,
+    },
+  };
+}

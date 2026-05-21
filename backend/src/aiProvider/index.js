@@ -58,15 +58,26 @@ import {
 // normalisation, adapter selection, instrumented call wrapper) lives in
 // dispatcher.js so this file holds only the public generateText / streamText
 // orchestration logic.
+//
+// B4.0.4 — `streamText` no longer routes through the legacy
+// `adapterFor(provider).stream(buildAdapterOpts(...))` path; it calls
+// `protocolAdapter.stream(route, messages, opts)` which resolves the
+// decrypted key via the secrets module and delegates to the route's
+// protocol module. `adapterFor` / `buildAdapterOpts` are intentionally
+// gone from this file's imports so CI catches any re-introduction.
 import {
   DEFAULT_MAX_TOKENS,
   normaliseMessages,
-  adapterFor,
-  buildAdapterOpts,
   recordAiTokens,
   callProvider,
   resolveAgentCall,
 } from "./dispatcher.js";
+import * as protocolAdapter from "./adapters/protocolAdapter.js";
+// B4.0.4 — single source of truth for the legacy-provider→protocol
+// mapping. Same alias the vision module uses ("protocol for the legacy
+// provider id") so the env-default transient-route fallback in
+// streamText reads naturally.
+import { protocolForProvider as protocolForLegacyProvider } from "./protocolForProvider.js";
 
 // Re-export the full public API so external callers that import from
 // `aiProvider.js` (which re-exports from this file) continue to work after
@@ -292,16 +303,49 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
     return text;
   }
 
-  const adapter = adapterFor(provider);
-  // AI-002: Google + Ollama explicitly return `null` from `.stream()` to mean
-  // "no native streaming — fall back to generate()". Errors are THROWN, not
-  // returned as null — adapters that return null on a transient error are a
-  // contract violation pinned by `aiProvider-adapter-contract.test.js`. The
-  // try/catch below routes thrown errors through the FEA-003 fallback chain;
-  // the `if (res !== null)` branch handles the no-streaming-support sentinel.
+  // B4.0.4 — route-driven streaming. `protocolAdapter.stream` handles
+  // BOTH paths the legacy `adapterFor(provider).stream()` used to fork
+  // between: native SDK streaming (anthropic / openai / openrouter /
+  // compat all emit incremental tokens via `protocol.stream()`), and
+  // the no-native-streaming fallback (gemini / ollama protocols return
+  // `null` from `stream()`, the adapter calls `generate()` and emits the
+  // full text as a single synthetic `onToken(text)` call). The
+  // `if (res !== null)` branch below stays because the adapter still
+  // returns `{ text, usage }` — only the `null` sentinel is now
+  // collapsed into the synthetic-token fallback inside the adapter.
+  //
+  // The `dispatchRoute` shape mirrors `vision.js#callVisionModel` — when
+  // a real route was resolved we use it as-is; when only an env-default
+  // provider exists we synthesise a transient route. `model` from the
+  // resolved route OR the env-default's `getProviderMeta().model` (which
+  // `resolveAgentCall` doesn't carry on the transient path); we honour
+  // either by always falling back to whatever the protocol module pulls
+  // off `route.model`.
+  const dispatchRoute = route && !route._transient
+    ? route
+    : {
+        id: `provider:${provider}`,
+        workspaceId: options?.workspaceId || null,
+        name: callOpts?.routeName || `transient:${provider}`,
+        family: provider,
+        protocol: protocolForLegacyProvider(provider),
+        baseUrl: null,
+        // route?.model preserves the agent_configs override on the
+        // transient path (when `cfg.routeId` was null but the cfg row
+        // still carried a model the admin wanted); otherwise the
+        // protocol module's own default (via getProviderMeta) applies.
+        model: route?.model || getProviderMeta()?.model || null,
+        _transient: true,
+        _transientProvider: provider,
+      };
+
   try {
-    const opts = buildAdapterOpts(provider, messages, maxTokens ?? DEFAULT_MAX_TOKENS, signal, responseFormat);
-    const res = await adapter.stream(opts, wrappedOnToken);
+    const res = await protocolAdapter.stream(dispatchRoute, messages, {
+      maxTokens: maxTokens ?? DEFAULT_MAX_TOKENS,
+      signal,
+      responseFormat,
+      onToken: wrappedOnToken,
+    });
     if (res !== null) {
       // `recordAiTokens`'s signature defaults agentRole to `"default"`, so
       // pass the original `agentRole` directly — null collapses to the

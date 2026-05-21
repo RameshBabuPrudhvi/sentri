@@ -63,3 +63,44 @@ export async function generate(route, messages, opts) {
  * synthetic token, preserving the streaming-API contract for callers.
  */
 export async function stream() { return null; }
+
+/**
+ * Route-driven multimodal generate (MNT-001 vision-healing).
+ *
+ * Mirrors `adapters/google.js#generateVision` — image as `inlineData`
+ * with base64 payload, 512 max output tokens, JSON-mode response. The
+ * Gemini SDK uses its own multimodal shape distinct from OpenAI's
+ * `image_url` and Anthropic's `image source`; abstracting them behind
+ * the same dispatcher entry point is exactly why protocol modules
+ * exist.
+ *
+ * Required `opts` fields:
+ *   • `apiKey`     — resolved by `protocolAdapter.generateVision`.
+ *   • `base64`     — raw base64 PNG (no `data:` URL prefix).
+ *   • `userPrompt` — the per-call instruction string.
+ *
+ * `signal` is intentionally omitted: the @google/generative-ai SDK's
+ * `generateContent()` does not honour `AbortSignal`, so passing it
+ * would be theatre. Same caveat as `generate()` above.
+ */
+export async function generateVision(route, opts) {
+  const genAI = new GoogleGenerativeAI(opts.apiKey);
+  const m = genAI.getGenerativeModel({
+    model: route.model,
+    generationConfig: { maxOutputTokens: 512, responseMimeType: "application/json" },
+  });
+  const result = await m.generateContent({
+    contents: [{ role: "user", parts: [
+      { text: opts.userPrompt },
+      { inlineData: { mimeType: "image/png", data: opts.base64 } },
+    ] }],
+  });
+  const um = result?.response?.usageMetadata;
+  return {
+    text: result.response.text(),
+    usage: {
+      input: um?.promptTokenCount,
+      output: um?.candidatesTokenCount,
+    },
+  };
+}
