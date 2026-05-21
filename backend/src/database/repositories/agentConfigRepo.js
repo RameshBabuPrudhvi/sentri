@@ -44,15 +44,6 @@ export function listByWorkspace(workspaceId) {
 function wouldCreateCycle(workspaceId, startRole, proposedFallback) {
   if (!proposedFallback) return false;
   if (proposedFallback === startRole) return true;
-
-  if (config.routeId) {
-    const route = providerRouteRepo.getById(config.workspaceId, config.routeId);
-    if (!route) {
-      const err = new Error(`routeId not found in workspace: ${config.routeId}`);
-      err.code = "ERR_AGENT_ROUTE_NOT_FOUND";
-      throw err;
-    }
-  }
   const db = getDatabase();
   const seen = new Set([startRole]);
   let next = proposedFallback;
@@ -82,6 +73,19 @@ function wouldCreateCycle(workspaceId, startRole, proposedFallback) {
  * @throws {Error} An Error with `code === "ERR_AGENT_FALLBACK_CYCLE"` if `fallbackRole` would create a cycle.
  */
 export function upsert(config) {
+  // B2.1 — validate routeId belongs to the same workspace before any write.
+  // Runs first so a bad routeId fails fast without spending a fallback-cycle
+  // walk on the same call. `providerRouteRepo.getById` is workspace-scoped,
+  // so a route in another workspace returns undefined here and fails the
+  // check — preventing cross-workspace route assignment.
+  if (config.routeId) {
+    const route = providerRouteRepo.getById(config.workspaceId, config.routeId);
+    if (!route) {
+      const err = new Error(`routeId not found in workspace: ${config.routeId}`);
+      err.code = "ERR_AGENT_ROUTE_NOT_FOUND";
+      throw err;
+    }
+  }
   if (wouldCreateCycle(config.workspaceId, config.role, config.fallbackRole)) {
     const err = new Error(`fallbackRole cycle detected: ${config.role} → ${config.fallbackRole}`);
     err.code = "ERR_AGENT_FALLBACK_CYCLE";

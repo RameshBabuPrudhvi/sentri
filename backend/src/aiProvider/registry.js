@@ -16,6 +16,7 @@ import * as providerRouteRepo from "../database/repositories/providerRouteRepo.j
 import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER } from "./modelCatalog.js";
+import { protocolForProvider } from "./protocolForProvider.js";
 
 // ── Mutable state ────────────────────────────────────────────────────────────
 const runtimeKeys = {};
@@ -598,35 +599,13 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
  * @internal — exported for tests via the module surface; not part of the public API.
  */
 function synthesiseTransientRoute({ provider, model, workspaceId }) {
-  const protocolMap = {
-    anthropic: "anthropic",
-    openai:    "openai",
-    openrouter: "openai",
-    google:    "gemini",
-    local:     "ollama",
-  };
-  // Compat slots all speak the OpenAI wire format — `openai` is correct.
-  // For non-compat providers we MUST have an explicit mapping; falling back
-  // to `"openai"` for an unknown provider id (e.g. a future `"mistral"`
-  // saved on `agent_configs.provider` before the protocolMap is updated)
-  // would silently dispatch under the wrong protocol and fail at the SDK
-  // level with a confusing 400. Fail closed instead — `protocolAdapter`
-  // already throws on unknown protocols (see `protocolAdapter.moduleFor`),
-  // so we mirror that contract here at the synthesis point.
-  let protocol;
-  if (isCompatProvider(provider)) {
-    protocol = "openai";
-  } else if (protocolMap[provider]) {
-    protocol = protocolMap[provider];
-  } else {
-    const err = new Error(
-      `Unknown provider "${provider}" — cannot synthesise transient route. ` +
-      `Add it to protocolMap in backend/src/aiProvider/registry.js#synthesiseTransientRoute, ` +
-      `or assign agent_configs.routeId to a real provider_routes row.`
-    );
-    err.code = "ERR_UNKNOWN_PROTOCOL";
-    throw err;
-  }
+  // B2.1 — the family→protocol mapping lives in `protocolForProvider.js`
+  // so the backfill script and runtime synthesis share one source of
+  // truth. Throws `ERR_UNKNOWN_PROTOCOL` on unmapped providers — fail
+  // closed rather than silently dispatching under the wrong wire
+  // format (`protocolAdapter.moduleFor` would throw anyway, but
+  // failing here gives a more actionable error message).
+  const protocol = protocolForProvider(provider);
   return {
     id: `provider:${provider}`,
     workspaceId: workspaceId || null,
