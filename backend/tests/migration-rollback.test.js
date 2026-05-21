@@ -61,10 +61,15 @@ function tableColumns() {
 function reAddLegacyColumns() {
   // SQLite's `ALTER TABLE ... ADD COLUMN` does not accept `IF NOT EXISTS`,
   // so we guard via `PRAGMA table_info` for test-level idempotency.
+  //
+  // B4.3 — migration 053 ALSO dropped `fallbackRole`, so the pre-048
+  // state requires re-adding all three legacy columns to write the
+  // seed row the round-trip assertion below queries.
   const db = getDatabase();
   const cols = tableColumns();
   if (!cols.includes("provider")) db.exec("ALTER TABLE agent_configs ADD COLUMN provider TEXT");
   if (!cols.includes("model")) db.exec("ALTER TABLE agent_configs ADD COLUMN model TEXT");
+  if (!cols.includes("fallbackRole")) db.exec("ALTER TABLE agent_configs ADD COLUMN fallbackRole TEXT");
 }
 
 function applyForwardMigration048() {

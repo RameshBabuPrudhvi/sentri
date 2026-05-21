@@ -75,23 +75,27 @@ ensureLegacyColumns();
 // leak across tests.
 function resetTables() {
   const db = getDatabase();
-  db.exec("BEGIN");
+  // `PRAGMA foreign_keys = OFF` is the only reliable way to bulk-DELETE
+  // rows across tables that cascade-reference each other on SQLite.
+  // `defer_foreign_keys = ON` only defers checks to COMMIT, but the
+  // CASCADE actions still fire mid-transaction and `__system__` rows
+  // (migration 033) end up cascading into workspaces and tripping the
+  // FK check at COMMIT. We disable the pragma for the duration of the
+  // reset and restore it after — better-sqlite3 honours per-connection
+  // pragmas immediately, so this can't leak across the connection's
+  // other transactions.
+  const prev = db.pragma("foreign_keys", { simple: true });
+  db.pragma("foreign_keys = OFF");
   try {
-    db.exec("PRAGMA defer_foreign_keys = ON");
     db.exec("DELETE FROM provider_route_audit");
     db.exec("DELETE FROM provider_routes");
     db.exec("DELETE FROM agent_configs");
     db.exec("DELETE FROM api_keys");
-    // Workspaces + users are seeded per test via seedWorkspace below,
-    // so clear them too. The `__system__` sentinel from migration 033
-    // is preserved via the explicit `id != '__system__'` filter.
     db.exec("DELETE FROM workspace_members");
     db.exec("DELETE FROM workspaces WHERE id != '__system__'");
     db.exec("DELETE FROM users WHERE id != '__system__'");
-    db.exec("COMMIT");
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
+  } finally {
+    db.pragma(`foreign_keys = ${prev ? "ON" : "OFF"}`);
   }
 }
 /**

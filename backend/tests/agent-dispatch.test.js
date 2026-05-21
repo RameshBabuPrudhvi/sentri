@@ -329,38 +329,13 @@ test("setRuntimeKey clears per-role breakers for the provider", () => {
   assert.equal(isCircuitBreakerOpen("anthropic"), false);
 });
 
-// ── fallbackRole cycle guard ──────────────────────────────────────────────────
-
-console.log("\n🧪 fallbackRole cycle detection");
-
-test("self-referential fallbackRole is rejected", () => {
-  const workspaceId = seedWorkspace();
-  assert.throws(
-    () => upsertConfig(workspaceId, "planner", { fallbackRole: "planner" }),
-    (err) => err.code === "ERR_AGENT_FALLBACK_CYCLE",
-  );
-});
-
-test("two-hop cycle (planner→critic→planner) is rejected", () => {
-  const workspaceId = seedWorkspace();
-  upsertConfig(workspaceId, "planner", { fallbackRole: null });
-  upsertConfig(workspaceId, "critic", { fallbackRole: "planner" });
-  // Now try to set planner.fallbackRole = critic → planner → critic → planner cycle.
-  assert.throws(
-    () => upsertConfig(workspaceId, "planner", { fallbackRole: "critic" }),
-    (err) => err.code === "ERR_AGENT_FALLBACK_CYCLE",
-  );
-});
-
-test("non-cyclic chain is accepted", () => {
-  const workspaceId = seedWorkspace();
-  upsertConfig(workspaceId, "planner", { fallbackRole: null });
-  upsertConfig(workspaceId, "critic", { fallbackRole: "planner" });
-  // critic → planner → null  ← terminates, no cycle.
-  // No throw expected; round-trip read confirms persistence.
-  const row = agentConfigRepo.getByRole(workspaceId, "critic");
-  assert.equal(row.fallbackRole, "planner");
-});
+// ── fallbackRole cycle guard (REMOVED in B4.3) ────────────────────────────────
+// Migration 053 dropped `agent_configs.fallbackRole`, and the
+// `wouldCreateCycle` helper was removed from `agentConfigRepo.js`. The
+// canonical per-route fallback now lives on `provider_routes.fallbackRouteId`
+// and its cycle protection is pinned by `tests/provider-routes-repo.test.js`
+// (`ERR_ROUTE_FALLBACK_CYCLE`). The three role-level cycle tests that lived
+// here are intentionally deleted — re-adding them would test dead code.
 
 // ── Canonical-list contracts (the lifeguard-flagged drift fix) ────────────────
 

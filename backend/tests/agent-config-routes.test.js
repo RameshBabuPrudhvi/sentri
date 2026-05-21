@@ -97,25 +97,16 @@ async function main() {
       assert.equal(out.res.status, 400);
     });
 
-    await test("deleting a role clears dangling fallbackRole refs in siblings", async () => {
-      // planner → healer; deleting healer should null planner.fallbackRole
-      // so AI-005 dispatch never resolves a dangling reference.
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "healer" } });
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "healer" } });
-      let out = await apiReq(base, "/api/settings/agent-roles/healer", { method: "DELETE", cookie: cookieA });
-      assert.equal(out.res.status, 200);
-      out = await apiReq(base, "/api/settings/agent-roles", { cookie: cookieA });
-      const planner = (out.json.roles || []).find((r) => r.role === "planner");
-      assert.ok(planner, "planner row should still exist");
-      assert.equal(planner.fallbackRole, null, "planner.fallbackRole should be nulled after healer delete");
-    });
-
-    await test("fallback cycle detection", async () => {
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "reviewer" } });
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "reviewer", fallbackRole: "author" } });
-      const out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "author", fallbackRole: "planner" } });
-      assert.equal(out.res.status, 400);
-    });
+    // B4.3 — `agent_configs.fallbackRole` was dropped by migration 053.
+    // The role-level cascade-null and the cycle detector were both
+    // removed; the canonical per-route fallback now lives on
+    // `provider_routes.fallbackRouteId` with cycle protection enforced
+    // in `providerRouteRepo.upsert` (ERR_ROUTE_FALLBACK_CYCLE). The two
+    // tests that lived here ("deleting a role clears dangling
+    // fallbackRole refs in siblings" + "fallback cycle detection")
+    // exercised behaviour that no longer exists at the column level and
+    // are intentionally removed rather than ported — re-adding them
+    // would test dead code.
 
     summary("agent-config-routes");
   } finally { await new Promise((r) => server.close(r)); }
