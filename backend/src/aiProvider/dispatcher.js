@@ -735,74 +735,88 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
     if (inflight) return inflight;
   }
 
-  // B3.7 — pre-call gates. Run BEFORE the SDK so a rejected call never
-  // touches vendor quota. Order matters:
-  //   1. Spend cap (cheap DB read, no I/O round-trip in the no-cap path).
-  //   2. Token-bucket reserve (Redis round-trip when configured).
-  // Both gates are skipped when their input data is missing — the env-
-  // default dispatch path (no route, no workspace) gets the legacy
-  // unconditional dispatch behaviour so operators not opted into B3.7
-  // see no semantic change.
-  if (workspaceId) {
-    const spend = checkSpendCap(workspaceId);
-    if (!spend.ok) {
-      const err = new Error(
-        `Spend cap exceeded (${spend.exceeded}). ` +
-        `Dispatch blocked until next ${spend.exceeded === "day" ? "24h window" : "month boundary"}.`,
-      );
-      err.code = "ERR_SPEND_CAP_EXCEEDED";
-      err.exceeded = spend.exceeded;
-      err.remainingUsd = spend.remainingUsd;
-      throw err;
-    }
-    // B3.7 — alert path. Fire-and-forget: spend alerts never block the
-    // dispatch call, even when the alert sink (Slack/webhook) is down.
-    if (spend.alertTriggered) {
-      try {
-        // Minimal stub — log + activity entry. Slack/webhook integration
-        // lands in a follow-up commit alongside the workspace
-        // `notifications.spendWebhookUrl` column. Logging here so the
-        // alert is at least visible in the operator's log feed today.
-        console.warn(formatLogLine("warn", null,
-          `[quotaGuard] spend alert: workspace=${workspaceId} ` +
-          `daily=${spend.dailySpent}/${spend.dailyCap} ` +
-          `monthly=${spend.monthlySpent}/${spend.monthlyCap} ` +
-          `threshold=${spend.thresholdPct}%`));
-      } catch { /* alert path is best-effort */ }
-    }
-  }
-  // Token-bucket reserve. `estimatedTokens` is the caller's `maxTokens`
-  // — a generous upper bound; the post-call `reportActual` corrects
-  // drift with the real count from `usage.input + usage.output`.
-  if (routeId && route) {
-    const reserved = await checkAndReserve(routeId, effectiveMaxTokens, {
-      rpmLimit: route.rpmLimit,
-      tpmLimit: route.tpmLimit,
-    });
-    if (!reserved.ok) {
-      const err = new Error(
-        `Local rate limit reached on route ${callOptions.routeName || routeId}. ` +
-        `Retry after ${reserved.retryAfterMs}ms.`,
-      );
-      err.code = "ERR_RATE_LIMIT_LOCAL";
-      err.retryAfterMs = reserved.retryAfterMs;
-      err.reason = reserved.reason;
-      throw err;
-    }
-  }
-
-  // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
-  // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
-  // also derives `useJson` for adapters that haven't migrated yet.
-  const opts = buildAdapterOpts(provider, messages, effectiveMaxTokens, signal, responseFormat);
-
-  // B3.8 — wrap the dispatch + telemetry in an inner async function so
-  // we can register the resulting Promise for in-flight coalescing.
-  // Concurrent identical misses past the cache lookup above will share
-  // this Promise via `coalesceInFlight` instead of fanning out to the
-  // vendor. The closure captures `cacheKey` (computed pre-quota above)
-  // so the post-call populate goes to the right row.
+  // B3.8 race fix — fold gates + dispatch + telemetry + cache populate
+  // into one IIFE and register it SYNCHRONOUSLY before any `await`.
+  //
+  // The original layout checked `coalesceInFlight`, then awaited
+  // `checkAndReserve` (a Redis round-trip), and only registered the
+  // dispatch promise AFTER the gates resolved. That left a window
+  // where concurrent callers all passed the empty `coalesceInFlight`
+  // check, each awaited the quota gate independently (consuming N
+  // units of quota for what should be one call), and each fanned out
+  // a separate vendor call before the first caller's `registerInFlight`
+  // landed. Registering the IIFE up front closes the window: the
+  // second caller sees the placeholder on its `coalesceInFlight`
+  // check and awaits the shared result — including the same
+  // `ERR_RATE_LIMIT_LOCAL` / `ERR_SPEND_CAP_EXCEEDED` rejection if
+  // the first caller failed those gates.
+  //
+  // Gates run INSIDE the IIFE so a rejection still removes the entry
+  // on settle via `registerInFlight`'s auto-clear `.finally`. A
+  // synchronous throw before the IIFE would skip the cleanup; here
+  // the throw lands on the promise, both `.finally` and the awaiter
+  // observe it, and the next call for the same key starts fresh.
   const dispatchPromise = (async () => {
+    // B3.7 — pre-call gates. Run BEFORE the SDK so a rejected call never
+    // touches vendor quota. Order matters:
+    //   1. Spend cap (cheap DB read, no I/O round-trip in the no-cap path).
+    //   2. Token-bucket reserve (Redis round-trip when configured).
+    // Both gates are skipped when their input data is missing — the env-
+    // default dispatch path (no route, no workspace) gets the legacy
+    // unconditional dispatch behaviour so operators not opted into B3.7
+    // see no semantic change.
+    if (workspaceId) {
+      const spend = checkSpendCap(workspaceId);
+      if (!spend.ok) {
+        const err = new Error(
+          `Spend cap exceeded (${spend.exceeded}). ` +
+          `Dispatch blocked until next ${spend.exceeded === "day" ? "24h window" : "month boundary"}.`,
+        );
+        err.code = "ERR_SPEND_CAP_EXCEEDED";
+        err.exceeded = spend.exceeded;
+        err.remainingUsd = spend.remainingUsd;
+        throw err;
+      }
+      // B3.7 — alert path. Fire-and-forget: spend alerts never block the
+      // dispatch call, even when the alert sink (Slack/webhook) is down.
+      if (spend.alertTriggered) {
+        try {
+          // Minimal stub — log + activity entry. Slack/webhook integration
+          // lands in a follow-up commit alongside the workspace
+          // `notifications.spendWebhookUrl` column. Logging here so the
+          // alert is at least visible in the operator's log feed today.
+          console.warn(formatLogLine("warn", null,
+            `[quotaGuard] spend alert: workspace=${workspaceId} ` +
+            `daily=${spend.dailySpent}/${spend.dailyCap} ` +
+            `monthly=${spend.monthlySpent}/${spend.monthlyCap} ` +
+            `threshold=${spend.thresholdPct}%`));
+        } catch { /* alert path is best-effort */ }
+      }
+    }
+    // Token-bucket reserve. `estimatedTokens` is the caller's `maxTokens`
+    // — a generous upper bound; the post-call `reportActual` corrects
+    // drift with the real count from `usage.input + usage.output`.
+    if (routeId && route) {
+      const reserved = await checkAndReserve(routeId, effectiveMaxTokens, {
+        rpmLimit: route.rpmLimit,
+        tpmLimit: route.tpmLimit,
+      });
+      if (!reserved.ok) {
+        const err = new Error(
+          `Local rate limit reached on route ${callOptions.routeName || routeId}. ` +
+          `Retry after ${reserved.retryAfterMs}ms.`,
+        );
+        err.code = "ERR_RATE_LIMIT_LOCAL";
+        err.retryAfterMs = reserved.retryAfterMs;
+        err.reason = reserved.reason;
+        throw err;
+      }
+    }
+
+    // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
+    // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
+    // also derives `useJson` for adapters that haven't migrated yet.
+    const opts = buildAdapterOpts(provider, messages, effectiveMaxTokens, signal, responseFormat);
     const { text, usage } = await adapterFor(provider).generate(opts);
     // Token telemetry is the orchestrator's responsibility — adapters return
     // raw usage and don't know about the metrics registry. Keeps adapters
