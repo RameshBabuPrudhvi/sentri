@@ -360,6 +360,27 @@
       "source": "backend/src/routes/settings.js",
       "$comment": "AI-005 \u2014 Settings UI \"Test agent\" button. Probes the configured (provider, role) pair via the same 1-token health-check helper the crawler pre-flight uses. Returns { role, ok, reason, provider }."
     },
+    "GET /api/v1/settings/provider-routes": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "POST /api/v1/settings/provider-routes": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "PATCH /api/v1/settings/provider-routes/:id": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "DELETE /api/v1/settings/provider-routes/:id": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "POST /api/v1/settings/provider-routes/:id/rotate-key": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "B3.6 — encrypts the new plaintext, runs a network probe against the candidate key BEFORE persisting, and rolls back to the prior ciphertext when the probe fails. Audit row emitted as action=rotate_key by the repo's diff path."
+    },
     "POST /api/v1/settings/provider-routes/:id/probe": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"

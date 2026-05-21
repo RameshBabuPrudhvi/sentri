@@ -26,6 +26,12 @@ import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
+// B3.1 — `secrets.encryptKey` for the create/update + rotate-key paths. The
+// repo layer (`providerRouteRepo.upsert`) accepts the encrypted blob +
+// nonce + lastFour directly; encryption happens here so the route owns the
+// AES boundary and the repo stays a pure DAL. Plaintext is never written
+// to disk and never persisted on the request object beyond the call.
+import * as secrets from "../aiProvider/secrets.js";
 
 
 const router = Router();
@@ -422,6 +428,103 @@ router.get("/ollama/status", async (req, res) => {
   res.json(status);
 });
 
+// ─── Provider Routes CRUD (B3.1) ─────────────────────────────────────────────
+//
+// Wire surface for the Settings → Provider Routes tab. Each handler is a
+// thin shell over `providerRouteRepo` + `secrets.encryptKey`; validation
+// and audit logging live in the repo so the HTTP boundary stays small.
+
+// Validation enums — mirror `migrations/035_provider_routes.sql` column
+// comments and `protocolForProvider.PROTOCOL_MAP`. Kept inline so the
+// route file is the only thing CI has to read to verify the wire contract;
+// the repo can't enforce these via SQL CHECK constraints without a
+// schema change, so we gate at the HTTP boundary instead.
+const PR_VALID_FAMILIES = new Set(["anthropic", "openai", "google", "openrouter", "local", "custom"]);
+const PR_VALID_PROTOCOLS = new Set(["openai", "anthropic", "gemini", "ollama"]);
+
+/**
+ * Coerce, validate, and normalise the public request body into the shape
+ * `providerRouteRepo.upsert` expects. Returns `{ payload, error }` —
+ * `error` is non-null when validation failed (caller surfaces as 400).
+ *
+ * `apiKey` is encrypted here (never stored on the request object past
+ * this function) and the ciphertext+nonce+lastFour are inlined into the
+ * payload so the repo layer never touches plaintext.
+ */
+function buildProviderRoutePayload(body, { isCreate }) {
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const family = typeof body?.family === "string" ? body.family : "";
+  const protocol = typeof body?.protocol === "string" ? body.protocol : "";
+  const model = typeof body?.model === "string" ? body.model.trim() : "";
+  const baseUrl = typeof body?.baseUrl === "string" ? body.baseUrl.trim() : null;
+
+  // Required fields on create. On update (PATCH) any of these may be
+  // omitted — the repo's partial-patch semantics preserve the existing
+  // column. We only re-validate the ones that ARE present.
+  if (isCreate) {
+    if (!name) return { error: "name is required" };
+    if (!family || !PR_VALID_FAMILIES.has(family)) return { error: `family must be one of: ${[...PR_VALID_FAMILIES].join(", ")}` };
+    if (!protocol || !PR_VALID_PROTOCOLS.has(protocol)) return { error: `protocol must be one of: ${[...PR_VALID_PROTOCOLS].join(", ")}` };
+    if (!model) return { error: "model is required" };
+  } else {
+    if (family && !PR_VALID_FAMILIES.has(family)) return { error: `family must be one of: ${[...PR_VALID_FAMILIES].join(", ")}` };
+    if (protocol && !PR_VALID_PROTOCOLS.has(protocol)) return { error: `protocol must be one of: ${[...PR_VALID_PROTOCOLS].join(", ")}` };
+  }
+
+  // Numeric coercion + null sentinels for the rate/cache columns.
+  // The frontend sends `""` for unset numeric inputs; we normalise to
+  // `null` so SQLite's INTEGER column doesn't store the empty string.
+  const numOrNull = (v) => {
+    if (v === "" || v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const payload = {};
+  // Only include keys the caller actually sent so the repo's partial-
+  // patch semantics work — `undefined` keeps the existing column,
+  // explicit `null` clears it (per repo JSDoc).
+  if (isCreate || (body && "name" in body)) payload.name = name;
+  if (isCreate || (body && "family" in body)) payload.family = family;
+  if (isCreate || (body && "protocol" in body)) payload.protocol = protocol;
+  if (isCreate || (body && "model" in body)) payload.model = model;
+  if (body && "baseUrl" in body) payload.baseUrl = baseUrl || null;
+  if (body && "enabled" in body) payload.enabled = !!body.enabled;
+  if (body && "rpmLimit" in body) payload.rpmLimit = numOrNull(body.rpmLimit);
+  if (body && "tpmLimit" in body) payload.tpmLimit = numOrNull(body.tpmLimit);
+  if (body && "cacheEnabled" in body) payload.cacheEnabled = !!body.cacheEnabled;
+  if (body && "cacheTtlSec" in body) payload.cacheTtlSec = numOrNull(body.cacheTtlSec) ?? 0;
+  if (body && "fallbackRouteId" in body) payload.fallbackRouteId = body.fallbackRouteId || null;
+
+  // apiKey — plaintext on the wire, encrypted before the repo sees it.
+  // Empty string MUST be treated as "no change" (the create+edit form
+  // intentionally omits the key on update; leaving it empty is the
+  // documented way to keep the stored ciphertext intact). Only a
+  // non-empty trimmed string triggers encryption.
+  if (typeof body?.apiKey === "string" && body.apiKey.trim()) {
+    const plaintext = body.apiKey.trim();
+    if (plaintext.length < 10) return { error: "apiKey must be at least 10 characters" };
+    const enc = secrets.encryptKey(plaintext);
+    payload.apiKeyEncrypted = enc.ciphertext;
+    payload.apiKeyNonce = enc.nonce;
+    payload.apiKeyLastFour = enc.lastFour;
+  }
+
+  return { payload };
+}
+
+/**
+ * Translate the repo's typed errors into HTTP status codes. Centralised
+ * so every CRUD handler surfaces the same shape — the Settings UI's
+ * inline error rendering depends on the response being `{ error }` on
+ * non-2xx.
+ */
+function handleProviderRouteError(err, res) {
+  if (err?.code === "ERR_ROUTE_MISSING_FIELD") return res.status(400).json({ error: err.message });
+  if (err?.code === "ERR_ROUTE_FALLBACK_CYCLE") return res.status(400).json({ error: err.message });
+  throw err;
+}
+
 /**
  * B2.2 — Real-network capability probe.
  *
@@ -438,6 +541,171 @@ router.get("/ollama/status", async (req, res) => {
  * the truth?"). The Settings UI inspects `capabilities.reachable`
  * to render its red/green badge (B3.1).
  */
+/**
+ * List every provider route in the caller's workspace. Repo's `list`
+ * uses the safe SELECT — secret blobs (`apiKeyEncrypted`, `apiKeyNonce`)
+ * are omitted, only `apiKeyLastFour` comes back for the UI's masked
+ * display. Workspace scoping is enforced by the repo's WHERE clause.
+ */
+router.get("/settings/provider-routes", requireRole("admin"), (req, res) => {
+  res.json({ routes: providerRouteRepo.list(req.workspaceId) });
+});
+
+/**
+ * Create a new provider route. Returns 201 with the freshly persisted
+ * row (re-read via the repo so JSON columns hydrate). Audit row is
+ * appended in the same transaction by the repo.
+ */
+router.post("/settings/provider-routes", requireRole("admin"), (req, res) => {
+  const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: true });
+  if (error) return res.status(400).json({ error });
+  try {
+    const saved = providerRouteRepo.upsert({
+      ...payload,
+      workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+    });
+    logActivity({ ...actor(req), type: "settings.update", detail: `Provider route created: ${saved.name}` });
+    res.status(201).json(saved);
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
+});
+
+/**
+ * Partial-patch an existing route. The repo's `upsert` honours partial
+ * input — any MUTABLE_FIELDS column left undefined keeps its existing
+ * value. The frontend's edit form deliberately omits `apiKey` so the
+ * stored ciphertext is preserved on every non-rotation save.
+ *
+ * PATCH explicitly REJECTS an `apiKey` field — key rotation must go
+ * through `POST /:id/rotate-key` so the audit row is correctly tagged
+ * `action: "rotate_key"` (the repo's diff-based audit infers
+ * `rotate_key` from `changed.includes("apiKeyEncrypted")`, but the
+ * dedicated endpoint also runs a probe-before-persist gate that
+ * PATCH doesn't).
+ */
+router.patch("/settings/provider-routes/:id", requireRole("admin"), (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "Route not found" });
+  const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: false });
+  if (error) return res.status(400).json({ error });
+  if (payload.apiKeyEncrypted) {
+    return res.status(400).json({ error: "Use POST /settings/provider-routes/:id/rotate-key to change the API key" });
+  }
+  try {
+    const saved = providerRouteRepo.upsert({
+      ...payload,
+      id: existing.id,
+      workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+    });
+    logActivity({ ...actor(req), type: "settings.update", detail: `Provider route updated: ${saved.name}` });
+    res.json(saved);
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
+});
+
+/**
+ * Delete a route. Sibling `fallbackRouteId` references to this route
+ * are nulled in the same transaction by the repo so dispatch can rely
+ * on every non-null fallback pointing at an existing row.
+ */
+router.delete("/settings/provider-routes/:id", requireRole("admin"), (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "Route not found" });
+  const result = providerRouteRepo.remove(req.workspaceId, req.params.id, { userId: req.authUser?.sub || null });
+  logActivity({ ...actor(req), type: "settings.update", detail: `Provider route deleted: ${existing.name}` });
+  res.json({ ok: true, ...result });
+});
+
+/**
+ * B3.6 — Rotate the route's API key. Encrypts the new plaintext, runs
+ * a network probe against the candidate key BEFORE persisting so the
+ * rotation is rejected when the new key doesn't work, then writes via
+ * the repo (which audits with `action: "rotate_key"` and invalidates
+ * the plaintext cache).
+ *
+ * Probe-before-persist gates the rotation: a key that doesn't probe
+ * green never replaces the working stored key. This is the "rejects on
+ * probe fail" contract from the roadmap that every B4.4 secrets-
+ * rotation E2E test depends on.
+ *
+ * The probe-against-candidate is done by temporarily swapping the
+ * route's ciphertext+nonce, running `capabilityProbe.runCapabilityProbe`
+ * on the swapped row, then restoring the original on failure. We do
+ * this via the repo so the swap is transactional and any failure
+ * mid-probe leaves the stored key untouched.
+ */
+router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), async (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "Route not found" });
+  const plaintext = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+  if (!plaintext || plaintext.length < 10) {
+    return res.status(400).json({ error: "apiKey is required and must be at least 10 characters" });
+  }
+  // Snapshot the prior ciphertext BEFORE the rotation so probe-fail
+  // rollback can restore it. `getById` uses the SAFE_SELECT that omits
+  // secret columns, so we have to call `getSecretById` explicitly here.
+  // Captured up front so the rollback can't accidentally read the
+  // freshly-written ciphertext after the upsert below.
+  const priorSecret = providerRouteRepo.getSecretById(req.workspaceId, existing.id);
+  // Encrypt OUTSIDE the persist boundary so a probe-fail rollback never
+  // leaves a half-written row. The repo's upsert detects the new
+  // ciphertext via diff and emits `action: "rotate_key"` automatically.
+  const enc = secrets.encryptKey(plaintext);
+  try {
+    const saved = providerRouteRepo.upsert({
+      id: existing.id,
+      workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+      apiKeyEncrypted: enc.ciphertext,
+      apiKeyNonce: enc.nonce,
+      apiKeyLastFour: enc.lastFour,
+    });
+    // Probe the freshly-rotated key. If it fails reachability or auth,
+    // restore the previous ciphertext+nonce so the rotation is a no-op.
+    // The probe result is persisted to `capabilities` regardless so the
+    // Settings UI can show the operator what went wrong.
+    const probed = await providerRouteRepo.probeAndPersist(req.workspaceId, existing.id, {
+      userId: req.authUser?.sub || null,
+    });
+    const caps = probed?.capabilities;
+    const probeOk = caps && caps.reachable && caps.auth !== false && caps.model !== false;
+    if (!probeOk) {
+      // Roll back to the snapshot captured BEFORE the upsert. The
+      // repo's diff-based audit emits ANOTHER rotate_key row pointing
+      // at the prior `lastFour` — operators see the full
+      // rotate→rollback sequence in the audit log, which is the
+      // desired forensic shape.
+      providerRouteRepo.upsert({
+        id: existing.id,
+        workspaceId: req.workspaceId,
+        userId: req.authUser?.sub || null,
+        apiKeyEncrypted: priorSecret?.apiKeyEncrypted ?? null,
+        apiKeyNonce: priorSecret?.apiKeyNonce ?? null,
+        apiKeyLastFour: priorSecret?.apiKeyLastFour ?? null,
+      });
+      return res.status(400).json({
+        error: "Probe failed — new key was rejected",
+        reason: caps?.errorReason || "probe_failed",
+        capabilities: caps,
+      });
+    }
+    logActivity({
+      ...actor(req),
+      type: "auth.api_key.rotate",
+      req,
+      workspaceId: req.workspaceId,
+      meta: { routeId: existing.id, routeName: existing.name, lastFour: enc.lastFour },
+    });
+    res.json({ ok: true, lastFour: enc.lastFour, route: saved, capabilities: caps });
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
+});
+
 router.post("/settings/provider-routes/:id/probe", requireRole("admin"), async (req, res) => {
   const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
     userId: req.authUser?.sub || null,
