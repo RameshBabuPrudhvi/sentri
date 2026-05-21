@@ -24,6 +24,11 @@ import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
+import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
+import * as providerRouteAuditRepo from "../database/repositories/providerRouteAuditRepo.js";
+import { capabilitiesFor } from "../aiProvider/modelCatalog.js";
+import { getDatabase } from "../database/sqlite.js";
+
 
 const router = Router();
 
@@ -401,4 +406,45 @@ router.get("/ollama/status", async (req, res) => {
   res.json(status);
 });
 
+router.post("/settings/provider-routes/:id/probe", requireRole("admin"), (req, res) => {
+  const route = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!route) return res.status(404).json({ error: "Route not found" });
+  const family = route.family === "custom" ? "openai" : route.family;
+  const base = capabilitiesFor(family);
+  const capabilities = {
+    vision: Boolean(base?.supportsVision),
+    jsonMode: Boolean(base?.supportsJsonMode),
+    tools: false,
+    streaming: Boolean(base?.supportsStreaming),
+    contextWindow: Number.isFinite(base?.contextWindow) ? base.contextWindow : null,
+    maxOutputTokens: Number.isFinite(base?.maxOutputTokens) ? base.maxOutputTokens : null,
+    probedAt: new Date().toISOString(),
+  };
+  const updated = providerRouteRepo.upsert({ ...route, workspaceId: req.workspaceId, userId: req.authUser?.sub || null, capabilities });
+  providerRouteAuditRepo.append({
+    workspaceId: req.workspaceId,
+    routeId: route.id,
+    userId: req.authUser?.sub || null,
+    action: "probe",
+    metadata: { capabilities },
+  });
+  return res.json({ ok: true, route: updated, capabilities });
+});
+
+router.get("/settings/ai-requests", requireRole("admin"), (req, res) => {
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+  const where = ["workspaceId = ?"];
+  const params = [req.workspaceId];
+  if (req.query.routeId) { where.push("routeId = ?"); params.push(String(req.query.routeId)); }
+  if (req.query.agentRole) { where.push("agentRole = ?"); params.push(String(req.query.agentRole)); }
+  if (req.query.traceId) { where.push("traceId = ?"); params.push(String(req.query.traceId)); }
+  if (req.query.outcome) { where.push("outcome = ?"); params.push(String(req.query.outcome)); }
+  if (req.query.before) { where.push("createdAt < ?"); params.push(String(req.query.before)); }
+  const rows = getDatabase().prepare(`SELECT * FROM ai_request_log WHERE ${where.join(" AND ")} ORDER BY createdAt DESC LIMIT ?`).all(...params, limit);
+  res.json({ items: rows, nextCursor: rows.length ? rows[rows.length - 1].createdAt : null });
+});
+
 export default router;
+
+
+

@@ -359,6 +359,14 @@
       "role": "admin",
       "source": "backend/src/routes/settings.js",
       "$comment": "AI-005 \u2014 Settings UI \"Test agent\" button. Probes the configured (provider, role) pair via the same 1-token health-check helper the crawler pre-flight uses. Returns { role, ok, reason, provider }."
+    },
+    "POST /api/v1/settings/provider-routes/:id/probe": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "GET /api/v1/settings/ai-requests": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
     }
   },
   "anyAuthenticatedMember": [

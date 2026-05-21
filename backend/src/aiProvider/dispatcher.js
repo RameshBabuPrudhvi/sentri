@@ -21,6 +21,7 @@ import {
 } from "../utils/metrics.js";
 import { buildProviderMeta } from "./providerInfo.js";
 import { getCurrentTraceId, annotateAiCallSpan } from "../utils/observability.js";
+import { logRequest } from "./requestLog.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -301,7 +302,7 @@ export function resolveAgentCall(prompt, options = {}) {
     effectiveAgentRole,
     effectivePrompt,
     maxTokens: config?.maxTokens ?? options.maxTokens,
-    callOpts: { agentRole, routeName: route?.name || route?.id || "unknown" },
+    callOpts: { agentRole, routeName: route?.name || route?.id || "unknown", routeId: route?.id || null, workspaceId },
     useRoutes: true,
   };
 }
@@ -365,6 +366,7 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
   // calls live in `callVisionModel` and pass `operation: "vision_heal"`
   // to the same metric counters directly.
   const operation = "generation";
+  const startedMs = Date.now();
   const label = providerMetricLabel(provider);
   const agentRole = callOptions.agentRole || "default";
   // AI-005 tripwire #3 — attach `ai.agent_role` + `ai.provider` +
@@ -398,6 +400,21 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
       aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome, operation, route_name: callOptions.routeName || "unknown" }, seconds);
       aiProviderErrorsTotal.inc({ provider: label, agent_role: agentRole, reason, operation, route_name: callOptions.routeName || "unknown" });
     } catch { /* best-effort */ }
+    try {
+      logRequest({
+        workspaceId: callOptions.workspaceId || null,
+        routeId: callOptions.routeId || null,
+        agentRole: callOptions.agentRole || null,
+        userId: callOptions.userId || null,
+        prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
+        response: "",
+        latencyMs: Date.now() - startedMs,
+        outcome: outcome,
+        errorReason: reason,
+        traceId: getCurrentTraceId(),
+        storageMode: callOptions.requestLogMode || "none",
+      });
+    } catch {}
     throw err;
   }
 }
