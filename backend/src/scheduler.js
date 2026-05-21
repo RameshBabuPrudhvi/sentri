@@ -30,6 +30,7 @@ import * as projectRepo from "./database/repositories/projectRepo.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import * as aiRequestLogRepo from "./database/repositories/aiRequestLogRepo.js";
+import { purgeExpired as purgeExpiredCacheRows } from "./aiProvider/responseCache.js";
 import * as activityRepo from "./database/repositories/activityRepo.js";
 import { generateRunId } from "./utils/idGenerator.js";
 import { runWithAbort } from "./utils/runWithAbort.js";
@@ -53,6 +54,9 @@ let _auditRetentionTask = null;
 
 /** @type {Object|null} Daily AUTO-009j coverage retention sweep task. */
 let _coverageRetentionTask = null;
+
+/** @type {Object|null} B3.8 — daily AI response-cache janitor task. */
+let _aiCacheJanitorTask = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -435,6 +439,26 @@ export function initScheduler() {
   }, { timezone: "UTC", scheduled: true });
 
   
+  // B3.8 — daily AI response-cache janitor. Sweeps expired rows from
+  // `ai_response_cache` so the table doesn't grow unbounded over time.
+  // Runs at 04:30 UTC, after the coverage sweep, so SQLite write
+  // contention is staggered across the morning maintenance window.
+  // `purgeExpired` is best-effort — `getCached` already double-checks
+  // `expiresAt` on every read, so a janitor failure can't return stale
+  // data, just delays the storage reclaim.
+  _aiCacheJanitorTask = cron.schedule("30 4 * * *", () => {
+    try {
+      const deleted = purgeExpiredCacheRows();
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] AI response-cache janitor swept ${deleted} expired row(s)`));
+      }
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[scheduler] AI response-cache janitor failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
   // B2.5: daily AI request-log retention sweep — default 30 days.
   schedules.push(schedule(
     "30 4 * * *",
@@ -503,6 +527,11 @@ export function stopAllTasks() {
   if (_coverageRetentionTask) {
     _coverageRetentionTask.stop();
     _coverageRetentionTask = null;
+  }
+  // B3.8 — graceful shutdown of the response-cache janitor.
+  if (_aiCacheJanitorTask) {
+    _aiCacheJanitorTask.stop();
+    _aiCacheJanitorTask = null;
   }
 }
 

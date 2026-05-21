@@ -168,6 +168,37 @@ export const aiProviderCostUsdTotal = new client.Counter({
   registers: [register],
 });
 
+// B3.8 — Response-cache telemetry. Three counters give the operator a
+// per-route view of cache effectiveness:
+//
+//   • hits / misses → hit rate per route + role
+//   • savings_usd  → cumulative dollars saved (sum of `costUsd` from the
+//                    original dispatch on every hit)
+//
+// All three carry `route_name` + `agent_role` to match the existing AI
+// dispatch label set. `route_name` is operator-controlled free text,
+// same cardinality concern documented in `aiProviderLatencySeconds`.
+export const aiCacheHitsTotal = new client.Counter({
+  name: "app_ai_cache_hits_total",
+  help: "B3.8 — Response cache hits. Each increment represents one AI call returned from `ai_response_cache` instead of dispatching to the provider. Combined with misses, gives the cache hit rate; combined with savings_usd, gives the spend reduction operators get from caching deterministic prompts.",
+  labelNames: ["route_name", "agent_role"],
+  registers: [register],
+});
+
+export const aiCacheMissesTotal = new client.Counter({
+  name: "app_ai_cache_misses_total",
+  help: "B3.8 — Response cache misses. Includes both first-time prompts (cold cache) and TTL expiries. Hit rate = hits / (hits + misses).",
+  labelNames: ["route_name", "agent_role"],
+  registers: [register],
+});
+
+export const aiCacheSavingsUsdTotal = new client.Counter({
+  name: "app_ai_cache_savings_usd_total",
+  help: "B3.8 — Cumulative USD saved by cache hits. Computed by summing the `costUsd` field stored alongside each cached response, so the metric represents what the operator WOULD have paid had the cache been disabled. Catalog-miss responses contribute 0.",
+  labelNames: ["route_name", "agent_role"],
+  registers: [register],
+});
+
 // MNT-001b — budget circuit-breaker trip counter. Increments every time
 // stage 8 is skipped due to per-project daily-call OR monthly-cost cap.
 // Drives the `VisionHealBudgetExhausted` alert in alerts.yml — any non-zero

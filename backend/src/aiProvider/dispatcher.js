@@ -38,6 +38,18 @@ import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 // `ERR_SPEND_CAP_EXCEEDED`) so the orchestrator can render an actionable
 // message to the operator instead of a generic 500.
 import { checkAndReserve, reportActual, checkSpendCap } from "./quotaGuard.js";
+// B3.8 — exact-match response cache. Pre-call check returns a stored
+// response when the route opted in (`cacheEnabled = 1`) and the
+// `(routeId, model, messages, params)` quad has been seen before;
+// post-call populate stores the freshly-dispatched response for next
+// time. Streaming + `skipCache: true` callers bypass the cache entirely.
+import {
+  computeCacheKey,
+  getCached,
+  setCached,
+  coalesceInFlight,
+  registerInFlight,
+} from "./responseCache.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -663,6 +675,66 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   const messages = normaliseMessages(promptOrMessages);
   const effectiveMaxTokens = maxTokens || DEFAULT_MAX_TOKENS;
 
+  const route = callOptions.route || null;
+  const routeId = route?.id || callOptions.routeId || null;
+  const workspaceId = callOptions.workspaceId || null;
+
+  // B3.8 — exact-match response cache. Runs FIRST, before quota gates,
+  // because a cache hit shouldn't consume rate-limit budget or spend-
+  // cap allowance — the response was already paid for on the original
+  // dispatch. Skip when:
+  //   • No route (env-default dispatch path).
+  //   • Route opted out (`cacheEnabled = 0`).
+  //   • Caller passed `skipCache: true` (self-healing path where stale
+  //     answers are dangerous).
+  // The `routeModel` is `route.model` (real route) or
+  // `buildAdapterOpts(provider).model` for shim routes — we use the
+  // route's model directly because it's already resolved by the time
+  // we reach this function.
+  const cacheEligible = route
+    && (route.cacheEnabled === 1 || route.cacheEnabled === true)
+    && Number.isFinite(route.cacheTtlSec) && route.cacheTtlSec > 0
+    && callOptions.skipCache !== true;
+  let cacheKey = null;
+  if (cacheEligible && routeId && route.model) {
+    cacheKey = computeCacheKey(routeId, route.model, {
+      messages,
+      maxTokens: effectiveMaxTokens,
+      // `temperature` is read from `callOptions` because the dispatcher
+      // doesn't otherwise track it — the adapters honour it via the
+      // OpenAI / Anthropic SDK options. Operators who want max hit rate
+      // standardise on T=0 dispatch; the cache key reflects whatever
+      // value was actually sent.
+      temperature: callOptions.temperature ?? null,
+      responseFormat: responseFormat ?? null,
+    });
+    const cached = getCached(routeId, route.model, {
+      messages,
+      maxTokens: effectiveMaxTokens,
+      temperature: callOptions.temperature ?? null,
+      responseFormat: responseFormat ?? null,
+    }, {
+      routeName: callOptions.routeName,
+      agentRole: callOptions.agentRole,
+    });
+    if (cached) {
+      // Cache hit — skip gates, skip dispatch, skip token telemetry
+      // (the original dispatch already counted those). Return the
+      // stored payload directly. `costResult.source = "cache"` lets
+      // `callProvider`'s logRequest hook record the hit shape so
+      // the request log shows cache hits as zero-cost rows.
+      return {
+        text: cached.response,
+        usage: cached.usage,
+        costResult: { costUsd: 0, source: "cache" },
+      };
+    }
+    // Miss — coalesce with any in-flight identical dispatch so
+    // thundering-herd traffic doesn't fan out N vendor calls.
+    const inflight = coalesceInFlight(cacheKey);
+    if (inflight) return inflight;
+  }
+
   // B3.7 — pre-call gates. Run BEFORE the SDK so a rejected call never
   // touches vendor quota. Order matters:
   //   1. Spend cap (cheap DB read, no I/O round-trip in the no-cap path).
@@ -671,9 +743,6 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // default dispatch path (no route, no workspace) gets the legacy
   // unconditional dispatch behaviour so operators not opted into B3.7
   // see no semantic change.
-  const route = callOptions.route || null;
-  const routeId = route?.id || callOptions.routeId || null;
-  const workspaceId = callOptions.workspaceId || null;
   if (workspaceId) {
     const spend = checkSpendCap(workspaceId);
     if (!spend.ok) {
@@ -726,29 +795,71 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
   // also derives `useJson` for adapters that haven't migrated yet.
   const opts = buildAdapterOpts(provider, messages, effectiveMaxTokens, signal, responseFormat);
-  const { text, usage } = await adapterFor(provider).generate(opts);
-  // Token telemetry is the orchestrator's responsibility — adapters return
-  // raw usage and don't know about the metrics registry. Keeps adapters
-  // self-contained and testable in isolation.
-  // B2.4 — pass `route` through so cost is computed from `route.pricing`
-  // (operator-set) when available, with `MODEL_PRICING` as catalog
-  // fallback. Adapters no longer compute `usage.costUsd` themselves;
-  // the dispatcher owns cost via `computeCostForRoute`.
-  let costResult = { costUsd: null, source: "none" };
-  if (usage) {
-    costResult = recordAiTokens(
-      provider, usage, "generation",
-      callOptions.agentRole, callOptions.routeName || "unknown",
-      callOptions.route || null,
-    );
+
+  // B3.8 — wrap the dispatch + telemetry in an inner async function so
+  // we can register the resulting Promise for in-flight coalescing.
+  // Concurrent identical misses past the cache lookup above will share
+  // this Promise via `coalesceInFlight` instead of fanning out to the
+  // vendor. The closure captures `cacheKey` (computed pre-quota above)
+  // so the post-call populate goes to the right row.
+  const dispatchPromise = (async () => {
+    const { text, usage } = await adapterFor(provider).generate(opts);
+    // Token telemetry is the orchestrator's responsibility — adapters return
+    // raw usage and don't know about the metrics registry. Keeps adapters
+    // self-contained and testable in isolation.
+    // B2.4 — pass `route` through so cost is computed from `route.pricing`
+    // (operator-set) when available, with `MODEL_PRICING` as catalog
+    // fallback. Adapters no longer compute `usage.costUsd` themselves;
+    // the dispatcher owns cost via `computeCostForRoute`.
+    let costResult = { costUsd: null, source: "none" };
+    if (usage) {
+      costResult = recordAiTokens(
+        provider, usage, "generation",
+        callOptions.agentRole, callOptions.routeName || "unknown",
+        callOptions.route || null,
+      );
+    }
+    // B3.7 — drift correction. Post-call so the bucket converges to the
+    // real token count after the SDK returns, regardless of how generous
+    // or stingy the pre-call estimate was. Fire-and-forget — failures are
+    // logged inside `reportActual` and never propagate.
+    if (routeId && route && usage) {
+      const actualTokens = (Number(usage.input) || 0) + (Number(usage.output) || 0);
+      reportActual(routeId, effectiveMaxTokens, actualTokens, costResult.costUsd).catch(() => {});
+    }
+    // B3.8 — populate the cache with the freshly-dispatched response.
+    // We persist `usage` with the costUsd embedded so subsequent hits
+    // can attribute the savings via the `aiCacheSavingsUsdTotal` metric.
+    // `setCached` no-ops when the route opted out, so the eligibility
+    // check at the top is the only gate; the post-call write is
+    // unconditional and cheap.
+    if (cacheEligible && cacheKey && routeId && route.model && text) {
+      const usageWithCost = usage
+        ? { ...usage, costUsd: costResult.costUsd }
+        : { input: 0, output: 0, costUsd: costResult.costUsd };
+      setCached(
+        routeId,
+        route.model,
+        {
+          messages,
+          maxTokens: effectiveMaxTokens,
+          temperature: callOptions.temperature ?? null,
+          responseFormat: responseFormat ?? null,
+        },
+        text,
+        usageWithCost,
+        route.cacheTtlSec,
+      );
+    }
+    return { text, usage: usage || null, costResult };
+  })();
+
+  // Register the dispatch promise for in-flight coalescing — concurrent
+  // identical calls past the initial cache miss will share this promise
+  // and skip the duplicate vendor call. `registerInFlight` auto-clears
+  // the entry on settle so a long-running call can't pin memory.
+  if (cacheEligible && cacheKey) {
+    registerInFlight(cacheKey, dispatchPromise);
   }
-  // B3.7 — drift correction. Post-call so the bucket converges to the
-  // real token count after the SDK returns, regardless of how generous
-  // or stingy the pre-call estimate was. Fire-and-forget — failures are
-  // logged inside `reportActual` and never propagate.
-  if (routeId && route && usage) {
-    const actualTokens = (Number(usage.input) || 0) + (Number(usage.output) || 0);
-    reportActual(routeId, effectiveMaxTokens, actualTokens, costResult.costUsd).catch(() => {});
-  }
-  return { text, usage: usage || null, costResult };
+  return dispatchPromise;
 }
