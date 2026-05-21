@@ -72,6 +72,42 @@ function sweepExpiredStickies() {
   }
 }
 
+/**
+ * Classify a thrown error from a defensive `agent_configs` lookup.
+ *
+ * Returns `true` when the error is the expected "table doesn't exist on
+ * a fresh DB" path — quiet fall-through is safe. Returns `false` for any
+ * other failure (DB corruption, lock timeout, decryption error inside
+ * `apiKeyRepo`, malformed schema, etc.) which we log at warn level and
+ * still fall through, but with observability so ops can correlate the
+ * "AI call routed to wrong provider" symptom with a real DB incident
+ * instead of having it disappear silently.
+ *
+ * Better-sqlite3 surfaces "no such table" as `err.code === "SQLITE_ERROR"`
+ * with the message containing `"no such table"`. PostgreSQL returns
+ * `err.code === "42P01"` (`undefined_table`). Both shapes are matched here.
+ */
+function isExpectedDbMissingTable(err) {
+  if (!err) return false;
+  if (err.code === "42P01") return true;
+  if (err.code === "SQLITE_ERROR" && /no such table/i.test(err.message || "")) return true;
+  return false;
+}
+
+function logUnexpectedAgentConfigError(err, where) {
+  if (isExpectedDbMissingTable(err)) return;
+  // Log at warn — the call still falls through to the workspace default,
+  // so it's not fatal, but the user is now silently using a different
+  // provider than they configured. Surface enough context for ops to
+  // correlate against DB / corruption alerts without leaking the full
+  // error chain (which can carry stack traces or path info).
+  const msg = err?.message?.slice(0, 200) || String(err);
+  console.warn(formatLogLine(
+    "warn", null,
+    `[aiProvider/${where}] agent_configs lookup failed: ${err?.code || "no_code"}: ${msg}. Falling back to workspace default.`,
+  ));
+}
+
 /** @type {Object<string, {failures: number, disabledUntil: number}>} */
 const circuitBreakers = {};
 /**
@@ -354,7 +390,7 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
     // elsewhere in this file (see `isProviderUsable` for compat slots, and
     // `listCompatSlots` in `detectProvider`).
     try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole) || null; }
-    catch { /* DB unavailable — fall through to detection */ }
+    catch (err) { logUnexpectedAgentConfigError(err, "resolveProvider"); }
   }
   // Unconditional sweep so expired entries for OTHER roles also get cleaned
   // up here — not just the ones that match the current role filter.
@@ -483,7 +519,7 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
   if (agentRole && workspaceId) {
     let cfg;
     try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole); }
-    catch { /* DB unavailable — fall through to env detection */ }
+    catch (err) { logUnexpectedAgentConfigError(err, "resolveRoute"); }
     if (cfg) {
       // (2) Explicit route assignment. The route row carries everything
       // dispatch needs (protocol + baseUrl + model + encrypted secret).
@@ -569,9 +605,28 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
     google:    "gemini",
     local:     "ollama",
   };
-  const protocol = isCompatProvider(provider)
-    ? "openai"
-    : protocolMap[provider] || "openai";
+  // Compat slots all speak the OpenAI wire format — `openai` is correct.
+  // For non-compat providers we MUST have an explicit mapping; falling back
+  // to `"openai"` for an unknown provider id (e.g. a future `"mistral"`
+  // saved on `agent_configs.provider` before the protocolMap is updated)
+  // would silently dispatch under the wrong protocol and fail at the SDK
+  // level with a confusing 400. Fail closed instead — `protocolAdapter`
+  // already throws on unknown protocols (see `protocolAdapter.moduleFor`),
+  // so we mirror that contract here at the synthesis point.
+  let protocol;
+  if (isCompatProvider(provider)) {
+    protocol = "openai";
+  } else if (protocolMap[provider]) {
+    protocol = protocolMap[provider];
+  } else {
+    const err = new Error(
+      `Unknown provider "${provider}" — cannot synthesise transient route. ` +
+      `Add it to protocolMap in backend/src/aiProvider/registry.js#synthesiseTransientRoute, ` +
+      `or assign agent_configs.routeId to a real provider_routes row.`
+    );
+    err.code = "ERR_UNKNOWN_PROTOCOL";
+    throw err;
+  }
   return {
     id: `provider:${provider}`,
     workspaceId: workspaceId || null,

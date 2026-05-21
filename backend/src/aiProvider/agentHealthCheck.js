@@ -115,10 +115,37 @@ async function probeRole(workspaceId, role, signal) {
   } catch (err) {
     return {
       ok: false,
-      reason: err?.code || err?.message?.slice(0, 200) || "probe_failed",
+      reason: sanitiseProbeReason(err),
       provider,
     };
   }
+}
+
+/**
+ * Strip secret-shaped tokens out of an error string before it lands in the
+ * probe's `reason` field. The reason flows through `assertAgentConfigsHealthy`
+ * into `ERR_AGENT_HEALTH_CHECK_FAILED.message`, which is logged in run logs
+ * (`backend/src/crawler.js#logWarn` calls in the health-check failure path)
+ * and surfaced to the operator via SSE / API responses. A misbehaving SDK
+ * that echoes the full Authorization header into its error message would
+ * leak the API key prefix without this filter.
+ *
+ * Strategy: prefer `err.code` (always a small enum like `ERR_AUTH`) when set;
+ * fall back to a redacted slice of `err.message`.
+ */
+function sanitiseProbeReason(err) {
+  if (err?.code) return String(err.code);
+  const raw = err?.message || "";
+  if (!raw) return "probe_failed";
+  // Redact common API-key prefixes + Authorization-header shapes. These are
+  // the patterns most SDKs leak when echoing 401/403 responses verbatim.
+  // The replacement is the literal "[redacted]" so the operator can see
+  // "we removed something here" rather than silently truncated context.
+  const redacted = raw
+    .replace(/\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{8,}/g, "[redacted-key]")
+    .replace(/\bBearer\s+[A-Za-z0-9_.\-+/=]{8,}/gi, "Bearer [redacted]")
+    .replace(/\b(?:authorization|x-api-key)\s*[:=]\s*[^\s,;]+/gi, "$&-[redacted]".replace(/[^:=]+$/, "[redacted]"));
+  return redacted.slice(0, 200);
 }
 
 /**
@@ -152,14 +179,50 @@ export async function validateAgentConfigs(workspaceId, { signal, roles } = {}) 
   const allowed = new Set(AGENT_ROLES);
   probeRoles = [...new Set(probeRoles.filter((r) => allowed.has(r)))];
   if (probeRoles.length === 0) return { ok: true, agentRoles: {} };
-  // Run probes in parallel — bounded by `probeRoles.length` which is capped at
-  // AGENT_ROLES.length so there's no need for a concurrency limiter.
-  const entries = await Promise.all(
-    probeRoles.map(async (role) => [role, await probeRole(workspaceId, role, signal)]),
+
+  // Cost optimisation: dedupe probes by resolved provider id. A workspace
+  // with 7 roles all pointing at one Anthropic key would otherwise burn 7
+  // paid API calls per crawl. We resolve each role's provider via
+  // `resolveProvider` (cheap — it's an in-process state machine), bucket
+  // roles by provider, probe ONE role per provider, then fan the result
+  // back out to every role in the bucket. Roles that can't be resolved
+  // (provider=null) get their own bucket per role so each surfaces the
+  // `no_provider_configured` reason in the result map.
+  //
+  // Trade-off: roles in the same bucket share the probe's `reason` field —
+  // an Anthropic outage looks identical for planner / author / critic.
+  // That's fine for "reachability" semantics; per-role failure isolation
+  // is meaningful only when the providers themselves differ.
+  const buckets = new Map(); // dedupKey → { canonicalRole, roles[] }
+  for (const role of probeRoles) {
+    let dedupKey;
+    let canonicalRole = role;
+    try {
+      const resolved = resolveProvider({ agentRole: role, workspaceId });
+      dedupKey = resolved?.provider ? `provider:${resolved.provider}` : `role:${role}`;
+    } catch {
+      // resolveProvider can throw on misconfig (forced AI_PROVIDER pointing
+      // at unknown id). Fall back to per-role probe so the error surfaces.
+      dedupKey = `role:${role}`;
+    }
+    if (!buckets.has(dedupKey)) buckets.set(dedupKey, { canonicalRole, roles: [role] });
+    else buckets.get(dedupKey).roles.push(role);
+  }
+
+  // Run probes in parallel — one per BUCKET, not per role. Bounded by
+  // distinct providers (≤ AGENT_ROLES.length, typically 1–3 in practice).
+  const bucketResults = await Promise.all(
+    [...buckets.values()].map(async (b) => [b, await probeRole(workspaceId, b.canonicalRole, signal)]),
   );
-  const agentRoles = Object.fromEntries(entries);
-  const ok = entries.every(([, v]) => v.ok);
-  return { ok, agentRoles };
+  // Fan results back out to every role that mapped into the bucket so the
+  // per-role result map shape stays unchanged for callers.
+  const agentRoles = {};
+  let allOk = true;
+  for (const [bucket, result] of bucketResults) {
+    for (const role of bucket.roles) agentRoles[role] = result;
+    if (!result.ok) allOk = false;
+  }
+  return { ok: allOk, agentRoles };
 }
 
 /**

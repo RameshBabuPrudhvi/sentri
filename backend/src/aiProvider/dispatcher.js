@@ -188,6 +188,42 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, response
 // ── Agent-call resolution ─────────────────────────────────────────────────────
 
 /**
+ * Defence-in-depth cap on `agent_configs.systemPromptOverride`.
+ *
+ * The settings route validator caps user-supplied values at save time
+ * (see `backend/src/routes/settings.js`), but the dispatch read path is
+ * the last line of defence: a hand-written migration, a future bulk-import
+ * endpoint, or a direct DB write could inject an oversized prompt that
+ * would then be prepended to every AI call for that role until reverted.
+ * Capping here also stops a runaway prompt from blowing the model's
+ * context window with no observable failure mode at the call site.
+ *
+ * 32 KB is generous for any legitimate system prompt (the longest in the
+ * codebase is ~6 KB). Truncated prompts are tagged with a trailing
+ * `[truncated]` marker so the operator can spot the issue in logs without
+ * silently corrupted output.
+ */
+const SYSTEM_PROMPT_OVERRIDE_MAX_BYTES = 32 * 1024;
+
+/**
+ * Resolve the effective prompt: when an agent_configs row carries a
+ * `systemPromptOverride` AND the caller passed a plain string, wrap into
+ * `{ system, user }`. Otherwise pass the prompt through unchanged.
+ *
+ * Capping is applied at dispatch read time (see
+ * {@link SYSTEM_PROMPT_OVERRIDE_MAX_BYTES}) — see that constant's JSDoc
+ * for why we don't trust upstream validators alone.
+ */
+function buildEffectivePrompt(prompt, config) {
+  const override = config?.systemPromptOverride;
+  if (!override || typeof prompt !== "string") return prompt;
+  const capped = override.length > SYSTEM_PROMPT_OVERRIDE_MAX_BYTES
+    ? `${override.slice(0, SYSTEM_PROMPT_OVERRIDE_MAX_BYTES)}\n[truncated]`
+    : override;
+  return { system: capped, user: prompt };
+}
+
+/**
  * AI-005 — single source of truth for "how does an agent role resolve into a
  * concrete adapter call?". Both {@link generateText} and {@link streamText}
  * (and any future caller that wants the same per-role semantics) use this so
@@ -265,9 +301,7 @@ export function resolveAgentCall(prompt, options = {}) {
   // Cost is one env lookup — negligible against the AI call itself.
   if (process.env.AI_ROUTES_ENABLED === "true") {
     const { route, config, effectiveAgentRole } = resolveRoute({ agentRole, workspaceId });
-    const effectivePrompt = (config?.systemPromptOverride && typeof prompt === "string")
-      ? { system: config.systemPromptOverride, user: prompt }
-      : prompt;
+    const effectivePrompt = buildEffectivePrompt(prompt, config);
     return {
       // Mirror the legacy shape (`provider` field) by deriving it from the
       // route's family so call sites that still inspect `provider` for
@@ -294,9 +328,7 @@ export function resolveAgentCall(prompt, options = {}) {
   // and `useRoutes` is `false` so the existing call sites in `index.js`
   // (and `vision.js`, etc.) never see a route object until they opt in.
   const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
-  const effectivePrompt = (config?.systemPromptOverride && typeof prompt === "string")
-    ? { system: config.systemPromptOverride, user: prompt }
-    : prompt;
+  const effectivePrompt = buildEffectivePrompt(prompt, config);
   return {
     provider,
     route: null,
