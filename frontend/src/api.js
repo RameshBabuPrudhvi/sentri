@@ -161,6 +161,53 @@ export const api = {
    * @returns {Promise<{role: string, ok: boolean, reason: string|null, provider: string|null}>}
    */
   testAgentRole: (role) => req("POST", `/settings/agent-roles/${role}/test`),
+
+  // ── Provider Routes (B2/B3 — Settings UI) ──────────────────────────────────
+  // Backend endpoints assumed per the B3.1 spec; companion PR adds them.
+  // Until that lands, every call here returns a 404 and the tab renders its
+  // empty / error state — no other surface depends on these helpers.
+  /**
+   * List every `provider_routes` row in the current workspace. Secret
+   * blobs (`apiKeyEncrypted`, `apiKeyNonce`) are omitted by the repo's
+   * default SELECT — only `apiKeyLastFour` comes back for UI display.
+   * @returns {Promise<{routes: Array<Object>}>}
+   */
+  listProviderRoutes:   () => req("GET", "/settings/provider-routes"),
+  /**
+   * Create a new provider route. `apiKey` is plaintext on the wire,
+   * encrypted server-side via `secrets.encryptKey` before persist.
+   * @param {{name: string, family: string, protocol: string, baseUrl?: string|null, model: string, apiKey?: string|null, enabled?: boolean, rpmLimit?: number|null, tpmLimit?: number|null, cacheEnabled?: boolean, cacheTtlSec?: number, fallbackRouteId?: string|null}} payload
+   */
+  createProviderRoute:  (payload) => req("POST", "/settings/provider-routes", payload),
+  /**
+   * Partial-patch an existing route. Omit `apiKey` to keep the stored
+   * key intact — rotation MUST go through `rotateProviderRouteKey`
+   * (B3.6) so the audit row is tagged `action: "rotate_key"`.
+   * @param {string} id
+   * @param {Object} payload
+   */
+  updateProviderRoute:  (id, payload) => req("PATCH", `/settings/provider-routes/${id}`, payload),
+  /** @param {string} id */
+  deleteProviderRoute:  (id) => req("DELETE", `/settings/provider-routes/${id}`),
+  /**
+   * B2.2 — Run a real network capability probe and persist the result
+   * to `provider_routes.capabilities`. Response carries the updated
+   * row regardless of probe outcome — caller inspects
+   * `capabilities.reachable` to render the badge.
+   * @param {string} id
+   * @returns {Promise<{ok: boolean, route: Object, capabilities: Object}>}
+   */
+  probeProviderRoute:   (id) => req("POST", `/settings/provider-routes/${id}/probe`),
+  /**
+   * B3.6 — Rotate the route's API key. New plaintext on the wire,
+   * encrypted server-side. Server is expected to gate on a probe pass
+   * before accepting the rotation (B3.6 "rejects on probe fail").
+   * @param {string} id
+   * @param {string} apiKey
+   * @returns {Promise<{ok: boolean, lastFour: string}>}
+   */
+  rotateProviderRouteKey: (id, apiKey) => req("POST", `/settings/provider-routes/${id}/rotate-key`, { apiKey }),
+
 // ── Projects ────────────────────────────────────────────────────────────────
   /** @param {Object} data - `{ name, url, credentials? }` */
   createProject: (data) => req("POST", "/projects", data),

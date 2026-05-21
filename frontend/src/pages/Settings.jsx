@@ -6,6 +6,7 @@ import {
   Activity, Shield, HardDrive, Info, Wifi, WifiOff, Terminal,
   Compass, RotateCcw, FolderOpen, FileText, Play, AlertCircle,
   Users, UserPlus, Crown, KeyRound, Smartphone, Download,
+  Route as RouteIcon, Plus,
 } from "lucide-react";
 import { api } from "../api.js";
 import { AGENT_ROLES } from "../config.js";
@@ -541,6 +542,7 @@ function fmtUptime(seconds) {
 
 const SETTINGS_TABS = [
   { key: "providers",   label: "AI Providers",  icon: <Zap size={14} />,          adminOnly: true },
+  { key: "provider_routes", label: "Provider Routes", icon: <RouteIcon size={14} />, adminOnly: true },
   { key: "agent_roles", label: "Agent Roles", icon: <Users size={14} />, adminOnly: true },
   { key: "members",     label: "Members",       icon: <Users size={14} />,        adminOnly: true },
   { key: "execution",   label: "Execution",     icon: <Cpu size={14} />,          adminOnly: false },
@@ -710,6 +712,579 @@ function AgentRolesTab() {
       );
     })}</div>
   </div>;
+}
+
+// ── Provider Routes tab (B3.1) ────────────────────────────────────────────────
+//
+// Per-row CRUD for `provider_routes` — the dispatch target every agent role
+// pins via `routeId`. Surfaces name / family / protocol / baseUrl / model /
+// apiKey (write-only, shows `••••<lastFour>`) / enabled / rpmLimit / tpmLimit
+// / cacheEnabled / cacheTtlSec / fallbackRouteId plus three actions:
+//
+//   • Test / Re-probe → POST /settings/provider-routes/:id/probe.
+//     Renders an inline green / red badge from the persisted
+//     `capabilities.reachable` flag (B2.2 contract — every probe row is a
+//     real network call, never a catalog copy).
+//   • Rotate key (B3.6) → POST /settings/provider-routes/:id/rotate-key
+//     with a fresh plaintext key. Server gates on a successful probe before
+//     accepting the new key, so the inline confirmation reflects whether
+//     the rotation actually went through.
+//
+// Mirrors the `AgentRolesTab` pattern (form on top, list below, per-row
+// inline badges) so admins moving between the two tabs don't context-switch.
+// No inline styles — every layout class lives in
+// `frontend/src/styles/pages/settings.css` so future theme work hits one file.
+
+// Supported families + protocols, mirrored from migration 035's enum
+// comments and `protocolForProvider.PROTOCOL_MAP`. Kept inline rather than
+// fetched at runtime — the set is process-stable across deployments and a
+// round-trip to populate two dropdowns would be noise on every render.
+const PR_FAMILIES = ["anthropic", "openai", "google", "openrouter", "local", "custom"];
+const PR_PROTOCOLS = ["openai", "anthropic", "gemini", "ollama"];
+
+const PR_FORM_EMPTY = {
+  id: null,
+  name: "",
+  family: "openai",
+  protocol: "openai",
+  baseUrl: "",
+  model: "",
+  apiKey: "",
+  enabled: true,
+  rpmLimit: "",
+  tpmLimit: "",
+  cacheEnabled: false,
+  cacheTtlSec: "",
+  fallbackRouteId: "",
+};
+
+function maskedKeyDisplay(lastFour) {
+  if (!lastFour) return "—";
+  return `••••${lastFour}`;
+}
+
+// Inline probe-result badge. Reads the row's persisted `capabilities`
+// payload + the optional `live` override (the result of the current Test
+// click before the parent has refetched). `live` wins so the admin sees
+// the click respond instantly, then the badge stabilises once the row
+// data comes back from the refetch.
+function ProbeBadge({ capabilities, live }) {
+  const caps = live || capabilities;
+  if (!caps) return <span className="st-pr-badge st-pr-badge--unprobed">Unprobed</span>;
+  if (caps.reachable && caps.auth !== false && caps.model !== false) {
+    return (
+      <span className="st-status-ok st-pr-badge" title={`Probed at ${caps.probedAt || "unknown"}`}>
+        <Check size={11} /> Reachable
+      </span>
+    );
+  }
+  const reason = caps.errorReason || "unreachable";
+  return (
+    <span className="st-status-err st-pr-badge" title={reason}>
+      <AlertCircle size={11} /> {reason.slice(0, 24)}
+    </span>
+  );
+}
+
+// Create / edit form. Pulled into its own component so the parent
+// `ProviderRoutesTabView` JSX stays scannable — the form has ten fields
+// and would otherwise dominate the surrounding list rendering.
+function ProviderRoutesForm({ form, setForm, busy, showKey, setShowKey, fallbackOptions, onSave, onCancel }) {
+  return (
+    <form onSubmit={onSave} className="st-pr-form">
+      <div className="st-pr-form-grid">
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Name</span>
+          <input
+            className="input"
+            value={form.name}
+            onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
+            placeholder="anthropic-primary"
+            required
+          />
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Family</span>
+          <select
+            className="input"
+            value={form.family}
+            onChange={(e) => setForm((s) => ({ ...s, family: e.target.value }))}
+          >
+            {PR_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Protocol</span>
+          <select
+            className="input"
+            value={form.protocol}
+            onChange={(e) => setForm((s) => ({ ...s, protocol: e.target.value }))}
+          >
+            {PR_PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Model</span>
+          <input
+            className="input"
+            value={form.model}
+            onChange={(e) => setForm((s) => ({ ...s, model: e.target.value }))}
+            placeholder="claude-3-5-sonnet"
+            required
+          />
+        </label>
+        <label className="st-pr-field st-pr-field--wide">
+          <span className="st-pr-field-label">Base URL (optional)</span>
+          <input
+            className="input"
+            value={form.baseUrl}
+            onChange={(e) => setForm((s) => ({ ...s, baseUrl: e.target.value }))}
+            placeholder="https://api.example.com/v1"
+          />
+        </label>
+        <label className="st-pr-field st-pr-field--wide">
+          <span className="st-pr-field-label">
+            API key {form.id && <span className="text-xs text-muted">(leave empty to keep existing)</span>}
+          </span>
+          <div className="st-key-input-wrap">
+            <input
+              className="input"
+              type={showKey ? "text" : "password"}
+              autoComplete="off"
+              value={form.apiKey}
+              onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))}
+              placeholder={form.id ? "•••• keep stored key" : "sk-..."}
+            />
+            <button type="button" className="st-key-toggle" onClick={() => setShowKey((v) => !v)}>
+              {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">RPM limit</span>
+          <input
+            className="input" type="number" min={0}
+            value={form.rpmLimit}
+            onChange={(e) => setForm((s) => ({ ...s, rpmLimit: e.target.value }))}
+            placeholder="—"
+          />
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">TPM limit</span>
+          <input
+            className="input" type="number" min={0}
+            value={form.tpmLimit}
+            onChange={(e) => setForm((s) => ({ ...s, tpmLimit: e.target.value }))}
+            placeholder="—"
+          />
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Cache TTL (s)</span>
+          <input
+            className="input" type="number" min={0}
+            value={form.cacheTtlSec}
+            onChange={(e) => setForm((s) => ({ ...s, cacheTtlSec: e.target.value }))}
+            placeholder="0"
+            disabled={!form.cacheEnabled}
+          />
+        </label>
+        <label className="st-pr-field st-pr-field--wide">
+          <span className="st-pr-field-label">Fallback route</span>
+          <select
+            className="input"
+            value={form.fallbackRouteId}
+            onChange={(e) => setForm((s) => ({ ...s, fallbackRouteId: e.target.value }))}
+          >
+            <option value="">No fallback</option>
+            {fallbackOptions.map((r) => (
+              <option key={r.id} value={r.id}>{r.name} ({r.family})</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="st-pr-form-checks">
+        <label className="st-pr-check">
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(e) => setForm((s) => ({ ...s, enabled: e.target.checked }))}
+          />
+          Enabled
+        </label>
+        <label className="st-pr-check">
+          <input
+            type="checkbox"
+            checked={form.cacheEnabled}
+            onChange={(e) => setForm((s) => ({ ...s, cacheEnabled: e.target.checked }))}
+          />
+          Cache responses
+        </label>
+      </div>
+
+      <div className="st-agent-form-actions">
+        <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>
+          {busy ? <RefreshCw size={13} className="spin" /> : (form.id ? <Check size={13} /> : <Plus size={13} />)}
+          {form.id ? "Update route" : "Create route"}
+        </button>
+        {form.id && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>
+            Cancel edit
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+// Per-row card. Carries its own action bar + rotate-key inline panel.
+// Pulled into a separate component so the table-of-rows render in
+// `ProviderRoutesTabView` stays a clean `rows.map`. Action handlers are
+// passed in as props — the row is otherwise stateless.
+function ProviderRouteRow({ row, rows, rowState, rotateOpen, setRotateOpen, rotateBuf, setRotateBuf, onEdit, onDelete, onProbe, onRotate }) {
+  const probing = rowState?.kind === "probing";
+  const rotating = rowState?.kind === "rotating";
+  const deleting = rowState?.kind === "deleting";
+  const liveCaps = rowState?.kind === "ok" && rowState.caps ? rowState.caps : null;
+  const fallbackName = row.fallbackRouteId
+    ? (rows.find((r) => r.id === row.fallbackRouteId)?.name || row.fallbackRouteId)
+    : null;
+  return (
+    <div className="card-padded-sm st-pr-row">
+      <div className="st-pr-row-header">
+        <div className="st-pr-row-name">
+          <span className="font-semi">{row.name}</span>
+          {!row.enabled && <span className="st-pr-badge st-pr-badge--disabled">Disabled</span>}
+          <ProbeBadge capabilities={row.capabilities} live={liveCaps} />
+        </div>
+        <div className="text-xs text-muted st-pr-row-meta">
+          {row.family} · {row.protocol} · {row.model || "—"}
+          {row.baseUrl && ` · ${row.baseUrl}`}
+          {" · "}<span className="text-mono">{maskedKeyDisplay(row.apiKeyLastFour)}</span>
+        </div>
+        <div className="text-xs text-muted st-pr-row-meta">
+          rpm {row.rpmLimit ?? "∞"} · tpm {row.tpmLimit ?? "∞"}
+          {row.cacheEnabled ? ` · cache ${row.cacheTtlSec || 0}s` : " · no cache"}
+          {fallbackName && ` · fallback ${fallbackName}`}
+        </div>
+        {rowState?.kind === "err" && (
+          <div className="st-status-err st-pr-row-error">
+            <AlertCircle size={11} /> {rowState.msg}
+          </div>
+        )}
+      </div>
+      <div className="st-pr-row-actions">
+        <button
+          className="btn btn-ghost btn-xs"
+          onClick={() => onProbe(row.id)}
+          disabled={probing}
+          title="Send a real network probe to verify reachability, auth, model, and JSON mode."
+        >
+          {probing ? <RefreshCw size={11} className="spin" /> : <Activity size={11} />}
+          {row.capabilities ? "Re-probe" : "Test"}
+        </button>
+        <button
+          className="btn btn-ghost btn-xs"
+          onClick={() => setRotateOpen(rotateOpen ? null : row.id)}
+          disabled={rotating}
+          title="Replace the stored API key. Server gates on a successful probe."
+        >
+          <KeyRound size={11} />
+          Rotate key
+        </button>
+        <button className="btn btn-ghost btn-xs" onClick={() => onEdit(row)}>
+          Edit
+        </button>
+        <button className="btn btn-danger btn-xs" onClick={() => onDelete(row.id)} disabled={deleting}>
+          {deleting ? <RefreshCw size={11} className="spin" /> : <Trash2 size={11} />}
+          Delete
+        </button>
+      </div>
+      {rotateOpen && (
+        <div className="st-pr-rotate-panel">
+          <div className="st-key-input-wrap st-pr-rotate-input">
+            <input
+              className="input"
+              type="password"
+              autoComplete="off"
+              value={rotateBuf[row.id] || ""}
+              onChange={(e) => setRotateBuf((b) => ({ ...b, [row.id]: e.target.value }))}
+              placeholder="New API key (plaintext — encrypted server-side)"
+            />
+          </div>
+          <button
+            className="btn btn-primary btn-xs"
+            onClick={() => onRotate(row.id)}
+            disabled={rotating || !(rotateBuf[row.id] || "").trim()}
+          >
+            {rotating ? <RefreshCw size={11} className="spin" /> : <Check size={11} />}
+            Rotate
+          </button>
+          <button
+            className="btn btn-ghost btn-xs"
+            onClick={() => {
+              setRotateOpen(null);
+              setRotateBuf((b) => { const n = { ...b }; delete n[row.id]; return n; });
+            }}
+            disabled={rotating}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Presentational shell for the Provider Routes tab. Receives every
+// piece of state + every action callback as a prop so the JSX is
+// trivially testable in isolation and the parent function stays a
+// pure orchestrator over `api.*` calls.
+function ProviderRoutesTabView(props) {
+  const {
+    rows, form, setForm, loading, error, busy,
+    rowState, rotateBuf, setRotateBuf, rotateOpen, setRotateOpen,
+    showKey, setShowKey, fallbackOptions,
+    onSave, onCancel, onEdit, onDelete, onProbe, onRotate,
+  } = props;
+  return (
+    <div className="card card-padded">
+      <SectionTitle
+        icon={<RouteIcon size={16} color="var(--accent)" />}
+        title="Provider Routes"
+        sub="Bundle protocol + endpoint + model + encrypted API key. Agent roles pin a route via routeId."
+      />
+      {error && (
+        <div className="st-status-err st-agent-error">
+          <AlertCircle size={12} /> {error}
+        </div>
+      )}
+      <ProviderRoutesForm
+        form={form}
+        setForm={setForm}
+        busy={busy}
+        showKey={showKey}
+        setShowKey={setShowKey}
+        fallbackOptions={fallbackOptions}
+        onSave={onSave}
+        onCancel={onCancel}
+      />
+      {loading ? (
+        <div className="text-sm text-muted st-pr-loading">Loading provider routes…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-muted st-pr-empty">
+          No provider routes configured. Create one above — agent roles need a routeId to dispatch.
+        </div>
+      ) : (
+        <div className="st-pr-rows">
+          {rows.map((row) => (
+            <ProviderRouteRow
+              key={row.id}
+              row={row}
+              rows={rows}
+              rowState={rowState[row.id]}
+              rotateOpen={rotateOpen === row.id}
+              setRotateOpen={setRotateOpen}
+              rotateBuf={rotateBuf}
+              setRotateBuf={setRotateBuf}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onProbe={onProbe}
+              onRotate={onRotate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProviderRoutesTab() {
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState(PR_FORM_EMPTY);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  // Per-row in-flight state keyed by route id. Entries are one of:
+  //   { kind: "probing" } | { kind: "rotating" } | { kind: "deleting" }
+  //   | { kind: "ok", caps?: object, lastFour?: string }
+  //   | { kind: "err", msg: string }
+  // Scoped per-row so probing route A doesn't grey out route B's actions.
+  const [rowState, setRowState] = useState({});
+  // Plaintext key buffer for the rotate-key inline form, per row. Never
+  // mirrored into `rows` — only used at submit time.
+  const [rotateBuf, setRotateBuf] = useState({});
+  // Which row's rotate panel is open. Closing the panel clears the
+  // plaintext buffer so a partially-typed key doesn't linger in memory.
+  const [rotateOpen, setRotateOpen] = useState(null);
+  // apiKey visibility toggle on the create+edit form.
+  const [showKey, setShowKey] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.listProviderRoutes();
+      setRows(res?.routes || []);
+    } catch (err) {
+      setError(err.message || "Failed to load provider routes.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  function resetForm() {
+    setForm(PR_FORM_EMPTY);
+    setError("");
+    setShowKey(false);
+  }
+
+  // Normalise the form payload before sending. The form keeps numeric
+  // fields as strings so empty inputs round-trip cleanly; here we coerce
+  // to `Number | null` so the backend doesn't receive "" for an INTEGER
+  // column. Empty `baseUrl` collapses to `null` so non-default endpoints
+  // can be cleared without leaving a sentinel "".
+  function buildPayload(src) {
+    const numOrNull = (v) => {
+      if (v === "" || v == null) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const payload = {
+      name: src.name.trim(),
+      family: src.family,
+      protocol: src.protocol,
+      baseUrl: src.baseUrl.trim() || null,
+      model: src.model.trim(),
+      enabled: !!src.enabled,
+      rpmLimit: numOrNull(src.rpmLimit),
+      tpmLimit: numOrNull(src.tpmLimit),
+      cacheEnabled: !!src.cacheEnabled,
+      cacheTtlSec: numOrNull(src.cacheTtlSec) ?? 0,
+      fallbackRouteId: src.fallbackRouteId || null,
+    };
+    // Only send `apiKey` when the admin actually typed one. Editing a
+    // row without retyping the key MUST leave the stored ciphertext
+    // untouched — rotation goes through a separate endpoint that audits
+    // with `action: "rotate_key"` and bumps the breaker.
+    if (src.apiKey && src.apiKey.trim()) payload.apiKey = src.apiKey.trim();
+    return payload;
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    setError("");
+    if (!form.name.trim()) { setError("Name is required."); return; }
+    if (!form.model.trim()) { setError("Model is required."); return; }
+    setBusy(true);
+    try {
+      const payload = buildPayload(form);
+      if (form.id) await api.updateProviderRoute(form.id, payload);
+      else await api.createProviderRoute(payload);
+      resetForm();
+      await load();
+    } catch (err) {
+      setError(err.message || "Failed to save provider route.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function edit(row) {
+    setError("");
+    setForm({
+      id: row.id,
+      name: row.name || "",
+      family: row.family || "openai",
+      protocol: row.protocol || "openai",
+      baseUrl: row.baseUrl || "",
+      model: row.model || "",
+      // Never prefill apiKey — the repo doesn't return the ciphertext
+      // to list reads (B1.4), and we don't want the input to pretend it
+      // has a stored value the user could accidentally clobber.
+      apiKey: "",
+      enabled: row.enabled === 1 || row.enabled === true,
+      rpmLimit: row.rpmLimit ?? "",
+      tpmLimit: row.tpmLimit ?? "",
+      cacheEnabled: row.cacheEnabled === 1 || row.cacheEnabled === true,
+      cacheTtlSec: row.cacheTtlSec ?? "",
+      fallbackRouteId: row.fallbackRouteId || "",
+    });
+  }
+
+  async function probe(id) {
+    setRowState((s) => ({ ...s, [id]: { kind: "probing" } }));
+    try {
+      const res = await api.probeProviderRoute(id);
+      setRowState((s) => ({ ...s, [id]: { kind: "ok", caps: res.capabilities } }));
+      // Refetch the list so the persisted capabilities (stamped on the
+      // row by the backend) replace the live override on the next render.
+      // Not awaited — the badge already updated from `live` and the
+      // refetch is opportunistic.
+      load();
+    } catch (err) {
+      setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message || "probe_failed" } }));
+    }
+  }
+
+  async function rotate(id) {
+    const key = (rotateBuf[id] || "").trim();
+    if (!key) return;
+    setRowState((s) => ({ ...s, [id]: { kind: "rotating" } }));
+    try {
+      const res = await api.rotateProviderRouteKey(id, key);
+      setRowState((s) => ({ ...s, [id]: { kind: "ok", lastFour: res?.lastFour } }));
+      setRotateBuf((b) => { const n = { ...b }; delete n[id]; return n; });
+      setRotateOpen(null);
+      await load();
+    } catch (err) {
+      setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message || "rotate_failed" } }));
+    }
+  }
+
+  async function del(id) {
+    if (!window.confirm("Delete this provider route? Agent roles pinned to it will fall back to env detection.")) return;
+    setRowState((s) => ({ ...s, [id]: { kind: "deleting" } }));
+    try {
+      await api.deleteProviderRoute(id);
+      if (form.id === id) resetForm();
+      await load();
+      setRowState((s) => { const n = { ...s }; delete n[id]; return n; });
+    } catch (err) {
+      setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message || "delete_failed" } }));
+    }
+  }
+
+  // Fallback dropdown options — exclude the row being edited so the UI
+  // can't offer a self-loop. The repo's `wouldCreateCycle` catches
+  // longer cycles server-side, so this is a UX nicety, not a security
+  // boundary.
+  const fallbackOptions = rows.filter((r) => r.id !== form.id);
+
+  return <ProviderRoutesTabView
+    rows={rows}
+    form={form}
+    setForm={setForm}
+    loading={loading}
+    error={error}
+    busy={busy}
+    rowState={rowState}
+    rotateBuf={rotateBuf}
+    setRotateBuf={setRotateBuf}
+    rotateOpen={rotateOpen}
+    setRotateOpen={setRotateOpen}
+    showKey={showKey}
+    setShowKey={setShowKey}
+    fallbackOptions={fallbackOptions}
+    onSave={save}
+    onCancel={resetForm}
+    onEdit={edit}
+    onDelete={del}
+    onProbe={probe}
+    onRotate={rotate}
+  />;
 }
 
 // ── Members tab (ACL-002) ─────────────────────────────────────────────────────
@@ -2167,6 +2742,9 @@ export default function Settings() {
         </div>
       </div>
       </>}
+
+      {/* ── Tab: Provider Routes (B3.1) ── */}
+      {tab === "provider_routes" && isAdmin && <ProviderRoutesTab />}
 
       {/* ── Tab: Members ── */}
       {tab === "agent_roles" && isAdmin && <AgentRolesTab />}

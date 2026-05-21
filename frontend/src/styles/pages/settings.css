@@ -204,6 +204,133 @@
   margin-top: 0;
 }
 
+/* ── Provider Routes tab (B3.1) ─────────────────────────────────────────────── */
+/* Per-row form + list inside the ProviderRoutesTab. Class names follow the
+   `.st-pr-*` prefix to stay scoped to the Settings page; no inline styles so
+   the same look survives theme changes and the AGENT.md "no inline CSS" rule. */
+.st-pr-form {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.st-pr-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.st-pr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.st-pr-field--wide {
+  grid-column: span 2;
+}
+.st-pr-field-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text2);
+}
+.st-pr-form-checks {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.st-pr-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.st-pr-loading,
+.st-pr-empty {
+  padding: 18px 4px;
+  text-align: center;
+}
+
+.st-pr-rows {
+  display: grid;
+  gap: 10px;
+}
+.st-pr-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+.st-pr-row-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.st-pr-row-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.st-pr-row-meta {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.st-pr-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.st-pr-row-error {
+  margin-top: 4px;
+}
+
+.st-pr-rotate-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  flex-wrap: wrap;
+}
+.st-pr-rotate-input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.st-pr-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 0;
+}
+.st-pr-badge--unprobed {
+  background: var(--bg3);
+  color: var(--text3);
+  border: 1px solid var(--border);
+}
+.st-pr-badge--disabled {
+  background: rgba(255, 165, 2, 0.1);
+  color: var(--amber);
+  border: 1px solid rgba(255, 165, 2, 0.25);
+}
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
   /* Provider cards: tighten padding */
@@ -230,6 +357,20 @@
   .st-data-action .btn {
     align-self: flex-start;
   }
+
+  /* Provider Routes: collapse form to 2 columns + stack action bar */
+  .st-pr-form-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .st-pr-field--wide {
+    grid-column: span 2;
+  }
+  .st-pr-row {
+    grid-template-columns: 1fr;
+  }
+  .st-pr-row-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
@@ -255,6 +396,21 @@
     align-items: flex-start;
     gap: 8px;
     padding: 12px 16px;
+  }
+
+  /* Provider Routes: single-column form on phones */
+  .st-pr-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .st-pr-field--wide {
+    grid-column: span 1;
+  }
+  .st-pr-rotate-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .st-pr-rotate-input {
+    min-width: 0;
   }
 
   /* Tour card: stack */
