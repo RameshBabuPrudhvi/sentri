@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **GAP-002 (audit) — Settings deep-linkable section routes.** Each Settings tab now has a canonical URL: `/settings/providers`, `/settings/provider_routes`, `/settings/agent_roles`, `/settings/members`, `/settings/execution`, `/settings/integrations`, `/settings/data`, `/settings/security`, `/settings/account`. Browser back/forward moves between sections, every section is bookmarkable, and `/settings` redirects to the first visible section (admin → `providers`, non-admin → `execution`). Legacy `/settings?tab=<key>` links (MfaGraceBanner, the GitHub App install callback) continue to work via a one-shot redirect that preserves sibling query params. Sets up the route scaffolding needed for the per-section lazy-chunk split the audit recommends as P0; the component itself is still one file in this PR — splitting into 6+ chunks is tracked as a follow-up.
+
 ## [1.8.0] — 2026-05-21
 
 ### Breaking

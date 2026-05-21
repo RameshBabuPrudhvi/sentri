@@ -68,7 +68,18 @@ export default function App() {
                 <Route path="/projects/:id" element={<ProjectDetail />} />
                 <Route path="/runs/:runId" element={<RunDetail />} />
                 <Route path="/tests/:testId" element={<TestDetail />} />
+                {/* GAP-002 (audit): per-section routes under /settings/:section give
+                    each settings surface a bookmarkable URL, sidebar wayfinding via
+                    Sidebar's NavLink active-class matching, and the route scaffolding
+                    needed for a future per-section lazy chunk split. The component
+                    is still one file today — splitting Settings.jsx itself into
+                    feature-scoped lazy chunks is tracked separately (the audit
+                    recommends 6+ chunks; landing them here would balloon this PR
+                    past reviewable size). Legacy `/settings?tab=<key>` deep links
+                    continue to work — Settings.jsx redirects them to the new
+                    canonical URL on mount. */}
                 <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                <Route path="/settings/:section" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
                 {/* SEC-007: compliance audit log — admin-gated at the route
                     layer (defence-in-depth; backend also enforces admin
                     via requireRole). Mounted at `/audit-log` only — the

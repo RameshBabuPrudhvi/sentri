@@ -46,7 +46,7 @@ The ⌘K command palette (`CommandPalette.jsx`) provides command navigation but 
 ---
 
 ### GAP-002 — Settings.jsx God-File Anti-Pattern
-**Severity: Critical**
+**Severity: Critical** · _Phase 1 landed in PR #25 — deep-linkable `/settings/:section` routes; component split still pending._
 
 `Settings.jsx` is 3,594 lines — one of the longest files in the codebase. It renders Provider configuration, Agent Roles, Team Members, MFA, Security, Integrations, AI Provider Routes, Workspace settings, Notification settings, Recycle Bin, and System info all within a single component with a single tab switcher. The file imports 30+ Lucide icons, 4 query hooks, and manages 40+ useState variables.
 

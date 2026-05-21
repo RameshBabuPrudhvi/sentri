@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, Check, Eye, EyeOff, ExternalLink, AlertTriangle,
   RefreshCw, Trash2, Zap, Database, Server, Clock, Cpu,
@@ -3282,17 +3282,50 @@ export default function Settings() {
   const { user } = useAuth();
   const isAdmin = user?.workspaceRole === "admin";
   const visibleTabs = SETTINGS_TABS.filter(t => isAdmin || !t.adminOnly);
-  // Honour `?tab=<key>` deep links (e.g. the GitHub App install callback
-  // redirects to `/settings?tab=integrations&github=installed&…` and the
-  // IntegrationsTab success banner only renders when that tab is active).
-  // Fall back to the first visible tab so non-admins don't land on a locked
-  // section. Computed once at mount via lazy init — subsequent navigations
-  // within Settings use the in-component `setTab`.
-  const [tab, setTab]           = useState(() => {
-    const urlTab = new URLSearchParams(window.location.search).get("tab");
-    if (urlTab && visibleTabs.some(t => t.key === urlTab)) return urlTab;
-    return visibleTabs[0]?.key || "account";
-  });
+
+  // GAP-002 (audit): tab state is now router-driven via `/settings/:section`.
+  // The legacy `/settings?tab=<key>` form is preserved as a one-shot redirect
+  // so existing deep links (MfaGraceBanner → `/settings?tab=security`, the
+  // GitHub App install callback → `/settings?tab=integrations&github=installed`)
+  // keep working without coordinated cross-file edits. Each section now has a
+  // bookmarkable URL, browser back/forward moves between sections, and the
+  // Sidebar's NavLink active-class lights up on the active section — laying
+  // the foundation for the per-section lazy-chunk split tracked separately.
+  const params = useParams();
+  const sectionParam = params.section;
+  const fallbackTab = visibleTabs[0]?.key || "account";
+  // Resolve the active tab from the URL segment. Unknown / missing segments
+  // (legacy `/settings`, typo'd section) collapse to the first visible tab so
+  // non-admins never land on a locked section.
+  const tab = sectionParam && visibleTabs.some(t => t.key === sectionParam)
+    ? sectionParam
+    : fallbackTab;
+
+  // Back-compat: `?tab=<key>` → `/settings/<key>` (preserve other query params
+  // like `github=installed` so IntegrationsTab's success banner still fires).
+  // Fires only when the legacy param is present so a user who lands on
+  // `/settings/security` directly never sees a URL flicker.
+  useEffect(() => {
+    const search = new URLSearchParams(window.location.search);
+    const legacyTab = search.get("tab");
+    if (!legacyTab) return;
+    if (!visibleTabs.some(t => t.key === legacyTab)) return;
+    search.delete("tab");
+    const qs = search.toString();
+    navigate(`/settings/${legacyTab}${qs ? `?${qs}` : ""}`, { replace: true });
+  }, [navigate, visibleTabs]);
+
+  // Sidebar nav still points at `/settings` (no section). Redirect to the
+  // first visible tab so the URL is always canonical and the per-section
+  // sidebar wayfinding (future, GAP-002 follow-up) has a stable active state.
+  useEffect(() => {
+    if (sectionParam) return;
+    navigate(`/settings/${fallbackTab}`, { replace: true });
+  }, [sectionParam, fallbackTab, navigate]);
+
+  function setTab(key) {
+    navigate(`/settings/${key}`);
+  }
 
   const bundleQuery = useSettingsBundleQuery();
 
