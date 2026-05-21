@@ -538,7 +538,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 ---
 
 ### AI-004 — Agent role config schema (dormant) 🔵 Medium
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Multi-agent foundation · Prerequisite for AI-005 · Industry pattern (CrewAI `Agent` config, LangGraph `Node` definition, AutoGen `AgentConfig`)
+**Status:** 🔲✅ Complete (PR #20) | **Effort:** M | **Source:** Multi-agent foundation · Prerequisite for AI-005 · Industry pattern (CrewAI `Agent` config, LangGraph `Node` definition, AutoGen `AgentConfig`)
 **Problem:** Multi-agent dispatch (AI-005) needs a place to read "which provider, model, system prompt, and temperature should the planner agent use?" from. The pipeline today (`backend/src/pipeline/*`) hardcodes prompt templates and reads provider config from the workspace default. Without a config layer, the multi-agent dispatch PR will need to ship: DB schema + repo + settings UI + dispatch wiring all at once — too large for safe review. AI-004 ships the config plumbing in isolation, with the pipeline still calling the workspace default. The config is read but ignored — dormant until AI-005 lights it up.
 **Fix:** New `agent_configs` table per workspace storing one row per role (`planner` / `codegen` / `critic` / `selfheal` / `crawl_classify` / `scenario_plan` / etc.). Settings UI under **Settings → AI → Agent Roles** lets admins define each role's `(provider, model, systemPromptOverride, temperature, maxTokens, fallbackRole)`. Backend exposes `agentConfigRepo.getByRole(workspaceId, role)` but no pipeline code reads it yet — that's AI-005's job.
 ```sql
@@ -584,7 +584,7 @@ CREATE TABLE agent_configs (
 **Out of scope:** Pipeline integration. AI-004 ships config storage + UI; AI-005 ships the dispatch wiring.
 ---
 ### AI-005 — Multi-agent dispatch (agentRole-aware generation) 🟢 Differentiator
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Strategic differentiator (Mabl / Testim / SmartBear ship single-LLM pipelines) · Industry pattern (CrewAI agent handoff, LangGraph stateful node dispatch, AutoGen `GroupChat`)
+**Status:** ✅ Complete (PR #22) | **Effort:** L | **Source:** Strategic differentiator (Mabl / Testim / SmartBear ship single-LLM pipelines) · Industry pattern (CrewAI agent handoff, LangGraph stateful node dispatch, AutoGen `GroupChat`)
 **Problem:** Single-agent mode uses one provider + model for all 8 pipeline stages (crawl classification → scenario planning → code generation → critic review → self-healing). This is the lowest-cost path but suboptimal: a customer might want Claude Sonnet for codegen (best at structured output), GPT-4o-mini for crawl classification (cheap + fast on simple JSON), Gemini Flash for the critic (different model gives independent second opinion), and Ollama for self-healing (low-stakes, on-prem). The agent-config table from AI-004 stores these preferences but is dormant — AI-005 lights it up.
 **Fix:** Add `options.agentRole` parameter to `generateText` / `streamText` / `generateVision`. When provided, `registry.resolveProvider({ agentRole, workspaceId })` reads the agent config from `agentConfigRepo` and returns the resolved provider/model/systemPrompt/temperature, falling back to the workspace default when the role is unconfigured. Per-role circuit breakers via `breakerKey(providerId, agentRole)` so a rate-limited Claude planner does not trip Claude for the critic. Per-role token + cost telemetry via a new `agent_role` Prometheus label (bounded cardinality: 8 fixed role names).
 ```js
