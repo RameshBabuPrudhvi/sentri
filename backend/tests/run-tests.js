@@ -170,6 +170,11 @@ const files = [
   "tests/eval-persistence.test.js",
   // AUTO-022 — CLI E2E subprocess tests for run-eval.mjs exit codes + report artifact.
   "tests/eval-cli-e2e.test.js",
+    // B3.11 — Integration tests for the new operator surface.
+  "tests/provider-routes-api.test.js",
+  "tests/routes-import-export.test.js",
+  "tests/compat-migration.test.js",
+  "tests/concurrent-dispatch.test.js",
 ];
 
 let passed = 0;
