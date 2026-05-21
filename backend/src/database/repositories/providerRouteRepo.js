@@ -229,15 +229,22 @@ export function upsert(input) {
         err.code = "ERR_ROUTE_MISSING_FIELD";
         throw err;
       }
-      const cols = ["id", "workspaceId", ...MUTABLE_FIELDS, "createdAt", "updatedAt"];
+      // Build INSERT dynamically: omit MUTABLE_FIELDS columns the caller
+      // left undefined so the SQL DEFAULT applies. This matters for the
+      // NOT NULL columns (`enabled`, `cacheEnabled`, `cacheTtlSec`) whose
+      // schema defaults would otherwise be clobbered by an explicit NULL
+      // and trip the NOT NULL constraint.
+      const cols = ["id", "workspaceId"];
+      const values = [targetId, workspaceId];
+      for (const f of MUTABLE_FIELDS) {
+        const wire = toWireValue(f, input[f]);
+        if (wire === undefined) continue;
+        cols.push(f);
+        values.push(wire);
+      }
+      cols.push("createdAt", "updatedAt");
+      values.push(now, now);
       const placeholders = cols.map(() => "?").join(", ");
-      const values = cols.map((c) => {
-        if (c === "id") return targetId;
-        if (c === "workspaceId") return workspaceId;
-        if (c === "createdAt" || c === "updatedAt") return now;
-        const wire = toWireValue(c, input[c]);
-        return wire === undefined ? null : wire;
-      });
       db.prepare(
         `INSERT INTO provider_routes (${cols.join(", ")}) VALUES (${placeholders})`
       ).run(...values);
