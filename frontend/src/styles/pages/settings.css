@@ -331,6 +331,35 @@
   border: 1px solid rgba(255, 165, 2, 0.25);
 }
 
+/* B3.2 — Inline cycle warning rendered under the fallback dropdown.
+   Reuses `.st-status-err` for colour + icon alignment; this rule just
+   tightens the spacing so it visually anchors to the dropdown above
+   rather than floating in the form grid gap. */
+.st-pr-cycle-warning {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* B3.2 — Deprecation hint that replaces the old `fallbackRole` dropdown
+   in `AgentRolesTab`. Looks like a muted form-row note so admins
+   editing role configs see WHY the field is gone without us having to
+   ship a separate migration UI. */
+.st-agent-fallback-deprecation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text3);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
   /* Provider cards: tighten padding */

@@ -608,7 +608,13 @@ function AgentRolesTab() {
         model: form.model || null,
         systemPromptOverride: form.systemPromptOverride || null,
         maxTokens: form.maxTokens ? Number(form.maxTokens) : null,
-        fallbackRole: form.fallbackRole || null,
+        // B3.2 — `fallbackRole` UI is deprecated. Always send `null`
+        // for new saves so the DB column drifts toward unused while we
+        // keep it around for one release per the rollback contract.
+        // Existing rows with non-null fallbackRole are not migrated
+        // here — operators clear them by re-saving the role in the
+        // Provider Routes tab via the route-level fallback.
+        fallbackRole: null,
       };
       if (editingRole) await api.updateAgentRole(editingRole, payload);
       else await api.createAgentRole(payload);
@@ -673,7 +679,22 @@ function AgentRolesTab() {
       <textarea className="input" placeholder="system prompt override" value={form.systemPromptOverride} onChange={(e) => setForm((s) => ({ ...s, systemPromptOverride: e.target.value }))} />
       <input className="input" type="number" step="0.1" value={form.temperature} onChange={(e) => setForm((s) => ({ ...s, temperature: Number(e.target.value) }))} />
       <input className="input" type="number" placeholder="max tokens" value={form.maxTokens} onChange={(e) => setForm((s) => ({ ...s, maxTokens: e.target.value }))} />
-      <select className="input" value={form.fallbackRole} onChange={(e) => setForm((s) => ({ ...s, fallbackRole: e.target.value }))}><option value="">No fallback</option>{AGENT_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+      {/* B3.2 — `fallbackRole` is deprecated. The canonical per-route
+          fallback lives on `provider_routes.fallbackRouteId` and is
+          edited in the Provider Routes tab. The DB column on
+          `agent_configs.fallbackRole` is preserved for one release so a
+          rollback to pre-B3 dispatch keeps working; the UI no longer
+          exposes it. New role configs leave `fallbackRole` as null —
+          dispatch resolves the fallback chain via the assigned
+          provider_route. Restore the dropdown here ONLY if the
+          rollback path needs to be re-enabled. */}
+      <div className="st-agent-fallback-deprecation">
+        <Info size={11} />
+        <span>
+          Per-role fallback is now configured on the provider route's
+          {" "}<strong>Fallback route</strong> field (Provider Routes tab).
+        </span>
+      </div>
       <div className="st-agent-form-actions">
         <button className="btn btn-primary btn-sm" disabled={busy}>{editingRole ? "Update role config" : "Save role config"}</button>
         {editingRole && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditingRole(""); setForm(empty); setError(""); }}>Cancel edit</button>}
@@ -763,6 +784,34 @@ function maskedKeyDisplay(lastFour) {
   return `••••${lastFour}`;
 }
 
+// B3.2 — Client-side fallback-cycle preview. Walks the `fallbackRouteId`
+// chain starting from the proposed fallback and returns the offending
+// route id when the walk revisits `startRouteId` (or hits the depth cap).
+// Mirrors `providerRouteRepo.wouldCreateCycle` so the UI matches the
+// authoritative backend check; the backend still wins on save (it sees
+// concurrent edits we can't), but the inline warning lets the operator
+// fix the loop without round-tripping through `ERR_ROUTE_FALLBACK_CYCLE`.
+//
+// `startRouteId` is `null` for the create form (no id yet, no self-loop
+// possible) and the current row's id for the edit form. Returns `null`
+// when no cycle exists.
+function detectFallbackCycle(rows, startRouteId, proposedFallbackId) {
+  if (!proposedFallbackId) return null;
+  if (startRouteId && proposedFallbackId === startRouteId) return startRouteId;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const seen = new Set();
+  if (startRouteId) seen.add(startRouteId);
+  let cur = proposedFallbackId;
+  // Bounded — caps at 64 hops (same as the repo). Any legitimate chain
+  // is far shorter; the cap defends against malformed local state.
+  for (let i = 0; i < 64 && cur; i += 1) {
+    if (seen.has(cur)) return cur;
+    seen.add(cur);
+    cur = byId.get(cur)?.fallbackRouteId || null;
+  }
+  return null;
+}
+
 // Inline probe-result badge. Reads the row's persisted `capabilities`
 // payload + the optional `live` override (the result of the current Test
 // click before the parent has refetched). `live` wins so the admin sees
@@ -789,7 +838,7 @@ function ProbeBadge({ capabilities, live }) {
 // Create / edit form. Pulled into its own component so the parent
 // `ProviderRoutesTabView` JSX stays scannable — the form has ten fields
 // and would otherwise dominate the surrounding list rendering.
-function ProviderRoutesForm({ form, setForm, busy, showKey, setShowKey, fallbackOptions, onSave, onCancel }) {
+function ProviderRoutesForm({ form, setForm, busy, showKey, setShowKey, fallbackOptions, cycleAtName, onSave, onCancel }) {
   return (
     <form onSubmit={onSave} className="st-pr-form">
       <div className="st-pr-form-grid">
@@ -900,6 +949,17 @@ function ProviderRoutesForm({ form, setForm, busy, showKey, setShowKey, fallback
               <option key={r.id} value={r.id}>{r.name} ({r.family})</option>
             ))}
           </select>
+          {/* B3.2 — Inline cycle preview. The backend's
+              `ERR_ROUTE_FALLBACK_CYCLE` is the authoritative check; this
+              warning fires on the same data the operator is editing
+              client-side so they can fix the loop before submitting.
+              `cycleAtName` is the human name of the route where the walk
+              revisits its origin. */}
+          {cycleAtName && (
+            <div className="st-status-err st-pr-cycle-warning">
+              <AlertTriangle size={11} /> Fallback chain loops at "{cycleAtName}". Pick a different route.
+            </div>
+          )}
         </label>
       </div>
 
@@ -923,7 +983,11 @@ function ProviderRoutesForm({ form, setForm, busy, showKey, setShowKey, fallback
       </div>
 
       <div className="st-agent-form-actions">
-        <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>
+        {/* B3.2 — Disable save when a fallback cycle was detected
+            client-side. The backend would reject the save with
+            `ERR_ROUTE_FALLBACK_CYCLE` anyway; disabling here saves
+            the round-trip and surfaces the issue immediately. */}
+        <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !!cycleAtName}>
           {busy ? <RefreshCw size={13} className="spin" /> : (form.id ? <Check size={13} /> : <Plus size={13} />)}
           {form.id ? "Update route" : "Create route"}
         </button>
@@ -1044,7 +1108,7 @@ function ProviderRoutesTabView(props) {
   const {
     rows, form, setForm, loading, error, busy,
     rowState, rotateBuf, setRotateBuf, rotateOpen, setRotateOpen,
-    showKey, setShowKey, fallbackOptions,
+    showKey, setShowKey, fallbackOptions, cycleAtName,
     onSave, onCancel, onEdit, onDelete, onProbe, onRotate,
   } = props;
   return (
@@ -1066,6 +1130,7 @@ function ProviderRoutesTabView(props) {
         showKey={showKey}
         setShowKey={setShowKey}
         fallbackOptions={fallbackOptions}
+        cycleAtName={cycleAtName}
         onSave={onSave}
         onCancel={onCancel}
       />
@@ -1263,6 +1328,14 @@ function ProviderRoutesTab() {
   // boundary.
   const fallbackOptions = rows.filter((r) => r.id !== form.id);
 
+  // B3.2 — Run the client-side cycle check on every keystroke against the
+  // current `form.fallbackRouteId`. `cycleAt` is the routeId where the
+  // walk loops (or `null` when no cycle). Passed to the view so the
+  // form can render an inline warning + disable save without round-
+  // tripping through the backend's `ERR_ROUTE_FALLBACK_CYCLE`.
+  const cycleAt = detectFallbackCycle(rows, form.id, form.fallbackRouteId);
+  const cycleAtName = cycleAt ? (rows.find((r) => r.id === cycleAt)?.name || cycleAt) : null;
+
   return <ProviderRoutesTabView
     rows={rows}
     form={form}
@@ -1278,6 +1351,7 @@ function ProviderRoutesTab() {
     showKey={showKey}
     setShowKey={setShowKey}
     fallbackOptions={fallbackOptions}
+    cycleAtName={cycleAtName}
     onSave={save}
     onCancel={resetForm}
     onEdit={edit}
