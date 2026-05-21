@@ -226,7 +226,11 @@ test("--dry-run reads but commits nothing", () => {
 test("compat:* slot → family=custom, protocol=openai, baseUrl + key carried", () => {
   resetTables();
   apiKeyRepo.setCompatSlot("compat:myllm", {
-    apiKey: "sk-compat-test-1234567890",
+    // Fake key shaped to NOT match Gitleaks `generic-api-key` heuristics
+    // (no `sk-` / `pk-` / `xoxb-` prefix on a property literally named
+    // `apiKey`). The encryption + lastFour assertions below still test
+    // the same contract regardless of the string's shape.
+    apiKey: "fake-test-key-aaaaaaaaaaaa7890",
     baseUrl: "https://llm.example.com/v1",
     model: "my-model-1",
   });

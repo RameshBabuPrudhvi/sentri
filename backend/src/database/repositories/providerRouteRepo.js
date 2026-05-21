@@ -29,6 +29,11 @@ import * as auditRepo from "./providerRouteAuditRepo.js";
 // is safe under Node ESM: neither module calls an imported function at
 // top-level, so both finish initialisation before any cache method runs.
 import * as secrets from "../../aiProvider/secrets.js";
+// B2.2 — capability probe wiring. Same import-cycle reasoning as
+// `secrets.js` above: the probe module imports protocol adapters which
+// import secrets which import this repo, but no top-level call walks
+// the cycle so initialisation completes cleanly.
+import { runCapabilityProbe } from "../../aiProvider/capabilityProbe.js";
 const SECRET_COLUMNS = Object.freeze(["apiKeyEncrypted", "apiKeyNonce"]);
 const SAFE_COLUMNS = [
   "id", "workspaceId", "name", "family", "protocol", "baseUrl", "model",
@@ -321,6 +326,64 @@ export function upsert(input) {
  * @param {string} [opts.userId]   — Audit actor.
  * @returns {{ deleted: number, fallbacksCleared: number }} better-sqlite3 changes counts.
  */
+/**
+ * B2.2 — Run a real network capability probe against an existing
+ * route and persist the result to `provider_routes.capabilities`.
+ *
+ * Two-phase write so a flaky probe can't leave the row half-updated:
+ *   1. `runCapabilityProbe(route)` returns a `capabilities` payload
+ *      OUTSIDE the transaction. The probe itself does network I/O
+ *      and can take seconds — holding a SQLite write lock that long
+ *      would serialise the rest of the deployment.
+ *   2. The transaction is opened only AFTER the probe resolves, then
+ *      writes the JSON column + appends the audit row atomically.
+ *
+ * Audit entry is `action: "probe"` with `metadata: { capabilities }`
+ * — never the secret. Lifeguard-flagged: the older endpoint at
+ * `routes/settings.js` was a catalog copy with `action: "probe"`,
+ * which is misleading. Once the route uses this helper, every
+ * `action: "probe"` audit row reflects a real network confirmation.
+ *
+ * @param {string} workspaceId
+ * @param {string} routeId
+ * @param {Object} [opts]
+ * @param {string} [opts.userId] - Audit actor; null for system probes.
+ * @param {number} [opts.timeoutMs=10000]
+ * @returns {Promise<Object|null>} The freshly persisted route row, or
+ *   `null` when the routeId doesn't exist in this workspace (caller
+ *   should 404).
+ */
+export async function probeAndPersist(workspaceId, routeId, { userId = null, timeoutMs } = {}) {
+  const route = getById(workspaceId, routeId);
+  if (!route) return null;
+  // Probe runs OUTSIDE the transaction — see JSDoc.
+  const capabilities = await runCapabilityProbe(route, { timeoutMs });
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const tx = db.transaction(() => {
+    db.prepare(
+      "UPDATE provider_routes SET capabilities = ?, updatedAt = ? WHERE id = ? AND workspaceId = ?",
+    ).run(stringifyJson(capabilities), now, routeId, workspaceId);
+    auditRepo.append({
+      workspaceId,
+      routeId,
+      userId,
+      action: "probe",
+      metadata: {
+        capabilities,
+        // Surface probe outcome at the top level of metadata too so
+        // audit-log filters (B3.9) can `WHERE metadata LIKE '%"reachable":false%'`
+        // without parsing the nested `capabilities` JSON.
+        reachable: capabilities.reachable,
+        source: capabilities.source,
+        errorReason: capabilities.errorReason || null,
+      },
+    });
+  });
+  tx();
+  return getById(workspaceId, routeId);
+}
+
 export function remove(workspaceId, id, { userId } = {}) {
   const db = getDatabase();
   const tx = db.transaction(() => {

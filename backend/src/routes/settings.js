@@ -26,9 +26,6 @@ import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
-import * as providerRouteAuditRepo from "../database/repositories/providerRouteAuditRepo.js";
-import { capabilitiesFor } from "../aiProvider/modelCatalog.js";
-import { getDatabase } from "../database/sqlite.js";
 
 
 const router = Router();
@@ -425,29 +422,28 @@ router.get("/ollama/status", async (req, res) => {
   res.json(status);
 });
 
-router.post("/settings/provider-routes/:id/probe", requireRole("admin"), (req, res) => {
-  const route = providerRouteRepo.getById(req.workspaceId, req.params.id);
-  if (!route) return res.status(404).json({ error: "Route not found" });
-  const family = route.family === "custom" ? "openai" : route.family;
-  const base = capabilitiesFor(family);
-  const capabilities = {
-    vision: Boolean(base?.supportsVision),
-    jsonMode: Boolean(base?.supportsJsonMode),
-    tools: false,
-    streaming: Boolean(base?.supportsStreaming),
-    contextWindow: Number.isFinite(base?.contextWindow) ? base.contextWindow : null,
-    maxOutputTokens: Number.isFinite(base?.maxOutputTokens) ? base.maxOutputTokens : null,
-    probedAt: new Date().toISOString(),
-  };
-  const updated = providerRouteRepo.upsert({ ...route, workspaceId: req.workspaceId, userId: req.authUser?.sub || null, capabilities });
-  providerRouteAuditRepo.append({
-    workspaceId: req.workspaceId,
-    routeId: route.id,
+/**
+ * B2.2 — Real-network capability probe.
+ *
+ * Replaces the earlier catalog-copy implementation. Probe success
+ * persists `capabilities: { reachable: true, auth: true, model: true,
+ * jsonMode: <observed>, vision: <catalog>, source: "network" }` plus
+ * an audit row tagged `action: "probe"`. Probe failure persists
+ * the same shape with `reachable`/`auth`/`model` set to whichever
+ * dimension failed and `errorReason` populated — the row still
+ * persists so the operator can see the failure in Settings.
+ *
+ * The HTTP response carries `ok: true` regardless of probe outcome
+ * (the request itself succeeded — the operator is asking "what is
+ * the truth?"). The Settings UI inspects `capabilities.reachable`
+ * to render its red/green badge (B3.1).
+ */
+router.post("/settings/provider-routes/:id/probe", requireRole("admin"), async (req, res) => {
+  const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
     userId: req.authUser?.sub || null,
-    action: "probe",
-    metadata: { capabilities },
   });
-  return res.json({ ok: true, route: updated, capabilities });
+  if (!updated) return res.status(404).json({ error: "Route not found" });
+  return res.json({ ok: true, route: updated, capabilities: updated.capabilities });
 });
 
 
