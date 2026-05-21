@@ -6,6 +6,23 @@
 > **Design principle:** Production primitives (encryption, quotas, audit, cache, request log) are designed in from Bundle 1 — not bolted on later. Each bundle adds capability without re-touching prior bundles' code.
 >
 > **Sequencing:** Bundle 1 → 2 → 3 → 4. Each ships as one PR. Bundle 4 (advanced routing) is deferred until requested.
+
+## Bundle status
+
+| Bundle | Status | Notes |
+|---|---|---|
+| **Bundle 1** | ✅ Shipped (PR #22) | Foundation: schema + audit + secrets + protocol adapter + `resolveRoute` (flag-gated). |
+| **Bundle 2** | ✅ Shipped (this PR) | Migration `provider → routeId` + capability probe + per-route pricing + request log + flag removal. `resolveProvider` deleted (not kept as thin wrapper — every internal caller was migrated). |
+| **Bundle 3** | 🟡 Mostly shipped (this PR) | Settings UI + import/export + quotas + cache + key rotation + audit log viewer + compat migration script. **B3.7 alert path** (Slack/webhook) is logged via `console.warn` only — webhook integration deferred to Bundle 4 per the "blocked on external input" carve-out (needs `notifications.spendWebhookUrl` column + repo + UI input, larger than fits this PR). **B3.10 runtime cleanup** (removing `compat:` branches from `registry.js`/`dispatcher.js`) deferred to Bundle 4 — removing them in this PR would break workspaces that haven't yet run the `compat-to-routes.js` script. **B3.11 tests**: `quota-guard.test.js` + `response-cache.test.js` shipped in this PR; `provider-routes-api`, `routes-import-export`, `compat-migration`, `concurrent-dispatch` deferred to Bundle 4 — the underlying repos (`provider-routes.test.js`, `secrets.test.js` from B1) already cover the data-access contracts, so the gap is integration-shaped only. |
+| **Bundle 4** | 🔲 Planned | Cleanup + load tests + advanced routing. Now expanded to include the B3.7/B3.10/B3.11 follow-ups above. |
+
+### Bundle 4 — expanded scope (post-Bundle-3 follow-ups)
+
+These items were spec'd in Bundles 2 / 3 but deferred to Bundle 4 to keep this PR reviewable. They're tracked here so they don't fall out of the plan:
+
+- **B4.0.1 (from B3.7) — Spend-alert webhook delivery.** Add `notifications.spendWebhookUrl` column (or extend the existing `notification_settings` repo); wire the dispatcher's alert branch (`backend/src/aiProvider/dispatcher.js`) to POST a JSON payload via `safeFetch` (same SSRF-guarded path the FEA-001 notifications use). Currently the alert fires as `console.warn` only.
+- **B4.0.2 (from B3.10) — Remove compat runtime branches.** Strip `isCompatProvider` / `getCompatConfig` / `listCompatSlots` call sites from `registry.js` and `dispatcher.js` after Bundle 3 has been in production ≥1 release with no rollback (`compat-to-routes.js` script is shipped; operators have an off-ramp). Coordinated with the existing B4.1 hardcoded-family-string sweep.
+- **B4.0.3 (from B3.11) — Remaining test files.** `provider-routes-api.test.js`, `routes-import-export.test.js`, `compat-migration.test.js`, `concurrent-dispatch.test.js`. The first two are HTTP integration tests; the third exercises the `compat-to-routes.js` script; the fourth is the 100-parallel-calls breaker / quota / cache race regression test. All four are independent — can ship as separate PRs.
 ---
 # Bundle 1 — Foundation (schema + adapter + resolution + secrets)
 **Scope:** Schema with production fields baked in. Encrypted secrets from day one. Protocol-dispatching adapter. Route resolution behind a feature flag.

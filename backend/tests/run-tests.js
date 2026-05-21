@@ -90,6 +90,10 @@ const files = [
   "tests/request-log.test.js",
   "tests/migration-rollback.test.js",
   "tests/capability-probe.test.js",
+  // B3.7 — Token-bucket reserve + spend-cap enforcement.
+  "tests/quota-guard.test.js",
+  // B3.8 — Exact-match response cache + thundering-herd coalescing + janitor.
+  "tests/response-cache.test.js",
   "tests/chaos-provider.test.js",        // B1.8 — error-injection: 500s, malformed JSON, mid-stream abort, breaker.
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",
