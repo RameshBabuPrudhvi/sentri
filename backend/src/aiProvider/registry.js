@@ -57,8 +57,8 @@ function keyHasRole(key, agentRole) {
  * Sweep every expired entry from `stickyFallbacks` regardless of role.
  *
  * Without this, the per-role iterations in `clearStickyFallback`,
- * `stickyFallbackActive`, `resolveProvider`, `resolveRoute`, and
- * `detectProvider` only delete expired entries that ALSO happen to match
+ * `stickyFallbackActive`, `resolveRoute`, and `detectProvider` only
+ * delete expired entries that ALSO happen to match
  * the role filter. Expired entries for other roles sit in the Map until
  * something else triggers a sweep — a slow memory leak proportional to
  * `STICKY_FALLBACK_TTL_MS × write rate × role count`.
@@ -394,115 +394,39 @@ export function isProviderUsable(provider) {
   return false;
 }
 
-export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
-  // AI-005 detection priority: sticky-fallback > agentRole > quick-switch > env > auto-detect.
-  // An active sticky-fallback for this role MUST win over the configured agent
-  // provider — otherwise a rate-limited primary keeps being retried under the
-  // agent override and silently collapses the multi-agent dispatch. This is
-  // tripwire #1 from the AI-005 spec.
-  //
-  // Look up the agent_configs row ONCE up front so it can be threaded
-  // through every return path that follows. Without this, the sticky-
-  // fallback branch below would return `config: null` and silently drop
-  // `systemPromptOverride` + per-role `maxTokens` during the 10-min
-  // sticky window — the admin-configured prompt for this role would
-  // never be applied while the fallback provider is active.
-  let cfg = null;
-  if (agentRole && workspaceId) {
-    // Defensive try/catch — the `agent_configs` table may not exist yet on
-    // fresh DBs where migrations haven't run, and we never want a transient
-    // SQLite error to crash every AI call. Falling through to env detection
-    // mirrors the single-agent path and matches the defensive pattern used
-    // elsewhere in this file (see `isProviderUsable` for compat slots, and
-    // `listCompatSlots` in `detectProvider`).
-    try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole) || null; }
-    catch (err) { logUnexpectedAgentConfigError(err, "resolveProvider"); }
-  }
-  // Unconditional sweep so expired entries for OTHER roles also get cleaned
-  // up here — not just the ones that match the current role filter.
-  sweepExpiredStickies();
-  if (agentRole) {
-    for (const [key, entry] of stickyFallbacks) {
-      if (!keyHasRole(key, agentRole)) continue;
-      if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) {
-        // Preserve the agent_configs row here so `systemPromptOverride`
-        // and `maxTokens` keep applying during the sticky-fallback window.
-        // The provider id comes from the sticky entry (the working fallback),
-        // but the role-specific config still drives prompt + token budget.
-        return { provider: entry.provider, config: cfg, effectiveAgentRole: agentRole };
-      }
-    }
-  }
-  if (cfg?.provider && isProviderUsable(cfg.provider)) {
-    return { provider: cfg.provider, config: cfg, effectiveAgentRole: agentRole };
-  }
-  // AI-005c (single-agent preservation): when no per-role agent_config row
-  // exists for this workspace+role, the call falls back to the workspace
-  // default provider. In that case it is **not** a multi-agent call — it's
-  // a single-agent call that happens to carry an `agentRole` label for
-  // future routing. Return `effectiveAgentRole: null` so downstream
-  // breakers, sticky-fallback, and metrics all collapse to the bare-provider
-  // key path, preserving pre-AI-005 wasted-call counts during 429 incidents.
-  // Multi-agent mode lights up automatically the moment a workspace adds an
-  // `agent_configs` row for the role.
-  //
-  // We deliberately pass NO `agentRole` to `detectProvider` here — role-scoped
-  // sticky entries were already consulted above, and any sticky persisted via
-  // `setStickyFallback(provider, effectiveAgentRole)` during single-agent
-  // fallback collapses to the BARE-key path (effectiveAgentRole=null →
-  // breakerKey="openai"). Forwarding `agentRole` would filter those bare-key
-  // stickies out, regressing the AI-005c "ONE breaker shared across stages"
-  // contract and reintroducing the wasted-call amplification during 429s.
-  const provider = detectProvider();
-  if (!provider) return { provider: null, config: null, effectiveAgentRole: null };
-  // If a role-specific agent_configs row exists but its `provider` column
-  // was null/empty (admin saved "use workspace default" while still setting
-  // systemPromptOverride / maxTokens), preserve the config so those role
-  // overrides still apply. effectiveAgentRole stays the original role —
-  // the admin DID configure something for this role, even if not provider —
-  // so breakers / sticky / metrics use the per-role keyspace.
-  if (cfg) return { provider, config: cfg, effectiveAgentRole: agentRole };
-  return { provider, config: null, effectiveAgentRole: null };
-}
-
 /**
- * B1.6 — Route-driven counterpart to {@link resolveProvider}.
+ * B2.6 — `resolveRoute` is now the single dispatch-resolution path.
  *
  * Returns the concrete `provider_routes` row a dispatch call should fire
- * against. Additive: callers that opt in get rows from the B1.x route
- * table; callers that don't keep using `resolveProvider` and the legacy
- * env-driven `buildAdapterOpts` path. The two helpers will coexist
- * through B2; a later bundle retires `resolveProvider` once every call
- * site is route-aware.
+ * against. Real routes come from the DB (`provider_routes.id = "pr-..."`);
+ * env-default workspaces get a transient route synthesised in-memory
+ * (`id = "provider:<id>"`) so the protocol-adapter contract holds
+ * uniformly.
  *
  * ### Resolution priority
  *
  *   1. **Sticky-fallback for this role** — if a recent failover pinned
- *      a route for this (role, ttl) tuple, return it. Mirrors the
- *      AI-005 tripwire #1 invariant from `resolveProvider`: an active
- *      sticky-fallback MUST beat the configured route so a rate-
- *      limited primary stops being retried under the agent override.
+ *      a route for this (role, ttl) tuple, return it. An active sticky
+ *      MUST beat the configured route so a rate-limited primary stops
+ *      being retried under the agent override. (AI-005 tripwire #1.)
  *   2. **`agent_configs.routeId`** — explicit per-role route assignment
  *      written by the Settings UI. Honoured when the route is usable
  *      (`provider_routes.enabled = 1` and a decryptable secret exists).
- *   3. **Provider-column shim** — when no `routeId` is set, the legacy
- *      `agent_configs.provider` column still drives selection. We
- *      synthesise a **transient** route — an in-memory object that
- *      satisfies the B1.5 protocol-adapter contract without ever
- *      hitting `provider_routes`. Lets workspaces adopt AI-005 dispatch
- *      semantics without migrating to routes first.
- *   4. **`null`** — when neither column is set, return a null route
- *      and let the caller fall through to {@link resolveProvider} for
- *      env-default detection. Preserves AI-005c single-agent
- *      collapse (`effectiveAgentRole: null`).
+ *   3. **Env-default transient route** — when no `routeId` is set on
+ *      the agent_configs row (or no row exists), `detectProvider`
+ *      identifies the workspace-default provider and we synthesise a
+ *      transient route from it. Collapses `effectiveAgentRole` to
+ *      `null` per AI-005c so single-agent workspaces share one
+ *      breaker across stages.
+ *   4. **`null`** — no provider configured at all. Caller surfaces a
+ *      config error to the operator.
  *
- * ### `effectiveAgentRole` collapse
+ * ### `effectiveAgentRole` collapse (AI-005c)
  *
- * Same rule as `resolveProvider`: workspaces with no `agent_configs`
- * row for the role get `effectiveAgentRole: null` so downstream
- * breakers / sticky / metrics collapse to the bare-discriminator key
- * path. Workspaces WITH a row (route-driven or shim) get the role
- * string back so per-role isolation kicks in.
+ * Workspaces with no `agent_configs` row for the role get
+ * `effectiveAgentRole: null` so downstream breakers / sticky / metrics
+ * collapse to the bare-discriminator key path. Workspaces WITH a row
+ * get the role string back so per-role isolation kicks in.
  *
  * @param {Object} [opts]
  * @param {string} [opts.agentRole]
@@ -510,13 +434,11 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
  * @returns {{ route: Object|null, config: Object|null, effectiveAgentRole: string|null }}
  */
 export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
-  // (1) Sticky-fallback wins — same shape as resolveProvider's check.
-  // The sticky map stores `{ provider, expiry }` keyed by either a
-  // provider id or a route id (B1.6 reuses the existing map; the
-  // value's `provider` field becomes "the discriminator to dispatch
-  // against", interpreted by the caller). Route-shaped stickies
-  // populate the synthetic-route shape so downstream code never has
-  // to know it's looking at a fallback.
+  // (1) Sticky-fallback wins. The sticky map stores `{ provider, expiry }`
+  // keyed by either a provider id or a route id — the value's `provider`
+  // field is "the discriminator to dispatch against", interpreted by the
+  // caller. Route-shaped stickies populate the synthetic-route shape so
+  // downstream code never has to know it's looking at a fallback.
   // Unconditional sweep so expired entries for OTHER roles also get cleaned
   // up here — not just the ones that match the current role filter.
   sweepExpiredStickies();
@@ -524,9 +446,9 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
     for (const [key, entry] of stickyFallbacks) {
       if (!keyHasRole(key, agentRole)) continue;
       if (Date.now() < entry.expiry) {
-        // Sticky entries written by `resolveProvider`'s fallback path
-        // carry a `provider` (not a route id). Synthesise a transient
-        // route from it so callers see a uniform shape.
+        // Sticky entries from `generateText`'s fallback path carry a
+        // `provider` (not a route id). Synthesise a transient route
+        // from it so callers see a uniform shape.
         if (entry.route) {
           return { route: entry.route, config: null, effectiveAgentRole: agentRole };
         }
@@ -541,14 +463,20 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
     }
   }
 
-  // (2) + (3): consult agent_configs for this (workspaceId, role).
+  // (2) Consult agent_configs for this (workspaceId, role).
   if (agentRole && workspaceId) {
     let cfg;
     try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole); }
     catch (err) { logUnexpectedAgentConfigError(err, "resolveRoute"); }
     if (cfg) {
-      // (2) Explicit route assignment. The route row carries everything
+      // Explicit route assignment. The route row carries everything
       // dispatch needs (protocol + baseUrl + model + encrypted secret).
+      // B2.1 (migration 048) dropped `cfg.provider` — the routeId
+      // column is now the only dispatch signal on agent_configs rows.
+      // A cfg row without routeId means the admin saved per-role
+      // tuning (systemPromptOverride / maxTokens) but left routing
+      // to the workspace default, so we fall through to (3) below
+      // with `cfg` still in scope.
       if (cfg.routeId) {
         let route;
         try { route = providerRouteRepo.getById(workspaceId, cfg.routeId); }
@@ -560,28 +488,31 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
           return { route, config: cfg, effectiveAgentRole: agentRole };
         }
         // Route id pointed at a disabled / deleted row. Don't silently
-        // fall back to the provider shim — that would hide a misconfig.
+        // fall back to env detection — that would hide a misconfig.
         // Return null so the caller surfaces a config error to the user.
         return { route: null, config: cfg, effectiveAgentRole: agentRole };
       }
-      // (3) No routeId — synthesise a transient route from the legacy
-      // provider column. This is the AI-005 shim that lets workspaces
-      // dispatch via routes WITHOUT having migrated their config yet.
-      if (cfg.provider && isProviderUsable(cfg.provider)) {
-        return {
-          route: synthesiseTransientRoute({ provider: cfg.provider, model: cfg.model, workspaceId }),
-          config: cfg,
-          effectiveAgentRole: agentRole,
-        };
-      }
+      // No routeId — fall through to (3) but keep `cfg` so any per-role
+      // overrides on the row (systemPromptOverride, maxTokens) still
+      // apply. We return `effectiveAgentRole: agentRole` (not null)
+      // because the admin DID configure something for this role, even
+      // if not the route itself — breakers / sticky / metrics use the
+      // per-role keyspace.
+      const fallbackProvider = detectProvider();
+      if (!fallbackProvider) return { route: null, config: cfg, effectiveAgentRole: agentRole };
+      return {
+        route: synthesiseTransientRoute({ provider: fallbackProvider, workspaceId }),
+        config: cfg,
+        effectiveAgentRole: agentRole,
+      };
     }
   }
 
-  // (4) No agent_configs row → AI-005c single-agent collapse. Return
+  // (3) No agent_configs row → AI-005c single-agent collapse. Return
   // a route synthesised from the workspace-default provider so
-  // dispatch can still go through the B1.5 protocol adapter, but
-  // collapse `effectiveAgentRole` to null so breakers / sticky /
-  // metrics use the bare-discriminator path.
+  // dispatch can still go through the protocol adapter, but collapse
+  // `effectiveAgentRole` to null so breakers / sticky / metrics use
+  // the bare-discriminator path.
   const provider = detectProvider();
   if (!provider) return { route: null, config: null, effectiveAgentRole: null };
   return {

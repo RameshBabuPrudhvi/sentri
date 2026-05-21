@@ -29,7 +29,6 @@ const { getDatabase } = await import("../src/database/sqlite.js");
 const agentConfigRepo = await import("../src/database/repositories/agentConfigRepo.js");
 const {
   breakerKey,
-  resolveProvider,
   resolveRoute,
   recordProviderFailure,
   recordProviderSuccess,
@@ -146,15 +145,20 @@ test("composes provider::role when role is set", () => {
   assert.equal(breakerKey("openai", "author"), "openai::author");
 });
 
-// ── resolveProvider ───────────────────────────────────────────────────────────
+// ── resolveRoute ──────────────────────────────────────────────────────────────
 
-console.log("\n🧪 resolveProvider()");
+console.log("\n🧪 resolveRoute()");
 
-test("returns null provider when nothing configured for unknown env", () => {
-  // workspaceId without role still goes through env detection — both env
-  // keys above are set, so this should return one of them.
-  const { provider } = resolveProvider({});
-  assert.ok(provider, "expected env detection to find ANTHROPIC or OPENAI");
+test("returns env-detected route when nothing is configured per-role", () => {
+  // B2.6 — `resolveProvider` was deleted; `resolveRoute` is the only
+  // dispatch-resolution path. With no agentRole / workspaceId pair the
+  // route comes from env-detected provider, synthesised as a transient
+  // route. Both ANTHROPIC + OPENAI keys are set above, so this should
+  // return one of them.
+  const { route } = resolveRoute({});
+  assert.ok(route, "expected env detection to synthesise a transient route");
+  assert.ok(route?.family || route?._transientProvider,
+    "transient route must carry provider id via family or _transientProvider");
 });
 
 test("agent_configs row drives route selection for (role, workspaceId)", () => {
@@ -170,11 +174,15 @@ test("agent_configs row drives route selection for (role, workspaceId)", () => {
 });
 
 test("unconfigured role falls back to env detection", () => {
+  // B2.6 — `resolveRoute` returns a transient route synthesised from
+  // env-detected provider when no agent_configs row exists for the
+  // (workspaceId, role). The `config` is null on the env-fallback path
+  // — there's no per-role row to carry overrides from.
   const workspaceId = seedWorkspace();
   upsertConfig(workspaceId, "planner", { provider: "openai" });
-  // No author row → fall back to env detection (anthropic / openai).
-  const { provider, config } = resolveProvider({ agentRole: "author", workspaceId });
-  assert.ok(provider, "expected env fallback for unconfigured role");
+  // No author row → fall back to env detection.
+  const { route, config } = resolveRoute({ agentRole: "author", workspaceId });
+  assert.ok(route, "expected env fallback to synthesise a transient route");
   assert.equal(config, null, "config should be null for env-fallback path");
 });
 
@@ -187,11 +195,15 @@ test("unconfigured role falls back to env detection", () => {
 // workspaces with 20-call/day caps would have burned 3 calls per incident
 // before the fix).
 test("AI-005c: unconfigured role returns effectiveAgentRole=null (single-agent collapse)", () => {
+  // B2.6 — `resolveRoute` is now the only resolution path. The
+  // AI-005c invariant still holds: no agent_configs row → returns
+  // `effectiveAgentRole: null` so downstream breakers / sticky /
+  // metrics use the bare-discriminator key path.
   const workspaceId = seedWorkspace();
   // No agent_configs rows at all — pure single-agent workspace.
-  const result = resolveProvider({ agentRole: "planner", workspaceId });
+  const result = resolveRoute({ agentRole: "planner", workspaceId });
   assert.equal(result.effectiveAgentRole, null,
-    "single-agent workspaces must collapse to bare-provider breaker key");
+    "single-agent workspaces must collapse to bare-discriminator breaker key");
 });
 
 test("AI-005c: configured role returns effectiveAgentRole=role (multi-agent isolation)", () => {
@@ -228,13 +240,19 @@ test("AI-005c: single-agent shares ONE breaker across roles (no wasted-call ampl
 });
 
 test("sticky fallback for the role WINS over agent_configs (tripwire #1)", () => {
+  // B2.6 — `resolveRoute` carries the sticky-fallback priority. When a
+  // sticky entry is pinned, the returned route is a transient route
+  // synthesised from the sticky provider, NOT the per-role configured
+  // route. Assertion via `route.family` (or `_transientProvider`)
+  // because the sticky path produces a synthetic route, not a real one.
   const workspaceId = seedWorkspace();
   upsertConfig(workspaceId, "planner", { provider: "anthropic" });
   // Pretend planner's anthropic just rate-limited and we pinned openai.
   setStickyFallback("openai", "planner");
   try {
-    const { provider } = resolveProvider({ agentRole: "planner", workspaceId });
-    assert.equal(provider, "openai", "sticky fallback must beat configured provider");
+    const { route } = resolveRoute({ agentRole: "planner", workspaceId });
+    const stickyProvider = route?._transientProvider || route?.family;
+    assert.equal(stickyProvider, "openai", "sticky fallback must beat configured route");
   } finally {
     clearStickyFallback("planner");
   }

@@ -11,7 +11,7 @@ import * as openaiAdapter from "./adapters/openai.js";
 import * as googleAdapter from "./adapters/google.js";
 import * as ollamaAdapter from "./adapters/ollama.js";
 import { isRateLimitError, isRetryableError, MAX_RETRIES } from "./retry.js";
-import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel, resolveProvider, resolveRoute } from "./registry.js";
+import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel, resolveRoute } from "./registry.js";
 import {
   aiProviderLatencySeconds,
   aiProviderTokensTotal,
@@ -242,30 +242,27 @@ function buildEffectivePrompt(prompt, config) {
  * precedence, and the AI-005c `effectiveAgentRole` collapse rule cannot
  * drift between the two surfaces.
  *
- * B1.7 — When `process.env.AI_ROUTES_ENABLED === "true"`, the function
- * resolves a `provider_routes` row via {@link resolveRoute} (the B1.6
- * route-driven path) and the return shape gains a `route` field plus
- * `useRoutes: true`. When the flag is off (the default), the shape is
- * bit-for-bit identical to the AI-005 pre-routes version (`route: null`,
- * `useRoutes: false`). Call sites that want to opt into routes check
- * `useRoutes` and dispatch via {@link module:aiProvider/adapters/protocolAdapter};
- * call sites that don't keep using the legacy `provider`-keyed path.
+ * B2.6 — The legacy `AI_ROUTES_ENABLED` feature flag was removed; the
+ * function unconditionally resolves a `provider_routes` row via
+ * {@link resolveRoute}. Real routes (`id = "pr-..."`) come from the DB;
+ * transient routes (`id = "provider:<id>"`) are synthesised by
+ * `resolveRoute` so the protocol-adapter contract still works for
+ * workspaces that haven't migrated past the env-default path.
+ * `useRoutes: true` is now a constant in the return shape — kept for
+ * call-site compatibility with the B1.7 era; future PRs can remove
+ * the field once every caller stops reading it.
  *
  * Inputs are the caller's `prompt` + `options` bag. Outputs everything the
  * caller needs to invoke `callProvider` and bookkeep breakers / sticky /
  * metrics correctly:
  *
  * - `provider` — concrete provider id, or `null` when no provider is configured.
- *   In the routes branch this is derived from `route.family` (or
- *   `route._transientProvider` for shim routes) so legacy telemetry call sites
- *   keep working without changes.
- * - `route` — B1.7 — the resolved `provider_routes` row when `useRoutes` is
- *   true, else `null`. Real routes (`id = "pr-..."`) come from the DB; shim
- *   routes (`id = "provider:<id>"`) are synthesised by `resolveRoute` so the
- *   protocol-adapter contract works for workspaces that haven't migrated yet.
- * - `useRoutes` — B1.7 — `true` when the flag is on, `false` otherwise.
- *   Lets callers gate "dispatch via protocolAdapter" without re-reading
- *   the env var.
+ *   Derived from `route.family` (real route) or `route._transientProvider`
+ *   (shim route) so legacy telemetry call sites keep working without changes.
+ * - `route` — the resolved `provider_routes` row (real or transient).
+ *   Carries `pricing`, `capabilities`, `apiKeyEncrypted` (via secret repo),
+ *   and everything `recordAiTokens` / `logRequest` need downstream.
+ * - `useRoutes` — always `true` post-B2.6. The dispatcher has one path.
  * - `config` — the `agent_configs` row (when one matched), `null` for fallback paths.
  * - `effectiveAgentRole` — AI-005c — `null` when single-agent (no
  *   `agent_configs` row exists), the `agentRole` string otherwise. Use this

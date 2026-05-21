@@ -22,9 +22,12 @@
  * Why both `route.capabilities.vision` (route path) AND `VISION_CAPABLE_MODELS`
  * (env path) coexist: routes carry first-hand network probe evidence
  * (B2.2 — what the provider actually accepts). Env paths don't have a
- * route to probe, so they fall back to the static catalog. When B3
- * lands the Settings UI for routes, the env paths become legacy and
- * eventually retire alongside `resolveProvider` (B2.6).
+ * route to probe, so they fall back to the static catalog. The env
+ * paths are legacy single-tenant compatibility; multi-tenant
+ * deployments should configure routes via Settings UI (B3.1) and rely
+ * on the route-driven path exclusively. A future bundle can remove
+ * the env paths once every deployment has migrated to per-workspace
+ * routes.
  */
 
 import { getProvider, getProviderMeta } from "./providerInfo.js";
