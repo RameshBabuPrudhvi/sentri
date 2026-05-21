@@ -209,6 +209,12 @@ test("sticky fallback for a DIFFERENT role does not leak", () => {
 
 console.log("\n🧪 per-role circuit breaker isolation");
 
+// Ensure clean breaker state before per-role isolation tests — previous
+// tests in this file (AI-005c shared-breaker test) may have left entries
+// in the circuitBreakers map. setRuntimeKey triggers resetCircuitBreaker
+// which zeros failures + disabledUntil for all anthropic::* keys.
+setRuntimeKey("anthropic", "test-anthropic-key");
+
 test("rate-limiting anthropic::planner does NOT trip anthropic::author", () => {
   recordProviderFailure("anthropic", "planner");
   assert.equal(isCircuitBreakerOpen("anthropic", "planner"), true);
