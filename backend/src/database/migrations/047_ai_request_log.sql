@@ -1,6 +1,15 @@
 CREATE TABLE IF NOT EXISTS ai_request_log (
   id TEXT PRIMARY KEY,
-  workspaceId TEXT NOT NULL,
+  -- workspaceId is nullable to mirror the routeId column below. The
+  -- dispatcher's `callProvider` path can fire with no workspace context
+  -- (e.g. single-tenant env-default dispatch, healthchecks) and we'd
+  -- rather persist a row with NULL workspaceId than silently drop it
+  -- to the catch-all in `requestLog.js#logRequest`. NULL rows are
+  -- naturally excluded from per-workspace queries (spend cap, viewer)
+  -- because `WHERE workspaceId = ?` never matches NULL — same tenant-
+  -- isolation guarantee as if the row didn't exist for that workspace.
+  -- Retention sweep still reclaims them since it doesn't filter on ws.
+  workspaceId TEXT,
   routeId TEXT,
   agentRole TEXT,
   userId TEXT,
