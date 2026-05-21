@@ -354,8 +354,14 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
         // route?.model preserves the agent_configs override on the
         // transient path (when `cfg.routeId` was null but the cfg row
         // still carried a model the admin wanted); otherwise the
-        // protocol module's own default (via getProviderMeta) applies.
-        model: route?.model || getProviderMeta()?.model || null,
+        // env-default cloud model for the resolved `provider` applies.
+        // `getProviderMeta()` returns a map keyed by provider id
+        // (`{ anthropic: { name, model, color }, openai: {...}, ... }`),
+        // NOT a flat object — bare `.model` always evaluated to
+        // `undefined` and silently collapsed to `null`. Mirrors the
+        // correct lookup at `dispatcher.js:1068` (`buildProviderMeta()
+        // [provider]?.model`).
+        model: route?.model || getProviderMeta()?.[provider]?.model || null,
         _transient: true,
         _transientProvider: provider,
       };
