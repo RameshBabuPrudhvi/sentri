@@ -14,7 +14,7 @@
 
 import { Router } from "express";
 import { logActivity } from "../utils/activityLogger.js";
-import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders } from "../aiProvider.js";
+import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders, generateText } from "../aiProvider.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { isDemoEnabled, getDemoQuotaStatus } from "../middleware/demoQuota.js";
@@ -429,6 +429,17 @@ router.post("/settings/provider-routes/:id/probe", requireRole("admin"), (req, r
     metadata: { capabilities },
   });
   return res.json({ ok: true, route: updated, capabilities });
+});
+
+
+router.post("/settings/ai-requests/:id/replay", requireRole("admin"), async (req, res) => {
+  const row = getDatabase().prepare("SELECT * FROM ai_request_log WHERE id = ? AND workspaceId = ?").get(req.params.id, req.workspaceId);
+  if (!row) return res.status(404).json({ error: "Request log not found" });
+  const prompt = row.promptRedacted || "";
+  if (!prompt) return res.status(400).json({ error: "Prompt payload unavailable for replay in current storage mode" });
+  const routeId = req.body?.routeId || null;
+  const text = await generateText(prompt, { workspaceId: req.workspaceId, agentRole: row.agentRole || undefined, routeId });
+  return res.json({ ok: true, replayedFrom: row.id, routeId, text });
 });
 
 router.get("/settings/ai-requests", requireRole("admin"), (req, res) => {

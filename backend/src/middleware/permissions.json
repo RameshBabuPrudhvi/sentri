@@ -367,6 +367,10 @@
     "GET /api/v1/settings/ai-requests": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"
+    },
+    "POST /api/v1/settings/ai-requests/:id/replay": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
     }
   },
   "anyAuthenticatedMember": [
