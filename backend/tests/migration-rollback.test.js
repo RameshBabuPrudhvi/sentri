@@ -54,17 +54,28 @@ const now = () => new Date().toISOString();
  * so we can simulate the pre-048 state, seed a row, then drop them
  * again to simulate the forward migration applying.
  */
+function tableColumns() {
+  return getDatabase().prepare("PRAGMA table_info(agent_configs)").all().map((c) => c.name);
+}
+
 function reAddLegacyColumns() {
+  // SQLite's `ALTER TABLE ... ADD COLUMN` does not accept `IF NOT EXISTS`,
+  // so we guard via `PRAGMA table_info` for test-level idempotency.
   const db = getDatabase();
-  db.exec("ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS provider TEXT");
-  db.exec("ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS model TEXT");
+  const cols = tableColumns();
+  if (!cols.includes("provider")) db.exec("ALTER TABLE agent_configs ADD COLUMN provider TEXT");
+  if (!cols.includes("model")) db.exec("ALTER TABLE agent_configs ADD COLUMN model TEXT");
 }
 
 function applyForwardMigration048() {
+  // Same effective behaviour as `migrations/048_*.sql`. The real SQL
+  // uses bare `DROP COLUMN`; idempotency in the runner comes from the
+  // `schema_migrations` ledger. Here we guard via `PRAGMA table_info`
+  // so the test can re-apply the forward migration without throwing.
   const db = getDatabase();
-  // Same statements as `migrations/048_agent_configs_drop_legacy_provider_columns.sql`.
-  db.exec("ALTER TABLE agent_configs DROP COLUMN IF EXISTS provider");
-  db.exec("ALTER TABLE agent_configs DROP COLUMN IF EXISTS model");
+  const cols = tableColumns();
+  if (cols.includes("provider")) db.exec("ALTER TABLE agent_configs DROP COLUMN provider");
+  if (cols.includes("model")) db.exec("ALTER TABLE agent_configs DROP COLUMN model");
 }
 
 function applyRollback048() {
@@ -173,15 +184,16 @@ test("migration 048 round-trip preserves routeId + 4 retained columns", () => {
   assert.equal(dropped.model, null);
 });
 
-// ── 2. Forward migration is idempotent (re-running with IF EXISTS) ────────────
+// ── 2. Forward migration is idempotent at the ledger level ────────────────────
 test("migration 048 forward is idempotent — re-run is a no-op", () => {
-  // Schema is currently rolled-back state from previous test (columns present).
-  // Apply forward once.
+  // The real `048_*.sql` is idempotent at the `schema_migrations`
+  // ledger level (runner skips already-applied versions), not at the
+  // SQL statement level — SQLite's bare `DROP COLUMN` would throw on
+  // a missing column. This test simulates the ledger guarantee by
+  // PRAGMA-guarding the drop in `applyForwardMigration048`.
   applyForwardMigration048();
-  // Apply forward AGAIN — must not throw thanks to `IF EXISTS`.
-  // Wrap in assert.doesNotThrow for explicit signal in the test runner.
   assert.doesNotThrow(() => applyForwardMigration048(),
-    "forward migration must be idempotent on re-run");
+    "PRAGMA-guarded re-apply mirrors the runner's ledger-level idempotency");
 
   // Restore for any subsequent test.
   applyRollback048();

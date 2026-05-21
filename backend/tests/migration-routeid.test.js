@@ -46,12 +46,15 @@ const { test, summary } = createTestRunner();
 const now = () => new Date().toISOString();
 
 // Re-add the legacy columns that migration 048 drops, so the backfill
-// script (which reads them) has rows to operate on. `ADD COLUMN IF NOT
-// EXISTS` requires SQLite 3.35+, which is the project's minimum.
+// script (which reads them) has rows to operate on. SQLite's
+// `ALTER TABLE ... ADD COLUMN` does not accept `IF NOT EXISTS`, so we
+// guard via `PRAGMA table_info` to keep the call idempotent within
+// the same test process.
 function ensureLegacyColumns() {
   const db = getDatabase();
-  db.exec("ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS provider TEXT");
-  db.exec("ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS model TEXT");
+  const cols = db.prepare("PRAGMA table_info(agent_configs)").all().map((c) => c.name);
+  if (!cols.includes("provider")) db.exec("ALTER TABLE agent_configs ADD COLUMN provider TEXT");
+  if (!cols.includes("model")) db.exec("ALTER TABLE agent_configs ADD COLUMN model TEXT");
 }
 ensureLegacyColumns();
 

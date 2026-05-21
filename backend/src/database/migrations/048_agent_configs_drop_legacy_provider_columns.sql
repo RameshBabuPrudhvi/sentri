@@ -35,9 +35,13 @@
 -- need a special case — `DROP COLUMN` is identical syntax on both
 -- backends.
 --
--- The `IF EXISTS` guard makes the statement idempotent on re-run
--- (which `migrationRunner.js` already prevents at the ledger level
--- via `schema_migrations`, but belt-and-braces).
+-- Idempotency note: bare `DROP COLUMN` (no `IF EXISTS`) per the
+-- convention from migration 017. SQLite's `ALTER TABLE ... DROP COLUMN`
+-- does not accept an `IF EXISTS` clause (only `DROP TABLE` / `DROP
+-- INDEX` do), and the postgres-adapter's `translateSql()` doesn't
+-- translate that clause either. Idempotency is guaranteed at the
+-- runner level — `schema_migrations` tracks applied versions, so
+-- re-running this file is a no-op.
 
-ALTER TABLE agent_configs DROP COLUMN IF EXISTS provider;
-ALTER TABLE agent_configs DROP COLUMN IF EXISTS model;
+ALTER TABLE agent_configs DROP COLUMN provider;
+ALTER TABLE agent_configs DROP COLUMN model;
