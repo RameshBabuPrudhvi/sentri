@@ -26,6 +26,7 @@ import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
+import * as providerRouteAuditRepo from "../database/repositories/providerRouteAuditRepo.js";
 // B3.1 — `secrets.encryptKey` for the create/update + rotate-key paths. The
 // repo layer (`providerRouteRepo.upsert`) accepts the encrypted blob +
 // nonce + lastFour directly; encryption happens here so the route owns the
@@ -739,6 +740,366 @@ router.post("/settings/provider-routes/:id/probe", requireRole("admin"), async (
   });
   if (!updated) return res.status(404).json({ error: "Route not found" });
   return res.json({ ok: true, route: updated, capabilities: updated.capabilities });
+});
+
+// ─── Provider Routes export / import (B3.5) ──────────────────────────────────
+//
+// Portable JSON representation of a workspace's `provider_routes` rows.
+// Schema is owned by `docs/schema/provider-routes-v1.json` — keep the
+// constants here in sync if the schema bumps. Secrets are NEVER written
+// to the export payload: `apiKeyEncrypted` and `apiKeyNonce` are
+// omitted entirely; only `apiKeyLastFour` round-trips so operators can
+// match imported rows to their real out-of-band keys.
+
+const PROVIDER_ROUTES_SCHEMA_VERSION = 1;
+const PROVIDER_ROUTES_SCHEMA_ID = "https://schemas.sentri.dev/provider-routes-v1.json";
+// Bounded parallelism for the post-import probe sweep. Operators
+// importing a 20-route bundle shouldn't fan out 20 simultaneous
+// provider calls — a small pool keeps the worst-case cost predictable
+// without sequentially blocking the response on each probe.
+const IMPORT_PROBE_PARALLELISM = 3;
+const IMPORT_VALID_MODES = new Set(["skip", "overwrite", "rename"]);
+
+/**
+ * Strip a `provider_routes` row down to the schema-v1 export shape.
+ * Drops `apiKeyEncrypted` / `apiKeyNonce` and any internal-only fields;
+ * preserves operator-set metadata (`pricing`, `capabilities`, rate
+ * limits) so a round-trip preserves intent. The repo's `list` already
+ * uses the safe SELECT (secret blobs excluded), but we re-pick the
+ * allowed columns explicitly here so a future schema column doesn't
+ * accidentally leak through the export.
+ */
+function serialiseRouteForExport(row) {
+  return {
+    id: row.id ?? null,
+    name: row.name,
+    family: row.family,
+    protocol: row.protocol,
+    baseUrl: row.baseUrl ?? null,
+    model: row.model,
+    apiKeyLastFour: row.apiKeyLastFour ?? null,
+    enabled: row.enabled === 1 || row.enabled === true,
+    rpmLimit: row.rpmLimit ?? null,
+    tpmLimit: row.tpmLimit ?? null,
+    cacheEnabled: row.cacheEnabled === 1 || row.cacheEnabled === true,
+    cacheTtlSec: row.cacheTtlSec ?? 0,
+    fallbackRouteId: row.fallbackRouteId ?? null,
+    capabilities: row.capabilities ?? null,
+    pricing: row.pricing ?? null,
+  };
+}
+
+/**
+ * Forward-compat shim. The current implementation only knows v1, but
+ * the contract from the checklist is "forward-compat shim for older
+ * versions". When v2 ships, this is where we add
+ * `if (version === 1) return upgradeV1ToV2(payload)`. For now: accept
+ * v1 verbatim, refuse everything else.
+ */
+function normaliseImportPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return { error: "Body must be a JSON object" };
+  }
+  const v = payload.schemaVersion;
+  if (v === PROVIDER_ROUTES_SCHEMA_VERSION) return { payload };
+  return {
+    error: `Unsupported schemaVersion ${v}. This server understands schemaVersion ${PROVIDER_ROUTES_SCHEMA_VERSION}.`,
+  };
+}
+
+/**
+ * Resolve a name collision per the requested mode. Returns either
+ * `{ name }` with the final name to use, `{ skip: true }` when the
+ * route should be skipped, or `{ error }` for malformed state.
+ */
+function resolveImportName({ desiredName, existingNames, importedNames, mode }) {
+  const collides = existingNames.has(desiredName);
+  if (!collides) return { name: desiredName };
+  if (mode === "skip") return { skip: true };
+  if (mode === "overwrite") return { name: desiredName };
+  // mode === "rename" — append -2, -3, … until no collision against
+  // existing OR freshly-imported routes.
+  let suffix = 2;
+  while (suffix < 1000) {
+    const candidate = `${desiredName}-${suffix}`;
+    if (!existingNames.has(candidate) && !importedNames.has(candidate)) {
+      return { name: candidate };
+    }
+    suffix += 1;
+  }
+  return { error: `Could not find a non-colliding name for "${desiredName}" after 1000 attempts` };
+}
+
+/**
+ * Run an async fn over an array with bounded parallelism. Returns
+ * after every item resolves. Errors are caught and returned per-item
+ * so a single probe failure can't fail the import.
+ */
+async function mapWithConcurrency(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const idx = cursor;
+      cursor += 1;
+      try {
+        results[idx] = { ok: true, value: await fn(items[idx], idx) };
+      } catch (err) {
+        results[idx] = { ok: false, error: err?.message || String(err) };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
+/**
+ * GET /settings/provider-routes/export — schema-v1 JSON dump.
+ *
+ * Sets `Content-Disposition: attachment` so a browser navigation
+ * triggers a download. The frontend's `api.exportRoutes` helper uses
+ * fetch + Blob to handle cross-origin deploys (cookies aren't sent on
+ * navigations in that mode); same-origin can navigate directly.
+ *
+ * Audit row: `action: "export"` with `metadata: { count, schemaVersion }`.
+ * `routeId` is null because export is workspace-scoped, not route-scoped.
+ */
+router.get("/settings/provider-routes/export", requireRole("admin"), (req, res) => {
+  const rows = providerRouteRepo.list(req.workspaceId);
+  const payload = {
+    $schema: PROVIDER_ROUTES_SCHEMA_ID,
+    schemaVersion: PROVIDER_ROUTES_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    workspaceId: req.workspaceId,
+    routes: rows.map(serialiseRouteForExport),
+  };
+  providerRouteAuditRepo.append({
+    workspaceId: req.workspaceId,
+    routeId: null,
+    userId: req.authUser?.sub || null,
+    action: "export",
+    metadata: { count: rows.length, schemaVersion: PROVIDER_ROUTES_SCHEMA_VERSION },
+  });
+  logActivity({
+    ...actor(req),
+    type: "settings.update",
+    detail: `Exported ${rows.length} provider route(s)`,
+  });
+  // Filename includes workspaceId tail + date so multiple exports from
+  // different workspaces don't collide in the operator's Downloads
+  // folder. ISO date (no time) is enough granularity — the audit log
+  // carries the millisecond timestamp.
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const wsTail = String(req.workspaceId || "ws").slice(-6);
+  res.setHeader("Content-Disposition", `attachment; filename="sentri-provider-routes-${wsTail}-${dateStr}.json"`);
+  res.json(payload);
+});
+
+/**
+ * POST /settings/provider-routes/import — upsert routes from a v1 JSON
+ * payload.
+ *
+ * Two-phase apply:
+ *   1. Upsert each row (resolving name collisions per `mode`), capturing
+ *      the source→destination id map for the next phase.
+ *   2. Re-resolve `fallbackRouteId` using the map, then write back via
+ *      a second upsert. Done as a second pass because forward
+ *      references (route A's fallback points at route B, but B hasn't
+ *      been created yet) would otherwise fail the repo's
+ *      `wouldCreateCycle` check on the first pass.
+ *
+ * Capability probe is then run with bounded parallelism so the
+ * importer never fans out more than `IMPORT_PROBE_PARALLELISM`
+ * concurrent provider calls. Probe failures don't fail the import —
+ * the route lands with `capabilities: { reachable: false, ... }` so
+ * the operator sees the failure in Settings and can fix the key
+ * out-of-band before depending on the route.
+ *
+ * Audit row: `action: "import"` with `metadata: { created, overwritten,
+ * skipped, renamed, schemaVersion }`. `routeId` is null because the
+ * event is workspace-scoped.
+ */
+router.post("/settings/provider-routes/import", requireRole("admin"), async (req, res) => {
+  const { payload: body, error: shimErr } = normaliseImportPayload(req.body);
+  if (shimErr) return res.status(400).json({ error: shimErr });
+
+  const mode = String(req.body?.mode || "").toLowerCase();
+  if (!IMPORT_VALID_MODES.has(mode)) {
+    return res.status(400).json({
+      error: `mode must be one of: ${[...IMPORT_VALID_MODES].join(", ")}`,
+    });
+  }
+  if (!Array.isArray(body.routes)) {
+    return res.status(400).json({ error: "routes must be an array" });
+  }
+
+  // Snapshot existing names BEFORE any writes so collisions are
+  // resolved against the pre-import state, not state mutated mid-loop.
+  const existingByName = new Map(
+    providerRouteRepo.list(req.workspaceId).map((r) => [r.name, r]),
+  );
+  const existingNames = new Set(existingByName.keys());
+  const importedNames = new Set();
+  // sourceId → destinationId, used in phase 2 to rewire `fallbackRouteId`.
+  const idMap = new Map();
+  // Final landed routes, indexed by destination id so phase 2 can patch
+  // them without re-fetching from the repo.
+  const landed = [];
+  const stats = { created: 0, overwritten: 0, skipped: 0, renamed: 0, errors: [] };
+
+  for (const incoming of body.routes) {
+    if (!incoming || typeof incoming !== "object" || typeof incoming.name !== "string") {
+      stats.errors.push({ name: incoming?.name ?? null, error: "missing or invalid name" });
+      continue;
+    }
+    const resolved = resolveImportName({
+      desiredName: incoming.name,
+      existingNames,
+      importedNames,
+      mode,
+    });
+    if (resolved.error) {
+      stats.errors.push({ name: incoming.name, error: resolved.error });
+      continue;
+    }
+    if (resolved.skip) {
+      stats.skipped += 1;
+      continue;
+    }
+    const finalName = resolved.name;
+    const isRename = finalName !== incoming.name;
+    const isOverwrite = mode === "overwrite" && existingNames.has(incoming.name);
+
+    // Build the payload. Re-use the create/update validator so the
+    // imported shape is enforced the same way as direct API calls;
+    // any operator who hand-edits the JSON to smuggle in a bogus
+    // family gets the same 400 they'd get from POST.
+    const candidateBody = {
+      name: finalName,
+      family: incoming.family,
+      protocol: incoming.protocol,
+      baseUrl: incoming.baseUrl ?? null,
+      model: incoming.model,
+      enabled: incoming.enabled !== false,
+      rpmLimit: incoming.rpmLimit ?? null,
+      tpmLimit: incoming.tpmLimit ?? null,
+      cacheEnabled: !!incoming.cacheEnabled,
+      cacheTtlSec: Number.isFinite(incoming.cacheTtlSec) ? incoming.cacheTtlSec : 0,
+      // fallbackRouteId is rewired in phase 2 — leave it null on the
+      // first pass so the cycle check can't trip on a forward reference.
+      fallbackRouteId: null,
+      // apiKey is NEVER in the export, so the import never carries one.
+      // The route lands keyless and the operator re-supplies via
+      // rotate-key after import.
+    };
+    // `isCreate` controls validation strictness: when overwriting an
+    // existing row we still want all required fields present so the
+    // overwrite can't silently drop columns.
+    const { payload, error } = buildProviderRoutePayload(candidateBody, { isCreate: true });
+    if (error) {
+      stats.errors.push({ name: incoming.name, error });
+      continue;
+    }
+
+    try {
+      // For `overwrite`, the repo's find-by-name path takes over —
+      // partial-patch semantics preserve the existing apiKeyEncrypted
+      // since we never include it in the payload above.
+      const saved = providerRouteRepo.upsert({
+        ...payload,
+        // Honour operator-set pricing JSON if present. `payload`
+        // doesn't include it (the build helper is for the wire CRUD
+        // shape); we pass it through verbatim per the schema contract.
+        pricing: incoming.pricing ?? null,
+        workspaceId: req.workspaceId,
+        userId: req.authUser?.sub || null,
+      });
+      importedNames.add(finalName);
+      if (incoming.id) idMap.set(incoming.id, saved.id);
+      landed.push({ saved, sourceFallbackId: incoming.fallbackRouteId ?? null });
+      if (isOverwrite) stats.overwritten += 1;
+      else if (isRename) stats.renamed += 1;
+      else stats.created += 1;
+    } catch (err) {
+      stats.errors.push({
+        name: incoming.name,
+        error: err?.code === "ERR_ROUTE_MISSING_FIELD" || err?.code === "ERR_ROUTE_FALLBACK_CYCLE"
+          ? err.message
+          : "upsert_failed",
+      });
+    }
+  }
+
+  // ── Phase 2: rewire fallback chains ─────────────────────────────────
+  // Walk every landed row, resolve the source fallbackRouteId via the
+  // id map, and patch the destination row. The repo's cycle check
+  // catches loops introduced by the rewire (which would happen if
+  // the source export itself contained a cycle — defensive guard).
+  for (const { saved, sourceFallbackId } of landed) {
+    if (!sourceFallbackId) continue;
+    const destFallbackId = idMap.get(sourceFallbackId) || null;
+    if (!destFallbackId) continue;
+    try {
+      providerRouteRepo.upsert({
+        id: saved.id,
+        workspaceId: req.workspaceId,
+        userId: req.authUser?.sub || null,
+        fallbackRouteId: destFallbackId,
+      });
+    } catch (err) {
+      // Cycle in the source export — landed row keeps fallbackRouteId
+      // = null. Surface as an error so the operator sees the issue.
+      stats.errors.push({
+        name: saved.name,
+        error: err?.code === "ERR_ROUTE_FALLBACK_CYCLE"
+          ? "imported fallback chain would create a cycle; left unset"
+          : "fallback_rewire_failed",
+      });
+    }
+  }
+
+  // ── Phase 3: bounded-parallel capability probe ──────────────────────
+  // Each route gets a fresh probe so stale `capabilities` from the
+  // source workspace can't mislead the operator on the destination.
+  // Failures land on the row as `reachable: false` + errorReason and
+  // are counted but don't fail the import.
+  const probeResults = await mapWithConcurrency(
+    landed,
+    IMPORT_PROBE_PARALLELISM,
+    ({ saved }) => providerRouteRepo.probeAndPersist(req.workspaceId, saved.id, {
+      userId: req.authUser?.sub || null,
+    }),
+  );
+  const probesReachable = probeResults.filter((r) => r.ok && r.value?.capabilities?.reachable).length;
+
+  providerRouteAuditRepo.append({
+    workspaceId: req.workspaceId,
+    routeId: null,
+    userId: req.authUser?.sub || null,
+    action: "import",
+    metadata: {
+      schemaVersion: PROVIDER_ROUTES_SCHEMA_VERSION,
+      mode,
+      created: stats.created,
+      overwritten: stats.overwritten,
+      skipped: stats.skipped,
+      renamed: stats.renamed,
+      errors: stats.errors.length,
+      probesReachable,
+    },
+  });
+  logActivity({
+    ...actor(req),
+    type: "settings.update",
+    detail: `Imported ${landed.length} provider route(s) [${mode}]`,
+  });
+
+  res.json({
+    ok: true,
+    ...stats,
+    probesReachable,
+    total: landed.length,
+  });
 });
 
 

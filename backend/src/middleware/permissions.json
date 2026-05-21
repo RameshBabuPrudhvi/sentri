@@ -385,6 +385,16 @@
       "role": "admin",
       "source": "backend/src/routes/settings.js"
     },
+    "GET /api/v1/settings/provider-routes/export": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "B3.5 — schema-v1 JSON dump of every provider_routes row in the workspace. Secrets are NEVER serialised (only apiKeyLastFour round-trips). Audit row appended as action=export with metadata={count, schemaVersion}."
+    },
+    "POST /api/v1/settings/provider-routes/import": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "B3.5 — three-phase import: (1) upsert rows resolving name collisions per mode (skip|overwrite|rename), (2) rewire fallbackRouteId via source→destination id map, (3) bounded-parallel capability probe (IMPORT_PROBE_PARALLELISM=3). Audit row appended as action=import."
+    },
     "GET /api/v1/settings/ai-requests": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"

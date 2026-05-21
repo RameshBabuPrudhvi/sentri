@@ -207,6 +207,65 @@ export const api = {
    * @returns {Promise<{ok: boolean, lastFour: string}>}
    */
   rotateProviderRouteKey: (id, apiKey) => req("POST", `/settings/provider-routes/${id}/rotate-key`, { apiKey }),
+  /**
+   * B3.5 — Download a schema-v1 JSON dump of every provider_routes row
+   * in the current workspace. Secrets are NEVER in the payload (only
+   * `apiKeyLastFour` round-trips), so the file is safe to share with
+   * another workspace's operator who'll re-supply keys out-of-band.
+   *
+   * Uses fetch + Blob so the cross-origin deploy path (cookies aren't
+   * sent on bare anchor navigations there) keeps working. Same-origin
+   * deploys could `window.open` the URL directly, but the Blob path
+   * is uniform and trivially correct in both.
+   *
+   * Returns the parsed JSON payload AS WELL AS triggering a download —
+   * callers that want to inspect the payload (e.g. to show "exported N
+   * routes" inline) can use the return value without re-fetching.
+   *
+   * @returns {Promise<Object>} The schema-v1 payload.
+   */
+  exportRoutes: async () => {
+    const url = `${BASE}/settings/provider-routes/export`;
+    const res = await fetch(url, { credentials: "include" });
+    const csrfHdr = res.headers.get("X-CSRF-Token");
+    if (csrfHdr) setCsrfToken(csrfHdr);
+    if (res.status === 401) { handleUnauthorized(); throw new Error("Session expired."); }
+    if (!res.ok) {
+      const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match?.[1] || `sentri-provider-routes-${new Date().toISOString().slice(0, 10)}.json`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    // Re-parse so callers can read counts inline. Cheap — the export is
+    // bounded by `provider_routes` rows per workspace, never a large blob.
+    return JSON.parse(await blob.text());
+  },
+  /**
+   * B3.5 — Upload a schema-v1 JSON file to upsert routes into the
+   * current workspace. The file is read into memory client-side and
+   * POSTed as the request body so the existing `req()` wrapper handles
+   * auth + CSRF + JSON; no multipart needed since the file IS the
+   * JSON body.
+   *
+   * @param {File}    file - Browser `File` from the upload input.
+   * @param {"skip"|"overwrite"|"rename"} mode - Collision resolution.
+   * @returns {Promise<{ok: boolean, created: number, overwritten: number, skipped: number, renamed: number, errors: Array, probesReachable: number, total: number}>}
+   */
+  importRoutes: async (file, mode) => {
+    const text = await file.text();
+    let payload;
+    try { payload = JSON.parse(text); }
+    catch { throw new Error("Selected file is not valid JSON."); }
+    return req("POST", "/settings/provider-routes/import", { ...payload, mode });
+  },
 
 // ── Projects ────────────────────────────────────────────────────────────────
   /** @param {Object} data - `{ name, url, credentials? }` */

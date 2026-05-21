@@ -6,7 +6,7 @@ import {
   Activity, Shield, HardDrive, Info, Wifi, WifiOff, Terminal,
   Compass, RotateCcw, FolderOpen, FileText, Play, AlertCircle,
   Users, UserPlus, Crown, KeyRound, Smartphone, Download,
-  Route as RouteIcon, Plus,
+  Route as RouteIcon, Plus, Upload as UploadIcon,
 } from "lucide-react";
 import { api } from "../api.js";
 import { AGENT_ROLES } from "../config.js";
@@ -1109,7 +1109,9 @@ function ProviderRoutesTabView(props) {
     rows, form, setForm, loading, error, busy,
     rowState, rotateBuf, setRotateBuf, rotateOpen, setRotateOpen,
     showKey, setShowKey, fallbackOptions, cycleAtName,
+    ioBusy, importMsg,
     onSave, onCancel, onEdit, onDelete, onProbe, onRotate,
+    onExport, onImport,
   } = props;
   return (
     <div className="card card-padded">
@@ -1123,6 +1125,12 @@ function ProviderRoutesTabView(props) {
           <AlertCircle size={12} /> {error}
         </div>
       )}
+      <ProviderRoutesIO
+        onExport={onExport}
+        onImport={onImport}
+        busy={ioBusy}
+        importMsg={importMsg}
+      />
       <ProviderRoutesForm
         form={form}
         setForm={setForm}
@@ -1164,12 +1172,84 @@ function ProviderRoutesTabView(props) {
   );
 }
 
+// B3.5 — Export/import action bar. Rendered above the form so admins
+// can bulk-move routes between workspaces without scrolling past the
+// per-row list. Mode selector defaults to "skip" — the safest option
+// when re-importing into a workspace that already has routes (no
+// existing data is touched). The file input is rendered hidden + driven
+// by a button click so the styling matches the rest of the action bar.
+function ProviderRoutesIO({ onExport, onImport, busy, importMsg }) {
+  const fileRef = useRef(null);
+  const [mode, setMode] = useState("skip");
+  function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    onImport(file, mode);
+    // Reset so re-selecting the same file fires onChange again. Without
+    // this, importing the same file twice in a row silently no-ops.
+    e.target.value = "";
+  }
+  return (
+    <div className="st-pr-io-bar">
+      <div className="st-pr-io-actions">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={onExport}
+          disabled={busy}
+          title="Download every provider route in this workspace as a schema-v1 JSON file. Secrets are never included."
+        >
+          <Download size={13} /> Export
+        </button>
+        <label className="st-pr-io-mode">
+          <span className="text-xs text-muted">On collision</span>
+          <select
+            className="input st-pr-io-mode-select"
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            disabled={busy}
+          >
+            <option value="skip">Skip existing</option>
+            <option value="overwrite">Overwrite by name</option>
+            <option value="rename">Rename (append -2, -3, …)</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          title="Upload a schema-v1 JSON file to upsert routes into this workspace. Each imported route is re-probed; you'll still need to supply API keys via Rotate key."
+        >
+          <UploadIcon size={13} /> Import
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          onChange={handleFileChange}
+          className="st-pr-io-file"
+        />
+      </div>
+      {importMsg && (
+        <div className={importMsg.type === "ok" ? "st-status-ok" : "st-status-err"}>
+          {importMsg.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {importMsg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProviderRoutesTab() {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState(PR_FORM_EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // B3.5 — Separate busy flag for export/import so the per-row CRUD
+  // form isn't disabled while a probe sweep is running.
+  const [ioBusy, setIoBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
   // Per-row in-flight state keyed by route id. Entries are one of:
   //   { kind: "probing" } | { kind: "rotating" } | { kind: "deleting" }
   //   | { kind: "ok", caps?: object, lastFour?: string }
@@ -1322,6 +1402,62 @@ function ProviderRoutesTab() {
     }
   }
 
+  // B3.5 — Export handler. Triggers a Blob download via `api.exportRoutes`
+  // (the helper handles cross-origin + Content-Disposition); inline
+  // status message confirms the count so the operator knows they didn't
+  // accidentally download an empty workspace dump.
+  async function exportRoutes() {
+    setIoBusy(true);
+    setImportMsg(null);
+    try {
+      const payload = await api.exportRoutes();
+      const count = payload?.routes?.length ?? 0;
+      setImportMsg({ type: "ok", text: `Exported ${count} route(s).` });
+    } catch (err) {
+      setImportMsg({ type: "err", text: err.message || "Export failed." });
+    } finally {
+      setIoBusy(false);
+    }
+  }
+
+  // B3.5 — Import handler. Reads the file, posts the payload + mode,
+  // refreshes the list, and surfaces the per-mode stats inline so the
+  // operator can confirm the apply matched their intent. Errors in
+  // individual rows (returned via the response's `errors` array) are
+  // summarised in the status message; the full per-row error list is
+  // dropped to the console for debugging.
+  async function importRoutes(file, mode) {
+    setIoBusy(true);
+    setImportMsg(null);
+    try {
+      const res = await api.importRoutes(file, mode);
+      await load();
+      const parts = [];
+      if (res.created) parts.push(`${res.created} created`);
+      if (res.overwritten) parts.push(`${res.overwritten} overwritten`);
+      if (res.renamed) parts.push(`${res.renamed} renamed`);
+      if (res.skipped) parts.push(`${res.skipped} skipped`);
+      if (res.errors?.length) {
+        // Surface count inline + dump details to the console so the
+        // operator can see WHICH rows failed without us blowing up the
+        // UI with a multi-line error list. (A dedicated import-result
+        // modal is the right long-term home for this; the console
+        // is the cheap version.)
+        parts.push(`${res.errors.length} error${res.errors.length === 1 ? "" : "s"}`);
+        // eslint-disable-next-line no-console
+        console.warn("[Provider Routes import] errors:", res.errors);
+      }
+      setImportMsg({
+        type: res.errors?.length ? "err" : "ok",
+        text: parts.length ? parts.join(" · ") : "No changes applied.",
+      });
+    } catch (err) {
+      setImportMsg({ type: "err", text: err.message || "Import failed." });
+    } finally {
+      setIoBusy(false);
+    }
+  }
+
   // Fallback dropdown options — exclude the row being edited so the UI
   // can't offer a self-loop. The repo's `wouldCreateCycle` catches
   // longer cycles server-side, so this is a UX nicety, not a security
@@ -1352,12 +1488,16 @@ function ProviderRoutesTab() {
     setShowKey={setShowKey}
     fallbackOptions={fallbackOptions}
     cycleAtName={cycleAtName}
+    ioBusy={ioBusy}
+    importMsg={importMsg}
     onSave={save}
     onCancel={resetForm}
     onEdit={edit}
     onDelete={del}
     onProbe={probe}
     onRotate={rotate}
+    onExport={exportRoutes}
+    onImport={importRoutes}
   />;
 }
 
