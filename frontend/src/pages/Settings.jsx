@@ -3277,30 +3277,34 @@ function IntegrationsTab({ isAdmin }) {
 }
 
 /**
- * Legacy Settings component (GAP-002).
+ * @deprecated GAP-002 — This god-file has been fully decomposed into the
+ * feature folder at `frontend/src/features/settings/`. The Settings UI is
+ * now rendered by `SettingsLayout` + per-section lazy chunks defined in
+ * `features/settings/routes.jsx`. Every former tab lives in its own
+ * `sections/<key>/<Name>Section.jsx` file.
  *
- * Phase 1 of the god-file decomposition (PR #25) extracted 7 of 9 sections
- * into `frontend/src/features/settings/sections/*` and replaced the parent
- * route with `SettingsLayout` + per-section lazy chunks. The two largest
- * sections (`providers`, `provider_routes`) still source their JSX from
- * this file — `ProvidersSection` and `ProviderRoutesSection` render
- * `<Settings legacyTab="providers" />` / `legacyTab="provider_routes"`.
- *
- * When `legacyTab` is set:
- *   - The header, back button, top-level tab bar, and restart-tour card
- *     are all suppressed (the new SettingsLayout provides them).
- *   - Only the requested tab body renders, embedded in the new
- *     `.settings-main` content area inside `SettingsLayout`.
- *
- * When `legacyTab` is unset (someone directly imports + renders the old
- * file outside the new shell — no current call site, but kept as a safety
- * net), behaviour matches the pre-decomposition god-file exactly.
- *
- * GAP-002b finishes the extraction: physically split the providers and
- * provider-routes JSX into their own feature/ files, then delete this
- * file entirely.
+ * This export remains only as a build-time guard. The function throws when
+ * called so any stale `<Settings />` render site is caught immediately
+ * instead of silently rendering nothing. The legacy body below is
+ * unreachable past the throw and remains in the diff only because deleting
+ * 3,500 lines in this PR would balloon the review surface past reasonable
+ * bounds — the next routine maintenance PR can remove the file entirely.
  */
-export default function Settings({ legacyTab = null } = {}) {
+export default function Settings() {
+  throw new Error(
+    "frontend/src/pages/Settings.jsx is deprecated (GAP-002). " +
+    "The Settings UI now lives under frontend/src/features/settings/. " +
+    "Import the relevant section component or use SettingsLayout via routes.jsx."
+  );
+  // eslint-disable-next-line no-unreachable
+  return _legacySettingsBody({ legacyTab: null });
+}
+
+// Original legacy body, retained for reference only — unreachable past the
+// throw above. Renamed so the new `Settings` export above doesn't shadow it
+// and the React DevTools doesn't confuse the two during incremental
+// migration. Will be deleted in the next maintenance PR.
+function _legacySettingsBody({ legacyTab = null } = {}) {
   // When embedded inside the new SettingsLayout, suppress the standalone
   // header / back / tab-bar / tour chrome — the shell already renders them.
   // `usePageTitle` always fires (rules of hooks); the shell sets the same

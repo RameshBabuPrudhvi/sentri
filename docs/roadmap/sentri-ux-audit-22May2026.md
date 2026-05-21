@@ -46,7 +46,7 @@ The ⌘K command palette (`CommandPalette.jsx`) provides command navigation but 
 ---
 
 ### GAP-002 — Settings.jsx God-File Anti-Pattern
-**Severity: Critical** · _Landed in PR #25 — sidebar-driven shell + 9 per-section lazy chunks under `frontend/src/features/settings/`. 7 sections physically extracted; the two largest (Providers, Provider Routes) defer their internal subtree extraction to GAP-002b but ship behind the same URL + sidebar contract._
+**Severity: Critical** · ✅ _Landed in PR #25 — sidebar-driven shell + 9 per-section lazy chunks under `frontend/src/features/settings/`. All 9 sections physically extracted as real React component files (Providers split into `ProvidersSection` + `ProviderCard` + `OllamaStatusPanel` + `CompatProviderForm`; Provider Routes split into `ProviderRoutesSection` + 9 sibling files for form / row / probe-badge / spend-caps / IO / audit-log / AI-request-log). The legacy 3,595-line `pages/Settings.jsx` is replaced by a build-time guard that throws on render._
 
 `Settings.jsx` is 3,594 lines — one of the longest files in the codebase. It renders Provider configuration, Agent Roles, Team Members, MFA, Security, Integrations, AI Provider Routes, Workspace settings, Notification settings, Recycle Bin, and System info all within a single component with a single tab switcher. The file imports 30+ Lucide icons, 4 query hooks, and manages 40+ useState variables.
 
