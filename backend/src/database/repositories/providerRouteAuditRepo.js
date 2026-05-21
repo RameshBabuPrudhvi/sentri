@@ -26,6 +26,24 @@
 import { randomUUID } from "crypto";
 import { getDatabase } from "../sqlite.js";
 
+// Per-process monotonic sequence prefix for audit row ids. Two audit rows
+// written in the same millisecond would otherwise tie on `createdAt` and
+// fall back to a random-UUID tiebreaker in `ORDER BY createdAt DESC, id
+// DESC` — non-deterministic ordering breaks the `provider-routes.test.js`
+// "remove() emits delete after create" assertion intermittently (and any
+// real UI relying on chronological audit-row ordering). We prepend a
+// 16-hex-char zero-padded counter to the id so lexicographic `id DESC`
+// matches insertion order. Portable across SQLite + PostgreSQL — we
+// deliberately do NOT use SQLite's `rowid` because the postgres adapter
+// doesn't translate that pseudo-column and the queries would fail there.
+// Counter resets on process restart, but `createdAt` (the primary sort
+// key) has always advanced by then so cross-restart ordering still works.
+let _auditSeq = 0n;
+function nextSeqHex() {
+  _auditSeq = (_auditSeq + 1n) & 0xFFFFFFFFFFFFFFFFn;
+  return _auditSeq.toString(16).padStart(16, "0");
+}
+
 /**
  * Allow-listed audit actions. Mirrors the column comment on the migration
  * and the route-handler call sites in B1.3+. Validated here so a typo at
@@ -70,7 +88,10 @@ export function append(entry) {
     err.code = "ERR_AUDIT_INVALID_ACTION";
     throw err;
   }
-  const id = `pra-${randomUUID()}`;
+  // Monotonic-prefix id so lexicographic ordering on `id DESC` matches
+  // insertion order — the random-UUID suffix preserves uniqueness even if
+  // a future change reads `_auditSeq` from disk and replays old values.
+  const id = `pra-${nextSeqHex()}-${randomUUID()}`;
   const createdAt = new Date().toISOString();
   // Normalise metadata: objects → JSON; strings + null pass through. This
   // matches the convention in `activities.meta` (migration 018) so the two
