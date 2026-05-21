@@ -84,7 +84,7 @@ Per-route opt-in via `cacheEnabled` + `cacheTtlSec`. Exact-match keyed by `sha25
 
 ## Audit log
 
-Every mutation (create / update / delete / rotate_key / probe / export / import) appends a `provider_route_audit` row. View via **Settings → Provider Routes → Audit log** subtab or `GET /api/v1/settings/provider-routes/audit`. Retention: 90 days default (`SENTRI_AUDIT_RETENTION_DAYS`).
+Every mutation (create / update / delete / rotate_key / probe / export / import) appends a `provider_route_audit` row. View via **Settings → Provider Routes → Audit log** subtab or `GET /api/v1/settings/provider-routes/audit`. Retention: 90 days default (`AI_ROUTES_AUDIT_RETENTION_DAYS`).
 
 ## Troubleshooting
 

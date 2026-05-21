@@ -1523,7 +1523,7 @@ function AuditLogSubtab({ rows: routeRows }) {
         <FileText size={13} /> Audit log
       </div>
       <div className="text-xs text-muted st-pr-audit-sub">
-        Every mutation to provider routes (create / update / delete / rotate-key) plus reads with side effects (probe / export / import). Retention defaults to 90 days; tune via <code>SENTRI_AUDIT_RETENTION_DAYS</code>.
+        Every mutation to provider routes (create / update / delete / rotate-key) plus reads with side effects (probe / export / import). Retention defaults to 90 days; tune via <code>AI_ROUTES_AUDIT_RETENTION_DAYS</code>.
       </div>
       <div className="st-pr-audit-filters">
         <label className="st-pr-field">

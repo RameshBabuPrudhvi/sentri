@@ -94,7 +94,7 @@ Sentri appends a `provider_route_audit` row on every mutation to a `provider_rou
 
 | Variable | Default | Description |
 |---|---|---|
-| `SENTRI_AUDIT_RETENTION_DAYS` | `90` | Daily 05:00 UTC sweep deletes `provider_route_audit` rows older than this many days. Set `0` to disable retention entirely (rows accumulate forever). Distinct from `AUDIT_RETENTION_DAYS` (SEC-007 `activities` table) — the two audit logs serve different compliance scopes and are tuned independently. |
+| `AI_ROUTES_AUDIT_RETENTION_DAYS` | `90` | Daily 05:00 UTC sweep deletes `provider_route_audit` rows older than this many days. Set `0` to disable retention entirely (rows accumulate forever). Distinct from `AUDIT_RETENTION_DAYS` (SEC-007 `activities` table) — the two audit logs serve different compliance scopes and are tuned independently. |
 
 ### AI Spend Alert Webhook (B4.0.1)
 

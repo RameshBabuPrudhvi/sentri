@@ -306,7 +306,7 @@
 ### B3.9 — Audit log viewer
 - [ ] `GET /api/v1/settings/provider-routes/audit` — admin, paginated, filterable by `routeId` / `action` / date range
 - [ ] Frontend: **Audit log** subtab in Settings → Provider Routes
-- [ ] Retention: 90 days default, configurable via `SENTRI_AUDIT_RETENTION_DAYS`, daily janitor
+- [ ] Retention: 90 days default, configurable via `AI_ROUTES_AUDIT_RETENTION_DAYS`, daily janitor
 ### B3.10 — Compat slot migration
 - [ ] One-shot migration `NNN_compat_to_routes.sql`:
   - Every `compat:<id>` config row → new `provider_routes` row with `protocol: "openai"`, `family: "custom"`

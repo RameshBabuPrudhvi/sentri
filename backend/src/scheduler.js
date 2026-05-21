@@ -469,7 +469,10 @@ export function initScheduler() {
   // B3.9 — daily provider-routes audit retention sweep. Runs at 05:00
   // UTC, after the cache janitor, so the morning maintenance window
   // stays staggered on a single SQLite writer. Honours
-  // `SENTRI_AUDIT_RETENTION_DAYS`:
+  // `AI_ROUTES_AUDIT_RETENTION_DAYS` (renamed from the brand-leaking
+  // `SENTRI_AUDIT_RETENTION_DAYS` per `docs/guide/rebranding.md` —
+  // every operator-facing env var should survive a `Sentri → YourName`
+  // find-and-replace unchanged):
   //   • unset / empty → default 90 days (roadmap baseline)
   //   • 0            → never delete (task is armed but is a no-op)
   //   • > 0          → delete rows older than the configured window
@@ -478,7 +481,7 @@ export function initScheduler() {
   // on every fire.
   _providerAuditRetentionTask = cron.schedule("0 5 * * *", () => {
     try {
-      const raw = process.env.SENTRI_AUDIT_RETENTION_DAYS;
+      const raw = process.env.AI_ROUTES_AUDIT_RETENTION_DAYS;
       const days = raw === undefined || raw === "" ? 90 : Number.parseInt(raw, 10);
       if (!Number.isFinite(days) || days <= 0) return; // disabled
       const deleted = providerRouteAuditRepo.purgeOlderThan(days);

@@ -153,7 +153,7 @@ export function list(workspaceId, opts = {}) {
 /**
  * B3.9 — Daily retention sweep. Deletes audit rows older than the
  * configured window. The default 90-day retention matches the roadmap
- * checklist; operators tune via `SENTRI_AUDIT_RETENTION_DAYS`. The
+ * checklist; operators tune via `AI_ROUTES_AUDIT_RETENTION_DAYS`. The
  * `(workspaceId, createdAt)` index from migration 036 doesn't cover
  * this query (no workspace filter), but `createdAt` is highly
  * selective on its own — even at 1M-row tables the sweep is sub-second.

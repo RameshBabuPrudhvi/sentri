@@ -398,7 +398,7 @@
     "GET /api/v1/settings/provider-routes/audit": {
       "role": "admin",
       "source": "backend/src/routes/settings.js",
-      "$comment": "B3.9 — paginated workspace-scoped audit log viewer. Filterable by routeId / action / since / before. Cursor pagination via `before` matching the AI request log endpoint. Retention sweep is daily at 05:00 UTC, configurable via SENTRI_AUDIT_RETENTION_DAYS (default 90)."
+      "$comment": "B3.9 — paginated workspace-scoped audit log viewer. Filterable by routeId / action / since / before. Cursor pagination via `before` matching the AI request log endpoint. Retention sweep is daily at 05:00 UTC, configurable via AI_ROUTES_AUDIT_RETENTION_DAYS (default 90)."
     },
     "GET /api/v1/settings/ai-requests": {
       "role": "admin",
