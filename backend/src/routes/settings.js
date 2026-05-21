@@ -27,6 +27,7 @@ import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthChec
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
 import * as providerRouteAuditRepo from "../database/repositories/providerRouteAuditRepo.js";
+import { resetRouteBreakers } from "../aiProvider/registry.js";
 // B3.1 — `secrets.encryptKey` for the create/update + rotate-key paths. The
 // repo layer (`providerRouteRepo.upsert`) accepts the encrypted blob +
 // nonce + lastFour directly; encryption happens here so the route owns the
@@ -669,9 +670,17 @@ router.delete("/settings/provider-routes/:id", requireRole("admin"), (req, res) 
 router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), async (req, res) => {
   const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
   if (!existing) return res.status(404).json({ error: "Route not found" });
-  const plaintext = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+  // B3.6 — accept both `apiKey` (B3.1 client) and `newApiKey` (B3.6
+  // checklist body shape). Either name is fine because the wire
+  // contract is identical; supporting both keeps the existing
+  // frontend client working while documenting the canonical name
+  // from the roadmap.
+  const rawKey = (typeof req.body?.newApiKey === "string" && req.body.newApiKey)
+    || (typeof req.body?.apiKey === "string" && req.body.apiKey)
+    || "";
+  const plaintext = rawKey.trim();
   if (!plaintext || plaintext.length < 10) {
-    return res.status(400).json({ error: "apiKey is required and must be at least 10 characters" });
+    return res.status(400).json({ error: "newApiKey is required and must be at least 10 characters" });
   }
   // Snapshot the prior ciphertext BEFORE the rotation so probe-fail
   // rollback can restore it. `getById` uses the SAFE_SELECT that omits
@@ -734,6 +743,14 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
         capabilities: caps,
       });
     }
+    // B3.6 — clear every circuit-breaker entry keyed off this route id
+    // (bare + role-scoped) so the freshly-rotated key isn't shadowed by
+    // a breaker tripped on the prior credentials. Without this, a route
+    // that was rate-limited under the old key would keep returning
+    // breaker-open errors for `CIRCUIT_BREAKER_COOLDOWN_MS` after a
+    // successful rotation — the new key would never get a chance to
+    // dispatch until the cooldown elapsed.
+    resetRouteBreakers(existing.id);
     logActivity({
       ...actor(req),
       type: "auth.api_key.rotate",

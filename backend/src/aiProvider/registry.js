@@ -351,6 +351,31 @@ function resetCircuitBreaker(provider) {
   }
 }
 
+/**
+ * B3.6 — Reset every circuit-breaker entry keyed off `routeId`. Called
+ * by the rotate-key endpoint so a freshly-rotated key isn't shadowed
+ * by a stale breaker tripped on the prior credentials. The breaker
+ * keyspace stores both bare `routeId` keys (single-agent dispatch) and
+ * role-scoped `routeId::role` keys (multi-agent), so we sweep both
+ * shapes in one pass.
+ *
+ * Mirrors `resetCircuitBreaker(provider)` above, just keyed on route
+ * id instead of the legacy provider enum. Exported so the routes layer
+ * can call it without reaching into module internals.
+ *
+ * @param {string} routeId - The `provider_routes.id` whose breakers
+ *   should be cleared. No-op when undefined / falsy (defensive).
+ */
+export function resetRouteBreakers(routeId) {
+  if (!routeId) return;
+  for (const key of Object.keys(circuitBreakers)) {
+    if (key === routeId || key.startsWith(`${routeId}::`)) {
+      circuitBreakers[key].failures = 0;
+      circuitBreakers[key].disabledUntil = 0;
+    }
+  }
+}
+
 // ── Provider detection ───────────────────────────────────────────────────────
 export function isProviderUsable(provider) {
   if (provider === "local") return !runtimeOllamaDisabled;
