@@ -44,17 +44,13 @@
 import OpenAI from "openai";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 import { throwIfAborted } from "../../utils/abortHelper.js";
-import { computeCostUsd } from "../modelCatalog.js";
 
-/**
- * Attach catalog-derived `costUsd` to a usage block. Mirrors
- * `adapters/openai.js#withCost` so dispatch's cost telemetry is
- * identical regardless of which path produced the response.
- */
-function withCost(model, usage) {
-  if (!usage) return usage;
-  return { ...usage, costUsd: computeCostUsd(model, usage) };
-}
+// B2.4 — protocol modules return raw `{ input, output }` token usage
+// only. Cost is computed by the dispatcher's
+// `computeCostForRoute(route, usage)` with `route.pricing` as the
+// authoritative source and `MODEL_PRICING` as catalog fallback.
+// `MODEL_PRICING` is no longer read at runtime; it stays as a
+// UI-suggestion catalog for the Settings UI defaults (B3.1).
 
 /**
  * Build an OpenAI SDK client from a route + caller-supplied opts.
@@ -110,10 +106,10 @@ export async function generate(route, messages, opts) {
       const res = await client.chat.completions.create(params, { signal: composedSignal });
       return {
         text: res.choices?.[0]?.message?.content || "",
-        usage: withCost(route.model, {
+        usage: {
           input: res?.usage?.prompt_tokens,
           output: res?.usage?.completion_tokens,
-        }),
+        },
       };
     } finally { cleanup(); }
   }, label);
@@ -146,5 +142,5 @@ export async function stream(route, messages, opts) {
       usage = { input: chunk.usage.prompt_tokens, output: chunk.usage.completion_tokens };
     }
   }
-  return { text: full, usage: withCost(route.model, usage) };
+  return { text: full, usage };
 }

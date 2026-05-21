@@ -1,6 +1,13 @@
 import { MAX_RETRIES, BASE_DELAY_MS, MAX_BACKOFF_MS, sleep } from "../retry.js";
 import { formatLogLine } from "../../utils/logFormatter.js";
-import { computeCostUsd, pricingFor } from "../modelCatalog.js";
+import { pricingFor } from "../modelCatalog.js";
+
+// B2.4 — adapters return raw `{ input, output }` token usage only.
+// Ollama's `/api/generate` doesn't return token counts in non-streaming
+// mode, but we still emit `{ input: 0, output: 0 }` for catalog-known
+// local models so the dispatcher's `computeCostForRoute` can compute
+// `costUsd: 0` (free local). Catalog-miss models return `usage: null`
+// so the dispatcher's "no data" branch fires correctly.
 
 const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 
@@ -111,15 +118,15 @@ export async function generate({ messages, maxTokens, signal, useJson, model, ba
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const text = await callOllama(messages.combined, maxTokens, signal, useJson, baseUrl, model);
-      // AI-003 — Ollama's /api/generate doesn't return token counts in
-      // non-streaming mode. We still emit a usage block so consumers see
-      // `costUsd: 0` for catalog-known local models (free) and
-      // `costUsd: null` for unknown models — distinguishing "free" from
-      // "no data" matches the dashboard contract from modelCatalog.js.
+      // B2.4 — Ollama's `/api/generate` doesn't return token counts in
+      // non-streaming mode. We still emit `{ input: 0, output: 0 }` for
+      // catalog-known local models so the dispatcher's
+      // `computeCostForRoute` resolves to `costUsd: 0` (free). For
+      // unknown models we return `usage: null` so the dispatcher's
+      // "no data" branch fires (skipping the cost metric) — distinguishing
+      // "free local model" from "no data" matches the dashboard contract.
       const known = pricingFor(model);
-      const usage = known
-        ? { input: 0, output: 0, costUsd: known.inputPer1k === 0 && known.outputPer1k === 0 ? 0 : computeCostUsd(model, { input: 0, output: 0 }) }
-        : null;
+      const usage = known ? { input: 0, output: 0 } : null;
       return { text, usage };
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;

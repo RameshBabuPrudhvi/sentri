@@ -23,12 +23,11 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
-import { computeCostUsd } from "../modelCatalog.js";
 
-function withCost(model, usage) {
-  if (!usage) return usage;
-  return { ...usage, costUsd: computeCostUsd(model, usage) };
-}
+// B2.4 — protocol modules return raw `{ input, output }` token usage
+// only. Cost is computed by the dispatcher's
+// `computeCostForRoute(route, usage)` with `route.pricing` as the
+// authoritative source and `MODEL_PRICING` as catalog fallback.
 
 export async function generate(route, messages, opts) {
   const genAI = new GoogleGenerativeAI(opts.apiKey);
@@ -48,10 +47,10 @@ export async function generate(route, messages, opts) {
       const um = result?.response?.usageMetadata;
       return {
         text: result.response.text(),
-        usage: withCost(route.model, {
+        usage: {
           input: um?.promptTokenCount,
           output: um?.candidatesTokenCount,
-        }),
+        },
       };
     } finally { cleanup(); }
   }, label);

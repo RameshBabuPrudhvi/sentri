@@ -16,15 +16,11 @@
 import OpenAI from "openai";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 import { throwIfAborted } from "../../utils/abortHelper.js";
-import { computeCostUsd } from "../modelCatalog.js";
 
-// AI-003 — attach catalog-derived `costUsd` to every usage block. Compat
-// slots that bring an unknown model get `costUsd: null` (no fake zeros);
-// known cloud models bump `app_ai_cost_usd_total` via the orchestrator.
-function withCost(model, usage) {
-  if (!usage) return usage;
-  return { ...usage, costUsd: computeCostUsd(model, usage) };
-}
+// B2.4 — adapters return raw `{ input, output }` token usage only. Cost
+// is computed by the dispatcher's `computeCostForRoute(route, usage)`
+// with `route.pricing` as the source of truth and `MODEL_PRICING` as
+// catalog fallback. See `dispatcher.js#computeCostForRoute` JSDoc.
 
 function mkClient({ provider, apiKey, baseUrl, defaultHeaders, guardedFetch }) {
   if (provider === "openrouter") {
@@ -60,7 +56,7 @@ export async function generate(opts) {
       const res = await client.chat.completions.create(params, { signal: composedSignal });
       return {
         text: res.choices?.[0]?.message?.content || "",
-        usage: withCost(model, { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens }),
+        usage: { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens },
       };
     } finally { cleanup(); }
   }, labelFor(provider));
@@ -80,7 +76,7 @@ export async function stream(opts, onToken) {
     if (token) { full += token; onToken(token); }
     if (chunk?.usage) usage = { input: chunk.usage.prompt_tokens, output: chunk.usage.completion_tokens };
   }
-  return { text: full, usage: withCost(model, usage) };
+  return { text: full, usage };
 }
 
 export async function generateVision(opts) {
@@ -97,6 +93,6 @@ export async function generateVision(opts) {
   }, { signal });
   return {
     text: res.choices?.[0]?.message?.content || "",
-    usage: withCost(model, { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens }),
+    usage: { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens },
   };
 }

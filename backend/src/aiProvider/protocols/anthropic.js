@@ -21,12 +21,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 import { throwIfAborted } from "../../utils/abortHelper.js";
-import { computeCostUsd } from "../modelCatalog.js";
 
-function withCost(model, usage) {
-  if (!usage) return usage;
-  return { ...usage, costUsd: computeCostUsd(model, usage) };
-}
+// B2.4 — protocol modules return raw `{ input, output }` token usage
+// only. Cost is computed by the dispatcher's
+// `computeCostForRoute(route, usage)` with `route.pricing` as the
+// authoritative source and `MODEL_PRICING` as catalog fallback.
 
 function mkClient(route, opts) {
   const config = { apiKey: opts.apiKey };
@@ -49,10 +48,10 @@ export async function generate(route, messages, opts) {
       const msg = await client.messages.create(params, { signal: composedSignal });
       return {
         text: msg.content?.[0]?.text || "",
-        usage: withCost(route.model, {
+        usage: {
           input: msg?.usage?.input_tokens,
           output: msg?.usage?.output_tokens,
-        }),
+        },
       };
     } finally { cleanup(); }
   }, label);
@@ -79,9 +78,9 @@ export async function stream(route, messages, opts) {
   const final = await s.finalMessage();
   return {
     text: final?.content?.[0]?.text || "",
-    usage: withCost(route.model, {
+    usage: {
       input: final?.usage?.input_tokens,
       output: final?.usage?.output_tokens,
-    }),
+    },
   };
 }

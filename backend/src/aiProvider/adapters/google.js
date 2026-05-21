@@ -12,14 +12,11 @@
  */
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
-import { computeCostUsd } from "../modelCatalog.js";
 
-// AI-003 — attach `costUsd` from the catalog. Gemini usage is normalised to
-// the same `{ input, output }` shape as the OpenAI family before lookup.
-function withCost(model, usage) {
-  if (!usage) return usage;
-  return { ...usage, costUsd: computeCostUsd(model, usage) };
-}
+// B2.4 — adapters return raw `{ input, output }` token usage only. Cost
+// is computed by the dispatcher's `computeCostForRoute(route, usage)`
+// with `route.pricing` as the source of truth and `MODEL_PRICING` as
+// catalog fallback. See `dispatcher.js#computeCostForRoute` JSDoc.
 
 export async function generate({ messages, maxTokens, signal, useJson, model, apiKey }) {
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -38,7 +35,7 @@ export async function generate({ messages, maxTokens, signal, useJson, model, ap
       const um = result?.response?.usageMetadata;
       return {
         text: result.response.text(),
-        usage: withCost(model, { input: um?.promptTokenCount, output: um?.candidatesTokenCount }),
+        usage: { input: um?.promptTokenCount, output: um?.candidatesTokenCount },
       };
     } finally { cleanup(); }
   }, "Google Gemini");
@@ -64,6 +61,6 @@ export async function generateVision({ model, apiKey, base64, userPrompt }) {
   const um = result?.response?.usageMetadata;
   return {
     text: result.response.text(),
-    usage: withCost(model, { input: um?.promptTokenCount, output: um?.candidatesTokenCount }),
+    usage: { input: um?.promptTokenCount, output: um?.candidatesTokenCount },
   };
 }

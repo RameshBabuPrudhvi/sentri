@@ -29,7 +29,14 @@
 
 import { MAX_RETRIES, BASE_DELAY_MS, MAX_BACKOFF_MS, sleep } from "../retry.js";
 import { formatLogLine } from "../../utils/logFormatter.js";
-import { computeCostUsd, pricingFor } from "../modelCatalog.js";
+import { pricingFor } from "../modelCatalog.js";
+
+// B2.4 — protocol modules return raw `{ input, output }` token usage
+// only. For Ollama (which doesn't expose token counts in non-streaming
+// mode), we emit `{ input: 0, output: 0 }` for catalog-known local
+// models so the dispatcher's `computeCostForRoute` resolves to
+// `costUsd: 0` (free). Unknown models return `usage: null` so the
+// dispatcher's "no data" branch fires correctly.
 
 const DEFAULT_OLLAMA_TIMEOUT_MS = 120_000;
 const DEFAULT_OLLAMA_MAX_PREDICT = 4096;
@@ -125,19 +132,13 @@ export async function generate(route, messages, opts) {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const text = await callOllama(route, messages, opts);
-      // Distinguish "free local model" (catalog hit, costUsd 0) from
-      // "unknown model" (catalog miss, usage null). Mirrors the legacy
-      // adapter so dashboards stay consistent across both code paths.
+      // B2.4 — distinguish "free local model" (catalog hit → `{0, 0}`
+      // → dispatcher computes costUsd: 0) from "unknown model"
+      // (catalog miss → `usage: null` → dispatcher skips cost metric).
+      // The dispatcher's `computeCostForRoute` owns the cost math;
+      // protocol modules only signal which case applies.
       const known = pricingFor(route.model);
-      const usage = known
-        ? {
-            input: 0,
-            output: 0,
-            costUsd: known.inputPer1k === 0 && known.outputPer1k === 0
-              ? 0
-              : computeCostUsd(route.model, { input: 0, output: 0 }),
-          }
-        : null;
+      const usage = known ? { input: 0, output: 0 } : null;
       return { text, usage };
     } catch (err) {
       if (err.name === "AbortError" || opts.signal?.aborted) throw err;
