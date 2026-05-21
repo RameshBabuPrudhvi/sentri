@@ -94,6 +94,14 @@ const files = [
   "tests/quota-guard.test.js",
   // B3.8 — Exact-match response cache + thundering-herd coalescing + janitor.
   "tests/response-cache.test.js",
+  // B4.1 / B4.4 — "no code edits to add a vendor" contract test. Registers
+  // a `family: "custom"` route at runtime, points it at a mock OpenAI
+  // server, and asserts dispatch reaches the mock with the operator-set
+  // apiKey + baseUrl + model. Pins the central guarantee from the
+  // roadmap's "Definition of done" — passes once `_callProviderUnsafe`
+  // dispatches real routes through `protocolAdapter.generate(route, …)`
+  // (B4.1) instead of the legacy `adapterFor(provider)` switch.
+  "tests/no-code-edits-contract.test.js",
   "tests/chaos-provider.test.js",        // B1.8 — error-injection: 500s, malformed JSON, mid-stream abort, breaker.
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",

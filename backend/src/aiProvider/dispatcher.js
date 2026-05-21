@@ -50,6 +50,18 @@ import {
   coalesceInFlight,
   registerInFlight,
 } from "./responseCache.js";
+// B4.1 — Route-driven dispatch entry point. For real routes (`route.id`
+// starts with `"pr-"`, i.e. backed by a `provider_routes` row), we
+// dispatch through `protocolAdapter.generate(route, messages, opts)`
+// keyed on `route.protocol` instead of the legacy `adapterFor(provider)`
+// + `buildAdapterOpts(provider, …)` switch. The legacy path is preserved
+// for transient routes (`route.id` starts with `"provider:"`, synthesised
+// by `resolveRoute` from env detection) because their `apiKeyEncrypted`
+// blob doesn't exist in the DB — `secrets.getDecryptedKey` would return
+// null and the protocol adapter would fail with a clearer-but-still-broken
+// "no apiKey" error. Removing the legacy path is gated on every workspace
+// running through the route-driven dispatch (separate cleanup PR).
+import * as protocolAdapter from "./adapters/protocolAdapter.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -830,11 +842,59 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
       }
     }
 
-    // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
-    // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
-    // also derives `useJson` for adapters that haven't migrated yet.
-    const opts = buildAdapterOpts(provider, messages, effectiveMaxTokens, signal, responseFormat);
-    const { text, usage } = await adapterFor(provider).generate(opts);
+    // B4.1 — Route-driven dispatch for real routes; legacy path for
+    // transient (env-detection) routes. The discriminator is the route id:
+    //   • `"pr-..."` → real `provider_routes` row → secret blob lives in
+    //     the DB → `protocolAdapter.generate(route, messages, opts)` keyed
+    //     on `route.protocol`. This path doesn't read `process.env.*_API_KEY`
+    //     and doesn't touch `route.family` — operators can register a
+    //     `family: "custom"` route and dispatch reaches the SDK uniformly.
+    //   • `"provider:<id>"` (transient) or `null` (no route at all) →
+    //     fall back to `adapterFor(provider)` + `buildAdapterOpts(provider, …)`.
+    //     The transient route was synthesised by `resolveRoute` from env
+    //     detection — there's no DB-backed encrypted key for `secrets.js`
+    //     to decrypt, so the legacy env-driven path is correct here.
+    //
+    // OpenRouter parity: real openrouter routes carry their `baseUrl` +
+    // referer headers on the row itself (set via Settings UI on save).
+    // Transient openrouter routes still need the `OPENROUTER_*` env-derived
+    // headers + `OPENROUTER_BASE_URL`, which `buildAdapterOpts` injects.
+    //
+    // Compat / custom-family routes: real routes get the `guardedFetch`
+    // SSRF wrapper applied below so DNS-rebinding mitigation matches the
+    // legacy compat-slot behaviour. Anthropic / Google / Ollama protocols
+    // ignore `guardedFetch` (they don't go through the OpenAI SDK), so
+    // passing it for every protocol is harmless.
+    const isRealRoute = route?.id && typeof route.id === "string" && route.id.startsWith("pr-");
+    let text, usage;
+    if (isRealRoute) {
+      const protocolOpts = {
+        maxTokens: effectiveMaxTokens,
+        signal,
+        responseFormat,
+        // SSRF guard for any operator-controlled baseUrl. The protocol
+        // module passes this to the OpenAI SDK as `fetch`; non-OpenAI
+        // protocols ignore it. Same DNS-rebinding mitigation as legacy
+        // compat slots — see `createSsrfGuardedFetch` JSDoc.
+        guardedFetch: route.baseUrl ? createSsrfGuardedFetch() : undefined,
+        // OpenRouter referer headers — only inject for `family: "openrouter"`
+        // routes. Real openrouter routes save these from the Settings UI in
+        // a future PR; until then the env-derived defaults match the legacy
+        // `buildAdapterOpts` injection so dispatch parity is preserved.
+        defaultHeaders: route.family === "openrouter" ? {
+          "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev",
+          "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri",
+        } : undefined,
+      };
+      ({ text, usage } = await protocolAdapter.generate(route, messages, protocolOpts));
+    } else {
+      // Legacy env-default dispatch path. Preserved verbatim — transient
+      // routes (env detection) never had encrypted keys to feed into the
+      // protocol adapter, so the legacy `buildAdapterOpts` + `adapterFor`
+      // switch remains the correct entry point.
+      const opts = buildAdapterOpts(provider, messages, effectiveMaxTokens, signal, responseFormat);
+      ({ text, usage } = await adapterFor(provider).generate(opts));
+    }
     // Token telemetry is the orchestrator's responsibility — adapters return
     // raw usage and don't know about the metrics registry. Keeps adapters
     // self-contained and testable in isolation.
