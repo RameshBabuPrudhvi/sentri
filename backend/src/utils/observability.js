@@ -76,7 +76,7 @@ export function getSpanContext() {
  * @param {string} [attrs.operation]
  * @returns {void}
  */
-export function annotateAiCallSpan({ provider, agentRole, operation } = {}) {
+export function annotateAiCallSpan({ provider, agentRole, operation, routeName } = {}) {
   if (!otelApi || !provider) return;
   try {
     const span = otelApi.trace.getSpan(otelApi.context.active());
@@ -89,6 +89,7 @@ export function annotateAiCallSpan({ provider, agentRole, operation } = {}) {
       attrs["ai.agent_role"] = agentRole;
       attrs["gen_ai.request.agent_role"] = agentRole;
     }
+    if (routeName) attrs["ai.route_name"] = routeName;
     if (operation) {
       attrs["ai.operation"] = operation;
       attrs["gen_ai.operation.name"] = operation;
