@@ -17,6 +17,11 @@ import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER } from "./modelCatalog.js";
 import { protocolForProvider } from "./protocolForProvider.js";
+// B4.6 — route-group resolution. When `agent_configs.routeId` starts
+// with `"rg-"`, the id points at a `route_groups` row instead of a
+// direct `provider_routes` row. `resolveGroup` picks a concrete route
+// from the group using the group's strategy (weighted / latency / cost).
+import { resolveGroup } from "./routeGroupResolver.js";
 
 // ── Mutable state ────────────────────────────────────────────────────────────
 const runtimeKeys = {};
@@ -479,17 +484,28 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
       // with `cfg` still in scope.
       if (cfg.routeId) {
         let route;
-        try { route = providerRouteRepo.getById(workspaceId, cfg.routeId); }
-        catch { /* DB unavailable */ }
+        // B4.6 — routeId can point at either a direct route (`pr-*`) or
+        // a route group (`rg-*`). Groups are resolved to a concrete route
+        // at call time using the group's strategy (weighted / latency /
+        // cost). The caller never knows whether the route came from a
+        // group or a direct assignment — the return shape is identical.
+        if (typeof cfg.routeId === "string" && cfg.routeId.startsWith("rg-")) {
+          try { route = resolveGroup(cfg.routeId, workspaceId, { agentRole }); }
+          catch { /* DB unavailable or resolver error */ }
+        } else {
+          try { route = providerRouteRepo.getById(workspaceId, cfg.routeId); }
+          catch { /* DB unavailable */ }
+        }
         // Route must exist, be enabled, and belong to the same
         // workspace (getById is workspace-scoped, so the second
         // check is implicit but spelled out for clarity).
         if (route && route.enabled && route.workspaceId === workspaceId) {
           return { route, config: cfg, effectiveAgentRole: agentRole };
         }
-        // Route id pointed at a disabled / deleted row. Don't silently
-        // fall back to env detection — that would hide a misconfig.
-        // Return null so the caller surfaces a config error to the user.
+        // Route id pointed at a disabled / deleted row (or a group with
+        // zero healthy members). Don't silently fall back to env
+        // detection — that would hide a misconfig. Return null so the
+        // caller surfaces a config error to the user.
         return { route: null, config: cfg, effectiveAgentRole: agentRole };
       }
       // No routeId — fall through to (3) but keep `cfg` so any per-role
