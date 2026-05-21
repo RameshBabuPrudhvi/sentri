@@ -66,6 +66,8 @@ useDefault = true
     # flags. Allowlisted so the historical commit doesn't fail CI;
     # production code never reads test-fixture key strings.
     "backend/tests/migration-routeid.test.js",
+    "backend/tests/routes-import-export.test.js",
+    "backend/tests/provider-routes-api.test.js"
   ]
 
   # Test fixtures and seed data may contain fake credentials for testing auth
