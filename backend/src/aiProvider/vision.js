@@ -73,13 +73,30 @@ import { parseJSON } from "./index.js";
 export function resolveVisionModel({ workspaceId = null } = {}) {
   // 1. Explicit operator override — no whitelist check.
   if (process.env.VISION_MODEL) return process.env.VISION_MODEL;
-  // 2. Route-driven path: healer agent_config → routeId → route with
-  //    capabilities.vision === true. This is the canonical multi-
-  //    tenant path; B2.2's probe wrote the capability evidence so we
-  //    trust the route here.
+  // 2. Route-driven path: healer agent_config → routeId → route.
+  //    Priority:
+  //      a. `route.capabilities.vision === true` (probed evidence —
+  //         B2.2's auto-probe wrote this on every Settings-UI save).
+  //      b. Fallback to `VISION_CAPABLE_MODELS` catalog when the
+  //         route exists but `capabilities` is `null` (backfill-routes
+  //         script intentionally skips probing — see its header
+  //         JSDoc — so backfilled routes need the catalog floor to
+  //         work immediately, before an operator manually probes).
+  //    Without the catalog fallback, vision healing silently breaks
+  //    for every workspace whose healer was migrated by the backfill
+  //    script until someone hits the Settings UI re-probe button.
   if (workspaceId) {
     const { route } = resolveRoute({ agentRole: "healer", workspaceId });
-    if (route?.capabilities?.vision && route?.model) return route.model;
+    if (route?.model) {
+      if (route.capabilities?.vision === true) return route.model;
+      // Catalog fallback for unprobed routes. We only fall through to
+      // env paths when the route's model isn't in the catalog either —
+      // an unprobed route with a clearly vision-capable model id (e.g.
+      // `claude-3-5-sonnet`) should still drive vision healing.
+      if (route.capabilities == null && VISION_CAPABLE_MODELS.has(route.model)) {
+        return route.model;
+      }
+    }
   }
   // 3. AI_MODEL env, guarded against accidentally sending image data
   //    to a text-only model (regression Lifeguard flagged when the

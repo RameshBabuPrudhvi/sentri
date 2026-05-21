@@ -205,15 +205,25 @@ function probeVision(route) {
  */
 function classifyProbeError(err) {
   const msg = String(err?.message || err || "").toLowerCase();
+  // `Number(undefined || undefined || 0) === 0`, so an error without a
+  // `.status` / `.statusCode` field always yields `status === 0`. We
+  // can't use `status === 0` alone as the network-error signal — many
+  // SDKs throw plain `new Error("Unauthorized: invalid API key")`
+  // without a status code, and treating those as network errors would
+  // misroute every key-rotation failure as "endpoint unreachable".
+  //
+  // Fix (B2.2 follow-up): run the message-pattern checks for auth /
+  // model_not_found / rate_limit BEFORE the network-error branch, and
+  // tighten the bare `status === 0` fallback to fire only when the
+  // message itself matches a network-shaped pattern (the regex). When
+  // the status is a real HTTP code (401/403/404/429), the message
+  // pattern is bypassed and the typed branch wins.
   const status = Number(err?.status || err?.statusCode || 0);
-  // Network / DNS / SSRF / timeout — provider unreachable.
-  if (
-    /timeout|timed out|abort|econn|enotfound|eai_again|fetch failed|network|ssrf/i.test(msg)
-    || status === 0
-  ) {
-    return { reachable: false, errorReason: msg.slice(0, 200) || "network_error" };
-  }
-  // Auth — key invalid / revoked / wrong scope.
+  const NETWORK_RE = /timeout|timed out|abort|econn|enotfound|eai_again|fetch failed|network|ssrf/i;
+
+  // Auth — key invalid / revoked / wrong scope. Check FIRST so SDK
+  // errors thrown with no `.status` (`new Error("Unauthorized: ...")`)
+  // still classify correctly.
   if (status === 401 || status === 403 || /unauthorized|forbidden|invalid api key|incorrect api key/i.test(msg)) {
     return { reachable: true, auth: false, errorReason: "auth_failed" };
   }
@@ -226,6 +236,15 @@ function classifyProbeError(err) {
   // as reachable + auth ok; capability dimensions left unobserved.
   if (status === 429 || /rate limit|too many requests/i.test(msg)) {
     return { reachable: true, auth: true, errorReason: "rate_limited" };
+  }
+  // Network / DNS / SSRF / timeout — provider unreachable. Only
+  // classify here when the message text matches a network pattern OR
+  // the error is truly statusless AND the message is empty (a bare
+  // throw with no metadata; safest to call it network). A statusless
+  // error WITH a non-network message falls through to the "unknown"
+  // branch below, which preserves reachability for downstream probes.
+  if (NETWORK_RE.test(msg) || (status === 0 && !msg)) {
+    return { reachable: false, errorReason: msg.slice(0, 200) || "network_error" };
   }
   // Unknown — assume reachable (we got *some* error response back) but
   // surface the message so the operator can see what went wrong.

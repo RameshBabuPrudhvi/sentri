@@ -290,6 +290,47 @@ export const api = {
     const qs = params.toString();
     return req("GET", `/settings/provider-routes/audit${qs ? `?${qs}` : ""}`);
   },
+  /**
+   * B2.5 — Paginated AI request-log viewer. Workspace-scoped on the
+   * backend. Returns the same cursor shape as `listProviderRouteAudit`
+   * for UI consistency. `promptRedacted` / `responseRedacted` carry
+   * PII-stripped content under `redacted` mode, raw content under
+   * `full` mode, and `null` under `none` (the workspace default).
+   *
+   * @param {Object} [filters]
+   * @param {string} [filters.routeId]
+   * @param {string} [filters.agentRole]
+   * @param {string} [filters.traceId]
+   * @param {string} [filters.outcome]    - `success` | `error` | `rate_limited`
+   * @param {string} [filters.before]     - ISO timestamp cursor
+   * @param {number} [filters.limit=50]
+   * @returns {Promise<{ items: Array, nextCursor: string|null }>}
+   */
+  listAiRequests: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.routeId) params.set("routeId", filters.routeId);
+    if (filters.agentRole) params.set("agentRole", filters.agentRole);
+    if (filters.traceId) params.set("traceId", filters.traceId);
+    if (filters.outcome) params.set("outcome", filters.outcome);
+    if (filters.before) params.set("before", filters.before);
+    if (filters.limit != null) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    return req("GET", `/settings/ai-requests${qs ? `?${qs}` : ""}`);
+  },
+  /**
+   * B2.5 — Replay a logged AI request. The server refuses with HTTP
+   * 400 when the row was captured under storage mode `none` (no prompt
+   * stored) or `redacted` (replaying sentinel strings is meaningless).
+   * Pass `routeId` to dispatch the replay against a different route
+   * than the original — useful for "would this work on a cheaper
+   * model?" debugging.
+   *
+   * @param {string} id - Request log id (`air-<uuid>`).
+   * @param {{ routeId?: string }} [opts]
+   * @returns {Promise<{ ok: boolean, replayedFrom: string, routeId: string|null, text: string }>}
+   */
+  replayAiRequest: (id, opts = {}) =>
+    req("POST", `/settings/ai-requests/${id}/replay`, opts || {}),
 
 // ── Projects ────────────────────────────────────────────────────────────────
   /** @param {Object} data - `{ name, url, credentials? }` */
