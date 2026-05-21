@@ -731,8 +731,25 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
     }
     // Miss — coalesce with any in-flight identical dispatch so
     // thundering-herd traffic doesn't fan out N vendor calls.
+    //
+    // Cost-attribution fix: the shared `dispatchPromise` resolves with
+    // the real `{ text, usage, costResult }` for every awaiter, but
+    // only ONE vendor call actually fires. If each coalesced caller's
+    // `callProvider` wrapper logged the same `costResult.costUsd` to
+    // `ai_request_log`, `checkSpendCap`'s SUM(costUsd) over the window
+    // would count N × cost for one provider call — wrongly tripping
+    // the workspace's daily/monthly spend cap. Rewrite the cost on
+    // secondary returns so only the primary caller (which actually
+    // runs the IIFE below) carries the real cost; secondary callers
+    // see `{ costUsd: 0, source: "coalesced" }` — mirrors the cache-hit
+    // contract at line ~720 where re-served responses cost $0.
     const inflight = coalesceInFlight(cacheKey);
-    if (inflight) return inflight;
+    if (inflight) {
+      return inflight.then((result) => ({
+        ...result,
+        costResult: { costUsd: 0, source: "coalesced" },
+      }));
+    }
   }
 
   // B3.8 race fix — fold gates + dispatch + telemetry + cache populate
