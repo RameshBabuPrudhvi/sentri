@@ -265,19 +265,10 @@ router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
 // magnitude used elsewhere in the codebase for user-supplied free-text.
 const MAX_SYSTEM_PROMPT_LEN = 32_000;
 
-function hasFallbackCycle(workspaceId, role, fallbackRole) {
-  if (!fallbackRole) return false;
-  const byRole = new Map(agentConfigRepo.listByWorkspace(workspaceId).map((r) => [r.role, r.fallbackRole]));
-  byRole.set(role, fallbackRole);
-  let cur = fallbackRole;
-  const seen = new Set([role]);
-  while (cur) {
-    if (seen.has(cur)) return true;
-    seen.add(cur);
-    cur = byRole.get(cur) || null;
-  }
-  return false;
-}
+// B4.3 — `hasFallbackCycle` removed. Migration 053 dropped the
+// `agent_configs.fallbackRole` column; the canonical per-route fallback
+// lives on `provider_routes.fallbackRouteId` and is cycle-checked by
+// `providerRouteRepo.upsert` (ERR_ROUTE_FALLBACK_CYCLE).
 
 router.get("/settings/agent-roles", requireRole("admin"), (req, res) => {
   res.json({ roles: agentConfigRepo.listByWorkspace(req.workspaceId) });
@@ -288,10 +279,10 @@ router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
   // now pin dispatch by `routeId` (a `provider_routes` row carries family +
   // model + encrypted key). The route validates `routeId` exists in this
   // workspace via `agentConfigRepo.upsert` (throws `ERR_AGENT_ROUTE_NOT_FOUND`).
-  const { role, routeId = null, systemPromptOverride = null, temperature = 0.2, maxTokens = null, fallbackRole = null } = req.body || {};
+  // B4.3 — `fallbackRole` dropped by migration 053. Silently ignore if
+  // callers still send it (old frontend builds, API scripts).
+  const { role, routeId = null, systemPromptOverride = null, temperature = 0.2, maxTokens = null } = req.body || {};
   if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
-  if (fallbackRole && !AGENT_ROLES.includes(fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
-  if (fallbackRole && hasFallbackCycle(req.workspaceId, role, fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
   if (typeof systemPromptOverride === "string" && systemPromptOverride.length > MAX_SYSTEM_PROMPT_LEN) {
     return res.status(400).json({ error: `systemPromptOverride must be ${MAX_SYSTEM_PROMPT_LEN} chars or fewer` });
   }
@@ -302,7 +293,7 @@ router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
       id: existing?.id || `AGC-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,
       workspaceId: req.workspaceId, role, routeId, systemPromptOverride,
       temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
-      maxTokens: maxTokens == null ? null : (Number.isFinite(Number(maxTokens)) ? Number(maxTokens) : null), fallbackRole,
+      maxTokens: maxTokens == null ? null : (Number.isFinite(Number(maxTokens)) ? Number(maxTokens) : null),
       createdAt: existing?.createdAt || now, updatedAt: now,
     });
     res.status(existing ? 200 : 201).json(saved);
@@ -317,7 +308,8 @@ router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
 // key or stamp a different workspace onto the row. B2.1 — `provider` and
 // `model` were dropped (migration 048); `routeId` is the new dispatch
 // pin and replaces both.
-const PATCHABLE_AGENT_FIELDS = ["routeId", "systemPromptOverride", "temperature", "maxTokens", "fallbackRole"];
+// B4.3 — `fallbackRole` removed (column dropped by migration 053).
+const PATCHABLE_AGENT_FIELDS = ["routeId", "systemPromptOverride", "temperature", "maxTokens"];
 
 router.patch("/settings/agent-roles/:role", requireRole("admin"), (req, res) => {
   const role = req.params.role;
@@ -329,8 +321,6 @@ router.patch("/settings/agent-roles/:role", requireRole("admin"), (req, res) => 
   for (const k of PATCHABLE_AGENT_FIELDS) if (k in body) payload[k] = body[k];
   payload.role = role;
   payload.workspaceId = req.workspaceId;
-  if (payload.fallbackRole && !AGENT_ROLES.includes(payload.fallbackRole)) return res.status(400).json({ error: "Invalid fallbackRole" });
-  if (payload.fallbackRole && hasFallbackCycle(req.workspaceId, role, payload.fallbackRole)) return res.status(400).json({ error: "fallbackRole creates a cycle" });
   if (typeof payload.systemPromptOverride === "string" && payload.systemPromptOverride.length > MAX_SYSTEM_PROMPT_LEN) {
     return res.status(400).json({ error: `systemPromptOverride must be ${MAX_SYSTEM_PROMPT_LEN} chars or fewer` });
   }

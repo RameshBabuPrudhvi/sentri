@@ -30,33 +30,11 @@ export function listByWorkspace(workspaceId) {
   return getDatabase().prepare("SELECT * FROM agent_configs WHERE workspaceId = ? ORDER BY role ASC").all(workspaceId);
 }
 
-/**
- * Walk the `fallbackRole` chain starting from `startRole` (with `startRole`'s
- * fallback set hypothetically to `proposedFallback`) and return `true` if the
- * walk revisits `startRole` before terminating. Used by `upsert()` to reject
- * cycles at config-save time (AI-005 acceptance criterion).
- *
- * @param {string} workspaceId
- * @param {string} startRole
- * @param {string|null} proposedFallback
- * @returns {boolean}
- */
-function wouldCreateCycle(workspaceId, startRole, proposedFallback) {
-  if (!proposedFallback) return false;
-  if (proposedFallback === startRole) return true;
-  const db = getDatabase();
-  const seen = new Set([startRole]);
-  let next = proposedFallback;
-  // Bounded walk — agent_configs has at most ~8 canonical roles per workspace,
-  // so a 16-hop guard is well beyond any legitimate chain length.
-  for (let i = 0; i < 16 && next; i += 1) {
-    if (seen.has(next)) return true;
-    seen.add(next);
-    const row = db.prepare("SELECT fallbackRole FROM agent_configs WHERE workspaceId = ? AND role = ?").get(workspaceId, next);
-    next = row?.fallbackRole || null;
-  }
-  return false;
-}
+// B4.3 — `wouldCreateCycle` removed. Migration 053 dropped the
+// `agent_configs.fallbackRole` column; the canonical per-route fallback
+// now lives on `provider_routes.fallbackRouteId` and is cycle-checked
+// by `providerRouteRepo.upsert` (ERR_ROUTE_FALLBACK_CYCLE). The
+// role-level cycle detector is dead code post-053.
 
 /**
  * Insert or update a role config (keyed on `(workspaceId, role)`). On
@@ -86,54 +64,41 @@ export function upsert(config) {
       throw err;
     }
   }
-  if (wouldCreateCycle(config.workspaceId, config.role, config.fallbackRole)) {
-    const err = new Error(`fallbackRole cycle detected: ${config.role} → ${config.fallbackRole}`);
-    err.code = "ERR_AGENT_FALLBACK_CYCLE";
-    throw err;
-  }
   const db = getDatabase();
-  // B2.1 — `provider` + `model` columns dropped in migration 048.
-  // Workspaces now pin dispatch by `routeId` exclusively; the
-  // `provider_routes` row carries the family + protocol + model +
-  // encrypted API key. Callers that still pass `provider`/`model` in
-  // the config payload have those values silently ignored at the SQL
-  // layer (excluded from the INSERT column list) — no error, no
-  // partial write. `temperature`, `systemPromptOverride`, `maxTokens`,
-  // and `fallbackRole` are kept for one release per the B2.1 roadmap.
+  // B4.3 — `fallbackRole` column dropped by migration 053. The
+  // canonical per-route fallback lives on `provider_routes.fallbackRouteId`.
+  // `provider` + `model` were already dropped in migration 048.
+  // Only `routeId`, `systemPromptOverride`, `temperature`, and
+  // `maxTokens` remain as mutable fields on agent_configs.
   db.prepare(`
-    INSERT INTO agent_configs (id, workspaceId, role, routeId, systemPromptOverride, temperature, maxTokens, fallbackRole, createdAt, updatedAt)
-    VALUES (@id, @workspaceId, @role, @routeId, @systemPromptOverride, @temperature, @maxTokens, @fallbackRole, @createdAt, @updatedAt)
+    INSERT INTO agent_configs (id, workspaceId, role, routeId, systemPromptOverride, temperature, maxTokens, createdAt, updatedAt)
+    VALUES (@id, @workspaceId, @role, @routeId, @systemPromptOverride, @temperature, @maxTokens, @createdAt, @updatedAt)
     ON CONFLICT(workspaceId, role) DO UPDATE SET
       routeId=excluded.routeId,
       systemPromptOverride=excluded.systemPromptOverride,
       temperature=excluded.temperature,
       maxTokens=excluded.maxTokens,
-      fallbackRole=excluded.fallbackRole,
       updatedAt=excluded.updatedAt
   `).run({ ...config, routeId: config.routeId ?? null });
   return getByRole(config.workspaceId, config.role);
 }
 
 /**
- * Delete a role config and null out any sibling `fallbackRole` references
- * to the deleted role in the same workspace. The two writes run in a single
- * transaction so dispatch (AI-005) can rely on the invariant that every
- * non-null `fallbackRole` points at an existing config.
+ * Delete a role config.
+ *
+ * B4.3 — the `fallbackRole` cascade-null is gone because migration 053
+ * dropped the column. The canonical fallback chain lives on
+ * `provider_routes.fallbackRouteId` now; `providerRouteRepo.remove`
+ * handles its own cascade-null in the same transaction pattern.
  *
  * @param {string} workspaceId
  * @param {string} role
- * @returns {Object} { deleted, fallbacksCleared } — better-sqlite3 changes counts.
+ * @returns {Object} { deleted } — better-sqlite3 changes count.
  */
 export function remove(workspaceId, role) {
   const db = getDatabase();
-  const tx = db.transaction(() => {
-    const cleared = db.prepare(
-      "UPDATE agent_configs SET fallbackRole = NULL, updatedAt = ? WHERE workspaceId = ? AND fallbackRole = ?"
-    ).run(new Date().toISOString(), workspaceId, role);
-    const deleted = db.prepare(
-      "DELETE FROM agent_configs WHERE workspaceId = ? AND role = ?"
-    ).run(workspaceId, role);
-    return { deleted: deleted.changes, fallbacksCleared: cleared.changes };
-  });
-  return tx();
+  const deleted = db.prepare(
+    "DELETE FROM agent_configs WHERE workspaceId = ? AND role = ?"
+  ).run(workspaceId, role);
+  return { deleted: deleted.changes };
 }
