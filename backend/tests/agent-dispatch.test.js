@@ -169,7 +169,9 @@ test("AI-005c: single-agent shares ONE breaker across roles (no wasted-call ampl
   // so its breaker check sees the same tripped state — no second wasted call.
   // (The multi-agent-mode regression test 'rate-limiting anthropic::planner
   // does NOT trip anthropic::author' above pins the opposite invariant.)
-  recordProviderSuccess("anthropic", null);
+  // Clean up: setRuntimeKey triggers resetCircuitBreaker internally, clearing
+  // ALL anthropic::* breaker keys so subsequent tests start clean.
+  setRuntimeKey("anthropic", "test-anthropic-key");
 });
 
 test("sticky fallback for the role WINS over agent_configs (tripwire #1)", () => {
