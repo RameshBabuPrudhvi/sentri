@@ -86,7 +86,23 @@ async function probeRole(workspaceId, role, signal) {
     return { ok: false, reason: "no_provider_configured", provider: null };
   }
   try {
-    await generateText("ping", { agentRole: role, workspaceId, maxTokens: 1, signal });
+    // `responseFormat: "text"` is critical here. `generateText` →
+    // `buildAdapterOpts` defaults `responseFormat` to `"json_object"`
+    // (see `dispatcher.js#buildAdapterOpts`). Sending a bare "ping" prompt
+    // under JSON mode causes OpenAI (and other strict-JSON providers) to
+    // reject the request with a 400 "must contain the word 'json'" error,
+    // which the probe would then misreport as a credential / connectivity
+    // failure — falsely aborting every crawl + generate run for any
+    // workspace whose agent_configs row points at OpenAI. The health
+    // check probes reachability, not schema compliance, so plain text is
+    // the right protocol here.
+    await generateText("ping", {
+      agentRole: role,
+      workspaceId,
+      maxTokens: 1,
+      signal,
+      responseFormat: "text",
+    });
     return { ok: true, reason: null, provider };
   } catch (err) {
     return {
