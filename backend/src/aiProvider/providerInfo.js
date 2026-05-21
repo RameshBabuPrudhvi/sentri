@@ -19,24 +19,36 @@ import {
 } from "./registry.js";
 import {
   CLOUD_KEY_MAP,
+  CLOUD_DEFAULT_MODELS,
   PROVIDER_DOCS,
   VISION_CAPABLE_MODELS,
   capabilitiesFor,
   getCloudModel,
   getCloudName,
+  getCloudColor,
   pricingFor,
 } from "./modelCatalog.js";
 
 // ── Provider metadata ─────────────────────────────────────────────────────────
 
 export function buildProviderMeta() {
-  const meta = {
-    anthropic:  { name: getCloudName("anthropic"),  model: getCloudModel("anthropic"),  color: "#cd7f32" },
-    openai:     { name: getCloudName("openai"),     model: getCloudModel("openai"),     color: "#10a37f" },
-    google:     { name: getCloudName("google"),     model: getCloudModel("google"),     color: "#4285f4" },
-    openrouter: { name: getCloudName("openrouter"), model: getCloudModel("openrouter"), color: "#6466f1" },
-    local:      { name: `Ollama (${getOllamaModel()})`, model: getOllamaModel(), color: "#7c3aed" },
-  };
+  // B4.1 — derive cloud entries from `CLOUD_DEFAULT_MODELS` (single source
+  // of truth in `modelCatalog.js`) instead of re-hardcoding the family enum
+  // here. Adding a new cloud family now requires ONE entry in the catalog;
+  // this builder, `detectProvider`, `getConfiguredKeys`, and the Settings UI
+  // all pick it up automatically with zero drift risk.
+  const meta = {};
+  for (const family of Object.keys(CLOUD_DEFAULT_MODELS)) {
+    meta[family] = {
+      name: getCloudName(family),
+      model: getCloudModel(family),
+      color: getCloudColor(family),
+    };
+  }
+  // Ollama is not in CLOUD_DEFAULT_MODELS (it's not cloud-keyed) — add it
+  // as the single non-cloud entry. The `"local"` key is the canonical enum
+  // value used throughout the codebase.
+  meta.local = { name: `Ollama (${getOllamaModel()})`, model: getOllamaModel(), color: "#7c3aed" };
   // AI-001: synthesize entries for every configured compat slot so
   // getProviderName() / getProviderMeta() don't throw when a compat provider
   // is active (called from crawler.js, testPersistence.js, etc).

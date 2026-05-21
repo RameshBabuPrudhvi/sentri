@@ -84,8 +84,14 @@ function resolveApiKey(route) {
  * @returns {Object}
  */
 function buildOpts(route, callerOpts) {
+  // B4.1 — `resolveApiKey` returns `null` for transient routes (no DB row
+  // to decrypt). In that case, honour `callerOpts.apiKey` so the dispatcher
+  // can pass the env-derived key for legacy single-tenant workspaces that
+  // haven't migrated to real routes. Real routes always win via
+  // `resolveApiKey` — the caller's key is a fallback, not an override.
+  const resolvedKey = resolveApiKey(route);
   return {
-    apiKey: resolveApiKey(route),
+    apiKey: resolvedKey ?? callerOpts.apiKey ?? null,
     maxTokens: callerOpts.maxTokens,
     signal: callerOpts.signal,
     useJson: callerOpts.responseFormat !== "text",

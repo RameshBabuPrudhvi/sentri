@@ -27,7 +27,7 @@ import { logRequest } from "./requestLog.js";
 // is consulted ONLY when the route's pricing column is null, and only
 // to compute a non-null cost for the metric — never to overwrite an
 // operator-set route price. See `computeCostForRoute` JSDoc below.
-import { pricingFor } from "./modelCatalog.js";
+import { pricingFor, CLOUD_KEY_MAP } from "./modelCatalog.js";
 // B2.5 — Per-workspace request-log policy lookup. Hot-path read; the
 // repo's `getAiRequestLogSettings` returns `{ mode: "none", customRules: [] }`
 // for unknown workspace ids so callers always get a usable shape.
@@ -865,36 +865,54 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
     // legacy compat-slot behaviour. Anthropic / Google / Ollama protocols
     // ignore `guardedFetch` (they don't go through the OpenAI SDK), so
     // passing it for every protocol is harmless.
-    const isRealRoute = route?.id && typeof route.id === "string" && route.id.startsWith("pr-");
+    // B4.1 — ALL dispatch goes through `protocolAdapter.generate` now,
+    // both real routes (pr-*) and transient routes (provider:*). The
+    // protocol adapter's `buildOpts` falls back to `callerOpts.apiKey`
+    // when `secrets.getDecryptedKey` returns null (transient routes have
+    // no DB row to decrypt). For transient routes we resolve the env-
+    // derived key here and pass it through — the protocol module never
+    // reads process.env directly.
+    //
+    // This eliminates the last `adapterFor()` + `buildAdapterOpts()`
+    // call site from the dispatch hot path. The exit criterion from
+    // `docs/roadmap/ai-provider-bundle.md` B4.1 — "zero hardcoded
+    // family strings in dispatch path" — is now met.
+    const protocolOpts = {
+      maxTokens: effectiveMaxTokens,
+      signal,
+      responseFormat,
+      // SSRF guard for any operator-controlled baseUrl. The protocol
+      // module passes this to the OpenAI SDK as `fetch`; non-OpenAI
+      // protocols ignore it. Same DNS-rebinding mitigation as legacy
+      // compat slots — see `createSsrfGuardedFetch` JSDoc.
+      guardedFetch: route?.baseUrl ? createSsrfGuardedFetch() : undefined,
+      // OpenRouter referer headers — inject for openrouter-family routes.
+      defaultHeaders: route?.family === "openrouter" ? {
+        "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev",
+        "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri",
+      } : undefined,
+      // B4.1 — env-derived API key for transient routes. Real routes
+      // resolve their key via `secrets.getDecryptedKey` inside
+      // `protocolAdapter.buildOpts`; transient routes have no DB row so
+      // the protocol adapter's null-guard falls back to this value.
+      // `getKey(CLOUD_KEY_MAP[provider])` is the same env read that
+      // `buildAdapterOpts` used to do inline — now centralised here so
+      // the protocol module stays env-free.
+      apiKey: route?._transient
+        ? (isCompatProvider(provider)
+          ? getCompatConfig(provider)?.apiKey
+          : getKey(CLOUD_KEY_MAP[provider] || ""))
+        : undefined,
+    };
+    // Dispatch route must carry a model for the protocol module. Transient
+    // routes from `synthesiseTransientRoute` have `model: null` (the env-
+    // default model wasn't resolved there). Patch it here from the catalog
+    // so the protocol module sends the correct model string to the SDK.
+    const dispatchRoute = route?.model
+      ? route
+      : { ...route, model: buildProviderMeta()[provider]?.model || "" };
     let text, usage;
-    if (isRealRoute) {
-      const protocolOpts = {
-        maxTokens: effectiveMaxTokens,
-        signal,
-        responseFormat,
-        // SSRF guard for any operator-controlled baseUrl. The protocol
-        // module passes this to the OpenAI SDK as `fetch`; non-OpenAI
-        // protocols ignore it. Same DNS-rebinding mitigation as legacy
-        // compat slots — see `createSsrfGuardedFetch` JSDoc.
-        guardedFetch: route.baseUrl ? createSsrfGuardedFetch() : undefined,
-        // OpenRouter referer headers — only inject for `family: "openrouter"`
-        // routes. Real openrouter routes save these from the Settings UI in
-        // a future PR; until then the env-derived defaults match the legacy
-        // `buildAdapterOpts` injection so dispatch parity is preserved.
-        defaultHeaders: route.family === "openrouter" ? {
-          "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev",
-          "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri",
-        } : undefined,
-      };
-      ({ text, usage } = await protocolAdapter.generate(route, messages, protocolOpts));
-    } else {
-      // Legacy env-default dispatch path. Preserved verbatim — transient
-      // routes (env detection) never had encrypted keys to feed into the
-      // protocol adapter, so the legacy `buildAdapterOpts` + `adapterFor`
-      // switch remains the correct entry point.
-      const opts = buildAdapterOpts(provider, messages, effectiveMaxTokens, signal, responseFormat);
-      ({ text, usage } = await adapterFor(provider).generate(opts));
-    }
+    ({ text, usage } = await protocolAdapter.generate(dispatchRoute, messages, protocolOpts));
     // Token telemetry is the orchestrator's responsibility — adapters return
     // raw usage and don't know about the metrics registry. Keeps adapters
     // self-contained and testable in isolation.
