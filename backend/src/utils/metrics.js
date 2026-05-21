@@ -129,7 +129,7 @@ export const pipelineStageDurationSeconds = new client.Histogram({
 export const aiProviderLatencySeconds = new client.Histogram({
   name: "app_ai_provider_latency_seconds",
   help: "Latency of outbound LLM calls. `provider` ∈ {anthropic, openai, google, openrouter, ollama, compat}; `outcome` ∈ {success, rate_limited, error}; `operation` ∈ {generation, vision_heal}. Histograms enable p99 SLO dashboards per provider so a degraded vendor can be detected and the fallback chain (FEA-003) verified.",
-  labelNames: ["provider", "outcome", "operation"],
+  labelNames: ["provider", "agent_role", "outcome", "operation"],
   buckets: AI_BUCKETS,
   registers: [register],
 });
@@ -137,14 +137,14 @@ export const aiProviderLatencySeconds = new client.Histogram({
 export const aiProviderTokensTotal = new client.Counter({
   name: "app_ai_provider_tokens_total",
   help: "Total tokens consumed across all LLM calls. `kind` ∈ {input, output}; `operation` ∈ {generation, vision_heal}. Combined with provider-specific pricing, this is the canonical SaaS unit-economics input: cost per workspace per day = sum(rate(app_ai_provider_tokens_total[1d])) × price_per_token, split by operation so vision-heal cost can be tracked against the per-project budget cap.",
-  labelNames: ["provider", "kind", "operation"],
+  labelNames: ["provider", "agent_role", "kind", "operation"],
   registers: [register],
 });
 
 export const aiProviderErrorsTotal = new client.Counter({
   name: "app_ai_provider_errors_total",
   help: "AI provider failures bucketed by category. `reason` ∈ {rate_limit, timeout, auth, server_error, network, unknown}; `operation` ∈ {generation, vision_heal}. Drives the AI provider health alert and the circuit-breaker (FEA-003) trip decisions.",
-  labelNames: ["provider", "reason", "operation"],
+  labelNames: ["provider", "agent_role", "reason", "operation"],
   registers: [register],
 });
 
@@ -164,7 +164,7 @@ export const aiProviderErrorsTotal = new client.Counter({
 export const aiProviderCostUsdTotal = new client.Counter({
   name: "app_ai_cost_usd_total",
   help: "Cumulative LLM spend in USD, bucketed by provider + operation. Computed per call from the per-(provider, model) catalog at aiProvider/modelCatalog.js#MODEL_PRICING. Catalog misses emit no increment (no fake zeros); known-free models (Ollama) emit increment of 0. Vision-heal uses the MNT-001 $5/M input + $15/M output midpoint when the model isn't in the catalog. SaaS unit-economics dashboard divides by workspace count to get cost-per-customer.",
-  labelNames: ["provider", "operation"],
+  labelNames: ["provider", "agent_role", "operation"],
   registers: [register],
 });
 

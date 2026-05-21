@@ -354,6 +354,11 @@
     "DELETE /api/v1/settings/agent-roles/:role": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"
+    },
+    "POST /api/v1/settings/agent-roles/:role/test": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "AI-005 \u2014 Settings UI \"Test agent\" button. Probes the configured (provider, role) pair via the same 1-token health-check helper the crawler pre-flight uses. Returns { role, ok, reason, provider }."
     }
   },
   "anyAuthenticatedMember": [

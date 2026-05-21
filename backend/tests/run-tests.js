@@ -76,6 +76,17 @@ const files = [
   "tests/ai-provider-cost-tracking.test.js",
   "tests/compat-config-cache.test.js",
   "tests/agent-config-routes.test.js",
+  // AI-005 — Multi-agent dispatch unit tests (resolveProvider, breakerKey,
+  // per-role circuit breakers, fallbackRole cycle guard, sticky-fallback priority).
+  "tests/agent-dispatch.test.js",
+  // B1.8 — Per-workspace provider-routes (the route-driven dispatch path).
+  // Each file pins one slice of the B1.x contract so a regression in one
+  // module surfaces in isolation rather than as a cascade across files.
+  "tests/provider-routes.test.js",       // B1.3 — repo CRUD + cycle guard + JSON round-trip + audit emission.
+  "tests/secrets.test.js",               // B1.4 — AES-256-GCM encrypt/decrypt + master-key fail-fast + lastFour.
+  "tests/protocol-adapter.test.js",      // B1.5 — protocol switch + streaming-parity fallback.
+  "tests/resolve-route.test.js",         // B1.6 — resolveRoute priority chain + AI-005c collapse + shim.
+  "tests/chaos-provider.test.js",        // B1.8 — error-injection: 500s, malformed JSON, mid-stream abort, breaker.
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",
   "tests/openapi.test.js",

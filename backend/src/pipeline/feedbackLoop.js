@@ -21,6 +21,7 @@ import { generateText, parseJSON } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
 import { getPromptRules } from "../selfHealing.js";
 import { getTier, TIER_CONFIG } from "./prompts/promptTiers.js";
 import { buildCapabilityCoverageBlock } from "./prompts/playwrightCapabilityGuide.js";
@@ -410,7 +411,19 @@ export async function regenerateFailingTest(improvement, signal) {
     throwIfAborted(signal);
     const tier = getTier();
     const prompt = buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier);
-    const text = await generateText(prompt, { signal });
+    // AI-005 — resolve workspaceId from the project row. The `tests` table
+    // has no `workspaceId` column (it's keyed by `projectId`), so the
+    // previous `test.workspaceId || test.projectWorkspaceId || null`
+    // expression always evaluated to `null` — the agentRole label still
+    // flowed through metrics but `resolveProvider`/`resolveRoute` never
+    // saw a workspace and silently fell back to env detection, ignoring
+    // any per-role `author` agent_config the admin configured.
+    let workspaceId = null;
+    if (test.projectId) {
+      try { workspaceId = projectRepo.getById(test.projectId)?.workspaceId || null; }
+      catch { /* DB unavailable — fall back to env-default routing */ }
+    }
+    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId });
     const improved = parseJSON(text);
 
     // Only pick safe fields from the AI response — never let the LLM

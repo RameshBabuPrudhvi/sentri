@@ -9,6 +9,7 @@
 
 import { VISION_CAPABLE_MODELS } from "./modelCatalog.js";
 import { getProvider, getProviderMeta } from "./providerInfo.js";
+import { resolveProvider, isProviderUsable } from "./registry.js";
 import {
   providerMetricLabel,
   buildAdapterOpts,
@@ -21,6 +22,7 @@ import {
   aiProviderCostUsdTotal,
   classifyAiError,
 } from "../utils/metrics.js";
+import { annotateAiCallSpan } from "../utils/observability.js";
 import { parseJSON } from "./index.js";
 
 // ── Vision model resolution ───────────────────────────────────────────────────
@@ -34,14 +36,27 @@ import { parseJSON } from "./index.js";
  * Resolution order:
  *   1. `VISION_MODEL` env var (explicit override, no whitelist check).
  *   2. `AI_MODEL` env var if it's in `VISION_CAPABLE_MODELS`.
- *   3. The active provider's default model if vision-capable.
- *   4. `null`.
+ *   3. AI-005: `agent_configs[healer].model` for the supplied workspaceId,
+ *      when it's whitelist-vision-capable.
+ *   4. The active provider's default model if vision-capable.
+ *   5. `null`.
  *
+ * @param {Object}  [opts]
+ * @param {string}  [opts.workspaceId] - AI-005: when present, the healer
+ *   agent config's `model` is preferred over the workspace default so a
+ *   per-role override (e.g. claude-3-5-sonnet) actually drives the call.
  * @returns {string|null}
  */
-export function resolveVisionModel() {
+export function resolveVisionModel({ workspaceId = null } = {}) {
   if (process.env.VISION_MODEL) return process.env.VISION_MODEL;
   if (process.env.AI_MODEL && VISION_CAPABLE_MODELS.has(process.env.AI_MODEL)) return process.env.AI_MODEL;
+  // AI-005: if the workspace has a healer agent config with a vision-capable
+  // model, honour it. The role's `provider` is applied separately in
+  // `callVisionModel` via `resolveProvider`; this only chooses the model id.
+  if (workspaceId) {
+    const { config: healer } = resolveProvider({ agentRole: "healer", workspaceId });
+    if (healer?.model && VISION_CAPABLE_MODELS.has(healer.model)) return healer.model;
+  }
   const provider = getProvider();
   if (!provider) return null;
   const meta = getProviderMeta();
@@ -99,14 +114,32 @@ export function hasVisionProvider() {
  * @param {string} [params.contextHtml]  - Last-known DOM context for the broken locator.
  * @param {AbortSignal} [params.signal]  - Honoured on Anthropic + OpenAI shapes;
  *   silently ignored on Google Gemini due to SDK limitation (see § Cancellation caveat).
+ * @param {string} [params.workspaceId]  - AI-005: when supplied, the healer
+ *   agent_config row drives provider + model selection so a workspace can
+ *   route vision-heal at a different provider than its text-generation
+ *   default. Falls back to the workspace default when no healer config exists.
+ * @param {string} [params.agentRole="healer"] - AI-005: role used for metric
+ *   labels + OTel span attribution. The default reflects the actual surface
+ *   ("healer") so per-role spend dashboards bucket vision-heal cost correctly
+ *   on workspaces that haven't configured the agent yet.
  * @returns {Promise<{confidence: number, box: ({x,y,width,height}|null), model: string, costUsd: number, reasoning: string|null}|null>}
  */
-export async function callVisionModel({ screenshot, intent, contextHtml, signal } = {}) {
+export async function callVisionModel({ screenshot, intent, contextHtml, signal, workspaceId = null, agentRole = "healer" } = {}) {
   if (!screenshot || !intent?.label) return null;
-  const model = resolveVisionModel();
+  const model = resolveVisionModel({ workspaceId });
   if (!model) return null;
-  const provider = getProvider();
-  if (!provider) return null;
+  // AI-005: prefer the healer agent_config provider when configured;
+  // fall back to the workspace default exactly the same way generateText
+  // does for unconfigured roles. `resolveProvider` itself enforces the
+  // detection priority (sticky-fallback > agentRole > env detection).
+  let provider;
+  if (workspaceId) {
+    const resolved = resolveProvider({ agentRole, workspaceId });
+    provider = resolved.provider;
+  } else {
+    provider = getProvider();
+  }
+  if (!provider || !isProviderUsable(provider)) return null;
 
   const metricLabel = providerMetricLabel(provider);
   const startedAt = process.hrtime.bigint();
@@ -133,6 +166,13 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // metric label clean.
   if (provider === "local") return null;
 
+  // AI-005 tripwire #3 — annotate the active OTel span with vision-heal
+  // attributes so distributed traces split by `ai.operation=vision_heal` AND
+  // `ai.agent_role=healer` (or whatever role the caller passed). Matches the
+  // Prometheus labels written below so a "spend by role" Grafana query
+  // and a "spans by role" Tempo / Jaeger query stay in sync.
+  annotateAiCallSpan({ provider, agentRole, operation: "vision_heal" });
+
   // Build a vision-specific opts bag. We reuse buildAdapterOpts() shape
   // for the auth/baseUrl/SSRF fields, then layer the image fields on top.
   // AI-002: pass the `"json_object"` string (not the legacy `true` boolean)
@@ -157,8 +197,8 @@ ${String(contextHtml).slice(0, 800)}` : "");
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: metricLabel, outcome, operation: "vision_heal" }, seconds);
-      aiProviderErrorsTotal.inc({ provider: metricLabel, reason, operation: "vision_heal" });
+      aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome, operation: "vision_heal" }, seconds);
+      aiProviderErrorsTotal.inc({ provider: metricLabel, agent_role: agentRole, reason, operation: "vision_heal" });
     } catch {}
     return null;
   }
@@ -167,7 +207,7 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // `usage.costUsd` (catalog-derived) for every adapter call, including
   // vision-heal. We let it run for tokens, but the cost increment here is
   // gated below so we don't double-count when the catalog has pricing.
-  if (usage) recordAiTokens(provider, usage, "vision_heal");
+  if (usage) recordAiTokens(provider, usage, "vision_heal", agentRole);
   let parsed;
   try { parsed = parseJSON(raw); } catch { return null; }
   const confidence = Number(parsed?.confidence);
@@ -201,13 +241,13 @@ ${String(contextHtml).slice(0, 800)}` : "");
     costUsd = inK * 5 + outK * 15;
     try {
       if (Number.isFinite(costUsd) && costUsd > 0) {
-        aiProviderCostUsdTotal.inc({ provider: metricLabel, operation: "vision_heal" }, costUsd);
+        aiProviderCostUsdTotal.inc({ provider: metricLabel, agent_role: agentRole, operation: "vision_heal" }, costUsd);
       }
     } catch {}
   }
   try {
     const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-    aiProviderLatencySeconds.observe({ provider: metricLabel, outcome: "success", operation: "vision_heal" }, seconds);
+    aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome: "success", operation: "vision_heal" }, seconds);
   } catch {}
   return { confidence: Math.min(1, Math.max(0, confidence)), box, model, costUsd, reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null };
 }

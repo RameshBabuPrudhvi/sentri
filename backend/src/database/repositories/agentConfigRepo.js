@@ -30,27 +30,72 @@ export function listByWorkspace(workspaceId) {
 }
 
 /**
+ * Walk the `fallbackRole` chain starting from `startRole` (with `startRole`'s
+ * fallback set hypothetically to `proposedFallback`) and return `true` if the
+ * walk revisits `startRole` before terminating. Used by `upsert()` to reject
+ * cycles at config-save time (AI-005 acceptance criterion).
+ *
+ * @param {string} workspaceId
+ * @param {string} startRole
+ * @param {string|null} proposedFallback
+ * @returns {boolean}
+ */
+function wouldCreateCycle(workspaceId, startRole, proposedFallback) {
+  if (!proposedFallback) return false;
+  if (proposedFallback === startRole) return true;
+  const db = getDatabase();
+  const seen = new Set([startRole]);
+  let next = proposedFallback;
+  // Bounded walk — agent_configs has at most ~8 canonical roles per workspace,
+  // so a 16-hop guard is well beyond any legitimate chain length.
+  for (let i = 0; i < 16 && next; i += 1) {
+    if (seen.has(next)) return true;
+    seen.add(next);
+    const row = db.prepare("SELECT fallbackRole FROM agent_configs WHERE workspaceId = ? AND role = ?").get(workspaceId, next);
+    next = row?.fallbackRole || null;
+  }
+  return false;
+}
+
+/**
  * Insert or update a role config (keyed on `(workspaceId, role)`). On
  * conflict every mutable field is overwritten and `updatedAt` is bumped;
  * `id` and `createdAt` are preserved.
  *
+ * AI-005 acceptance criterion: a `fallbackRole` cycle (planner → critic →
+ * planner) is rejected at save time so dispatch never enters an infinite
+ * resolution loop. The cycle detector walks the existing chain assuming the
+ * proposed change is already applied.
+ *
  * @param {Object} config - Must include id, workspaceId, role, createdAt, updatedAt.
  * @returns {Object} The freshly persisted row (re-read via getByRole).
+ * @throws {Error} An Error with `code === "ERR_AGENT_FALLBACK_CYCLE"` if `fallbackRole` would create a cycle.
  */
 export function upsert(config) {
+  if (wouldCreateCycle(config.workspaceId, config.role, config.fallbackRole)) {
+    const err = new Error(`fallbackRole cycle detected: ${config.role} → ${config.fallbackRole}`);
+    err.code = "ERR_AGENT_FALLBACK_CYCLE";
+    throw err;
+  }
   const db = getDatabase();
+  // B1.6 — include `routeId` (migration 037) so workspaces can pin a
+  // specific `provider_routes` row to a role. `routeId` defaults to null
+  // when callers omit it, which keeps the AI-005 `provider`-column shim
+  // path intact: `resolveRoute` synthesises a transient route from the
+  // legacy `provider` column when no routeId is set.
   db.prepare(`
-    INSERT INTO agent_configs (id, workspaceId, role, provider, model, systemPromptOverride, temperature, maxTokens, fallbackRole, createdAt, updatedAt)
-    VALUES (@id, @workspaceId, @role, @provider, @model, @systemPromptOverride, @temperature, @maxTokens, @fallbackRole, @createdAt, @updatedAt)
+    INSERT INTO agent_configs (id, workspaceId, role, provider, routeId, model, systemPromptOverride, temperature, maxTokens, fallbackRole, createdAt, updatedAt)
+    VALUES (@id, @workspaceId, @role, @provider, @routeId, @model, @systemPromptOverride, @temperature, @maxTokens, @fallbackRole, @createdAt, @updatedAt)
     ON CONFLICT(workspaceId, role) DO UPDATE SET
       provider=excluded.provider,
+      routeId=excluded.routeId,
       model=excluded.model,
       systemPromptOverride=excluded.systemPromptOverride,
       temperature=excluded.temperature,
       maxTokens=excluded.maxTokens,
       fallbackRole=excluded.fallbackRole,
       updatedAt=excluded.updatedAt
-  `).run(config);
+  `).run({ ...config, routeId: config.routeId ?? null });
   return getByRole(config.workspaceId, config.role);
 }
 

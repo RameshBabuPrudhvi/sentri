@@ -152,6 +152,15 @@ export const api = {
   createAgentRole: (data) => req("POST", "/settings/agent-roles", data),
   updateAgentRole: (role, data) => req("PATCH", `/settings/agent-roles/${role}`, data),
   deleteAgentRole: (role) => req("DELETE", `/settings/agent-roles/${role}`),
+  /**
+   * AI-005 — Run the 1-token health probe for a single configured agent role.
+   * Surfaces the same `{ ok, reason, provider }` shape the crawler pre-flight
+   * uses, so the Settings UI "Test agent" button can show a green / red
+   * badge inline without kicking off a real run.
+   * @param {string} role - Canonical role name (planner, author, etc).
+   * @returns {Promise<{role: string, ok: boolean, reason: string|null, provider: string|null}>}
+   */
+  testAgentRole: (role) => req("POST", `/settings/agent-roles/${role}/test`),
 // ── Projects ────────────────────────────────────────────────────────────────
   /** @param {Object} data - `{ name, url, credentials? }` */
   createProject: (data) => req("POST", "/projects", data),

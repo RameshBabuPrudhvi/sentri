@@ -174,7 +174,10 @@ export const VISION_STRATEGY_INDICES = Object.freeze([
  * @param {string} ctx.action           - Action verb ("click", "fill", …).
  * @param {string} ctx.label            - Human label / target text.
  * @param {Object} ctx.project          - Project row (visionHealing,
- *   visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth fields read).
+ *   visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, workspaceId
+ *   fields read). `workspaceId` is forwarded to the LLM-vision adapter so
+ *   the AI-005 `healer` agent_config row drives provider + model selection
+ *   when configured; falls back to the workspace default otherwise.
  * @param {Buffer} [ctx.failureScreenshot] - PNG of viewport at failure.
  * @param {Buffer} [ctx.baselineCrop]   - PNG of element's last green crop.
  * @param {Object} [deps]
@@ -263,6 +266,12 @@ export async function tryVisionHeal(ctx, deps = {}) {
     const r = await deps.llmVisionHeal({
       failure: ctx.failureScreenshot,
       intent: { action: ctx.action, label: ctx.label },
+      // AI-005: forward workspaceId so the healer agent_config row drives
+      // provider + model selection. Undefined when the project row predates
+      // workspace scoping (extremely rare) — callVisionModel falls back to
+      // the workspace default in that case, matching pre-AI-005 routing.
+      workspaceId: ctx.project?.workspaceId || null,
+      agentRole: "healer",
     });
     if (r && r.confidence >= LLM_CONFIDENCE) {
       recordHealing(ctx.testId, ctx.action, ctx.label, STRATEGY_INDEX_LLM_VISION);

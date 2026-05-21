@@ -23,6 +23,7 @@ import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
+import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 
 const router = Router();
 
@@ -239,7 +240,13 @@ router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
 
 
 
-const AGENT_ROLES = ["explorer", "planner", "author", "oracle", "executor", "healer", "reviewer", "triager"];
+// AI-005: AGENT_ROLES is imported from `aiProvider/agentHealthCheck.js` —
+// single source of truth shared with the pipeline-side health check and
+// (via byte-for-byte mirroring) the frontend Settings dropdown. The
+// previous local definition included "executor" (no pipeline stage ever
+// used it — dead validator entry) and "default" was wrongly omitted
+// here while present in the metrics list, producing two diverging
+// allowlists. The canonical 7-role list is now the only source.
 
 // Cap on systemPromptOverride length. Even though this is admin-only, an
 // unbounded TEXT column gets serialised on every GET and bloats list
@@ -319,6 +326,29 @@ router.delete("/settings/agent-roles/:role", requireRole("admin"), (req, res) =>
   if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
   agentConfigRepo.remove(req.workspaceId, role);
   res.json({ ok: true });
+});
+
+// AI-005 — Settings UI "Test agent" button. Probes a single configured role
+// via the same 1-token health-check helper the crawler pre-flight uses, so
+// admins can validate a (provider, role) pair end-to-end before a real run
+// burns ten minutes against a misconfigured key. Returns the per-role
+// `{ ok, reason, provider }` shape carried by `assertAgentConfigsHealthy`'s
+// `agentRoles` map. Admin-gated to mirror the rest of the agent-roles surface.
+router.post("/settings/agent-roles/:role/test", requireRole("admin"), async (req, res) => {
+  const role = req.params.role;
+  if (!AGENT_ROLES.includes(role)) return res.status(400).json({ error: "Invalid role" });
+  const existing = agentConfigRepo.getByRole(req.workspaceId, role);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  try {
+    const { agentRoles } = await validateAgentConfigs(req.workspaceId, { roles: [role] });
+    const status = agentRoles[role] || { ok: false, reason: "no_result", provider: null };
+    return res.json({ role, ...status });
+  } catch (err) {
+    // validateAgentConfigs catches probe errors internally; an exception here
+    // means something unexpected (DB outage, etc) — surface it without
+    // leaking internals, matching the rest of this router's error contract.
+    return res.status(500).json({ role, ok: false, reason: err?.code || "probe_failed", provider: null });
+  }
 });
 
 // GET /api/settings/github-checks — per-project PR check settings.

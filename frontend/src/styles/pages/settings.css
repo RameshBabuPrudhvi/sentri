@@ -163,6 +163,47 @@
   display: flex; align-items: center; gap: 14px;
 }
 
+/* ── Agent Roles tab (AI-005) ───────────────────────────────────────────────── */
+/* Per-row form + result row inside the AgentRolesTab. Class names follow the
+   `.st-agent-*` prefix to stay scoped to the Settings page; no inline styles
+   so the same look survives theme changes and the AGENT.md "no inline CSS"
+   rule (§127-128). */
+.st-agent-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.st-agent-form-actions {
+  display: flex;
+  gap: 8px;
+}
+.st-agent-error {
+  margin-bottom: 12px;
+}
+.st-agent-rows {
+  display: grid;
+  gap: 8px;
+}
+.st-agent-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.st-agent-row-meta {
+  font-family: var(--font-mono);
+}
+.st-agent-row-actions {
+  display: flex;
+  gap: 6px;
+}
+.st-agent-row-badge {
+  /* Override the default `.st-status-ok` / `.st-status-err` `margin-top: 8px`
+     so the badge sits flush with the row meta + actions on a single line. */
+  margin-top: 0;
+}
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
   /* Provider cards: tighten padding */

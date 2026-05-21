@@ -65,6 +65,7 @@ import {
   buildAdapterOpts,
   recordAiTokens,
   callProvider,
+  resolveAgentCall,
 } from "./dispatcher.js";
 
 // Re-export the full public API so external callers that import from
@@ -117,7 +118,14 @@ export { resolveVisionModel, hasVisionProvider, callVisionModel } from "./vision
  * @throws {Error} If no AI provider is configured or all providers fail.
  */
 export async function generateText(prompt, options) {
-  const provider = detectProvider();
+  // AI-005 — `resolveAgentCall` is the single source of truth for per-role
+  // call resolution: it produces the concrete `provider`, the AI-005c
+  // `effectiveAgentRole` for breaker / sticky keys (null for single-agent),
+  // the `effectivePrompt` with any `systemPromptOverride` applied, the
+  // `maxTokens` precedence, and the `callOpts` carrying the original
+  // `agentRole` for OTel + metric labels. See `dispatcher.js#resolveAgentCall`.
+  const { provider, effectiveAgentRole, effectivePrompt, maxTokens, callOpts } =
+    resolveAgentCall(prompt, options);
   if (!provider) {
     throw new Error(
       "No AI provider configured. Options:\n" +
@@ -129,8 +137,8 @@ export async function generateText(prompt, options) {
 
   // ── FEA-003: Try primary provider, then fall back on rate-limit OR transient 5xx errors ──
   try {
-    const result = await callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
-    recordProviderSuccess(provider);
+    const result = await callProvider(provider, effectivePrompt, maxTokens, options?.signal, options?.responseFormat, callOpts);
+    recordProviderSuccess(provider, effectiveAgentRole);
     return result;
   } catch (err) {
     // Only fall back on retriable errors (rate limits or transient server errors).
@@ -147,8 +155,8 @@ export async function generateText(prompt, options) {
     // and try fallbacks. Transient 5xx errors don't trip the circuit breaker because
     // the quota is fine; the provider's backend is just temporarily overloaded.
     const errType = isRateLimitError(err) ? "rate-limited" : "transient server error (5xx)";
-    if (isRateLimitError(err)) recordProviderFailure(provider);
-    const fallbacks = getFallbackProviders(provider);
+    if (isRateLimitError(err)) recordProviderFailure(provider, effectiveAgentRole);
+    const fallbacks = getFallbackProviders(provider, effectiveAgentRole);
 
     if (fallbacks.length === 0) {
       // No fallbacks available — log why and rethrow so the caller (and user)
@@ -161,13 +169,17 @@ export async function generateText(prompt, options) {
     for (const fallbackProvider of fallbacks) {
       console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} — falling back to ${fallbackProvider}`));
       try {
-        const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
-        recordProviderSuccess(fallbackProvider);
+        const result = await callProvider(fallbackProvider, effectivePrompt, maxTokens, options?.signal, options?.responseFormat, callOpts);
+        recordProviderSuccess(fallbackProvider, effectiveAgentRole);
         // ── Sticky fallback: pin this provider so subsequent calls in the same
         // pipeline skip the failing primary entirely. Expires after
         // STICKY_FALLBACK_TTL_MS so normal selection resumes once the
         // quota/outage window closes.
-        setStickyFallback(fallbackProvider);
+        // AI-005c: keyed by `effectiveAgentRole` so single-agent workspaces
+        // pin a SINGLE sticky fallback shared across stages (the pre-PR shape).
+        // Multi-agent workspaces (with agent_configs rows) get per-role sticky
+        // entries so a planner's rate-limit doesn't divert the author.
+        setStickyFallback(fallbackProvider, effectiveAgentRole);
         console.log(formatLogLine("info", null, `[aiProvider] Pinned ${fallbackProvider} as sticky fallback for ${STICKY_FALLBACK_TTL_MS / 1000}s`));
         return result;
       } catch (fallbackErr) {
@@ -176,7 +188,7 @@ export async function generateText(prompt, options) {
           // providers. Transient 5xx errors don't disable the provider — the
           // backend is temporarily overloaded, not permanently broken.
           if (isRateLimitError(fallbackErr) && fallbackProvider !== "local") {
-            recordProviderFailure(fallbackProvider);
+            recordProviderFailure(fallbackProvider, effectiveAgentRole);
           }
           const fallbackErrType = isRateLimitError(fallbackErr) ? "rate-limited" : "transient server error (5xx)";
           console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} ${fallbackErrType} — trying next`));
@@ -235,10 +247,27 @@ export function parseJSON(text) {
  * @throws {Error} If no AI provider is configured.
  */
 export async function streamText(promptOrMessages, onToken, options = {}) {
-  const provider = detectProvider();
+  // AI-005 — `resolveAgentCall` produces the same shape for the streaming
+  // path as for `generateText` so per-role provider configs, sticky-fallback
+  // isolation, metric labels, and the AI-005c single-agent collapse rule
+  // stay in sync. The fallback path (when streaming fails before any tokens
+  // are emitted) delegates to `generateText` which calls `resolveAgentCall`
+  // a second time — accepted cost since both calls are pure-functional and
+  // identical, and a second resolution catches any agent_configs row that
+  // landed between the stream attempt and the fallback retry.
+  const agentRole = options?.agentRole || null;
+  // AI-005 — destructure `maxTokens` too so the streaming path honours the
+  // agent-config precedence (`config.maxTokens` wins over `options.maxTokens`)
+  // that `resolveAgentCall` computes. Without this, `streamText` would silently
+  // pass the caller-supplied `options.maxTokens` (or `DEFAULT_MAX_TOKENS`) to
+  // `buildAdapterOpts` and ignore the role-specific token budget the
+  // workspace admin configured, violating the JSDoc contract in
+  // `dispatcher.js#resolveAgentCall`.
+  const { provider, effectiveAgentRole, effectivePrompt, maxTokens } =
+    resolveAgentCall(promptOrMessages, options);
   if (!provider) throw new Error("No AI provider configured.");
   const { signal, responseFormat } = options;
-  const messages = normaliseMessages(promptOrMessages);
+  const messages = normaliseMessages(effectivePrompt);
 
   // Wrap onToken so we can detect whether any tokens were emitted before a
   // mid-stream error. Without this guard, falling back to generateText()
@@ -261,10 +290,13 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   // try/catch below routes thrown errors through the FEA-003 fallback chain;
   // the `if (res !== null)` branch handles the no-streaming-support sentinel.
   try {
-    const opts = buildAdapterOpts(provider, messages, options.maxTokens ?? DEFAULT_MAX_TOKENS, signal, responseFormat);
+    const opts = buildAdapterOpts(provider, messages, maxTokens ?? DEFAULT_MAX_TOKENS, signal, responseFormat);
     const res = await adapter.stream(opts, wrappedOnToken);
     if (res !== null) {
-      if (res?.usage) recordAiTokens(provider, res.usage);
+      // `recordAiTokens`'s signature defaults agentRole to `"default"`, so
+      // pass the original `agentRole` directly — null collapses to the
+      // signature default at the function boundary, single source of truth.
+      if (res?.usage) recordAiTokens(provider, res.usage, "generation", agentRole);
       return res?.text ?? "";
     }
   } catch (err) {

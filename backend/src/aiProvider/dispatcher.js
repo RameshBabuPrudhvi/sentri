@@ -11,7 +11,7 @@ import * as openaiAdapter from "./adapters/openai.js";
 import * as googleAdapter from "./adapters/google.js";
 import * as ollamaAdapter from "./adapters/ollama.js";
 import { isRateLimitError, isRetryableError, MAX_RETRIES } from "./retry.js";
-import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel } from "./registry.js";
+import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel, resolveProvider, resolveRoute } from "./registry.js";
 import {
   aiProviderLatencySeconds,
   aiProviderTokensTotal,
@@ -20,6 +20,7 @@ import {
   classifyAiError,
 } from "../utils/metrics.js";
 import { buildProviderMeta } from "./providerInfo.js";
+import { getCurrentTraceId, annotateAiCallSpan } from "../utils/observability.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -184,6 +185,165 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, response
   throw new Error(`Unknown provider: ${provider}`);
 }
 
+// ── Agent-call resolution ─────────────────────────────────────────────────────
+
+/**
+ * Defence-in-depth cap on `agent_configs.systemPromptOverride`.
+ *
+ * The settings route validator caps user-supplied values at save time
+ * (see `backend/src/routes/settings.js`), but the dispatch read path is
+ * the last line of defence: a hand-written migration, a future bulk-import
+ * endpoint, or a direct DB write could inject an oversized prompt that
+ * would then be prepended to every AI call for that role until reverted.
+ * Capping here also stops a runaway prompt from blowing the model's
+ * context window with no observable failure mode at the call site.
+ *
+ * 32 KB is generous for any legitimate system prompt (the longest in the
+ * codebase is ~6 KB). Truncated prompts are tagged with a trailing
+ * `[truncated]` marker so the operator can spot the issue in logs without
+ * silently corrupted output.
+ */
+const SYSTEM_PROMPT_OVERRIDE_MAX_BYTES = 32 * 1024;
+
+/**
+ * Resolve the effective prompt: when an agent_configs row carries a
+ * `systemPromptOverride` AND the caller passed a plain string, wrap into
+ * `{ system, user }`. Otherwise pass the prompt through unchanged.
+ *
+ * Capping is applied at dispatch read time (see
+ * {@link SYSTEM_PROMPT_OVERRIDE_MAX_BYTES}) — see that constant's JSDoc
+ * for why we don't trust upstream validators alone.
+ */
+function buildEffectivePrompt(prompt, config) {
+  const override = config?.systemPromptOverride;
+  if (!override || typeof prompt !== "string") return prompt;
+  const capped = override.length > SYSTEM_PROMPT_OVERRIDE_MAX_BYTES
+    ? `${override.slice(0, SYSTEM_PROMPT_OVERRIDE_MAX_BYTES)}\n[truncated]`
+    : override;
+  return { system: capped, user: prompt };
+}
+
+/**
+ * AI-005 — single source of truth for "how does an agent role resolve into a
+ * concrete adapter call?". Both {@link generateText} and {@link streamText}
+ * (and any future caller that wants the same per-role semantics) use this so
+ * the resolution semantics, `effectivePrompt` assembly, `maxTokens`
+ * precedence, and the AI-005c `effectiveAgentRole` collapse rule cannot
+ * drift between the two surfaces.
+ *
+ * B1.7 — When `process.env.AI_ROUTES_ENABLED === "true"`, the function
+ * resolves a `provider_routes` row via {@link resolveRoute} (the B1.6
+ * route-driven path) and the return shape gains a `route` field plus
+ * `useRoutes: true`. When the flag is off (the default), the shape is
+ * bit-for-bit identical to the AI-005 pre-routes version (`route: null`,
+ * `useRoutes: false`). Call sites that want to opt into routes check
+ * `useRoutes` and dispatch via {@link module:aiProvider/adapters/protocolAdapter};
+ * call sites that don't keep using the legacy `provider`-keyed path.
+ *
+ * Inputs are the caller's `prompt` + `options` bag. Outputs everything the
+ * caller needs to invoke `callProvider` and bookkeep breakers / sticky /
+ * metrics correctly:
+ *
+ * - `provider` — concrete provider id, or `null` when no provider is configured.
+ *   In the routes branch this is derived from `route.family` (or
+ *   `route._transientProvider` for shim routes) so legacy telemetry call sites
+ *   keep working without changes.
+ * - `route` — B1.7 — the resolved `provider_routes` row when `useRoutes` is
+ *   true, else `null`. Real routes (`id = "pr-..."`) come from the DB; shim
+ *   routes (`id = "provider:<id>"`) are synthesised by `resolveRoute` so the
+ *   protocol-adapter contract works for workspaces that haven't migrated yet.
+ * - `useRoutes` — B1.7 — `true` when the flag is on, `false` otherwise.
+ *   Lets callers gate "dispatch via protocolAdapter" without re-reading
+ *   the env var.
+ * - `config` — the `agent_configs` row (when one matched), `null` for fallback paths.
+ * - `effectiveAgentRole` — AI-005c — `null` when single-agent (no
+ *   `agent_configs` row exists), the `agentRole` string otherwise. Use this
+ *   for breaker / sticky-fallback / fallback-enumeration keys so single-
+ *   agent workspaces collapse to the bare-provider key (1 breaker shared
+ *   across stages, pre-PR shape) and multi-agent workspaces get full
+ *   per-`(provider, role)` isolation.
+ * - `effectivePrompt` — `{ system, user }` when the agent config carries a
+ *   `systemPromptOverride` AND the caller passed a plain string, else the
+ *   caller's prompt unchanged. Mirrors the pre-existing inline shape so
+ *   adapters see exactly what they saw before this refactor.
+ * - `maxTokens` — `config?.maxTokens || options.maxTokens` precedence.
+ *   Agent-config `maxTokens` wins over caller-supplied. Caller's value
+ *   wins when no agent config exists. Adapter-default applies when both
+ *   are undefined.
+ * - `callOpts` — `{ agentRole }` — the **original** role string (not the
+ *   collapsed `effectiveAgentRole`). Forwarded to {@link callProvider} so
+ *   OTel span attribution and Prometheus metric labels carry the per-stage
+ *   role tag even in single-agent mode where the breaker key collapses.
+ *
+ * @param {string|{system: string, user: string}} prompt - Caller's prompt.
+ * @param {Object} [options] - Caller's options bag.
+ * @param {string} [options.agentRole]
+ * @param {string} [options.workspaceId]
+ * @param {number} [options.maxTokens]
+ * @returns {{
+ *   provider: string|null,
+ *   config: Object|null,
+ *   effectiveAgentRole: string|null,
+ *   effectivePrompt: string|{system: string, user: string},
+ *   maxTokens: number|undefined,
+ *   callOpts: { agentRole: string|null }
+ * }}
+ */
+export function resolveAgentCall(prompt, options = {}) {
+  const agentRole = options.agentRole || null;
+  const workspaceId = options.workspaceId || null;
+  // B1.7 — feature-flagged routes branch. Off by default; when on, dispatch
+  // resolves a `provider_routes` row via {@link resolveRoute} (which honours
+  // the B1.6 priority chain: sticky-fallback → routeId → provider-column
+  // shim → env detection). The flag is process-scoped so it can be flipped
+  // per-deployment without an env-var reload on every call: cached at import
+  // time would prevent test-suite toggling, so we read on each call instead.
+  // Cost is one env lookup — negligible against the AI call itself.
+  if (process.env.AI_ROUTES_ENABLED === "true") {
+    const { route, config, effectiveAgentRole } = resolveRoute({ agentRole, workspaceId });
+    const effectivePrompt = buildEffectivePrompt(prompt, config);
+    return {
+      // Mirror the legacy shape (`provider` field) by deriving it from the
+      // route's family so call sites that still inspect `provider` for
+      // telemetry labels or fallback enumeration keep working unchanged.
+      // The transient route synthesised by `resolveRoute` carries the
+      // legacy provider id in `_transientProvider`; real routes use the
+      // `family` column. Either path produces the same value as the
+      // legacy `resolveProvider` would have returned.
+      provider: route?._transientProvider || route?.family || null,
+      route,
+      config,
+      effectiveAgentRole,
+      effectivePrompt,
+      // `??` (not `||`) so an explicit `maxTokens: 0` saved on an
+      // agent_configs row is honoured rather than treated as unset.
+      // Matches the documented "Agent-config maxTokens wins over
+      // caller-supplied" contract in the JSDoc above.
+      maxTokens: config?.maxTokens ?? options.maxTokens,
+      callOpts: { agentRole },
+      useRoutes: true,
+    };
+  }
+  // Legacy AI-005 path — unchanged when the flag is off. `route` is `null`
+  // and `useRoutes` is `false` so the existing call sites in `index.js`
+  // (and `vision.js`, etc.) never see a route object until they opt in.
+  const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
+  const effectivePrompt = buildEffectivePrompt(prompt, config);
+  return {
+    provider,
+    route: null,
+    config,
+    effectiveAgentRole,
+    effectivePrompt,
+    // `??` matches the routes branch above — explicit `maxTokens: 0`
+    // on the agent_configs row must beat `options.maxTokens`, not fall
+    // through to it.
+    maxTokens: config?.maxTokens ?? options.maxTokens,
+    callOpts: { agentRole },
+    useRoutes: false,
+  };
+}
+
 // ── Token telemetry ───────────────────────────────────────────────────────────
 
 /**
@@ -205,17 +365,17 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, response
  * @param {object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
  * @param {"generation"|"vision_heal"} [operation="generation"] - Which surface initiated the call.
  */
-export function recordAiTokens(provider, usage, operation = "generation") {
+export function recordAiTokens(provider, usage, operation = "generation", agentRole = "default") {
   if (!usage) return;
   const label = providerMetricLabel(provider);
   try {
     const inTokens = Number(usage.input);
     if (Number.isFinite(inTokens) && inTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, kind: "input", operation }, inTokens);
+      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "input", operation }, inTokens);
     }
     const outTokens = Number(usage.output);
     if (Number.isFinite(outTokens) && outTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, kind: "output", operation }, outTokens);
+      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "output", operation }, outTokens);
     }
     // AI-003 — generalised cost counter. Adapters compute `costUsd` from the
     // catalog (see modelCatalog.js#computeCostUsd) and attach it to the
@@ -225,7 +385,7 @@ export function recordAiTokens(provider, usage, operation = "generation") {
     // because incrementing by 0 is a no-op anyway.
     const costUsd = Number(usage.costUsd);
     if (Number.isFinite(costUsd) && costUsd > 0) {
-      aiProviderCostUsdTotal.inc({ provider: label, operation }, costUsd);
+      aiProviderCostUsdTotal.inc({ provider: label, agent_role: agentRole || "default", operation }, costUsd);
     }
   } catch { /* best-effort */ }
 }
@@ -238,18 +398,34 @@ export function recordAiTokens(provider, usage, operation = "generation") {
  * SaaS operators get RED dashboards (Rate / Errors / Duration) per provider
  * without ad-hoc logging or invasive try/catch at every call site.
  */
-export async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat) {
+export async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions = {}) {
   // All call sites in this file are test-generation traffic. Vision-heal
   // calls live in `callVisionModel` and pass `operation: "vision_heal"`
   // to the same metric counters directly.
   const operation = "generation";
   const label = providerMetricLabel(provider);
+  const agentRole = callOptions.agentRole || "default";
+  // AI-005 tripwire #3 — attach `ai.agent_role` + `ai.provider` +
+  // `ai.operation` attributes to the active OTel span so distributed traces
+  // line up with the Prometheus labels for per-role debugging. No-op when
+  // OTel is unconfigured (single helper, single owner: observability.js).
+  annotateAiCallSpan({ provider, agentRole, operation });
+  // Trace-correlation: emit the per-call traceId at debug level only.
+  // Every AI call inside an OTel-instrumented request has a traceId, so an
+  // unconditional info-level line would flood logs (~hundreds per crawl).
+  // The traceId is already attached to the OTel span by INF-007 +
+  // `annotateAiCallSpan` above — this log line is a developer aid for
+  // non-OTel deployments, gated by LOG_LEVEL.
+  const traceId = getCurrentTraceId();
+  if (traceId && process.env.LOG_LEVEL === "debug") {
+    console.log(formatLogLine("debug", null, `[aiProvider] traceId=${traceId} provider=${provider} role=${agentRole}`));
+  }
   const startedAt = process.hrtime.bigint();
   try {
-    const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat);
+    const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions);
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      aiProviderLatencySeconds.observe({ provider: label, outcome: "success", operation }, seconds);
+      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome: "success", operation }, seconds);
     } catch { /* best-effort */ }
     return result;
   } catch (err) {
@@ -257,14 +433,14 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: label, outcome, operation }, seconds);
-      aiProviderErrorsTotal.inc({ provider: label, reason, operation });
+      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome, operation }, seconds);
+      aiProviderErrorsTotal.inc({ provider: label, agent_role: agentRole, reason, operation });
     } catch { /* best-effort */ }
     throw err;
   }
 }
 
-export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat) {
+export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions = {}) {
   const messages = normaliseMessages(promptOrMessages);
   // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
   // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
@@ -274,6 +450,9 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // Token telemetry is the orchestrator's responsibility — adapters return
   // raw usage and don't know about the metrics registry. Keeps adapters
   // self-contained and testable in isolation.
-  if (usage) recordAiTokens(provider, usage);
+  // `recordAiTokens`'s signature defaults agentRole + the function body
+  // OR-defaults `null` → `"default"` for the metric label, so pass the
+  // original `callOptions.agentRole` directly without re-applying the OR.
+  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole);
   return text;
 }
