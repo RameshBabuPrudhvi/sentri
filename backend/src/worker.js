@@ -24,7 +24,7 @@ import { loadKeysFromDatabase } from "./aiProvider.js";
 import { ensureDefaultWorkspaces } from "./database/repositories/workspaceRepo.js";
 import { closeQueue } from "./queue.js";
 import { startWorker, stopWorker } from "./workers/runWorker.js";
-import { closeRedis } from "./utils/redisClient.js";
+import { closeRedis, isRedisAvailable } from "./utils/redisClient.js";
 import { formatLogLine } from "./utils/logFormatter.js";
 
 dotenv.config();
@@ -63,7 +63,7 @@ startWorker();
 _workerReady = true;
 const healthPort = Number(process.env.WORKER_HEALTH_PORT || 3002);
 const healthServer = http.createServer((_req, res) => {
-  if (_workerReady) {
+  if (_workerReady && isRedisAvailable()) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;

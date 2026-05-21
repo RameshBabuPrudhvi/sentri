@@ -222,6 +222,33 @@ app.get("/metrics", async (req, res) => {
   res.end(await metricsRegister.metrics());
 });
 
+
+// INF-009: Kubernetes-ready health endpoint used by readiness/liveness probes.
+// Returns 200 only when both database and Redis are reachable.
+app.get("/api/v1/health", async (_req, res) => {
+  const checks = { database: false, redis: false };
+
+  try {
+    const { getDatabase } = await import("../database/sqlite.js");
+    const db = getDatabase();
+    if (typeof db?.query === "function") {
+      await db.query("SELECT 1");
+    } else if (typeof db?.prepare === "function") {
+      db.prepare("SELECT 1").get();
+    }
+    checks.database = true;
+  } catch {
+    checks.database = false;
+  }
+
+  checks.redis = isRedisAvailable();
+
+  if (checks.database && checks.redis) {
+    return res.status(200).json({ ok: true, checks });
+  }
+  return res.status(503).json({ ok: false, checks });
+});
+
 // ─── Cross-origin cookie helper ──────────────────────────────────────────────
 // When the frontend and backend live on different origins (e.g. GitHub Pages +
 // Render), SameSite=Strict cookies are never sent on cross-site requests.
