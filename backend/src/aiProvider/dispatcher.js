@@ -281,7 +281,11 @@ export function resolveAgentCall(prompt, options = {}) {
       config,
       effectiveAgentRole,
       effectivePrompt,
-      maxTokens: config?.maxTokens || options.maxTokens,
+      // `??` (not `||`) so an explicit `maxTokens: 0` saved on an
+      // agent_configs row is honoured rather than treated as unset.
+      // Matches the documented "Agent-config maxTokens wins over
+      // caller-supplied" contract in the JSDoc above.
+      maxTokens: config?.maxTokens ?? options.maxTokens,
       callOpts: { agentRole },
       useRoutes: true,
     };
@@ -299,7 +303,10 @@ export function resolveAgentCall(prompt, options = {}) {
     config,
     effectiveAgentRole,
     effectivePrompt,
-    maxTokens: config?.maxTokens || options.maxTokens,
+    // `??` matches the routes branch above — explicit `maxTokens: 0`
+    // on the agent_configs row must beat `options.maxTokens`, not fall
+    // through to it.
+    maxTokens: config?.maxTokens ?? options.maxTokens,
     callOpts: { agentRole },
     useRoutes: false,
   };

@@ -294,15 +294,14 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
   // provider — otherwise a rate-limited primary keeps being retried under the
   // agent override and silently collapses the multi-agent dispatch. This is
   // tripwire #1 from the AI-005 spec.
-  if (agentRole) {
-    for (const [key, entry] of stickyFallbacks) {
-      if (!key.endsWith(`::${agentRole}`)) continue;
-      if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) {
-        return { provider: entry.provider, config: null, effectiveAgentRole: agentRole };
-      }
-      if (Date.now() >= entry.expiry) stickyFallbacks.delete(key);
-    }
-  }
+  //
+  // Look up the agent_configs row ONCE up front so it can be threaded
+  // through every return path that follows. Without this, the sticky-
+  // fallback branch below would return `config: null` and silently drop
+  // `systemPromptOverride` + per-role `maxTokens` during the 10-min
+  // sticky window — the admin-configured prompt for this role would
+  // never be applied while the fallback provider is active.
+  let cfg = null;
   if (agentRole && workspaceId) {
     // Defensive try/catch — the `agent_configs` table may not exist yet on
     // fresh DBs where migrations haven't run, and we never want a transient
@@ -310,12 +309,24 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
     // mirrors the single-agent path and matches the defensive pattern used
     // elsewhere in this file (see `isProviderUsable` for compat slots, and
     // `listCompatSlots` in `detectProvider`).
-    try {
-      const cfg = agentConfigRepo.getByRole(workspaceId, agentRole);
-      if (cfg?.provider && isProviderUsable(cfg.provider)) {
-        return { provider: cfg.provider, config: cfg, effectiveAgentRole: agentRole };
+    try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole) || null; }
+    catch { /* DB unavailable — fall through to detection */ }
+  }
+  if (agentRole) {
+    for (const [key, entry] of stickyFallbacks) {
+      if (!key.endsWith(`::${agentRole}`)) continue;
+      if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) {
+        // Preserve the agent_configs row here so `systemPromptOverride`
+        // and `maxTokens` keep applying during the sticky-fallback window.
+        // The provider id comes from the sticky entry (the working fallback),
+        // but the role-specific config still drives prompt + token budget.
+        return { provider: entry.provider, config: cfg, effectiveAgentRole: agentRole };
       }
-    } catch { /* DB unavailable — fall through to detection */ }
+      if (Date.now() >= entry.expiry) stickyFallbacks.delete(key);
+    }
+  }
+  if (cfg?.provider && isProviderUsable(cfg.provider)) {
+    return { provider: cfg.provider, config: cfg, effectiveAgentRole: agentRole };
   }
   // AI-005c (single-agent preservation): when no per-role agent_config row
   // exists for this workspace+role, the call falls back to the workspace
@@ -336,6 +347,13 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
   // contract and reintroducing the wasted-call amplification during 429s.
   const provider = detectProvider();
   if (!provider) return { provider: null, config: null, effectiveAgentRole: null };
+  // If a role-specific agent_configs row exists but its `provider` column
+  // was null/empty (admin saved "use workspace default" while still setting
+  // systemPromptOverride / maxTokens), preserve the config so those role
+  // overrides still apply. effectiveAgentRole stays the original role —
+  // the admin DID configure something for this role, even if not provider —
+  // so breakers / sticky / metrics use the per-role keyspace.
+  if (cfg) return { provider, config: cfg, effectiveAgentRole: agentRole };
   return { provider, config: null, effectiveAgentRole: null };
 }
 
