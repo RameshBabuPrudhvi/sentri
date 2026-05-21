@@ -13,6 +13,8 @@
 
 > **Working on the next PR? Read [`NEXT.md`](./NEXT.md) instead — it has the current item spec, files to change, and acceptance criteria. You do not need to read further in this file.**
 >
+> **Working on AI-provider routes (post PR #22)?** Read [`docs/roadmap/ai-provider-bundle.md`](./docs/roadmap/ai-provider-bundle.md) — the full B1→B4 bundle plan with schema, exit criteria, cross-bundle invariants, and risk register. PR #22 shipped the B1.x foundation; B2–B4 are queued.
+>
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
 > **Current sprint:** INF-009 (Helm chart + K8s readiness/liveness + DR playbook) — promoted after AUTO-009 (browser code coverage mapping — all 10 sub-items 009b/c/d/e/f/g/h/i/j shipped) landed in PR #19. Queue: AI-004 (agent role config schema — dormant) slot 1, AI-005 (multi-agent dispatch — `agentRole` parameter + per-role circuit breakers + per-role telemetry; incl. PR #20 post-ship tripwires for sticky-fallback per-role, planner→author handshake, distributed trace ID, pre-run agent health check) slot 2, AI-006 (per-role eval harness extension; incl. PR #20 tripwire for AST-based scorer) slot 3, AI-007 (AI cost governance + budget enforcement; incl. PR #20 tripwires for atomic pre-flight budget check + mid-stream abort) slot 4, AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 5, AUTO-014 (test dependency + execution ordering) slot 6, DIF-008 (Jira / Linear issue sync) slot 7.
