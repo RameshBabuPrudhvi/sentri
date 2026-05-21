@@ -71,7 +71,18 @@ import {
   recordAiTokens,
   callProvider,
   resolveAgentCall,
+  // B4 — streaming dispatch must run the same B3.7 spend-cap +
+  // token-bucket gates as non-streaming dispatch (cross-bundle
+  // invariant: "Quota guard never burns provider quota"). Same for
+  // the B2.5 per-request log write. These helpers are extracted from
+  // `_callProviderUnsafe` so both code paths share one implementation.
+  runPreCallGates,
+  runPostCallHooks,
+  resolveRequestLogConfig,
+  routeIdForLog,
+  computeCostForRoute,
 } from "./dispatcher.js";
+import { getCurrentTraceId } from "../utils/observability.js";
 import * as protocolAdapter from "./adapters/protocolAdapter.js";
 // B4.0.4 — single source of truth for the legacy-provider→protocol
 // mapping. Same alias the vision module uses ("protocol for the legacy
@@ -339,9 +350,27 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
         _transientProvider: provider,
       };
 
+  // B4 — pre-call gates BEFORE the SDK is touched. Streaming dispatch
+  // historically bypassed these, violating the cross-bundle invariant
+  // "Quota guard never burns provider quota" — every streamed AI call
+  // landed on the vendor regardless of spend cap or rpm/tpm limits.
+  // The shared `runPreCallGates` helper enforces the same B3.7 contract
+  // as `_callProviderUnsafe`. Throws `ERR_SPEND_CAP_EXCEEDED` or
+  // `ERR_RATE_LIMIT_LOCAL` on rejection — both are typed errors
+  // `classifyAiError` buckets into their own Prometheus reason labels.
+  const effectiveMaxTokens = maxTokens ?? DEFAULT_MAX_TOKENS;
+  await runPreCallGates(callOpts?.workspaceId || null, dispatchRoute.id, dispatchRoute, effectiveMaxTokens);
+  // B2.5 — resolve the workspace's request-log policy ONCE per call
+  // (same shape `_callProviderUnsafe` uses) and reuse the result on
+  // both the success and error paths.
+  const logCfg = resolveRequestLogConfig(callOpts || {});
+  const promptForLog = typeof promptOrMessages === "string"
+    ? promptOrMessages
+    : JSON.stringify(promptOrMessages);
+  const startedMs = Date.now();
   try {
     const res = await protocolAdapter.stream(dispatchRoute, messages, {
-      maxTokens: maxTokens ?? DEFAULT_MAX_TOKENS,
+      maxTokens: effectiveMaxTokens,
       signal,
       responseFormat,
       onToken: wrappedOnToken,
@@ -358,20 +387,80 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
       // / OpenAI / OpenRouter) lands with `costUsd: null` and
       // `route_name: "unknown"`. `callOpts.routeName` and `route` are
       // sourced from `resolveAgentCall` above.
+      let costResult = { costUsd: null, source: "none" };
       if (res?.usage) {
-        recordAiTokens(
+        costResult = recordAiTokens(
           provider,
           res.usage,
           "generation",
           agentRole,
           callOpts?.routeName || "unknown",
-          route || null,
+          dispatchRoute || null,
         );
       }
+      // B4 — post-call hooks: drift correction on the token bucket +
+      // request-log write. The log row carries the same `inputTokens`
+      // / `outputTokens` / `costUsd` shape the non-streaming path does,
+      // so `checkSpendCap`'s SUM(costUsd) and the replay endpoint both
+      // see streaming calls now. `routeIdForLog` strips transient
+      // `provider:*` ids to satisfy the FK on `ai_request_log.routeId`.
+      const actualTokens = res?.usage
+        ? (Number(res.usage.input) || 0) + (Number(res.usage.output) || 0)
+        : 0;
+      runPostCallHooks({
+        routeId: dispatchRoute.id,
+        route: dispatchRoute,
+        estimatedTokens: effectiveMaxTokens,
+        actualTokens,
+        costUsd: costResult.costUsd,
+        logEntry: {
+          workspaceId: callOpts?.workspaceId || null,
+          routeId: routeIdForLog(dispatchRoute.id),
+          agentRole: callOpts?.agentRole || null,
+          userId: callOpts?.userId || null,
+          prompt: promptForLog,
+          response: res?.text || "",
+          inputTokens: Number.isFinite(res?.usage?.input) ? res.usage.input : null,
+          outputTokens: Number.isFinite(res?.usage?.output) ? res.usage.output : null,
+          costUsd: Number.isFinite(costResult.costUsd) ? costResult.costUsd : null,
+          latencyMs: Date.now() - startedMs,
+          outcome: "success",
+          traceId: getCurrentTraceId(),
+          storageMode: logCfg.mode,
+          customRedactionRules: logCfg.customRules,
+        },
+      });
       return res?.text ?? "";
     }
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
+    // B4 — request-log the failure even on the error path. Without
+    // this, every streaming auth failure / 429 / SDK error is invisible
+    // in `ai_request_log` and operators investigating an outage have
+    // to fall back to Prometheus + raw logs.
+    try {
+      runPostCallHooks({
+        routeId: null, // skip drift correction on error
+        route: null,
+        estimatedTokens: effectiveMaxTokens,
+        actualTokens: NaN,
+        costUsd: null,
+        logEntry: {
+          workspaceId: callOpts?.workspaceId || null,
+          routeId: routeIdForLog(dispatchRoute.id),
+          agentRole: callOpts?.agentRole || null,
+          userId: callOpts?.userId || null,
+          prompt: promptForLog,
+          response: "",
+          latencyMs: Date.now() - startedMs,
+          outcome: "error",
+          errorReason: err?.message?.slice(0, 200) || "unknown",
+          traceId: getCurrentTraceId(),
+          storageMode: logCfg.mode,
+          customRedactionRules: logCfg.customRules,
+        },
+      });
+    } catch {}
     // Only fall back if no tokens were emitted — otherwise the user would
     // see a partial stream concatenated with the full retry response.
     if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);

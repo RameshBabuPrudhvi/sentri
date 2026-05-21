@@ -15,7 +15,7 @@ import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER } from "./modelCatalog.js";
+import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER, getCloudModel } from "./modelCatalog.js";
 import { protocolForProvider } from "./protocolForProvider.js";
 // B4.6 — route-group resolution. When `agent_configs.routeId` starts
 // with `"rg-"`, the id points at a `route_groups` row instead of a
@@ -578,6 +578,23 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
   // format (`protocolAdapter.moduleFor` would throw anyway, but
   // failing here gives a more actionable error message).
   const protocol = protocolForProvider(provider);
+  // B4.x — resolve a concrete model id when the caller didn't supply
+  // one. Without this, `route.model` stays `null` and the dispatcher's
+  // `computeCostForRoute` Path 2 catalog fallback (which keys on
+  // `route.model`) never fires for env-default dispatch — every
+  // transient call lands `costUsd: null` even when the chosen cloud
+  // model IS in `MODEL_PRICING`. The catalog model is also what
+  // `protocolAdapter` actually dispatches against, so the runtime
+  // contract requires SOME model id here regardless of cost.
+  // `getCloudModel` returns the configured env override
+  // (`ANTHROPIC_MODEL` / `OPENAI_MODEL` / etc.) or the catalog
+  // default; for compat slots it falls through to null which is fine
+  // — those routes always supply an explicit model via
+  // `getCompatConfig().model` higher up the stack.
+  let effectiveModel = model || null;
+  if (!effectiveModel && !provider.startsWith("compat:")) {
+    try { effectiveModel = getCloudModel(provider) || null; } catch { /* unknown family */ }
+  }
   return {
     id: `provider:${provider}`,
     workspaceId: workspaceId || null,
@@ -585,7 +602,7 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
     family: provider,
     protocol,
     baseUrl: null,
-    model: model || null,
+    model: effectiveModel,
     apiKeyLastFour: null,
     capabilities: null,
     pricing: null,
@@ -598,6 +615,12 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
     // Marker — lets the protocol-adapter caller detect a synthetic
     // route and resolve the apiKey via the legacy `getKey(envName)`
     // path instead of `secrets.getDecryptedKey(workspaceId, routeId)`.
+    // Also the canonical "is this a transient route?" predicate used
+    // by `streamText` / `callVisionModel` / `_callProviderUnsafe`.
+    // The discriminator stays consistent across all dispatch paths:
+    // real routes have `id` starting `"pr-"` AND no `_transient`;
+    // transient routes have `id` starting `"provider:"` AND
+    // `_transient: true`.
     _transient: true,
     _transientProvider: provider,
   };

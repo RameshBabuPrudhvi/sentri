@@ -1074,11 +1074,22 @@ router.post("/settings/provider-routes/import", requireRole("admin"), async (req
     }
 
     try {
-      // For `overwrite`, the repo's find-by-name path takes over —
-      // partial-patch semantics preserve the existing apiKeyEncrypted
-      // since we never include it in the payload above.
+      // B3.5 fix — pass the existing row's `id` explicitly on overwrite
+      // so the repo takes the deterministic by-id path instead of
+      // falling back to its name-based lookup. The fallback worked by
+      // coincidence today (the SAFE_SELECT happens to return rows by
+      // name when `id` is unset on the input), but it's fragile: a
+      // future refactor that prunes the unused-`id` branch would
+      // silently turn every overwrite into a duplicate-key
+      // `UNIQUE(workspaceId, name)` collision. Be explicit.
+      //
+      // When mode is `rename`, finalName differs from incoming.name and
+      // there's no existing row to overwrite — leave `id` unset so the
+      // repo treats the call as INSERT.
+      const overwriteTarget = isOverwrite ? existingByName.get(incoming.name) : null;
       const saved = providerRouteRepo.upsert({
         ...payload,
+        ...(overwriteTarget ? { id: overwriteTarget.id } : {}),
         // Honour operator-set pricing JSON if present. `payload`
         // doesn't include it (the build helper is for the wire CRUD
         // shape); we pass it through verbatim per the schema contract.
@@ -1093,8 +1104,24 @@ router.post("/settings/provider-routes/import", requireRole("admin"), async (req
         skipAutoProbe: true,
       });
       importedNames.add(finalName);
-      if (incoming.id) idMap.set(incoming.id, saved.id);
-      landed.push({ saved, sourceFallbackId: incoming.fallbackRouteId ?? null });
+      // B3.5 fix — always populate `idMap` (incoming.id → saved.id) for
+      // phase-2 fallback rewire to work. The previous `if (incoming.id)`
+      // gate dropped rows whose source-side `id` was absent (e.g.
+      // exports from older tooling, hand-edited bundles), silently
+      // breaking the fallback chain for those entries. Use a stable
+      // synthetic key when `incoming.id` is missing so the map still
+      // covers the entry — `_imp:<name>` collides with neither real
+      // ids (`pr-*`) nor group ids (`rg-*`).
+      const sourceKey = incoming.id || `_imp:${incoming.name}`;
+      idMap.set(sourceKey, saved.id);
+      // Capture the source key alongside the saved row so phase 2 can
+      // resolve `incoming.fallbackRouteId` (which may be a real
+      // source-side id OR a `_imp:<name>` synthetic) without a second
+      // lookup pass.
+      landed.push({
+        saved,
+        sourceFallbackId: incoming.fallbackRouteId ?? null,
+      });
       if (isOverwrite) stats.overwritten += 1;
       else if (isRename) stats.renamed += 1;
       else stats.created += 1;

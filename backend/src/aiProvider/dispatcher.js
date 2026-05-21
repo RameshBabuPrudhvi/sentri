@@ -525,7 +525,7 @@ export function recordAiTokens(provider, usage, operation = "generation", agentR
  * @param {Object} callOptions - The dispatcher's `callOpts` object.
  * @returns {{ mode: "none"|"redacted"|"full", customRules: Array }}
  */
-function resolveRequestLogConfig(callOptions = {}) {
+export function resolveRequestLogConfig(callOptions = {}) {
   const VALID_MODES = ["none", "redacted", "full"];
   // 1. Explicit per-call override (tests, replay endpoint).
   if (callOptions.requestLogMode && VALID_MODES.includes(callOptions.requestLogMode)) {
@@ -565,6 +565,132 @@ function resolveRequestLogConfig(callOptions = {}) {
   }
   // 4. Final default.
   return { mode: "none", customRules: [] };
+}
+
+// ── Pre-call dispatch gates (shared by generate + stream) ─────────────────────
+
+/**
+ * Run the B3.7 spend-cap + token-bucket gates that gate every AI call.
+ *
+ * Extracted from `_callProviderUnsafe` so `streamText` (which bypasses
+ * `_callProviderUnsafe` entirely — see `aiProvider/index.js#streamText`)
+ * can run the same gates and not violate the cross-bundle invariant
+ * "Quota guard never burns provider quota".
+ *
+ * Same throw contract as the inline version inside `_callProviderUnsafe`:
+ * spend-cap exceeded → `ERR_SPEND_CAP_EXCEEDED`; rate-limit reserve
+ * exhausted → `ERR_RATE_LIMIT_LOCAL`. Both errors carry `.code` for
+ * `classifyAiError` to bucket them into their own Prometheus reason
+ * labels (`spend_cap_exceeded`, `rate_limit_local`).
+ *
+ * @param {string|null} workspaceId
+ * @param {string|null} routeId
+ * @param {Object|null} route
+ * @param {number} estimatedTokens - maxTokens upper bound passed to the bucket.
+ * @returns {Promise<void>} resolves when both gates pass; throws otherwise.
+ */
+export async function runPreCallGates(workspaceId, routeId, route, estimatedTokens) {
+  if (workspaceId) {
+    const spend = checkSpendCap(workspaceId);
+    if (!spend.ok) {
+      const err = new Error(
+        `Spend cap exceeded (${spend.exceeded}). ` +
+        `Dispatch blocked until next ${spend.exceeded === "day" ? "24h window" : "month boundary"}.`,
+      );
+      err.code = "ERR_SPEND_CAP_EXCEEDED";
+      err.exceeded = spend.exceeded;
+      err.remainingUsd = spend.remainingUsd;
+      throw err;
+    }
+    if (spend.alertTriggered) {
+      try {
+        console.warn(formatLogLine("warn", null,
+          `[quotaGuard] spend alert: workspace=${workspaceId} ` +
+          `daily=${spend.dailySpent}/${spend.dailyCap} ` +
+          `monthly=${spend.monthlySpent}/${spend.monthlyCap} ` +
+          `threshold=${spend.thresholdPct}%`));
+      } catch { /* best-effort */ }
+    }
+  }
+  if (routeId && route) {
+    const reserved = await checkAndReserve(routeId, estimatedTokens, {
+      rpmLimit: route.rpmLimit,
+      tpmLimit: route.tpmLimit,
+    });
+    if (!reserved.ok) {
+      const err = new Error(
+        `Local rate limit reached on route ${route.name || routeId}. ` +
+        `Retry after ${reserved.retryAfterMs}ms.`,
+      );
+      err.code = "ERR_RATE_LIMIT_LOCAL";
+      err.retryAfterMs = reserved.retryAfterMs;
+      err.reason = reserved.reason;
+      throw err;
+    }
+  }
+}
+
+/**
+ * Post-call drift correction + request-log write. Extracted for the
+ * same reason as `runPreCallGates` — `streamText` needs to run these
+ * obligations too. Best-effort: errors are swallowed inside.
+ *
+ * @param {Object} args
+ * @param {string|null} args.routeId
+ * @param {Object|null} args.route
+ * @param {number} args.estimatedTokens
+ * @param {number} args.actualTokens
+ * @param {number|null} args.costUsd
+ * @param {Object} args.logEntry - Passed to `logRequest`.
+ */
+export function runPostCallHooks({ routeId, route, estimatedTokens, actualTokens, costUsd, logEntry }) {
+  if (routeId && route && Number.isFinite(actualTokens)) {
+    reportActual(routeId, estimatedTokens, actualTokens, costUsd).catch(() => {});
+  }
+  if (logEntry) {
+    try { logRequest(logEntry); } catch { /* best-effort */ }
+  }
+}
+
+// ── Request-log routeId resolution ────────────────────────────────────────────
+
+/**
+ * Resolve the `routeId` value to persist on an `ai_request_log` row.
+ *
+ * The dispatcher's `callOptions.routeId` mirrors `route.id` — which is
+ * `"provider:<id>"` for transient routes synthesised by
+ * `registry.synthesiseTransientRoute` from env detection. Those ids do
+ * not exist in the `provider_routes` table, so persisting them would
+ * violate the FK `ai_request_log.routeId REFERENCES provider_routes(id)
+ * ON DELETE SET NULL` (migration 047). The `logRequest` swallow-all
+ * catch then silently drops the entire row.
+ *
+ * Cascade: a dropped log row means `checkSpendCap` sees `SUM(costUsd) = 0`
+ * for the workspace (B3.7 caps never fire); replay endpoints return 404
+ * (B2.5 replay impossible); GET /settings/ai-requests returns empty
+ * (B3.9 viewer dark). Every env-default workspace gets ZERO observability.
+ *
+ * The fix is to null out the routeId for transient routes only — real
+ * routes (`pr-*`) keep their id so per-route filtering still works.
+ * Workspaces using env-default dispatch get NULL routeId rows (which
+ * the schema explicitly allows — the column is nullable + FK is ON
+ * DELETE SET NULL precisely for the "route deleted between dispatch
+ * and log write" case; we extend the semantics here to also cover
+ * "route never existed in the DB").
+ *
+ * @param {string|null} routeId - `callOptions.routeId`, possibly transient.
+ * @returns {string|null} `routeId` for real routes, `null` for transient.
+ */
+export function routeIdForLog(routeId) {
+  if (!routeId) return null;
+  // Transient ids start with `"provider:"` (synthesised by
+  // `synthesiseTransientRoute`). Real route ids start with `"pr-"`
+  // (UUID-prefixed by `providerRouteRepo.upsert`). Any other shape is
+  // unexpected — be conservative and null it out rather than risk an
+  // FK violation that drops the row.
+  if (typeof routeId !== "string") return null;
+  if (routeId.startsWith("pr-")) return routeId;
+  return null;
 }
 
 // ── Instrumented provider call ────────────────────────────────────────────────
@@ -616,7 +742,10 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
     try {
       logRequest({
         workspaceId: callOptions.workspaceId || null,
-        routeId: callOptions.routeId || null,
+        // Strip transient `provider:*` ids so the FK
+        // (`ai_request_log.routeId REFERENCES provider_routes(id)`)
+        // doesn't reject the row. See `routeIdForLog` JSDoc.
+        routeId: routeIdForLog(callOptions.routeId),
         agentRole: callOptions.agentRole || null,
         userId: callOptions.userId || null,
         prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
@@ -648,7 +777,11 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
     try {
       logRequest({
         workspaceId: callOptions.workspaceId || null,
-        routeId: callOptions.routeId || null,
+        // Strip transient `provider:*` ids — see `routeIdForLog` JSDoc.
+        // Even on the error path, a transient routeId would FK-fail
+        // and silently drop the error row, losing the diagnostic
+        // signal operators need to see WHY env-default dispatch failed.
+        routeId: routeIdForLog(callOptions.routeId),
         agentRole: callOptions.agentRole || null,
         userId: callOptions.userId || null,
         prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
