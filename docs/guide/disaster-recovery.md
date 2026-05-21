@@ -5,6 +5,7 @@
 
 ## Backup layout
 - `s3://<bucket>/daily/YYYY-MM-DD.sql`
+- `s3://<bucket>/monthly/YYYY-MM.sql`
 - keep 30 daily and 12 monthly snapshots (bucket lifecycle policy)
 
 ## Restore

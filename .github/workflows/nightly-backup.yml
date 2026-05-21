@@ -12,8 +12,17 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Upload daily backup
+        run: aws s3 cp backup.sql "s3://${S3_BACKUP_BUCKET}/daily/$(date -u +%F).sql"
+        env:
+          S3_BACKUP_BUCKET: ${{ secrets.S3_BACKUP_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_BACKUP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_BACKUP_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.S3_BACKUP_REGION }}
+      - name: Upload monthly backup snapshot
         run: |
-          aws s3 cp backup.sql "s3://${S3_BACKUP_BUCKET}/daily/$(date -u +%F).sql"
+          if [ "$(date -u +%d)" = "01" ]; then
+            aws s3 cp backup.sql "s3://${S3_BACKUP_BUCKET}/monthly/$(date -u +%Y-%m).sql"
+          fi
         env:
           S3_BACKUP_BUCKET: ${{ secrets.S3_BACKUP_BUCKET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_BACKUP_ACCESS_KEY_ID }}

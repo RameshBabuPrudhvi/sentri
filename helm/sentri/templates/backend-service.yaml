@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentri-backend
+spec:
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 3001
+      targetPort: 3001

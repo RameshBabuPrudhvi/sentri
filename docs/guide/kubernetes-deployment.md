@@ -4,3 +4,9 @@
 2. `kubectl wait --for=condition=Ready pod -l app=backend --timeout=90s`
 3. `kubectl wait --for=condition=Ready pod -l app=worker --timeout=90s`
 4. Validate `GET /api/v1/health` and worker `/healthz`.
+
+
+## Services created by chart
+- `sentri-backend` (ClusterIP) for HTTP traffic and ingress backend target.
+- `sentri-postgres` (headless) for StatefulSet stable network identity.
+- `sentri-redis` (ClusterIP) for BullMQ queue connectivity.
