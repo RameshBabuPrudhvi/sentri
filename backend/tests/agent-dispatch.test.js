@@ -103,11 +103,15 @@ function ensureRouteForFamily(workspaceId, family) {
     : family === "google" ? "gemini"
     : family === "local" ? "ollama"
     : "openai";
+  // `provider_routes.model` is NOT NULL (migration 035). Synthesise a
+  // family-shaped placeholder so the INSERT satisfies the constraint —
+  // these tests only exercise dispatch resolution, not the model string.
+  const model = `test-model-${family}`;
   db.prepare(
     "INSERT INTO provider_routes (id, workspaceId, name, family, protocol, baseUrl, model, " +
     "enabled, cacheEnabled, cacheTtlSec, createdAt, updatedAt) " +
     "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?)",
-  ).run(id, workspaceId, `route-${family}-${id.slice(-4)}`, family, protocol, null, null, now(), now());
+  ).run(id, workspaceId, `route-${family}-${id.slice(-4)}`, family, protocol, null, model, now(), now());
   return id;
 }
 
