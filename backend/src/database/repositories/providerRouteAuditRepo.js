@@ -149,3 +149,33 @@ export function list(workspaceId, opts = {}) {
       LIMIT ?`
   ).all(...params, limit);
 }
+
+/**
+ * B3.9 — Daily retention sweep. Deletes audit rows older than the
+ * configured window. The default 90-day retention matches the roadmap
+ * checklist; operators tune via `AI_ROUTES_AUDIT_RETENTION_DAYS`. The
+ * `(workspaceId, createdAt)` index from migration 036 doesn't cover
+ * this query (no workspace filter), but `createdAt` is highly
+ * selective on its own — even at 1M-row tables the sweep is sub-second.
+ *
+ * Returns the number of rows deleted for log correlation. Best-effort
+ * — a DB failure logs and returns 0; the next janitor run picks up
+ * what this one missed.
+ *
+ * @param {number} days - Retention window in days. `≤ 0` disables the
+ *   sweep entirely (returns 0 without touching the table).
+ * @returns {number} Rows deleted.
+ */
+export function purgeOlderThan(days) {
+  const d = Number(days);
+  if (!Number.isFinite(d) || d <= 0) return 0;
+  const cutoff = new Date(Date.now() - d * 86400000).toISOString();
+  try {
+    const result = getDatabase().prepare(
+      "DELETE FROM provider_route_audit WHERE createdAt < ?",
+    ).run(cutoff);
+    return result.changes || 0;
+  } catch {
+    return 0;
+  }
+}

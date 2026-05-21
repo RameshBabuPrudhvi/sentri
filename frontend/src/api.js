@@ -161,6 +161,177 @@ export const api = {
    * @returns {Promise<{role: string, ok: boolean, reason: string|null, provider: string|null}>}
    */
   testAgentRole: (role) => req("POST", `/settings/agent-roles/${role}/test`),
+
+  // ── Provider Routes (B2/B3 — Settings UI) ──────────────────────────────────
+  // Backend endpoints assumed per the B3.1 spec; companion PR adds them.
+  // Until that lands, every call here returns a 404 and the tab renders its
+  // empty / error state — no other surface depends on these helpers.
+  /**
+   * List every `provider_routes` row in the current workspace. Secret
+   * blobs (`apiKeyEncrypted`, `apiKeyNonce`) are omitted by the repo's
+   * default SELECT — only `apiKeyLastFour` comes back for UI display.
+   * @returns {Promise<{routes: Array<Object>}>}
+   */
+  listProviderRoutes:   () => req("GET", "/settings/provider-routes"),
+  /**
+   * Create a new provider route. `apiKey` is plaintext on the wire,
+   * encrypted server-side via `secrets.encryptKey` before persist.
+   * @param {{name: string, family: string, protocol: string, baseUrl?: string|null, model: string, apiKey?: string|null, enabled?: boolean, rpmLimit?: number|null, tpmLimit?: number|null, cacheEnabled?: boolean, cacheTtlSec?: number, fallbackRouteId?: string|null}} payload
+   */
+  createProviderRoute:  (payload) => req("POST", "/settings/provider-routes", payload),
+  /**
+   * Partial-patch an existing route. Omit `apiKey` to keep the stored
+   * key intact — rotation MUST go through `rotateProviderRouteKey`
+   * (B3.6) so the audit row is tagged `action: "rotate_key"`.
+   * @param {string} id
+   * @param {Object} payload
+   */
+  updateProviderRoute:  (id, payload) => req("PATCH", `/settings/provider-routes/${id}`, payload),
+  /** @param {string} id */
+  deleteProviderRoute:  (id) => req("DELETE", `/settings/provider-routes/${id}`),
+  /**
+   * B2.2 — Run a real network capability probe and persist the result
+   * to `provider_routes.capabilities`. Response carries the updated
+   * row regardless of probe outcome — caller inspects
+   * `capabilities.reachable` to render the badge.
+   * @param {string} id
+   * @returns {Promise<{ok: boolean, route: Object, capabilities: Object}>}
+   */
+  probeProviderRoute:   (id) => req("POST", `/settings/provider-routes/${id}/probe`),
+  /**
+   * B3.6 — Rotate the route's API key. New plaintext on the wire,
+   * encrypted server-side. Server is expected to gate on a probe pass
+   * before accepting the rotation (B3.6 "rejects on probe fail").
+   * @param {string} id
+   * @param {string} apiKey
+   * @returns {Promise<{ok: boolean, lastFour: string}>}
+   */
+  rotateProviderRouteKey: (id, apiKey) => req("POST", `/settings/provider-routes/${id}/rotate-key`, { apiKey }),
+  /**
+   * B3.5 — Download a schema-v1 JSON dump of every provider_routes row
+   * in the current workspace. Secrets are NEVER in the payload (only
+   * `apiKeyLastFour` round-trips), so the file is safe to share with
+   * another workspace's operator who'll re-supply keys out-of-band.
+   *
+   * Uses fetch + Blob so the cross-origin deploy path (cookies aren't
+   * sent on bare anchor navigations there) keeps working. Same-origin
+   * deploys could `window.open` the URL directly, but the Blob path
+   * is uniform and trivially correct in both.
+   *
+   * Returns the parsed JSON payload AS WELL AS triggering a download —
+   * callers that want to inspect the payload (e.g. to show "exported N
+   * routes" inline) can use the return value without re-fetching.
+   *
+   * @returns {Promise<Object>} The schema-v1 payload.
+   */
+  exportRoutes: async () => {
+    const url = `${BASE}/settings/provider-routes/export`;
+    const res = await fetch(url, { credentials: "include" });
+    const csrfHdr = res.headers.get("X-CSRF-Token");
+    if (csrfHdr) setCsrfToken(csrfHdr);
+    if (res.status === 401) { handleUnauthorized(); throw new Error("Session expired."); }
+    if (!res.ok) {
+      const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Export failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match?.[1] || `sentri-provider-routes-${new Date().toISOString().slice(0, 10)}.json`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    // Re-parse so callers can read counts inline. Cheap — the export is
+    // bounded by `provider_routes` rows per workspace, never a large blob.
+    return JSON.parse(await blob.text());
+  },
+  /**
+   * B3.5 — Upload a schema-v1 JSON file to upsert routes into the
+   * current workspace. The file is read into memory client-side and
+   * POSTed as the request body so the existing `req()` wrapper handles
+   * auth + CSRF + JSON; no multipart needed since the file IS the
+   * JSON body.
+   *
+   * @param {File}    file - Browser `File` from the upload input.
+   * @param {"skip"|"overwrite"|"rename"} mode - Collision resolution.
+   * @returns {Promise<{ok: boolean, created: number, overwritten: number, skipped: number, renamed: number, errors: Array, probesReachable: number, total: number}>}
+   */
+  importRoutes: async (file, mode) => {
+    const text = await file.text();
+    let payload;
+    try { payload = JSON.parse(text); }
+    catch { throw new Error("Selected file is not valid JSON."); }
+    return req("POST", "/settings/provider-routes/import", { ...payload, mode });
+  },
+  /**
+   * B3.9 — Paginated, filterable provider-routes audit log. Workspace-
+   * scoped on the backend; admins see every mutation across every
+   * route in the workspace. `metadata` round-trips as a JSON string;
+   * the UI parses on render.
+   *
+   * @param {Object} [filters]
+   * @param {string} [filters.routeId]  - Filter to one route's history.
+   * @param {string} [filters.action]   - One of {create, update, delete, rotate_key, probe, export, import}.
+   * @param {string} [filters.since]    - ISO timestamp; rows with `createdAt >= since`.
+   * @param {string} [filters.before]   - ISO timestamp cursor; rows with `createdAt < before`.
+   * @param {number} [filters.limit=50]
+   * @returns {Promise<{ items: Array, nextCursor: string|null }>}
+   */
+  listProviderRouteAudit: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.routeId) params.set("routeId", filters.routeId);
+    if (filters.action) params.set("action", filters.action);
+    if (filters.since) params.set("since", filters.since);
+    if (filters.before) params.set("before", filters.before);
+    if (filters.limit != null) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    return req("GET", `/settings/provider-routes/audit${qs ? `?${qs}` : ""}`);
+  },
+  /**
+   * B2.5 — Paginated AI request-log viewer. Workspace-scoped on the
+   * backend. Returns the same cursor shape as `listProviderRouteAudit`
+   * for UI consistency. `promptRedacted` / `responseRedacted` carry
+   * PII-stripped content under `redacted` mode, raw content under
+   * `full` mode, and `null` under `none` (the workspace default).
+   *
+   * @param {Object} [filters]
+   * @param {string} [filters.routeId]
+   * @param {string} [filters.agentRole]
+   * @param {string} [filters.traceId]
+   * @param {string} [filters.outcome]    - `success` | `error` | `rate_limited`
+   * @param {string} [filters.before]     - ISO timestamp cursor
+   * @param {number} [filters.limit=50]
+   * @returns {Promise<{ items: Array, nextCursor: string|null }>}
+   */
+  listAiRequests: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.routeId) params.set("routeId", filters.routeId);
+    if (filters.agentRole) params.set("agentRole", filters.agentRole);
+    if (filters.traceId) params.set("traceId", filters.traceId);
+    if (filters.outcome) params.set("outcome", filters.outcome);
+    if (filters.before) params.set("before", filters.before);
+    if (filters.limit != null) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    return req("GET", `/settings/ai-requests${qs ? `?${qs}` : ""}`);
+  },
+  /**
+   * B2.5 — Replay a logged AI request. The server refuses with HTTP
+   * 400 when the row was captured under storage mode `none` (no prompt
+   * stored) or `redacted` (replaying sentinel strings is meaningless).
+   * Pass `routeId` to dispatch the replay against a different route
+   * than the original — useful for "would this work on a cheaper
+   * model?" debugging.
+   *
+   * @param {string} id - Request log id (`air-<uuid>`).
+   * @param {{ routeId?: string }} [opts]
+   * @returns {Promise<{ ok: boolean, replayedFrom: string, routeId: string|null, text: string }>}
+   */
+  replayAiRequest: (id, opts = {}) =>
+    req("POST", `/settings/ai-requests/${id}/replay`, opts || {}),
+
 // ── Projects ────────────────────────────────────────────────────────────────
   /** @param {Object} data - `{ name, url, credentials? }` */
   createProject: (data) => req("POST", "/projects", data),

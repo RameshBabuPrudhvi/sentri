@@ -67,22 +67,31 @@ These are starting points — A/B test against your eval harness
 Per-workspace agent rows live in the `agent_configs` table. Every row carries:
 
 ```text
-id, workspaceId, role, provider, model, systemPromptOverride,
+id, workspaceId, role, routeId, systemPromptOverride,
 temperature, maxTokens, fallbackRole, createdAt, updatedAt
 ```
 
 `UNIQUE(workspaceId, role)` is enforced — one row per role per workspace.
 
-Edit via **Settings → Agents** (admin only). The UI surfaces:
+> **B2.1 breaking change:** the legacy `provider` and `model` columns
+> were dropped in migration 048. Dispatch now keys on `routeId` which
+> points at a `provider_routes` row carrying family, protocol, model,
+> encrypted API key, capabilities, and pricing. See the
+> [changelog](../changelog.md) for migration instructions.
 
-- Provider dropdown (one of the providers configured under Settings →
-  AI Provider — cloud key, Ollama, or any OpenAI-compatible slot).
-- Model field (free text, validated against the catalog when known).
+Edit via **Settings → Agent Roles** (admin only). The UI surfaces:
+
+- **Route** dropdown — one of the `provider_routes` rows configured
+  under **Settings → Provider Routes**. Each route bundles protocol +
+  endpoint + model + encrypted API key, so switching a role's route
+  changes every dispatch dimension at once.
 - System prompt override (free text, optional — appended as the system
   message at every call site for this role).
 - Max tokens (optional; falls back to caller's hint or `LLM_MAX_TOKENS`).
-- Fallback role (drop-down of other roles — if this role's provider is
-  rate-limited, dispatch falls through to the fallback role's provider).
+- Fallback is now configured at the **route level** (route-level
+  `fallbackRouteId`) rather than the role level. The per-role
+  `fallbackRole` column is preserved for one release for rollback but
+  is no longer exposed in the UI.
 
 ### `fallbackRole` cycle protection
 

@@ -21,12 +21,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 import { throwIfAborted } from "../../utils/abortHelper.js";
-import { computeCostUsd } from "../modelCatalog.js";
 
-function withCost(model, usage) {
-  if (!usage) return usage;
-  return { ...usage, costUsd: computeCostUsd(model, usage) };
-}
+// B2.4 — protocol modules return raw `{ input, output }` token usage
+// only. Cost is computed by the dispatcher's
+// `computeCostForRoute(route, usage)` with `route.pricing` as the
+// authoritative source and `MODEL_PRICING` as catalog fallback.
 
 function mkClient(route, opts) {
   const config = { apiKey: opts.apiKey };
@@ -49,10 +48,10 @@ export async function generate(route, messages, opts) {
       const msg = await client.messages.create(params, { signal: composedSignal });
       return {
         text: msg.content?.[0]?.text || "",
-        usage: withCost(route.model, {
+        usage: {
           input: msg?.usage?.input_tokens,
           output: msg?.usage?.output_tokens,
-        }),
+        },
       };
     } finally { cleanup(); }
   }, label);
@@ -79,9 +78,44 @@ export async function stream(route, messages, opts) {
   const final = await s.finalMessage();
   return {
     text: final?.content?.[0]?.text || "",
-    usage: withCost(route.model, {
+    usage: {
       input: final?.usage?.input_tokens,
       output: final?.usage?.output_tokens,
-    }),
+    },
+  };
+}
+
+/**
+ * Route-driven multimodal generate (MNT-001 vision-healing).
+ *
+ * Mirrors `adapters/anthropic.js#generateVision` — image as a base64
+ * source block, 512 max output tokens. Anthropic's vision API uses the
+ * native `image` content type (NOT the OpenAI `image_url` shape), so
+ * `opts.base64` is the raw base64 string (no `data:` prefix); the
+ * media_type is fixed to `image/png` since the screenshot pipeline
+ * always emits PNG.
+ *
+ * Required `opts` fields:
+ *   • `apiKey`     — resolved by `protocolAdapter.generateVision`.
+ *   • `base64`     — raw base64 PNG (no `data:` URL prefix).
+ *   • `userPrompt` — the per-call instruction string.
+ *   • `signal`     — optional AbortSignal; honoured by the SDK.
+ */
+export async function generateVision(route, opts) {
+  const client = mkClient(route, opts);
+  const msg = await client.messages.create({
+    model: route.model,
+    max_tokens: 512,
+    messages: [{ role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/png", data: opts.base64 } },
+      { type: "text", text: opts.userPrompt },
+    ] }],
+  }, { signal: opts.signal });
+  return {
+    text: msg.content?.[0]?.text || "",
+    usage: {
+      input: msg?.usage?.input_tokens,
+      output: msg?.usage?.output_tokens,
+    },
   };
 }

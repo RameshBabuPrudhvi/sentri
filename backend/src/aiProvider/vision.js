@@ -2,20 +2,54 @@
  * @module vision
  * @description Vision (multimodal) provider abstraction — MNT-001 stage-8 healing.
  *
- * VISION_CAPABLE_MODELS lives in modelCatalog.js — operators add new vision-
- * capable model IDs there, not here. An explicit VISION_MODEL env var
- * bypasses the whitelist for opt-in coverage of new models.
+ * Vision-model resolution priority (B2.3):
+ *   1. `VISION_MODEL` env override — explicit operator opt-in, no
+ *      whitelist check (lets operators try a brand-new vision model
+ *      before the catalog is updated).
+ *   2. Workspace healer route's `capabilities.vision === true` AND
+ *      its `model` — the route-driven canonical path. Set up by an
+ *      admin in Settings → Agent Roles → healer with a route whose
+ *      capability probe (B2.2) confirmed vision support.
+ *   3. `AI_MODEL` env, GUARDED by `VISION_CAPABLE_MODELS` — single-
+ *      tenant deployments without per-workspace routes that just want
+ *      "the same model the rest of the platform uses, if it's vision-
+ *      capable".
+ *   4. Active provider's default model, GUARDED by `VISION_CAPABLE_MODELS` —
+ *      catch-all when no agent_config and no override exist.
+ *   5. `null` — no vision-capable model is available; the caller
+ *      degrades to non-LLM healing.
+ *
+ * Why both `route.capabilities.vision` (route path) AND `VISION_CAPABLE_MODELS`
+ * (env path) coexist: routes carry first-hand network probe evidence
+ * (B2.2 — what the provider actually accepts). Env paths don't have a
+ * route to probe, so they fall back to the static catalog. The env
+ * paths are legacy single-tenant compatibility; multi-tenant
+ * deployments should configure routes via Settings UI (B3.1) and rely
+ * on the route-driven path exclusively. A future bundle can remove
+ * the env paths once every deployment has migrated to per-workspace
+ * routes.
  */
 
-import { VISION_CAPABLE_MODELS } from "./modelCatalog.js";
 import { getProvider, getProviderMeta } from "./providerInfo.js";
-import { resolveProvider, isProviderUsable } from "./registry.js";
+import { resolveRoute, isProviderUsable, isCompatProvider, getCompatConfig, getKey } from "./registry.js";
+import { VISION_CAPABLE_MODELS, CLOUD_KEY_MAP } from "./modelCatalog.js";
 import {
   providerMetricLabel,
-  buildAdapterOpts,
-  adapterFor,
   recordAiTokens,
 } from "./dispatcher.js";
+// B4.0.4 — route-driven dispatch. Vision-heal no longer routes through
+// the legacy `adapterFor(provider).generateVision()` path; it calls
+// `protocolAdapter.generateVision(route, opts)` which resolves the
+// decrypted key via `secrets.getDecryptedKey(workspaceId, routeId)` and
+// delegates to the route's protocol module (openai / anthropic / gemini
+// / ollama). Final caller of the legacy adapter surface — the
+// `adapterFor` / `buildAdapterOpts` imports are intentionally gone so
+// CI catches any re-introduction.
+import * as protocolAdapter from "./adapters/protocolAdapter.js";
+// B4.0.4 — same provider→protocol mapping used by `registry.synthesiseTransientRoute`
+// for the single-tenant no-workspace fallback. Aliased so the dispatch
+// site reads naturally ("protocol for the legacy provider id").
+import { protocolForProvider as protocolForLegacyProvider } from "./protocolForProvider.js";
 import {
   aiProviderLatencySeconds,
   aiProviderErrorsTotal,
@@ -33,30 +67,55 @@ import { parseJSON } from "./index.js";
  * `PATCH /projects/:id` to reject `pixelmatch_and_llm` mode with
  * `VISION_PROVIDER_NOT_CONFIGURED` when no usable model exists.
  *
- * Resolution order:
- *   1. `VISION_MODEL` env var (explicit override, no whitelist check).
- *   2. `AI_MODEL` env var if it's in `VISION_CAPABLE_MODELS`.
- *   3. AI-005: `agent_configs[healer].model` for the supplied workspaceId,
- *      when it's whitelist-vision-capable.
- *   4. The active provider's default model if vision-capable.
- *   5. `null`.
+ * See module-level JSDoc for the full resolution priority. In short:
+ * `VISION_MODEL` env override → workspace healer route (B1.6 +
+ * B2.2 probe) → guarded `AI_MODEL` env → guarded provider default.
  *
  * @param {Object}  [opts]
- * @param {string}  [opts.workspaceId] - AI-005: when present, the healer
- *   agent config's `model` is preferred over the workspace default so a
- *   per-role override (e.g. claude-3-5-sonnet) actually drives the call.
+ * @param {string}  [opts.workspaceId] - B1.6: when present, the healer
+ *   agent_config's `routeId` drives selection so a per-role override
+ *   (e.g. claude-3-5-sonnet on a different workspace's anthropic
+ *   route) actually drives the call. The route's `capabilities.vision`
+ *   field (set by B2.2 probe) is the authoritative vision-support
+ *   signal — operators no longer have to keep `VISION_CAPABLE_MODELS`
+ *   in sync with their actual provider config.
  * @returns {string|null}
  */
 export function resolveVisionModel({ workspaceId = null } = {}) {
+  // 1. Explicit operator override — no whitelist check.
   if (process.env.VISION_MODEL) return process.env.VISION_MODEL;
-  if (process.env.AI_MODEL && VISION_CAPABLE_MODELS.has(process.env.AI_MODEL)) return process.env.AI_MODEL;
-  // AI-005: if the workspace has a healer agent config with a vision-capable
-  // model, honour it. The role's `provider` is applied separately in
-  // `callVisionModel` via `resolveProvider`; this only chooses the model id.
+  // 2. Route-driven path: healer agent_config → routeId → route.
+  //    Priority:
+  //      a. `route.capabilities.vision === true` (probed evidence —
+  //         B2.2's auto-probe wrote this on every Settings-UI save).
+  //      b. Fallback to `VISION_CAPABLE_MODELS` catalog when the
+  //         route exists but `capabilities` is `null` (backfill-routes
+  //         script intentionally skips probing — see its header
+  //         JSDoc — so backfilled routes need the catalog floor to
+  //         work immediately, before an operator manually probes).
+  //    Without the catalog fallback, vision healing silently breaks
+  //    for every workspace whose healer was migrated by the backfill
+  //    script until someone hits the Settings UI re-probe button.
   if (workspaceId) {
-    const { config: healer } = resolveProvider({ agentRole: "healer", workspaceId });
-    if (healer?.model && VISION_CAPABLE_MODELS.has(healer.model)) return healer.model;
+    const { route } = resolveRoute({ agentRole: "healer", workspaceId });
+    if (route?.model) {
+      if (route.capabilities?.vision === true) return route.model;
+      // Catalog fallback for unprobed routes. We only fall through to
+      // env paths when the route's model isn't in the catalog either —
+      // an unprobed route with a clearly vision-capable model id (e.g.
+      // `claude-3-5-sonnet`) should still drive vision healing.
+      if (route.capabilities == null && VISION_CAPABLE_MODELS.has(route.model)) {
+        return route.model;
+      }
+    }
   }
+  // 3. AI_MODEL env, guarded against accidentally sending image data
+  //    to a text-only model (regression Lifeguard flagged when the
+  //    guard was removed earlier in this PR).
+  if (process.env.AI_MODEL && VISION_CAPABLE_MODELS.has(process.env.AI_MODEL)) {
+    return process.env.AI_MODEL;
+  }
+  // 4. Active provider's default model, same guard.
   const provider = getProvider();
   if (!provider) return null;
   const meta = getProviderMeta();
@@ -128,14 +187,33 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal,
   if (!screenshot || !intent?.label) return null;
   const model = resolveVisionModel({ workspaceId });
   if (!model) return null;
-  // AI-005: prefer the healer agent_config provider when configured;
-  // fall back to the workspace default exactly the same way generateText
-  // does for unconfigured roles. `resolveProvider` itself enforces the
-  // detection priority (sticky-fallback > agentRole > env detection).
+  // B4.0.4 — route-driven dispatch. `resolveRoute` produces the
+  // healer's `provider_routes` row (real or transient); `protocolAdapter.
+  // generateVision` resolves the decrypted key via the secrets module
+  // and delegates to the protocol module that owns the wire format.
+  //
+  // `provider` / `routeName` are still extracted for the `route_name`
+  // Prometheus label + the OTel span attribute so vision-heal metrics
+  // stay split per-route alongside generation metrics (B2.4 — already
+  // added the label dimension to the four AI metric definitions).
+  //
+  // `routeId` (B2.5 request log linkage) is intentionally NOT captured
+  // here — vision-heal doesn't route through `callProvider`'s
+  // `logRequest()` post-call hook. When vision-heal request logging
+  // lands, the resolved route should be threaded into a dedicated
+  // `logRequest` call alongside the cost / outcome metric writes
+  // below.
   let provider;
+  let routeName = "unknown";
+  let resolvedRoute = null;
   if (workspaceId) {
-    const resolved = resolveProvider({ agentRole, workspaceId });
-    provider = resolved.provider;
+    const { route } = resolveRoute({ agentRole, workspaceId });
+    provider = route?._transientProvider || route?.family || null;
+    routeName = route?.name || route?.id || "unknown";
+    // B2.4 — keep the route in scope so `recordAiTokens` can compute
+    // cost from `route.pricing`, and so the MNT-001 fallback estimator
+    // below knows whether the cost was already recorded.
+    resolvedRoute = route;
   } else {
     provider = getProvider();
   }
@@ -161,9 +239,11 @@ ${String(contextHtml).slice(0, 800)}` : "");
   const base64 = screenshot.toString("base64");
   const dataUrl = `data:image/png;base64,${base64}`;
 
-  // Local / unknown providers don't have a vision adapter (Ollama returns
-  // null from generateVision). Bail before the adapter call to keep the
-  // metric label clean.
+  // Local / unknown providers don't have a vision adapter (Ollama's
+  // protocol module returns null from generateVision). Bail before the
+  // adapter call to keep the metric label clean — same behaviour as
+  // the legacy `adapterFor("local").generateVision()` no-op, but now
+  // explicit at the dispatch site.
   if (provider === "local") return null;
 
   // AI-005 tripwire #3 — annotate the active OTel span with vision-heal
@@ -171,25 +251,71 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // `ai.agent_role=healer` (or whatever role the caller passed). Matches the
   // Prometheus labels written below so a "spend by role" Grafana query
   // and a "spans by role" Tempo / Jaeger query stay in sync.
-  annotateAiCallSpan({ provider, agentRole, operation: "vision_heal" });
+  annotateAiCallSpan({ provider, agentRole, operation: "vision_heal", routeName });
 
-  // Build a vision-specific opts bag. We reuse buildAdapterOpts() shape
-  // for the auth/baseUrl/SSRF fields, then layer the image fields on top.
-  // AI-002: pass the `"json_object"` string (not the legacy `true` boolean)
-  // so `buildAdapterOpts` carries `responseFormat` through unchanged. The
-  // derived `useJson === true` is preserved for adapters that read either.
-  const baseOpts = buildAdapterOpts(provider, { system: null, user: userPrompt, combined: userPrompt }, 512, signal, "json_object");
-  // Override `model` with the vision-resolved model — buildAdapterOpts()
-  // returns the provider's default text model, which is wrong for vision
-  // (e.g. user picked claude-3-5-sonnet via VISION_MODEL but the active
-  // provider's default is the older claude-sonnet-4).
-  const visionOpts = { ...baseOpts, model, base64, dataUrl, userPrompt };
+  // B4.0.4 — build the `dispatchRoute` that the protocol adapter calls
+  // against. Two layers:
+  //   1. `resolvedRoute` (when workspaceId was passed) — already
+  //      carries `protocol` / `baseUrl` / `family` / `workspaceId` /
+  //      `id` so the secrets module can locate the encrypted key.
+  //   2. Otherwise synthesise a transient route from the env-default
+  //      `provider` so single-tenant deployments without per-workspace
+  //      routes still dispatch. Mirrors `synthesiseTransientRoute` in
+  //      `registry.js` but specialised for the no-workspace case
+  //      (transient routes from `registry.js` carry a fake workspaceId
+  //      that would break the secrets lookup; here we keep
+  //      `workspaceId: null` and the secrets module's null-guard
+  //      falls back to `null` which `protocolAdapter.generateVision`
+  //      treats as "no key — let the protocol module use its own
+  //      env-fallback chain"). The legacy `adapterFor(provider)` path
+  //      relied on `buildAdapterOpts(provider)` to read `process.env`
+  //      directly; with protocol modules we keep env reads out of the
+  //      dispatch hot path by routing them through the OpenAI compat
+  //      slot's `getCompatConfig()` only on the workspaceId-less
+  //      single-tenant fallback (used by `hasVisionProvider()` from
+  //      `routes/projects.js`).
+  //
+  // CRITICAL: `model` always comes from `resolveVisionModel` (which
+  // honours `VISION_MODEL` env override → workspace healer route →
+  // catalog floor). Without the explicit override `dispatchRoute.model
+  // = model`, the protocol module would dispatch against
+  // `route.model` (the healer's *text* model) instead of the
+  // operator-picked vision model.
+  const dispatchRoute = resolvedRoute && !resolvedRoute._transient
+    ? { ...resolvedRoute, model }
+    : {
+        id: `provider:${provider}`,
+        workspaceId: workspaceId || null,
+        name: routeName,
+        family: provider,
+        protocol: protocolForLegacyProvider(provider),
+        baseUrl: null,
+        model,
+        _transient: true,
+        _transientProvider: provider,
+      };
 
   let raw = "";
   let usage = null;
   try {
-    const res = await adapterFor(provider).generateVision(visionOpts);
-    if (!res) return null;
+    // B4.1 follow-up — resolve env-derived apiKey for transient routes
+    // so vision-heal on env-default deployments doesn't fail with a null
+    // key. Real routes decrypt via `secrets.getDecryptedKey` inside
+    // `protocolAdapter.buildOpts` and ignore this fallback. Mirrors the
+    // `apiKey` branch in `_callProviderUnsafe`'s `protocolOpts`.
+    const transientApiKey = dispatchRoute._transient
+      ? (isCompatProvider(provider)
+        ? getCompatConfig(provider)?.apiKey
+        : getKey(CLOUD_KEY_MAP[provider] || ""))
+      : undefined;
+    const res = await protocolAdapter.generateVision(dispatchRoute, {
+      base64,
+      dataUrl,
+      userPrompt,
+      signal,
+      apiKey: transientApiKey,
+    });
+    if (!res) return null; // Ollama protocol returns null — no vision support.
     raw = res.text || "";
     usage = res.usage;
   } catch (err) {
@@ -197,57 +323,54 @@ ${String(contextHtml).slice(0, 800)}` : "");
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome, operation: "vision_heal" }, seconds);
-      aiProviderErrorsTotal.inc({ provider: metricLabel, agent_role: agentRole, reason, operation: "vision_heal" });
+      aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome, operation: "vision_heal", route_name: routeName }, seconds);
+      aiProviderErrorsTotal.inc({ provider: metricLabel, agent_role: agentRole, reason, operation: "vision_heal", route_name: routeName });
     } catch {}
     return null;
   }
 
-  // AI-003 — recordAiTokens() now bumps the cost counter from
-  // `usage.costUsd` (catalog-derived) for every adapter call, including
-  // vision-heal. We let it run for tokens, but the cost increment here is
-  // gated below so we don't double-count when the catalog has pricing.
-  if (usage) recordAiTokens(provider, usage, "vision_heal", agentRole);
+  // B2.4 — `recordAiTokens` now owns cost computation via
+  // `computeCostForRoute(route, usage)` and returns `{ costUsd, source }`.
+  // Source priority (see dispatcher.js#computeCostForRoute JSDoc):
+  //   route.pricing > catalog (MODEL_PRICING[route.model]) > none
+  // When source === "none" (no route pricing AND no catalog entry, e.g.
+  // operator-set VISION_MODEL on a freshly-created compat route), we
+  // fall back to the MNT-001 $5/M input + $15/M output midpoint so the
+  // per-project monthly USD cap (`visionHealMaxCostUsdPerMonth`) still
+  // has a signal to enforce against. The midpoint is bumped into the
+  // metric here because recordAiTokens skipped it (cost source was
+  // "none"). On every other path the cost metric is already counted by
+  // recordAiTokens — no double-counting.
+  const tokenResult = usage
+    ? recordAiTokens(provider, usage, "vision_heal", agentRole, routeName, resolvedRoute)
+    : { costUsd: null, source: "none" };
   let parsed;
   try { parsed = parseJSON(raw); } catch { return null; }
   const confidence = Number(parsed?.confidence);
   if (!Number.isFinite(confidence) || confidence <= 0) return null;
   const x = Number(parsed?.x), y = Number(parsed?.y), width = Number(parsed?.width), height = Number(parsed?.height);
   const box = (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height)) ? { x, y, width, height } : null;
-  // Prefer the catalog-derived cost when available so vision-heal spend
-  // tracks the same per-model pricing as test generation. Fall back to the
-  // MNT-001 $5/M input + $15/M output midpoint estimate when the model
-  // isn't in the catalog — the budget circuit-breaker still needs *some*
-  // signal to enforce caps, and the midpoint estimate is the documented
-  // pre-AI-003 behaviour. Already-counted via `recordAiTokens()` when
-  // catalog-derived; we increment the counter ourselves only on fallback.
-  //
-  // BUGFIX: `Number(null) === 0` and `Number.isFinite(0) === true`, so the
-  // old `Number(usage?.costUsd)` coerced catalog-miss `costUsd: null` into
-  // `0`, took the if-branch with `costUsd = 0`, and never recorded the
-  // MNT-001 fallback estimate. Net effect: the per-project monthly USD
-  // cap (`visionHealMaxCostUsdPerMonth`) silently never tripped for any
-  // vision model that wasn't in the catalog (e.g. operator-set
-  // `VISION_MODEL`). Now we null-check FIRST so the fallback path runs
-  // whenever the catalog produced `null` (or undefined / NaN).
-  const rawCatalogCost = usage?.costUsd;
-  const catalogCost = (rawCatalogCost == null) ? NaN : Number(rawCatalogCost);
+
   let costUsd;
-  if (Number.isFinite(catalogCost)) {
-    costUsd = catalogCost;
+  if (Number.isFinite(tokenResult.costUsd)) {
+    // Cost already recorded by recordAiTokens (route or catalog).
+    costUsd = tokenResult.costUsd;
   } else {
+    // MNT-001 fallback estimator — route has no pricing AND catalog
+    // doesn't know this model. Compute a midpoint and emit the metric
+    // ourselves (recordAiTokens skipped it under source="none").
     const inK = (Number(usage?.input) || 0) / 1_000_000;
     const outK = (Number(usage?.output) || 0) / 1_000_000;
     costUsd = inK * 5 + outK * 15;
     try {
       if (Number.isFinite(costUsd) && costUsd > 0) {
-        aiProviderCostUsdTotal.inc({ provider: metricLabel, agent_role: agentRole, operation: "vision_heal" }, costUsd);
+        aiProviderCostUsdTotal.inc({ provider: metricLabel, agent_role: agentRole, operation: "vision_heal", route_name: routeName }, costUsd);
       }
     } catch {}
   }
   try {
     const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-    aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome: "success", operation: "vision_heal" }, seconds);
+    aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome: "success", operation: "vision_heal", route_name: routeName }, seconds);
   } catch {}
   return { confidence: Math.min(1, Math.max(0, confidence)), box, model, costUsd, reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null };
 }

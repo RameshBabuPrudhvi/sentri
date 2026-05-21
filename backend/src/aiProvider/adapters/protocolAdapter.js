@@ -84,8 +84,14 @@ function resolveApiKey(route) {
  * @returns {Object}
  */
 function buildOpts(route, callerOpts) {
+  // B4.1 — `resolveApiKey` returns `null` for transient routes (no DB row
+  // to decrypt). In that case, honour `callerOpts.apiKey` so the dispatcher
+  // can pass the env-derived key for legacy single-tenant workspaces that
+  // haven't migrated to real routes. Real routes always win via
+  // `resolveApiKey` — the caller's key is a fallback, not an override.
+  const resolvedKey = resolveApiKey(route);
   return {
-    apiKey: resolveApiKey(route),
+    apiKey: resolvedKey ?? callerOpts.apiKey ?? null,
     maxTokens: callerOpts.maxTokens,
     signal: callerOpts.signal,
     useJson: callerOpts.responseFormat !== "text",
@@ -155,4 +161,44 @@ export async function stream(route, messages, callerOpts = {}) {
   const result = await mod.generate(route, messages, opts);
   if (result?.text) callerOpts.onToken(result.text);
   return result;
+}
+
+/**
+ * Route-driven multimodal generate (MNT-001 vision-healing).
+ *
+ * Resolves the protocol module + decrypted key, then delegates. Each
+ * protocol module marshals the image into its own multimodal shape
+ * (OpenAI `image_url` data URL, Anthropic `image source` base64 block,
+ * Gemini `inlineData` part) — callers pass both `base64` and `dataUrl`
+ * so the protocol module picks whichever its SDK wants without forcing
+ * the caller to know.
+ *
+ * Returns `null` when the route's protocol module returns `null`
+ * (Ollama in B2.4 — no built-in vision support; vision-heal degrades to
+ * non-LLM healing). Real failures (auth, network, schema) DO throw and
+ * propagate normally — only the explicit `null` sentinel triggers the
+ * "no vision" branch.
+ *
+ * @param {Object} route - `provider_routes` row.
+ * @param {Object} callerOpts
+ * @param {string} callerOpts.base64    - Raw base64 PNG (no `data:` prefix).
+ * @param {string} callerOpts.dataUrl   - `data:image/png;base64,<…>`.
+ * @param {string} callerOpts.userPrompt
+ * @param {AbortSignal} [callerOpts.signal]
+ * @returns {Promise<{ text: string, usage: Object|null }|null>}
+ */
+export async function generateVision(route, callerOpts = {}) {
+  if (!route?.protocol) throw new Error("protocolAdapter.generateVision: route.protocol is required");
+  const mod = moduleFor(route.protocol);
+  // `generateVision` is the only adapter method whose surface diverges
+  // from text dispatch — image fields aren't on `buildOpts`'s contract,
+  // so we layer them in explicitly here rather than polluting the
+  // shared opts builder.
+  const opts = {
+    ...buildOpts(route, callerOpts),
+    base64: callerOpts.base64,
+    dataUrl: callerOpts.dataUrl,
+    userPrompt: callerOpts.userPrompt,
+  };
+  return mod.generateVision(route, opts);
 }

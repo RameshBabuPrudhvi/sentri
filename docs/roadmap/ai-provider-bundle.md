@@ -6,6 +6,15 @@
 > **Design principle:** Production primitives (encryption, quotas, audit, cache, request log) are designed in from Bundle 1 — not bolted on later. Each bundle adds capability without re-touching prior bundles' code.
 >
 > **Sequencing:** Bundle 1 → 2 → 3 → 4. Each ships as one PR. Bundle 4 (advanced routing) is deferred until requested.
+
+## Bundle status
+
+| Bundle | Status | Notes |
+|---|---|---|
+| **Bundle 1** | ✅ Shipped (PR #22) | Foundation: schema + audit + secrets + protocol adapter + `resolveRoute` (flag-gated). |
+| **Bundle 2** | ✅ Shipped (PR #23) | Migration `provider → routeId` + capability probe + per-route pricing + request log + flag removal. `resolveProvider` deleted. |
+| **Bundle 3** | ✅ Shipped (PR #23) | Settings UI + import/export + quotas + cache + key rotation + audit log viewer + compat migration script + spend-alert webhook delivery (migration 052 + `spendAlert.js`). All B3.11 tests shipped. |
+| **Bundle 4** | ✅ Shipped (PR #23) | B4.1 hardcoded-string sweep (all dispatch via `protocolAdapter`, `buildProviderMeta` derives from catalog). B4.2 observability parity (alerts pivoted to `route_name`, cardinality budget documented, cache+quota PromQL). B4.3 migration 053 drops `fallbackRole` + compat `api_keys` rows. B4.4 `no-code-edits-contract.test.js` E2E. B4.5 load tests (`dispatch-overhead.js` + `cache-throughput.js`). B4.6 route groups (migration 054 + `routeGroupResolver.js` + `resolveRoute` wiring). B4.7 docs polish (`observability.md`, `provider-routes.md`, `multi-agent-pipeline.md`, `changelog.md`). |
 ---
 # Bundle 1 — Foundation (schema + adapter + resolution + secrets)
 **Scope:** Schema with production fields baked in. Encrypted secrets from day one. Protocol-dispatching adapter. Route resolution behind a feature flag.
@@ -297,7 +306,7 @@
 ### B3.9 — Audit log viewer
 - [ ] `GET /api/v1/settings/provider-routes/audit` — admin, paginated, filterable by `routeId` / `action` / date range
 - [ ] Frontend: **Audit log** subtab in Settings → Provider Routes
-- [ ] Retention: 90 days default, configurable via `SENTRI_AUDIT_RETENTION_DAYS`, daily janitor
+- [ ] Retention: 90 days default, configurable via `AI_ROUTES_AUDIT_RETENTION_DAYS`, daily janitor
 ### B3.10 — Compat slot migration
 - [ ] One-shot migration `NNN_compat_to_routes.sql`:
   - Every `compat:<id>` config row → new `provider_routes` row with `protocol: "openai"`, `family: "custom"`
@@ -496,5 +505,4 @@ These are intentionally NOT in this roadmap. Document the decision so future con
 - ❌ **Streaming response caching** — cardinality blowup; not worth complexity
 - ❌ **DAG agent handshake** (`{fromRole, toRole, artifact, traceId}`) — separate work item (AUTO-023)
 - ❌ **Per-`(workspace, role)` API keys distinct from per-route keys** — separate work item (AI-005b)
-- ❌ **Route groups with weighted/latency/cost-aware routing** (B4.6) — built only on operator demand
 ```

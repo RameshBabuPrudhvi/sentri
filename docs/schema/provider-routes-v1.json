@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.sentri.dev/provider-routes-v1.json",
+  "title": "Sentri Provider Routes Export — schemaVersion 1",
+  "description": "B3.5 — Portable representation of a workspace's `provider_routes` rows. Secrets are NEVER serialised — only `apiKeyLastFour` (the masked tail) round-trips so operators can identify which row corresponds to which deployment key, and re-supply the real key out-of-band after import. The schema is forward-compatible: parsers SHOULD accept unknown fields and reject only on `schemaVersion` mismatch.",
+  "type": "object",
+  "required": ["schemaVersion", "routes"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Bumped on incompatible shape changes. Importers MUST refuse versions they don't understand; a forward-compat shim in the importer can map older versions up."
+    },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp the export was generated. Informational only — not used for ordering or dedupe."
+    },
+    "workspaceId": {
+      "type": "string",
+      "description": "Source workspace id. Imported into the CALLER's workspace regardless of this value; surfaced only for forensic correlation across workspaces."
+    },
+    "routes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/route" }
+    }
+  },
+  "$defs": {
+    "route": {
+      "type": "object",
+      "required": ["name", "family", "protocol", "model"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": ["string", "null"],
+          "description": "Source-side `provider_routes.id`. Importer IGNORES this field — every imported route gets a fresh id minted by `providerRouteRepo.upsert`. Surfaced for forensic correlation only."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable route name. UNIQUE per workspace — importer's `mode` controls collision resolution."
+        },
+        "family": {
+          "type": "string",
+          "enum": ["anthropic", "openai", "google", "openrouter", "local", "custom"],
+          "description": "Provider family. Mirrors `migrations/035_provider_routes.sql:31`."
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["openai", "anthropic", "gemini", "ollama"],
+          "description": "Wire protocol the dispatcher speaks. Mirrors `protocolForProvider.PROTOCOL_MAP`."
+        },
+        "baseUrl": {
+          "type": ["string", "null"],
+          "description": "Optional override of the SDK's default endpoint. `null` means use the SDK default."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Model id the provider should dispatch against (e.g. `claude-3-5-sonnet`)."
+        },
+        "apiKeyLastFour": {
+          "type": ["string", "null"],
+          "pattern": "^.{0,8}$",
+          "description": "Masked tail of the original key for operator identification. Importer treats this as advisory text — the real key is NEVER round-tripped through the export, so operators MUST re-supply it via the rotate-key endpoint after import."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the route is eligible for dispatch."
+        },
+        "rpmLimit": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Requests-per-minute throttle. `null` = unlimited."
+        },
+        "tpmLimit": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Tokens-per-minute throttle. `null` = unlimited."
+        },
+        "cacheEnabled": {
+          "type": "boolean",
+          "description": "Whether dispatch should consult the prompt cache for this route."
+        },
+        "cacheTtlSec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cache TTL when `cacheEnabled` is true. `0` is valid (disables caching even with the flag on)."
+        },
+        "fallbackRouteId": {
+          "type": ["string", "null"],
+          "description": "Source-side fallback route id. Importer resolves these AFTER all rows land, mapping each id to the freshly-minted id of the matching name. Unresolvable ids (deleted source route, name collision under `skip` mode) collapse to `null` with a note in the import response."
+        },
+        "capabilities": {
+          "type": ["object", "null"],
+          "description": "Persisted capability-probe payload. Re-probed on import (B2.2) so a stale payload never leaks across workspaces — the imported value is overwritten by the post-import probe result."
+        },
+        "pricing": {
+          "type": ["object", "null"],
+          "description": "Operator-set per-Mtok pricing. Honoured verbatim by the importer — pricing is operator metadata, not derived state."
+        }
+      }
+    }
+  }
+}

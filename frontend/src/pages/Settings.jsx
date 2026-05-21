@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Check, Eye, EyeOff, ExternalLink, AlertTriangle,
@@ -6,6 +6,7 @@ import {
   Activity, Shield, HardDrive, Info, Wifi, WifiOff, Terminal,
   Compass, RotateCcw, FolderOpen, FileText, Play, AlertCircle,
   Users, UserPlus, Crown, KeyRound, Smartphone, Download,
+  Route as RouteIcon, Plus, Upload as UploadIcon,
 } from "lucide-react";
 import { api } from "../api.js";
 import { AGENT_ROLES } from "../config.js";
@@ -541,6 +542,7 @@ function fmtUptime(seconds) {
 
 const SETTINGS_TABS = [
   { key: "providers",   label: "AI Providers",  icon: <Zap size={14} />,          adminOnly: true },
+  { key: "provider_routes", label: "Provider Routes", icon: <RouteIcon size={14} />, adminOnly: true },
   { key: "agent_roles", label: "Agent Roles", icon: <Users size={14} />, adminOnly: true },
   { key: "members",     label: "Members",       icon: <Users size={14} />,        adminOnly: true },
   { key: "execution",   label: "Execution",     icon: <Cpu size={14} />,          adminOnly: false },
@@ -578,8 +580,21 @@ function AdminLockedSection({ feature, role }) {
 
 
 function AgentRolesTab() {
-  const empty = { role: AGENT_ROLES[0], provider: "", model: "", systemPromptOverride: "", temperature: 0.2, maxTokens: "", fallbackRole: "" };
+  // B2.1 — migration 048 dropped `agent_configs.provider` and
+  // `agent_configs.model`. Roles now pin dispatch via `routeId` →
+  // `provider_routes` row. The form mirrors that contract: a single
+  // route picker replaces the legacy free-text provider + model inputs.
+  // The backend's `agentConfigRepo.upsert` validates that `routeId`
+  // exists in the same workspace (throws `ERR_AGENT_ROUTE_NOT_FOUND`
+  // → HTTP 400), so an empty value means "use workspace default"
+  // (the dispatcher's env-detection fallback path in `resolveRoute`).
+  const empty = { role: AGENT_ROLES[0], routeId: "", systemPromptOverride: "", temperature: 0.2, maxTokens: "", fallbackRole: "" };
   const [rows, setRows] = useState([]);
+  // Provider routes for the dropdown — loaded once and refetched only
+  // when a role save succeeds, since admins editing roles rarely also
+  // edit routes in the same session. Empty array on load failure so
+  // the form still renders (with a disabled-state hint inline).
+  const [routes, setRoutes] = useState([]);
   const [form, setForm] = useState(empty);
   const [editingRole, setEditingRole] = useState("");
   const [error, setError] = useState("");
@@ -590,10 +605,28 @@ function AgentRolesTab() {
   // `api.testAgentRole(role)` call without blocking the rest of the form.
   const [probes, setProbes] = useState({});
   const load = useCallback(async () => {
-    try { const r = await api.getAgentRoles(); setRows(r.roles || []); }
-    catch (err) { setError(err.message || "Failed to load agent roles."); }
+    try {
+      const [r, routesRes] = await Promise.all([
+        api.getAgentRoles(),
+        // Defensive: route list failure must not blank the agent-roles
+        // table. The form falls back to "workspace default" only.
+        api.listProviderRoutes().catch(() => ({ routes: [] })),
+      ]);
+      setRows(r.roles || []);
+      setRoutes(routesRes?.routes || []);
+    } catch (err) { setError(err.message || "Failed to load agent roles."); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Lookup helper for rendering row meta — converts a saved `routeId`
+  // back to a human-readable `name · family · model` string. Falls back
+  // to the raw id when the route was deleted (FK is ON DELETE SET NULL,
+  // but the cfg row may still carry a stale id until re-saved).
+  const routeById = useMemo(() => {
+    const m = new Map();
+    for (const r of routes) m.set(r.id, r);
+    return m;
+  }, [routes]);
 
   async function save(e) {
     e.preventDefault();
@@ -601,12 +634,22 @@ function AgentRolesTab() {
     setBusy(true);
     try {
       const payload = {
-        ...form,
-        provider: form.provider || null,
-        model: form.model || null,
+        role: form.role,
+        // Empty string → null so the backend treats it as "use
+        // workspace default" (no per-role route override). Non-empty
+        // values are validated server-side against the workspace's
+        // provider_routes rows.
+        routeId: form.routeId || null,
         systemPromptOverride: form.systemPromptOverride || null,
+        temperature: form.temperature,
         maxTokens: form.maxTokens ? Number(form.maxTokens) : null,
-        fallbackRole: form.fallbackRole || null,
+        // B3.2 — `fallbackRole` UI is deprecated. Always send `null`
+        // for new saves so the DB column drifts toward unused while we
+        // keep it around for one release per the rollback contract.
+        // Existing rows with non-null fallbackRole are not migrated
+        // here — operators clear them by re-saving the role in the
+        // Provider Routes tab via the route-level fallback.
+        fallbackRole: null,
       };
       if (editingRole) await api.updateAgentRole(editingRole, payload);
       else await api.createAgentRole(payload);
@@ -622,7 +665,7 @@ function AgentRolesTab() {
   function edit(row) {
     setError("");
     setEditingRole(row.role);
-    setForm({ role: row.role, provider: row.provider || "", model: row.model || "", systemPromptOverride: row.systemPromptOverride || "", temperature: row.temperature ?? 0.2, maxTokens: row.maxTokens ?? "", fallbackRole: row.fallbackRole || "" });
+    setForm({ role: row.role, routeId: row.routeId || "", systemPromptOverride: row.systemPromptOverride || "", temperature: row.temperature ?? 0.2, maxTokens: row.maxTokens ?? "", fallbackRole: row.fallbackRole || "" });
   }
   async function del(role) {
     setError("");
@@ -666,12 +709,50 @@ function AgentRolesTab() {
     )}
     <form onSubmit={save} className="st-agent-form">
       <select className="input" value={form.role} onChange={(e) => setForm((s) => ({ ...s, role: e.target.value }))} disabled={!!editingRole}>{AGENT_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
-      <input className="input" placeholder="provider (optional)" value={form.provider} onChange={(e) => setForm((s) => ({ ...s, provider: e.target.value }))} />
-      <input className="input" placeholder="model (optional)" value={form.model} onChange={(e) => setForm((s) => ({ ...s, model: e.target.value }))} />
+      {/* B2.1 — Route picker replaces the legacy free-text provider +
+          model inputs that the backend silently discarded post-048.
+          Empty value → "use workspace default" (dispatcher's
+          env-detection fallback via `resolveRoute`). When the workspace
+          has no routes configured yet, the dropdown is empty and the
+          hint below points admins at the Provider Routes tab. */}
+      <select
+        className="input"
+        value={form.routeId}
+        onChange={(e) => setForm((s) => ({ ...s, routeId: e.target.value }))}
+        title="The provider route this role dispatches against. Leave empty to use the workspace default."
+      >
+        <option value="">Workspace default (no per-role override)</option>
+        {routes.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.name} · {r.family} · {r.model || "model?"}{!r.enabled ? " (disabled)" : ""}
+          </option>
+        ))}
+      </select>
+      {routes.length === 0 && (
+        <div className="hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Info size={11} />
+          <span>No provider routes configured yet — create one in the <strong>Provider Routes</strong> tab.</span>
+        </div>
+      )}
       <textarea className="input" placeholder="system prompt override" value={form.systemPromptOverride} onChange={(e) => setForm((s) => ({ ...s, systemPromptOverride: e.target.value }))} />
       <input className="input" type="number" step="0.1" value={form.temperature} onChange={(e) => setForm((s) => ({ ...s, temperature: Number(e.target.value) }))} />
       <input className="input" type="number" placeholder="max tokens" value={form.maxTokens} onChange={(e) => setForm((s) => ({ ...s, maxTokens: e.target.value }))} />
-      <select className="input" value={form.fallbackRole} onChange={(e) => setForm((s) => ({ ...s, fallbackRole: e.target.value }))}><option value="">No fallback</option>{AGENT_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+      {/* B3.2 — `fallbackRole` is deprecated. The canonical per-route
+          fallback lives on `provider_routes.fallbackRouteId` and is
+          edited in the Provider Routes tab. The DB column on
+          `agent_configs.fallbackRole` is preserved for one release so a
+          rollback to pre-B3 dispatch keeps working; the UI no longer
+          exposes it. New role configs leave `fallbackRole` as null —
+          dispatch resolves the fallback chain via the assigned
+          provider_route. Restore the dropdown here ONLY if the
+          rollback path needs to be re-enabled. */}
+      <div className="st-agent-fallback-deprecation">
+        <Info size={11} />
+        <span>
+          Per-role fallback is now configured on the provider route's
+          {" "}<strong>Fallback route</strong> field (Provider Routes tab).
+        </span>
+      </div>
       <div className="st-agent-form-actions">
         <button className="btn btn-primary btn-sm" disabled={busy}>{editingRole ? "Update role config" : "Save role config"}</button>
         {editingRole && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditingRole(""); setForm(empty); setError(""); }}>Cancel edit</button>}
@@ -679,9 +760,18 @@ function AgentRolesTab() {
     </form>
     <div className="st-agent-rows">{rows.map((r) => {
       const probe = probes[r.role];
+      // B2.1 — resolve the row's routeId back to a display string.
+      // Stale routeId (route deleted, FK set null but cfg not re-saved)
+      // falls back to the raw id so admins can still identify the row.
+      const linkedRoute = r.routeId ? routeById.get(r.routeId) : null;
+      const routeLabel = linkedRoute
+        ? `${linkedRoute.name} · ${linkedRoute.family} · ${linkedRoute.model || "model?"}`
+        : r.routeId
+        ? `${r.routeId} (route missing)`
+        : "workspace-default";
       return (
         <div key={r.role} className="card-padded-sm st-agent-row">
-          <span className="st-agent-row-meta">{r.role} · {r.provider || "workspace-default"} · {r.model || "provider-default"} · temp {r.temperature}</span>
+          <span className="st-agent-row-meta">{r.role} · {routeLabel} · temp {r.temperature}</span>
           {probe && probe.status !== "running" && (
             <span
               className={`${probe.status === "ok" ? "st-status-ok" : "st-status-err"} st-agent-row-badge`}
@@ -710,6 +800,1224 @@ function AgentRolesTab() {
       );
     })}</div>
   </div>;
+}
+
+// ── Provider Routes tab (B3.1) ────────────────────────────────────────────────
+//
+// Per-row CRUD for `provider_routes` — the dispatch target every agent role
+// pins via `routeId`. Surfaces name / family / protocol / baseUrl / model /
+// apiKey (write-only, shows `••••<lastFour>`) / enabled / rpmLimit / tpmLimit
+// / cacheEnabled / cacheTtlSec / fallbackRouteId plus three actions:
+//
+//   • Test / Re-probe → POST /settings/provider-routes/:id/probe.
+//     Renders an inline green / red badge from the persisted
+//     `capabilities.reachable` flag (B2.2 contract — every probe row is a
+//     real network call, never a catalog copy).
+//   • Rotate key (B3.6) → POST /settings/provider-routes/:id/rotate-key
+//     with a fresh plaintext key. Server gates on a successful probe before
+//     accepting the new key, so the inline confirmation reflects whether
+//     the rotation actually went through.
+//
+// Mirrors the `AgentRolesTab` pattern (form on top, list below, per-row
+// inline badges) so admins moving between the two tabs don't context-switch.
+// No inline styles — every layout class lives in
+// `frontend/src/styles/pages/settings.css` so future theme work hits one file.
+
+// Supported families + protocols, mirrored from migration 035's enum
+// comments and `protocolForProvider.PROTOCOL_MAP`. Kept inline rather than
+// fetched at runtime — the set is process-stable across deployments and a
+// round-trip to populate two dropdowns would be noise on every render.
+const PR_FAMILIES = ["anthropic", "openai", "google", "openrouter", "local", "custom"];
+const PR_PROTOCOLS = ["openai", "anthropic", "gemini", "ollama"];
+
+const PR_FORM_EMPTY = {
+  id: null,
+  name: "",
+  family: "openai",
+  protocol: "openai",
+  baseUrl: "",
+  model: "",
+  apiKey: "",
+  enabled: true,
+  rpmLimit: "",
+  tpmLimit: "",
+  cacheEnabled: false,
+  cacheTtlSec: "",
+  fallbackRouteId: "",
+};
+
+function maskedKeyDisplay(lastFour) {
+  if (!lastFour) return "—";
+  return `••••${lastFour}`;
+}
+
+// B3.2 — Client-side fallback-cycle preview. Walks the `fallbackRouteId`
+// chain starting from the proposed fallback and returns the offending
+// route id when the walk revisits `startRouteId` (or hits the depth cap).
+// Mirrors `providerRouteRepo.wouldCreateCycle` so the UI matches the
+// authoritative backend check; the backend still wins on save (it sees
+// concurrent edits we can't), but the inline warning lets the operator
+// fix the loop without round-tripping through `ERR_ROUTE_FALLBACK_CYCLE`.
+//
+// `startRouteId` is `null` for the create form (no id yet, no self-loop
+// possible) and the current row's id for the edit form. Returns `null`
+// when no cycle exists.
+function detectFallbackCycle(rows, startRouteId, proposedFallbackId) {
+  if (!proposedFallbackId) return null;
+  if (startRouteId && proposedFallbackId === startRouteId) return startRouteId;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const seen = new Set();
+  if (startRouteId) seen.add(startRouteId);
+  let cur = proposedFallbackId;
+  // Bounded — caps at 64 hops (same as the repo). Any legitimate chain
+  // is far shorter; the cap defends against malformed local state.
+  for (let i = 0; i < 64 && cur; i += 1) {
+    if (seen.has(cur)) return cur;
+    seen.add(cur);
+    cur = byId.get(cur)?.fallbackRouteId || null;
+  }
+  return null;
+}
+
+// Inline probe-result badge. Reads the row's persisted `capabilities`
+// payload + the optional `live` override (the result of the current Test
+// click before the parent has refetched). `live` wins so the admin sees
+// the click respond instantly, then the badge stabilises once the row
+// data comes back from the refetch.
+function ProbeBadge({ capabilities, live }) {
+  const caps = live || capabilities;
+  if (!caps) return <span className="st-pr-badge st-pr-badge--unprobed">Unprobed</span>;
+  if (caps.reachable && caps.auth !== false && caps.model !== false) {
+    return (
+      <span className="st-status-ok st-pr-badge" title={`Probed at ${caps.probedAt || "unknown"}`}>
+        <Check size={11} /> Reachable
+      </span>
+    );
+  }
+  const reason = caps.errorReason || "unreachable";
+  return (
+    <span className="st-status-err st-pr-badge" title={reason}>
+      <AlertCircle size={11} /> {reason.slice(0, 24)}
+    </span>
+  );
+}
+
+// Create / edit form. Pulled into its own component so the parent
+// `ProviderRoutesTabView` JSX stays scannable — the form has ten fields
+// and would otherwise dominate the surrounding list rendering.
+function ProviderRoutesForm({ form, setForm, busy, showKey, setShowKey, fallbackOptions, cycleAtName, onSave, onCancel }) {
+  return (
+    <form onSubmit={onSave} className="st-pr-form">
+      <div className="st-pr-form-grid">
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Name</span>
+          <input
+            className="input"
+            value={form.name}
+            onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
+            placeholder="anthropic-primary"
+            required
+          />
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Family</span>
+          <select
+            className="input"
+            value={form.family}
+            onChange={(e) => setForm((s) => ({ ...s, family: e.target.value }))}
+          >
+            {PR_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Protocol</span>
+          <select
+            className="input"
+            value={form.protocol}
+            onChange={(e) => setForm((s) => ({ ...s, protocol: e.target.value }))}
+          >
+            {PR_PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Model</span>
+          <input
+            className="input"
+            value={form.model}
+            onChange={(e) => setForm((s) => ({ ...s, model: e.target.value }))}
+            placeholder="claude-3-5-sonnet"
+            required
+          />
+        </label>
+        <label className="st-pr-field st-pr-field--wide">
+          <span className="st-pr-field-label">Base URL (optional)</span>
+          <input
+            className="input"
+            value={form.baseUrl}
+            onChange={(e) => setForm((s) => ({ ...s, baseUrl: e.target.value }))}
+            placeholder="https://api.example.com/v1"
+          />
+        </label>
+        <label className="st-pr-field st-pr-field--wide">
+          <span className="st-pr-field-label">
+            API key {form.id && <span className="text-xs text-muted">(leave empty to keep existing)</span>}
+          </span>
+          <div className="st-key-input-wrap">
+            <input
+              className="input"
+              type={showKey ? "text" : "password"}
+              autoComplete="off"
+              value={form.apiKey}
+              onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))}
+              placeholder={form.id ? "•••• keep stored key" : "sk-..."}
+            />
+            <button type="button" className="st-key-toggle" onClick={() => setShowKey((v) => !v)}>
+              {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">RPM limit</span>
+          <input
+            className="input" type="number" min={0}
+            value={form.rpmLimit}
+            onChange={(e) => setForm((s) => ({ ...s, rpmLimit: e.target.value }))}
+            placeholder="—"
+          />
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">TPM limit</span>
+          <input
+            className="input" type="number" min={0}
+            value={form.tpmLimit}
+            onChange={(e) => setForm((s) => ({ ...s, tpmLimit: e.target.value }))}
+            placeholder="—"
+          />
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Cache TTL (s)</span>
+          <input
+            className="input" type="number" min={0}
+            value={form.cacheTtlSec}
+            onChange={(e) => setForm((s) => ({ ...s, cacheTtlSec: e.target.value }))}
+            placeholder="0"
+            disabled={!form.cacheEnabled}
+          />
+        </label>
+        <label className="st-pr-field st-pr-field--wide">
+          <span className="st-pr-field-label">Fallback route</span>
+          <select
+            className="input"
+            value={form.fallbackRouteId}
+            onChange={(e) => setForm((s) => ({ ...s, fallbackRouteId: e.target.value }))}
+          >
+            <option value="">No fallback</option>
+            {fallbackOptions.map((r) => (
+              <option key={r.id} value={r.id}>{r.name} ({r.family})</option>
+            ))}
+          </select>
+          {/* B3.2 — Inline cycle preview. The backend's
+              `ERR_ROUTE_FALLBACK_CYCLE` is the authoritative check; this
+              warning fires on the same data the operator is editing
+              client-side so they can fix the loop before submitting.
+              `cycleAtName` is the human name of the route where the walk
+              revisits its origin. */}
+          {cycleAtName && (
+            <div className="st-status-err st-pr-cycle-warning">
+              <AlertTriangle size={11} /> Fallback chain loops at "{cycleAtName}". Pick a different route.
+            </div>
+          )}
+        </label>
+      </div>
+
+      <div className="st-pr-form-checks">
+        <label className="st-pr-check">
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(e) => setForm((s) => ({ ...s, enabled: e.target.checked }))}
+          />
+          Enabled
+        </label>
+        <label className="st-pr-check">
+          <input
+            type="checkbox"
+            checked={form.cacheEnabled}
+            onChange={(e) => setForm((s) => ({ ...s, cacheEnabled: e.target.checked }))}
+          />
+          Cache responses
+        </label>
+      </div>
+
+      <div className="st-agent-form-actions">
+        {/* B3.2 — Disable save when a fallback cycle was detected
+            client-side. The backend would reject the save with
+            `ERR_ROUTE_FALLBACK_CYCLE` anyway; disabling here saves
+            the round-trip and surfaces the issue immediately. */}
+        <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !!cycleAtName}>
+          {busy ? <RefreshCw size={13} className="spin" /> : (form.id ? <Check size={13} /> : <Plus size={13} />)}
+          {form.id ? "Update route" : "Create route"}
+        </button>
+        {form.id && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>
+            Cancel edit
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+// Per-row card. Carries its own action bar + rotate-key inline panel.
+// Pulled into a separate component so the table-of-rows render in
+// `ProviderRoutesTabView` stays a clean `rows.map`. Action handlers are
+// passed in as props — the row is otherwise stateless.
+function ProviderRouteRow({ row, rows, rowState, rotateOpen, setRotateOpen, rotateBuf, setRotateBuf, onEdit, onDelete, onProbe, onRotate }) {
+  const probing = rowState?.kind === "probing";
+  const rotating = rowState?.kind === "rotating";
+  const deleting = rowState?.kind === "deleting";
+  const liveCaps = rowState?.kind === "ok" && rowState.caps ? rowState.caps : null;
+  const fallbackName = row.fallbackRouteId
+    ? (rows.find((r) => r.id === row.fallbackRouteId)?.name || row.fallbackRouteId)
+    : null;
+  return (
+    <div className="card-padded-sm st-pr-row">
+      <div className="st-pr-row-header">
+        <div className="st-pr-row-name">
+          <span className="font-semi">{row.name}</span>
+          {!row.enabled && <span className="st-pr-badge st-pr-badge--disabled">Disabled</span>}
+          <ProbeBadge capabilities={row.capabilities} live={liveCaps} />
+        </div>
+        <div className="text-xs text-muted st-pr-row-meta">
+          {row.family} · {row.protocol} · {row.model || "—"}
+          {row.baseUrl && ` · ${row.baseUrl}`}
+          {" · "}<span className="text-mono">{maskedKeyDisplay(row.apiKeyLastFour)}</span>
+        </div>
+        <div className="text-xs text-muted st-pr-row-meta">
+          rpm {row.rpmLimit ?? "∞"} · tpm {row.tpmLimit ?? "∞"}
+          {row.cacheEnabled ? ` · cache ${row.cacheTtlSec || 0}s` : " · no cache"}
+          {fallbackName && ` · fallback ${fallbackName}`}
+        </div>
+        {rowState?.kind === "err" && (
+          <div className="st-status-err st-pr-row-error">
+            <AlertCircle size={11} /> {rowState.msg}
+          </div>
+        )}
+      </div>
+      <div className="st-pr-row-actions">
+        <button
+          className="btn btn-ghost btn-xs"
+          onClick={() => onProbe(row.id)}
+          disabled={probing}
+          title="Send a real network probe to verify reachability, auth, model, and JSON mode."
+        >
+          {probing ? <RefreshCw size={11} className="spin" /> : <Activity size={11} />}
+          {row.capabilities ? "Re-probe" : "Test"}
+        </button>
+        <button
+          className="btn btn-ghost btn-xs"
+          onClick={() => setRotateOpen(rotateOpen ? null : row.id)}
+          disabled={rotating}
+          title="Replace the stored API key. Server gates on a successful probe."
+        >
+          <KeyRound size={11} />
+          Rotate key
+        </button>
+        <button className="btn btn-ghost btn-xs" onClick={() => onEdit(row)}>
+          Edit
+        </button>
+        <button className="btn btn-danger btn-xs" onClick={() => onDelete(row.id)} disabled={deleting}>
+          {deleting ? <RefreshCw size={11} className="spin" /> : <Trash2 size={11} />}
+          Delete
+        </button>
+      </div>
+      {rotateOpen && (
+        <div className="st-pr-rotate-panel">
+          <div className="st-key-input-wrap st-pr-rotate-input">
+            <input
+              className="input"
+              type="password"
+              autoComplete="off"
+              value={rotateBuf[row.id] || ""}
+              onChange={(e) => setRotateBuf((b) => ({ ...b, [row.id]: e.target.value }))}
+              placeholder="New API key (plaintext — encrypted server-side)"
+            />
+          </div>
+          <button
+            className="btn btn-primary btn-xs"
+            onClick={() => onRotate(row.id)}
+            disabled={rotating || !(rotateBuf[row.id] || "").trim()}
+          >
+            {rotating ? <RefreshCw size={11} className="spin" /> : <Check size={11} />}
+            Rotate
+          </button>
+          <button
+            className="btn btn-ghost btn-xs"
+            onClick={() => {
+              setRotateOpen(null);
+              setRotateBuf((b) => { const n = { ...b }; delete n[row.id]; return n; });
+            }}
+            disabled={rotating}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Presentational shell for the Provider Routes tab. Receives every
+// piece of state + every action callback as a prop so the JSX is
+// trivially testable in isolation and the parent function stays a
+// pure orchestrator over `api.*` calls.
+function ProviderRoutesTabView(props) {
+  const {
+    rows, form, setForm, loading, error, busy,
+    rowState, rotateBuf, setRotateBuf, rotateOpen, setRotateOpen,
+    showKey, setShowKey, fallbackOptions, cycleAtName,
+    ioBusy, importMsg,
+    onSave, onCancel, onEdit, onDelete, onProbe, onRotate,
+    onExport, onImport,
+  } = props;
+  return (
+    <div className="card card-padded">
+      <SectionTitle
+        icon={<RouteIcon size={16} color="var(--accent)" />}
+        title="Provider Routes"
+        sub="Bundle protocol + endpoint + model + encrypted API key. Agent roles pin a route via routeId."
+      />
+      {error && (
+        <div className="st-status-err st-agent-error">
+          <AlertCircle size={12} /> {error}
+        </div>
+      )}
+      {/* B3.7 — workspace spend caps. Renders above the import/export
+          bar so the most consequential setting is closest to the
+          section title. */}
+      <WorkspaceSpendCapsPanel />
+      <ProviderRoutesIO
+        onExport={onExport}
+        onImport={onImport}
+        busy={ioBusy}
+        importMsg={importMsg}
+      />
+      <ProviderRoutesForm
+        form={form}
+        setForm={setForm}
+        busy={busy}
+        showKey={showKey}
+        setShowKey={setShowKey}
+        fallbackOptions={fallbackOptions}
+        cycleAtName={cycleAtName}
+        onSave={onSave}
+        onCancel={onCancel}
+      />
+      {loading ? (
+        <div className="text-sm text-muted st-pr-loading">Loading provider routes…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-muted st-pr-empty">
+          No provider routes configured. Create one above — agent roles need a routeId to dispatch.
+        </div>
+      ) : (
+        <div className="st-pr-rows">
+          {rows.map((row) => (
+            <ProviderRouteRow
+              key={row.id}
+              row={row}
+              rows={rows}
+              rowState={rowState[row.id]}
+              rotateOpen={rotateOpen === row.id}
+              setRotateOpen={setRotateOpen}
+              rotateBuf={rotateBuf}
+              setRotateBuf={setRotateBuf}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onProbe={onProbe}
+              onRotate={onRotate}
+            />
+          ))}
+        </div>
+      )}
+      {/* B3.9 — audit log viewer at the bottom of the tab. Below the
+          route list because admins read it last (after seeing the
+          current state); above the next tab boundary so it stays
+          discoverable without a separate menu entry. */}
+      <AuditLogSubtab rows={rows} />
+      {/* B2.5 — AI request-log viewer. Renders below the audit log so
+          admins reading top-to-bottom see "what mutations happened"
+          → "what calls happened". Tied into PROC-001: the backend's
+          `GET /settings/ai-requests` + `POST /settings/ai-requests/:id/replay`
+          endpoints land in this PR; this subtab is their frontend
+          consumer. */}
+      <AiRequestLogSubtab rows={rows} />
+    </div>
+  );
+}
+
+// B2.5 — AI request-log viewer. Mirrors `AuditLogSubtab`'s cursor-pagination
+// shape so the two subtabs read identically. Each row carries the per-call
+// telemetry (tokens, costUsd, latencyMs, outcome) plus the redacted/raw
+// prompt body. Admins can replay any "full"-mode row against the same
+// route or a different one (the dropdown lets them pick).
+//
+// Replay button is disabled when the row's `promptRedacted` is null
+// (mode was `"none"` at capture) or contains a `[REDACTED_*]` sentinel
+// (mode was `"redacted"`) — the backend would reject the replay with
+// HTTP 400 anyway; disabling here saves the round-trip and surfaces
+// the reason inline.
+const AI_REQ_OUTCOMES = ["success", "error", "rate_limited"];
+const AI_REQ_PAGE_SIZE = 50;
+
+function isPromptReplayable(promptRedacted) {
+  if (!promptRedacted) return false;
+  if (/\[REDACTED_(EMAIL|PHONE|SSN|CARD|CUSTOM)\]/.test(promptRedacted)) return false;
+  return true;
+}
+
+function fmtCost(n) {
+  if (!Number.isFinite(n)) return "—";
+  if (n === 0) return "$0";
+  if (n < 0.01) return `$${n.toFixed(5)}`;
+  return `$${n.toFixed(4)}`;
+}
+
+function AiRequestLogSubtab({ rows: routeRows }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [filterRouteId, setFilterRouteId] = useState("");
+  const [filterOutcome, setFilterOutcome] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  // Per-row in-flight state for replay actions. Keyed by request id so a
+  // running replay doesn't grey out other rows.
+  const [replayState, setReplayState] = useState({});
+
+  const routeNameById = useMemo(() => {
+    const m = new Map();
+    for (const r of (routeRows || [])) m.set(r.id, r.name);
+    return m;
+  }, [routeRows]);
+
+  const load = useCallback(async ({ before, append } = {}) => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.listAiRequests({
+        routeId: filterRouteId || undefined,
+        outcome: filterOutcome || undefined,
+        before: before || undefined,
+        limit: AI_REQ_PAGE_SIZE,
+      });
+      const next = res?.items || [];
+      setItems((prev) => append ? [...prev, ...next] : next);
+      setHasMore(next.length >= AI_REQ_PAGE_SIZE);
+    } catch (err) {
+      setError(err.message || "Failed to load AI request log.");
+    } finally {
+      setLoading(false);
+    }
+  }, [filterRouteId, filterOutcome]);
+
+  useEffect(() => { load({}); }, [load]);
+
+  function loadMore() {
+    if (!items.length) return;
+    load({ before: items[items.length - 1].createdAt, append: true });
+  }
+
+  async function replay(row) {
+    setReplayState((s) => ({ ...s, [row.id]: { kind: "running" } }));
+    try {
+      const res = await api.replayAiRequest(row.id, {});
+      setReplayState((s) => ({ ...s, [row.id]: { kind: "ok", text: res?.text || "" } }));
+    } catch (err) {
+      setReplayState((s) => ({ ...s, [row.id]: { kind: "err", msg: err.message || "replay_failed" } }));
+    }
+  }
+
+  return (
+    <div className="card-padded-sm st-pr-audit-panel">
+      <div className="font-semi st-pr-audit-title">
+        <FileText size={13} /> AI request log
+      </div>
+      <div className="text-xs text-muted st-pr-audit-sub">
+        Per-call telemetry for every AI dispatch. Storage mode is per
+        workspace (<code>aiRequestLogMode</code>): <code>none</code> stores
+        metadata only, <code>redacted</code> strips PII before persist,
+        <code>full</code> stores raw prompts (admin opt-in required for
+        replay). Retention defaults to 30 days; tune via
+        {" "}<code>AI_REQUEST_LOG_RETENTION_DAYS</code>.
+      </div>
+      <div className="st-pr-audit-filters">
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Route</span>
+          <select className="input" value={filterRouteId} onChange={(e) => setFilterRouteId(e.target.value)}>
+            <option value="">All routes</option>
+            {(routeRows || []).map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Outcome</span>
+          <select className="input" value={filterOutcome} onChange={(e) => setFilterOutcome(e.target.value)}>
+            <option value="">All outcomes</option>
+            {AI_REQ_OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </label>
+      </div>
+      {error && (
+        <div className="st-status-err"><AlertCircle size={12} /> {error}</div>
+      )}
+      {loading && items.length === 0 ? (
+        <div className="text-sm text-muted st-pr-audit-empty">Loading AI request log…</div>
+      ) : items.length === 0 ? (
+        <div className="text-sm text-muted st-pr-audit-empty">
+          No AI requests match the current filters.
+        </div>
+      ) : (
+        <div className="st-pr-audit-table">
+          {items.map((row) => {
+            const replayable = isPromptReplayable(row.promptRedacted);
+            const rep = replayState[row.id];
+            return (
+              <div key={row.id} className="st-pr-audit-row">
+                <span className="text-xs text-muted text-mono">{fmtAuditTimestamp(row.createdAt)}</span>
+                <span className={`st-pr-badge st-pr-audit-action st-pr-audit-action--${row.outcome === "success" ? "create" : row.outcome === "error" ? "delete" : "update"}`}>
+                  {row.outcome}
+                </span>
+                <span className="text-xs text-mono">{routeNameById.get(row.routeId) || row.routeId || "—"}</span>
+                <span className="text-xs text-muted st-pr-audit-meta">
+                  {row.agentRole || "default"} · {row.inputTokens ?? "?"}+{row.outputTokens ?? "?"}t · {fmtCost(row.costUsd)} · {row.latencyMs ?? "?"}ms
+                  {rep?.kind === "err" && <> · <span className="st-status-err"><AlertCircle size={11} /> {rep.msg}</span></>}
+                  {rep?.kind === "ok" && <> · <span className="st-status-ok"><Check size={11} /> replayed</span></>}
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => replay(row)}
+                    disabled={!replayable || rep?.kind === "running"}
+                    title={replayable
+                      ? "Re-issue this prompt against its original route. Requires storage mode 'full' at capture time."
+                      : "Replay unavailable — prompt was captured under storage mode 'none' or 'redacted'."}
+                    style={{ marginLeft: 6 }}
+                  >
+                    {rep?.kind === "running" ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                    Replay
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {hasMore && (
+        <div className="st-pr-audit-actions">
+          <button className="btn btn-ghost btn-sm" onClick={loadMore} disabled={loading}>
+            {loading ? <RefreshCw size={13} className="spin" /> : null}
+            Load more
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// B3.9 — Audit log viewer subtab. Renders below the route list inside
+// the Provider Routes tab so admins can see every mutation in
+// chronological order without leaving the page.
+//
+// Filters: action enum + free-form routeId. Pagination is cursor-based
+// via `before` (matches the backend repo's keyset). The "Load more"
+// button stays visible whenever the previous page returned `limit`
+// rows — an empty page or a partial page hides it.
+//
+// `metadata` is a JSON string on the wire (per repo contract). We
+// parse defensively per row so a malformed entry never blanks the
+// whole list.
+const AUDIT_ACTIONS = ["create", "update", "delete", "rotate_key", "probe", "export", "import"];
+const AUDIT_PAGE_SIZE = 50;
+
+function fmtAuditTimestamp(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+  } catch { return iso; }
+}
+
+function AuditLogSubtab({ rows: routeRows }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [filterAction, setFilterAction] = useState("");
+  const [filterRouteId, setFilterRouteId] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+
+  // Build a routeId → name lookup so the table can render route names
+  // instead of opaque `pr-...` ids. Falls back to the id when the
+  // route has been deleted (audit rows survive route deletion by
+  // design — the FK is nullable).
+  const routeNameById = useMemo(() => {
+    const m = new Map();
+    for (const r of (routeRows || [])) m.set(r.id, r.name);
+    return m;
+  }, [routeRows]);
+
+  const load = useCallback(async ({ before, append } = {}) => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.listProviderRouteAudit({
+        action: filterAction || undefined,
+        routeId: filterRouteId || undefined,
+        before: before || undefined,
+        limit: AUDIT_PAGE_SIZE,
+      });
+      const next = res?.items || [];
+      setItems((prev) => append ? [...prev, ...next] : next);
+      setHasMore(next.length >= AUDIT_PAGE_SIZE);
+    } catch (err) {
+      setError(err.message || "Failed to load audit log.");
+    } finally {
+      setLoading(false);
+    }
+  }, [filterAction, filterRouteId]);
+
+  // Reload when filters change. `load` is stable per-filter via
+  // useCallback dependencies, so this fires exactly once per filter
+  // edit.
+  useEffect(() => { load({}); }, [load]);
+
+  function loadMore() {
+    if (!items.length) return;
+    load({ before: items[items.length - 1].createdAt, append: true });
+  }
+
+  // Defensive metadata parse — repo stores JSON-as-string, but a
+  // hand-edited row or a future schema change shouldn't blank the row.
+  function renderMetadata(row) {
+    if (!row.metadata) return "—";
+    try {
+      const obj = typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata;
+      // Compact one-line summary for the most common audit shapes.
+      // Full payload visible on hover via title.
+      const summary = [];
+      if (obj.changed && Array.isArray(obj.changed)) summary.push(`changed: ${obj.changed.join(", ")}`);
+      if (obj.lastFour) summary.push(`lastFour: ${obj.lastFour}`);
+      if (obj.reachable != null) summary.push(`reachable: ${obj.reachable}`);
+      if (obj.errorReason) summary.push(`error: ${obj.errorReason}`);
+      if (obj.count != null) summary.push(`count: ${obj.count}`);
+      if (obj.mode) summary.push(`mode: ${obj.mode}`);
+      const text = summary.length ? summary.join(" · ") : JSON.stringify(obj).slice(0, 80);
+      return <span title={JSON.stringify(obj, null, 2)}>{text}</span>;
+    } catch {
+      return <span className="text-mono">{String(row.metadata).slice(0, 80)}</span>;
+    }
+  }
+
+  return (
+    <div className="card-padded-sm st-pr-audit-panel">
+      <div className="font-semi st-pr-audit-title">
+        <FileText size={13} /> Audit log
+      </div>
+      <div className="text-xs text-muted st-pr-audit-sub">
+        Every mutation to provider routes (create / update / delete / rotate-key) plus reads with side effects (probe / export / import). Retention defaults to 90 days; tune via <code>AI_ROUTES_AUDIT_RETENTION_DAYS</code>.
+      </div>
+      <div className="st-pr-audit-filters">
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Action</span>
+          <select className="input" value={filterAction} onChange={(e) => setFilterAction(e.target.value)}>
+            <option value="">All actions</option>
+            {AUDIT_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Route</span>
+          <select className="input" value={filterRouteId} onChange={(e) => setFilterRouteId(e.target.value)}>
+            <option value="">All routes</option>
+            {(routeRows || []).map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {error && (
+        <div className="st-status-err"><AlertCircle size={12} /> {error}</div>
+      )}
+      {loading && items.length === 0 ? (
+        <div className="text-sm text-muted st-pr-audit-empty">Loading audit log…</div>
+      ) : items.length === 0 ? (
+        <div className="text-sm text-muted st-pr-audit-empty">
+          No audit entries match the current filters.
+        </div>
+      ) : (
+        <div className="st-pr-audit-table">
+          {items.map((row) => (
+            <div key={row.id} className="st-pr-audit-row">
+              <span className="text-xs text-muted text-mono">{fmtAuditTimestamp(row.createdAt)}</span>
+              <span className={`st-pr-badge st-pr-audit-action st-pr-audit-action--${row.action}`}>{row.action}</span>
+              <span className="text-xs text-mono">{routeNameById.get(row.routeId) || row.routeId || "—"}</span>
+              <span className="text-xs text-muted st-pr-audit-meta">{renderMetadata(row)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {hasMore && (
+        <div className="st-pr-audit-actions">
+          <button className="btn btn-ghost btn-sm" onClick={loadMore} disabled={loading}>
+            {loading ? <RefreshCw size={13} className="spin" /> : null}
+            Load more
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// B3.7 — Workspace-level spend caps. Reads the workspace via
+// `api.getWorkspace()` on mount, posts via `api.updateWorkspace()`
+// with the three new B3.7 fields. Sits above the per-route form so
+// admins see workspace-wide limits before per-route limits — the
+// "blast radius" frames the conversation.
+function WorkspaceSpendCapsPanel() {
+  const [ws, setWs] = useState(null);
+  const [draft, setDraft] = useState({ daily: "", monthly: "", threshold: 80 });
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const w = await api.getWorkspace();
+      setWs(w);
+      setDraft({
+        daily: w.dailySpendCapUsd ?? "",
+        monthly: w.monthlySpendCapUsd ?? "",
+        threshold: w.spendAlertThresholdPct ?? 80,
+      });
+    } catch (err) {
+      setStatus({ type: "err", text: err.message || "Failed to load workspace." });
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // Coerce empty string → null (clear cap) so the backend receives the
+  // explicit "no cap" sentinel, not a 400-rejected empty string.
+  function valueOrNull(v) {
+    if (v === "" || v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : NaN;
+  }
+
+  async function save() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const daily = valueOrNull(draft.daily);
+      const monthly = valueOrNull(draft.monthly);
+      if (Number.isNaN(daily)) throw new Error("Daily cap must be a non-negative number or empty.");
+      if (Number.isNaN(monthly)) throw new Error("Monthly cap must be a non-negative number or empty.");
+      const threshold = Number(draft.threshold);
+      if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+        throw new Error("Alert threshold must be between 0 and 100.");
+      }
+      await api.updateWorkspace({
+        dailySpendCapUsd: daily,
+        monthlySpendCapUsd: monthly,
+        spendAlertThresholdPct: threshold,
+      });
+      setStatus({ type: "ok", text: "Spend caps updated." });
+      await load();
+    } catch (err) {
+      setStatus({ type: "err", text: err.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!ws) return null;
+
+  return (
+    <div className="card-padded-sm st-pr-spend-panel">
+      <div className="font-semi st-pr-spend-title">
+        <Activity size={13} /> Workspace spend caps
+      </div>
+      <div className="text-xs text-muted st-pr-spend-sub">
+        Hard cap on AI cost per workspace. Leave a field empty for "unlimited".
+        The dispatcher rejects new calls with <code>ERR_SPEND_CAP_EXCEEDED</code>
+        once the cap is reached, and emits a warning when spend crosses the alert threshold.
+      </div>
+      <div className="st-pr-spend-grid">
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Daily cap (USD)</span>
+          <input
+            className="input" type="number" min={0} step="0.01"
+            value={draft.daily}
+            onChange={(e) => setDraft((s) => ({ ...s, daily: e.target.value }))}
+            placeholder="—"
+          />
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Monthly cap (USD)</span>
+          <input
+            className="input" type="number" min={0} step="0.01"
+            value={draft.monthly}
+            onChange={(e) => setDraft((s) => ({ ...s, monthly: e.target.value }))}
+            placeholder="—"
+          />
+        </label>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Alert at (% of cap)</span>
+          <input
+            className="input" type="number" min={0} max={100}
+            value={draft.threshold}
+            onChange={(e) => setDraft((s) => ({ ...s, threshold: e.target.value }))}
+          />
+        </label>
+      </div>
+      <div className="st-pr-spend-actions">
+        <button className="btn btn-primary btn-sm" onClick={save} disabled={busy}>
+          {busy ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
+          Save caps
+        </button>
+        {status && (
+          <span className={status.type === "ok" ? "st-status-ok" : "st-status-err"}>
+            {status.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {status.text}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// B3.5 — Export/import action bar. Rendered above the form so admins
+// can bulk-move routes between workspaces without scrolling past the
+// per-row list. Mode selector defaults to "skip" — the safest option
+// when re-importing into a workspace that already has routes (no
+// existing data is touched). The file input is rendered hidden + driven
+// by a button click so the styling matches the rest of the action bar.
+function ProviderRoutesIO({ onExport, onImport, busy, importMsg }) {
+  const fileRef = useRef(null);
+  const [mode, setMode] = useState("skip");
+  function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    onImport(file, mode);
+    // Reset so re-selecting the same file fires onChange again. Without
+    // this, importing the same file twice in a row silently no-ops.
+    e.target.value = "";
+  }
+  return (
+    <div className="st-pr-io-bar">
+      <div className="st-pr-io-actions">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={onExport}
+          disabled={busy}
+          title="Download every provider route in this workspace as a schema-v1 JSON file. Secrets are never included."
+        >
+          <Download size={13} /> Export
+        </button>
+        <label className="st-pr-io-mode">
+          <span className="text-xs text-muted">On collision</span>
+          <select
+            className="input st-pr-io-mode-select"
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            disabled={busy}
+          >
+            <option value="skip">Skip existing</option>
+            <option value="overwrite">Overwrite by name</option>
+            <option value="rename">Rename (append -2, -3, …)</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          title="Upload a schema-v1 JSON file to upsert routes into this workspace. Each imported route is re-probed; you'll still need to supply API keys via Rotate key."
+        >
+          <UploadIcon size={13} /> Import
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          onChange={handleFileChange}
+          className="st-pr-io-file"
+        />
+      </div>
+      {importMsg && (
+        <div className={importMsg.type === "ok" ? "st-status-ok" : "st-status-err"}>
+          {importMsg.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {importMsg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProviderRoutesTab() {
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState(PR_FORM_EMPTY);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  // B3.5 — Separate busy flag for export/import so the per-row CRUD
+  // form isn't disabled while a probe sweep is running.
+  const [ioBusy, setIoBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+  // Per-row in-flight state keyed by route id. Entries are one of:
+  //   { kind: "probing" } | { kind: "rotating" } | { kind: "deleting" }
+  //   | { kind: "ok", caps?: object, lastFour?: string }
+  //   | { kind: "err", msg: string }
+  // Scoped per-row so probing route A doesn't grey out route B's actions.
+  const [rowState, setRowState] = useState({});
+  // Plaintext key buffer for the rotate-key inline form, per row. Never
+  // mirrored into `rows` — only used at submit time.
+  const [rotateBuf, setRotateBuf] = useState({});
+  // Which row's rotate panel is open. Closing the panel clears the
+  // plaintext buffer so a partially-typed key doesn't linger in memory.
+  const [rotateOpen, setRotateOpen] = useState(null);
+  // apiKey visibility toggle on the create+edit form.
+  const [showKey, setShowKey] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.listProviderRoutes();
+      setRows(res?.routes || []);
+    } catch (err) {
+      setError(err.message || "Failed to load provider routes.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  function resetForm() {
+    setForm(PR_FORM_EMPTY);
+    setError("");
+    setShowKey(false);
+  }
+
+  // Normalise the form payload before sending. The form keeps numeric
+  // fields as strings so empty inputs round-trip cleanly; here we coerce
+  // to `Number | null` so the backend doesn't receive "" for an INTEGER
+  // column. Empty `baseUrl` collapses to `null` so non-default endpoints
+  // can be cleared without leaving a sentinel "".
+  function buildPayload(src) {
+    const numOrNull = (v) => {
+      if (v === "" || v == null) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const payload = {
+      name: src.name.trim(),
+      family: src.family,
+      protocol: src.protocol,
+      baseUrl: src.baseUrl.trim() || null,
+      model: src.model.trim(),
+      enabled: !!src.enabled,
+      rpmLimit: numOrNull(src.rpmLimit),
+      tpmLimit: numOrNull(src.tpmLimit),
+      cacheEnabled: !!src.cacheEnabled,
+      cacheTtlSec: numOrNull(src.cacheTtlSec) ?? 0,
+      fallbackRouteId: src.fallbackRouteId || null,
+    };
+    // Only send `apiKey` when the admin actually typed one. Editing a
+    // row without retyping the key MUST leave the stored ciphertext
+    // untouched — rotation goes through a separate endpoint that audits
+    // with `action: "rotate_key"` and bumps the breaker.
+    if (src.apiKey && src.apiKey.trim()) payload.apiKey = src.apiKey.trim();
+    return payload;
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    setError("");
+    if (!form.name.trim()) { setError("Name is required."); return; }
+    if (!form.model.trim()) { setError("Model is required."); return; }
+    setBusy(true);
+    try {
+      const payload = buildPayload(form);
+      if (form.id) await api.updateProviderRoute(form.id, payload);
+      else await api.createProviderRoute(payload);
+      resetForm();
+      await load();
+    } catch (err) {
+      setError(err.message || "Failed to save provider route.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function edit(row) {
+    setError("");
+    setForm({
+      id: row.id,
+      name: row.name || "",
+      family: row.family || "openai",
+      protocol: row.protocol || "openai",
+      baseUrl: row.baseUrl || "",
+      model: row.model || "",
+      // Never prefill apiKey — the repo doesn't return the ciphertext
+      // to list reads (B1.4), and we don't want the input to pretend it
+      // has a stored value the user could accidentally clobber.
+      apiKey: "",
+      enabled: row.enabled === 1 || row.enabled === true,
+      rpmLimit: row.rpmLimit ?? "",
+      tpmLimit: row.tpmLimit ?? "",
+      cacheEnabled: row.cacheEnabled === 1 || row.cacheEnabled === true,
+      cacheTtlSec: row.cacheTtlSec ?? "",
+      fallbackRouteId: row.fallbackRouteId || "",
+    });
+  }
+
+  async function probe(id) {
+    setRowState((s) => ({ ...s, [id]: { kind: "probing" } }));
+    try {
+      const res = await api.probeProviderRoute(id);
+      setRowState((s) => ({ ...s, [id]: { kind: "ok", caps: res.capabilities } }));
+      // Refetch the list so the persisted capabilities (stamped on the
+      // row by the backend) replace the live override on the next render.
+      // Not awaited — the badge already updated from `live` and the
+      // refetch is opportunistic.
+      load();
+    } catch (err) {
+      setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message || "probe_failed" } }));
+    }
+  }
+
+  async function rotate(id) {
+    const key = (rotateBuf[id] || "").trim();
+    if (!key) return;
+    setRowState((s) => ({ ...s, [id]: { kind: "rotating" } }));
+    try {
+      const res = await api.rotateProviderRouteKey(id, key);
+      setRowState((s) => ({ ...s, [id]: { kind: "ok", lastFour: res?.lastFour } }));
+      setRotateBuf((b) => { const n = { ...b }; delete n[id]; return n; });
+      setRotateOpen(null);
+      await load();
+    } catch (err) {
+      setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message || "rotate_failed" } }));
+    }
+  }
+
+  async function del(id) {
+    if (!window.confirm("Delete this provider route? Agent roles pinned to it will fall back to env detection.")) return;
+    setRowState((s) => ({ ...s, [id]: { kind: "deleting" } }));
+    try {
+      await api.deleteProviderRoute(id);
+      if (form.id === id) resetForm();
+      await load();
+      setRowState((s) => { const n = { ...s }; delete n[id]; return n; });
+    } catch (err) {
+      setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message || "delete_failed" } }));
+    }
+  }
+
+  // B3.5 — Export handler. Triggers a Blob download via `api.exportRoutes`
+  // (the helper handles cross-origin + Content-Disposition); inline
+  // status message confirms the count so the operator knows they didn't
+  // accidentally download an empty workspace dump.
+  async function exportRoutes() {
+    setIoBusy(true);
+    setImportMsg(null);
+    try {
+      const payload = await api.exportRoutes();
+      const count = payload?.routes?.length ?? 0;
+      setImportMsg({ type: "ok", text: `Exported ${count} route(s).` });
+    } catch (err) {
+      setImportMsg({ type: "err", text: err.message || "Export failed." });
+    } finally {
+      setIoBusy(false);
+    }
+  }
+
+  // B3.5 — Import handler. Reads the file, posts the payload + mode,
+  // refreshes the list, and surfaces the per-mode stats inline so the
+  // operator can confirm the apply matched their intent. Errors in
+  // individual rows (returned via the response's `errors` array) are
+  // summarised in the status message; the full per-row error list is
+  // dropped to the console for debugging.
+  async function importRoutes(file, mode) {
+    setIoBusy(true);
+    setImportMsg(null);
+    try {
+      const res = await api.importRoutes(file, mode);
+      await load();
+      const parts = [];
+      if (res.created) parts.push(`${res.created} created`);
+      if (res.overwritten) parts.push(`${res.overwritten} overwritten`);
+      if (res.renamed) parts.push(`${res.renamed} renamed`);
+      if (res.skipped) parts.push(`${res.skipped} skipped`);
+      if (res.errors?.length) {
+        // Surface count inline + dump details to the console so the
+        // operator can see WHICH rows failed without us blowing up the
+        // UI with a multi-line error list. (A dedicated import-result
+        // modal is the right long-term home for this; the console
+        // is the cheap version.)
+        parts.push(`${res.errors.length} error${res.errors.length === 1 ? "" : "s"}`);
+        // eslint-disable-next-line no-console
+        console.warn("[Provider Routes import] errors:", res.errors);
+      }
+      setImportMsg({
+        type: res.errors?.length ? "err" : "ok",
+        text: parts.length ? parts.join(" · ") : "No changes applied.",
+      });
+    } catch (err) {
+      setImportMsg({ type: "err", text: err.message || "Import failed." });
+    } finally {
+      setIoBusy(false);
+    }
+  }
+
+  // Fallback dropdown options — exclude the row being edited so the UI
+  // can't offer a self-loop. The repo's `wouldCreateCycle` catches
+  // longer cycles server-side, so this is a UX nicety, not a security
+  // boundary.
+  const fallbackOptions = rows.filter((r) => r.id !== form.id);
+
+  // B3.2 — Run the client-side cycle check on every keystroke against the
+  // current `form.fallbackRouteId`. `cycleAt` is the routeId where the
+  // walk loops (or `null` when no cycle). Passed to the view so the
+  // form can render an inline warning + disable save without round-
+  // tripping through the backend's `ERR_ROUTE_FALLBACK_CYCLE`.
+  const cycleAt = detectFallbackCycle(rows, form.id, form.fallbackRouteId);
+  const cycleAtName = cycleAt ? (rows.find((r) => r.id === cycleAt)?.name || cycleAt) : null;
+
+  return <ProviderRoutesTabView
+    rows={rows}
+    form={form}
+    setForm={setForm}
+    loading={loading}
+    error={error}
+    busy={busy}
+    rowState={rowState}
+    rotateBuf={rotateBuf}
+    setRotateBuf={setRotateBuf}
+    rotateOpen={rotateOpen}
+    setRotateOpen={setRotateOpen}
+    showKey={showKey}
+    setShowKey={setShowKey}
+    fallbackOptions={fallbackOptions}
+    cycleAtName={cycleAtName}
+    ioBusy={ioBusy}
+    importMsg={importMsg}
+    onSave={save}
+    onCancel={resetForm}
+    onEdit={edit}
+    onDelete={del}
+    onProbe={probe}
+    onRotate={rotate}
+    onExport={exportRoutes}
+    onImport={importRoutes}
+  />;
 }
 
 // ── Members tab (ACL-002) ─────────────────────────────────────────────────────
@@ -2167,6 +3475,9 @@ export default function Settings() {
         </div>
       </div>
       </>}
+
+      {/* ── Tab: Provider Routes (B3.1) ── */}
+      {tab === "provider_routes" && isAdmin && <ProviderRoutesTab />}
 
       {/* ── Tab: Members ── */}
       {tab === "agent_roles" && isAdmin && <AgentRolesTab />}

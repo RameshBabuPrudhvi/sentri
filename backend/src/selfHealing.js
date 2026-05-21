@@ -1665,5 +1665,10 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
  * @returns {string} Prompt rules string.
  */
 export function getPromptRules(tier) {
+  // B4.1 audit: `"local"` here is a PROMPT-TIER discriminator (compact vs
+  // full rules set), NOT a provider-dispatch string. The self-healing module
+  // never calls adapterFor / buildAdapterOpts / resolveRoute — it only
+  // constructs the prompt that generateText() will dispatch via the route-
+  // driven path. Intentionally left as a string literal.
   return tier === "local" ? CORE_RULES : SELF_HEALING_PROMPT_RULES;
 }

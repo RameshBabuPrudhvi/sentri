@@ -19,7 +19,6 @@
 #     wake operators on a 90-second blip.
 #   - 15m for resource-saturation alerts (queue depth, memory) so we
 #     don't flap on legitimate burst traffic.
-
 groups:
   - name: sentri-saas-availability
     rules:
@@ -41,7 +40,6 @@ groups:
           summary: "Backend 5xx error rate above 1% for 5 minutes"
           description: "{{ $value | humanizePercentage }} of HTTP requests are returning 5xx. Customer-visible outage signal. Check Sentry for the top errors and the deploy-history dashboard."
           runbook_url: "https://docs.sentri.dev/guide/observability#highhttperrorrate"
-
       # ── HTTP latency SLO ───────────────────────────────────────────────────
       - alert: HighApiLatencyP99
         expr: |
@@ -56,7 +54,6 @@ groups:
           summary: "API p99 latency above 2s"
           description: "p99 API latency is {{ $value }}s over 5 min. Drill into per-route latency in Grafana."
           runbook_url: "https://docs.sentri.dev/guide/observability#highapilatencyp99"
-
   - name: sentri-saas-runs
     rules:
       # ── Run failure-rate SLI ───────────────────────────────────────────────
@@ -77,7 +74,6 @@ groups:
           summary: "More than 5% of runs failed in the last 15 minutes"
           description: "Failure ratio is {{ $value | humanizePercentage }}. Likely causes: AI provider outage, Playwright launch failure, or a customer site that started rejecting our crawler."
           runbook_url: "https://docs.sentri.dev/guide/observability#highrunfailurerate"
-
       # ── Run latency regression ─────────────────────────────────────────────
       - alert: TestRunP99LatencyRegression
         expr: |
@@ -92,7 +88,6 @@ groups:
           summary: "test_run p99 duration above 10 minutes"
           description: "p99 test_run duration is {{ $value }}s. SaaS customers expect runs to finish in under a few minutes."
           runbook_url: "https://docs.sentri.dev/guide/observability#testrunp99latencyregression"
-
   - name: sentri-saas-queue
     rules:
       # ── Queue depth saturation ─────────────────────────────────────────────
@@ -106,7 +101,6 @@ groups:
           summary: "BullMQ waiting queue above 50 jobs for 15 minutes"
           description: "Customers' runs are not making progress. Scale WORKER_CONCURRENCY or add more worker replicas."
           runbook_url: "https://docs.sentri.dev/guide/observability#queuedepthsaturated"
-
       # ── Failed-job accumulation ────────────────────────────────────────────
       - alert: QueueFailedJobsGrowing
         expr: increase(app_queue_depth{state="failed"}[1h]) > 10
@@ -118,56 +112,120 @@ groups:
           summary: "More than 10 BullMQ jobs failed in the last hour"
           description: "Poison-pill payload, downstream outage, or code regression. Inspect failed jobs via the Bull Board dashboard."
           runbook_url: "https://docs.sentri.dev/guide/observability#queuefailedjobsgrowing"
-
   - name: sentri-saas-ai-providers
     rules:
       # ── AI provider error rate ─────────────────────────────────────────────
       # FEA-003 fallback chain should mask most transient failures — high
       # threshold (15%) keeps the alert signal-rich.
+      #
+      # B4.2 — group by (provider, route_name) so a single bad route on a
+      # workspace surfaces independently of the rest of the family. A
+      # workspace running 3 anthropic routes (prod / staging / experimental)
+      # whose `staging` key got rotated should fire one alert tagged
+      # route_name="anthropic-staging" — not a vague provider="anthropic"
+      # alert that the on-call engineer has to triage by hand. The
+      # `route_name` label is operator-controlled free-text from
+      # `provider_routes.name`; cardinality is bounded per workspace by
+      # `routes-per-workspace` admin policy (see `docs/guide/observability.md`).
       - alert: AiProviderHighErrorRate
         expr: |
           (
-            sum by (provider) (rate(app_ai_provider_errors_total[5m]))
+            sum by (provider, route_name) (rate(app_ai_provider_errors_total[5m]))
             /
-            sum by (provider) (rate(app_ai_provider_latency_seconds_count[5m]))
+            sum by (provider, route_name) (rate(app_ai_provider_latency_seconds_count[5m]))
           ) > 0.15
         for: 5m
         labels:
           severity: warning
           component: ai
         annotations:
-          summary: "AI provider {{ $labels.provider }} error rate above 15%"
-          description: "{{ $labels.provider }} is failing {{ $value | humanizePercentage }} of LLM calls. Check app_ai_provider_errors_total by reason to identify the failure mode (rate_limit / server_error / timeout / auth)."
+          summary: "AI route {{ $labels.provider }}/{{ $labels.route_name }} error rate above 15%"
+          description: "Route {{ $labels.route_name }} (family: {{ $labels.provider }}) is failing {{ $value | humanizePercentage }} of LLM calls. Check app_ai_provider_errors_total by reason to identify the failure mode (rate_limit / server_error / timeout / auth)."
           runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderhigherrorrate"
-
       # ── AI provider auth failures (security signal) ────────────────────────
       # ANY auth failure is critical — keys shouldn't be invalid in production.
+      #
+      # B4.2 — split by route_name so the on-call engineer sees WHICH route's
+      # key needs rotating. Pre-routes, every workspace's anthropic key
+      # came from one env var so `provider="anthropic"` was sufficient.
+      # Post-routes, each route holds its own encrypted key — an alert
+      # without `route_name` would force the operator to grep
+      # `app_ai_provider_errors_total{reason="auth"}` by hand to find the
+      # broken row.
       - alert: AiProviderAuthFailures
-        expr: increase(app_ai_provider_errors_total{reason="auth"}[15m]) > 0
+        expr: |
+          sum by (provider, route_name) (
+            increase(app_ai_provider_errors_total{reason="auth"}[15m])
+          ) > 0
         for: 0m
         labels:
           severity: critical
           component: ai
         annotations:
-          summary: "AI provider {{ $labels.provider }} returned auth errors"
-          description: "Provider {{ $labels.provider }} is rejecting our credentials. Likely a rotated / revoked API key. Customer-visible: every workspace using this provider as their primary is broken."
+          summary: "AI route {{ $labels.provider }}/{{ $labels.route_name }} returned auth errors"
+          description: "Route {{ $labels.route_name }} (family: {{ $labels.provider }}) is rejecting our credentials. Likely a rotated / revoked API key. Customer-visible: every workspace assigning this route to a pipeline role is broken until the key is rotated via Settings → Provider Routes → Rotate key."
           runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderauthfailures"
-
       # ── AI provider latency regression ─────────────────────────────────────
+      # B4.2 — group by route_name so a slow self-hosted vLLM proxy doesn't
+      # falsely indict the entire openai protocol family.
       - alert: AiProviderHighLatencyP99
         expr: |
           histogram_quantile(0.99,
-            sum by (provider, le) (rate(app_ai_provider_latency_seconds_bucket{outcome="success"}[5m]))
+            sum by (provider, route_name, le) (rate(app_ai_provider_latency_seconds_bucket{outcome="success"}[5m]))
           ) > 30
         for: 10m
         labels:
           severity: warning
           component: ai
         annotations:
-          summary: "AI provider {{ $labels.provider }} p99 latency above 30s"
-          description: "p99 latency for successful calls to {{ $labels.provider }} is {{ $value }}s. Check vendor status page."
+          summary: "AI route {{ $labels.provider }}/{{ $labels.route_name }} p99 latency above 30s"
+          description: "p99 latency for successful calls on route {{ $labels.route_name }} (family: {{ $labels.provider }}) is {{ $value }}s. Check the vendor status page or the operator-set baseUrl."
           runbook_url: "https://docs.sentri.dev/guide/observability#aiproviderhighlatencyp99"
-
+      # ── B3.7 spend cap exceeded ────────────────────────────────────────────
+      # Hard signal — dispatch is BLOCKED for this workspace until the
+      # cap window rolls. The dispatcher's spend-alert webhook should
+      # already have notified the workspace admin (B3.7 + B4.0.1); this
+      # alert tells the platform on-call when caps are hitting widely
+      # (could mean a legit burst, or a runaway pipeline that nobody
+      # noticed). `ERR_SPEND_CAP_EXCEEDED` is a typed error —
+      # `classifyAiError` in `utils/metrics.js` maps it to
+      # `reason="spend_cap_exceeded"` so we alert on it directly without
+      # parsing free-form messages.
+      - alert: AiSpendCapExceeded
+        expr: |
+          sum by (route_name) (
+            increase(app_ai_provider_errors_total{reason="spend_cap_exceeded"}[15m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: ai
+        annotations:
+          summary: "Workspace AI spend cap blocking dispatch on route {{ $labels.route_name }}"
+          description: "Dispatch on route {{ $labels.route_name }} is being rejected with ERR_SPEND_CAP_EXCEEDED. The workspace's daily or monthly cap is exhausted. Workspace admins should have already received the spend-alert webhook (B3.7 / B4.0.1) — confirm the alert delivered, then either raise the cap via Settings → Provider Routes → Workspace spend caps or wait for the window to roll. Cross-reference with the workspace's `dailySpent` / `monthlySpent` columns."
+          runbook_url: "https://docs.sentri.dev/guide/observability#aispendcapexceeded"
+      # ── B3.7 local rate-limit rejections (under-provisioned route) ────────
+      # `ERR_RATE_LIMIT_LOCAL` means our token bucket rejected the call
+      # before it touched the vendor. Sustained high rejection rate means
+      # rpmLimit/tpmLimit are too tight for the route's workload — the
+      # operator should raise them via Settings → Provider Routes → rate
+      # limits, or distribute load across sibling routes via the fallback
+      # chain.
+      - alert: AiQuotaRejectionRateHigh
+        expr: |
+          (
+            sum by (route_name) (rate(app_ai_provider_errors_total{reason="rate_limit_local"}[10m]))
+            /
+            sum by (route_name) (rate(app_ai_provider_latency_seconds_count[10m]))
+          ) > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          component: ai
+        annotations:
+          summary: "Route {{ $labels.route_name }} rejecting >10% of calls on local rate limit"
+          description: "{{ $value | humanizePercentage }} of dispatch attempts on route {{ $labels.route_name }} are being locally rejected by the token bucket. The route's rpmLimit / tpmLimit are likely too tight for current workload — raise via Settings → Provider Routes → Rate limits, or distribute load across sibling routes via fallback chain."
+          runbook_url: "https://docs.sentri.dev/guide/observability#aiquotarejectionratehigh"
   - name: sentri-saas-runtime
     rules:
       # ── Event loop lag ─────────────────────────────────────────────────────
@@ -181,7 +239,6 @@ groups:
           summary: "Node.js event-loop lag above 100ms for 10 minutes"
           description: "Process is CPU-saturated or running sync work on the main thread. Likely a hot AI prompt loop, runaway crawl, or large sync DB migration."
           runbook_url: "https://docs.sentri.dev/guide/observability#eventlooplaghigh"
-
       # ── Heap pressure ──────────────────────────────────────────────────────
       # IMPORTANT: `nodejs_heap_size_total_bytes` is V8's `heapTotal` — the
       # *currently allocated* heap, which V8 dynamically resizes (shrinks
@@ -208,7 +265,6 @@ groups:
           summary: "Node.js RSS above 1.8 GiB for 15 minutes"
           description: "Resident memory is {{ $value | humanize1024 }}B (approaching a 2 GiB container limit). Imminent OOM-kill risk. Bump container memory or hunt the leak (unbounded cache, runaway run.logs buffer)."
           runbook_url: "https://docs.sentri.dev/guide/observability#heapusagehigh"
-
       # ── Observability liveness (the meta-alert) ────────────────────────────
       # If we stop receiving samples for our own metrics for 3 minutes, the
       # scrape pipeline is broken — every other alert above is silently dark.
@@ -223,8 +279,6 @@ groups:
           summary: "Prometheus cannot scrape {{ $labels.instance }}"
           description: "/metrics endpoint is unreachable for 3 minutes. Either the backend is down, the scrape key changed, or the network path is broken. Without this signal, every other alert is silently dark."
           runbook_url: "https://docs.sentri.dev/guide/observability#backendscrapedown"
-
-
   - name: sentri-saas-vision-healing
     rules:
       # ── MNT-001 vision-heal budget circuit breaker ─────────────────────────

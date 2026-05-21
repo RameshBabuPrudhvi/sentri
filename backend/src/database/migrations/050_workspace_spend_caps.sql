@@ -1,0 +1,46 @@
+-- B3.7 — Per-workspace AI spend caps.
+--
+-- Adds three columns to `workspaces` so each workspace can independently
+-- bound its monthly AI spend without coordinating through deploy-wide
+-- env vars. Roadmap requirement (`docs/roadmap/ai-provider-bundle.md`
+-- B3.7): operator UI for "daily / monthly USD caps + alert threshold".
+--
+-- ## Why three columns, not one JSON blob
+--
+-- The dispatcher reads these on every AI call (`checkSpendCap` in
+-- `quotaGuard.js`). A bare REAL column avoids JSON.parse on every
+-- dispatch; the schema cost is three extra columns on a low-cardinality
+-- table (workspaces ~10s-100s per deployment, not millions).
+--
+-- ## Default model
+--
+-- All three default to NULL → "unlimited" semantics. The dispatcher
+-- treats NULL as "no cap configured, dispatch unconditionally". This
+-- is the documented non-disruptive default — existing workspaces keep
+-- their current behaviour until an admin opts in via Settings.
+--
+-- `spendAlertThresholdPct` defaults to 80 (not NULL) because the
+-- alert path is meaningful only when at least one cap is set; the
+-- threshold field always carries a numeric value so the alert math
+-- (`currentSpend >= cap * thresholdPct/100`) never has to defend
+-- against a NULL multiplier.
+--
+-- ## Cap-source contract
+--
+-- The dispatcher queries `app_ai_cost_usd_total` (per-process
+-- Prometheus counter) when no central spend store is available, with
+-- the `ai_request_log` table (B2.5) as the authoritative cross-process
+-- source. Single-replica deployments using either source MUST resolve
+-- to the same cap because the table is workspace-scoped and durable.
+--
+-- ## Compatibility
+--
+-- SQLite + PostgreSQL both accept the `ALTER TABLE ... ADD COLUMN`
+-- syntax unchanged. No CHECK constraint on the numeric values —
+-- defensive coercion in the routes layer rejects negative / NaN values
+-- at the HTTP boundary instead, matching the existing pattern from
+-- `mfaGracePeriodDays`.
+
+ALTER TABLE workspaces ADD COLUMN dailySpendCapUsd REAL;
+ALTER TABLE workspaces ADD COLUMN monthlySpendCapUsd REAL;
+ALTER TABLE workspaces ADD COLUMN spendAlertThresholdPct INTEGER NOT NULL DEFAULT 80;

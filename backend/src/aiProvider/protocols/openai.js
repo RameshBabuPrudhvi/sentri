@@ -44,17 +44,13 @@
 import OpenAI from "openai";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 import { throwIfAborted } from "../../utils/abortHelper.js";
-import { computeCostUsd } from "../modelCatalog.js";
 
-/**
- * Attach catalog-derived `costUsd` to a usage block. Mirrors
- * `adapters/openai.js#withCost` so dispatch's cost telemetry is
- * identical regardless of which path produced the response.
- */
-function withCost(model, usage) {
-  if (!usage) return usage;
-  return { ...usage, costUsd: computeCostUsd(model, usage) };
-}
+// B2.4 — protocol modules return raw `{ input, output }` token usage
+// only. Cost is computed by the dispatcher's
+// `computeCostForRoute(route, usage)` with `route.pricing` as the
+// authoritative source and `MODEL_PRICING` as catalog fallback.
+// `MODEL_PRICING` is no longer read at runtime; it stays as a
+// UI-suggestion catalog for the Settings UI defaults (B3.1).
 
 /**
  * Build an OpenAI SDK client from a route + caller-supplied opts.
@@ -110,10 +106,10 @@ export async function generate(route, messages, opts) {
       const res = await client.chat.completions.create(params, { signal: composedSignal });
       return {
         text: res.choices?.[0]?.message?.content || "",
-        usage: withCost(route.model, {
+        usage: {
           input: res?.usage?.prompt_tokens,
           output: res?.usage?.completion_tokens,
-        }),
+        },
       };
     } finally { cleanup(); }
   }, label);
@@ -146,5 +142,46 @@ export async function stream(route, messages, opts) {
       usage = { input: chunk.usage.prompt_tokens, output: chunk.usage.completion_tokens };
     }
   }
-  return { text: full, usage: withCost(route.model, usage) };
+  return { text: full, usage };
+}
+
+/**
+ * Route-driven multimodal generate (MNT-001 vision-healing).
+ *
+ * Mirrors `adapters/openai.js#generateVision` — image as `image_url` data
+ * URL, JSON-mode response, 512 max output tokens. The legacy adapter
+ * branched on `provider` to pick the OpenAI / OpenRouter / compat client;
+ * here the `route.baseUrl` + `opts.guardedFetch` already encode that
+ * choice, so the dispatch shape is uniform.
+ *
+ * Required `opts` fields:
+ *   • `apiKey`       — resolved by `protocolAdapter.generateVision` via
+ *                      `secrets.getDecryptedKey(workspaceId, routeId)`.
+ *   • `dataUrl`      — `data:image/png;base64,<…>` (what OpenAI / Anthropic
+ *                      compat vision endpoints accept).
+ *   • `userPrompt`   — the per-call instruction string.
+ *   • `signal`       — optional AbortSignal; honoured by the SDK.
+ *
+ * Returns the same `{ text, usage }` shape every other protocol module
+ * produces. Cost is computed downstream by
+ * `dispatcher.computeCostForRoute(route, usage)`.
+ */
+export async function generateVision(route, opts) {
+  const client = mkClient(route, opts);
+  const res = await client.chat.completions.create({
+    model: route.model,
+    max_tokens: 512,
+    response_format: { type: "json_object" },
+    messages: [{ role: "user", content: [
+      { type: "text", text: opts.userPrompt },
+      { type: "image_url", image_url: { url: opts.dataUrl } },
+    ] }],
+  }, { signal: opts.signal });
+  return {
+    text: res.choices?.[0]?.message?.content || "",
+    usage: {
+      input: res?.usage?.prompt_tokens,
+      output: res?.usage?.completion_tokens,
+    },
+  };
 }

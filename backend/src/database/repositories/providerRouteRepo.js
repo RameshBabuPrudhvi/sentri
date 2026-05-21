@@ -29,6 +29,11 @@ import * as auditRepo from "./providerRouteAuditRepo.js";
 // is safe under Node ESM: neither module calls an imported function at
 // top-level, so both finish initialisation before any cache method runs.
 import * as secrets from "../../aiProvider/secrets.js";
+// B2.2 — capability probe wiring. Same import-cycle reasoning as
+// `secrets.js` above: the probe module imports protocol adapters which
+// import secrets which import this repo, but no top-level call walks
+// the cycle so initialisation completes cleanly.
+import { runCapabilityProbe } from "../../aiProvider/capabilityProbe.js";
 const SECRET_COLUMNS = Object.freeze(["apiKeyEncrypted", "apiKeyNonce"]);
 const SAFE_COLUMNS = [
   "id", "workspaceId", "name", "family", "protocol", "baseUrl", "model",
@@ -186,10 +191,37 @@ function toWireValue(field, value) {
  *     metadata={ lastFour }   (never cleartext or ciphertext)
  *   • other update → action="update", metadata={ changed: [<field>…] }
  *
+ * ## B2.2 — Auto-probe-on-upsert
+ *
+ * After the transaction commits, schedules a fire-and-forget capability
+ * probe (`probeAndPersist`) via `setImmediate` when:
+ *   • The route is new (insert), OR
+ *   • Any **routing-relevant** field changed: `apiKeyEncrypted`,
+ *     `apiKeyNonce`, `model`, `baseUrl`, `family`, `protocol`.
+ *
+ * Pricing-only / quota-only / cache-only / name-only updates DON'T
+ * trigger a re-probe because the network result wouldn't change.
+ *
+ * The probe runs OUTSIDE the transaction — never blocks the upsert's
+ * synchronous return, never holds a SQLite write lock during the 10s
+ * network call. Capabilities land asynchronously on the row; clients
+ * polling the row see `null → {probed result}` within a few seconds.
+ *
+ * Opt out via `input.skipAutoProbe: true` — used by:
+ *   • The backfill script (inherited global keys may not work in every
+ *     workspace; operators expected to rotate before relying on probe).
+ *   • The manual `probeAndPersist` endpoint when it calls upsert
+ *     internally (would otherwise probe twice).
+ *
+ * Errors in the deferred probe are swallowed (best-effort) — the route
+ * stays persisted with `capabilities: null` and the operator can hit
+ * the manual probe button via the Settings UI to retry.
+ *
  * @param {Object} input
  * @param {string} [input.id]
  * @param {string} input.workspaceId
  * @param {string} [input.userId]    — Audit actor; null for system writes.
+ * @param {boolean} [input.skipAutoProbe] — When true, suppress B2.2 auto-probe.
  * @returns {Object} The freshly persisted row (re-read via getById).
  * @throws {Error} An Error with `code === "ERR_ROUTE_FALLBACK_CYCLE"`.
  * @throws {Error} An Error with `code === "ERR_ROUTE_MISSING_FIELD"`.
@@ -219,6 +251,13 @@ export function upsert(input) {
     throw err;
   }
   const now = new Date().toISOString();
+  // B2.2 — fields whose change invalidates the prior probe result.
+  // Pricing / quotas / cache / name changes leave dispatch reachability
+  // unchanged, so we don't burn a probe on them. Apikey changes
+  // (rotation) DO invalidate the probe because the new key might not
+  // work — same row, different result.
+  const PROBE_RELEVANT_FIELDS = ["apiKeyEncrypted", "apiKeyNonce", "model", "baseUrl", "family", "protocol"];
+  let shouldAutoProbe = false;
   const tx = db.transaction(() => {
     if (!existing) {
       // ── INSERT ────────────────────────────────────────────────────────────
@@ -256,6 +295,10 @@ export function upsert(input) {
           protocol: input.protocol, model: input.model,
         },
       });
+      // New route → always probe (any of family / protocol / model
+      // / baseUrl / apiKey could be wrong; the operator needs the
+      // network-evidence badge to know).
+      shouldAutoProbe = true;
     } else {
       // ── UPDATE (partial-patch) ────────────────────────────────────────────
       const changed = diffFields(existing, input);
@@ -264,6 +307,14 @@ export function upsert(input) {
         // agentConfigRepo.upsert contract: idempotent saves don't pollute
         // the audit log with phantom "update" events.
         return;
+      }
+      // B2.2 — re-probe only when something probe-relevant changed.
+      // A rename or pricing-only update leaves dispatch reachability
+      // unchanged; skipping the probe there saves a network call per
+      // edit (matters at scale when admins iterate on cache TTL /
+      // pricing without rotating keys).
+      if (changed.some((f) => PROBE_RELEVANT_FIELDS.includes(f))) {
+        shouldAutoProbe = true;
       }
       const setClauses = changed.map((c) => `${c} = ?`).concat("updatedAt = ?");
       const setValues = changed.map((c) => {
@@ -300,6 +351,35 @@ export function upsert(input) {
     }
   });
   tx();
+  // B2.2 — Auto-probe-on-upsert. Fire-and-forget so the upsert's
+  // synchronous return contract is preserved. `setImmediate` schedules
+  // the probe on the next event-loop tick — by then the tx is committed
+  // and the row is visible to other queries (including the probe's own
+  // `getById` lookup).
+  //
+  // We deliberately don't await the probe here even though we COULD —
+  // upsert is sync from a better-sqlite3 perspective, and making it
+  // async would force every call site (settings routes, tests, the
+  // backfill script) to flip to `await`. Fire-and-forget keeps the
+  // contract intact AND lets the probe run while the HTTP response
+  // is already on its way back to the operator.
+  //
+  // Skipped when:
+  //   • `input.skipAutoProbe === true` (backfill, manual-probe path)
+  //   • No probe-relevant field changed (renames, pricing edits)
+  //   • `tx()` returned early on no-op write (caught by !shouldAutoProbe)
+  //
+  // Errors swallowed — the row stays with `capabilities: null` and the
+  // operator can hit the manual probe button in the Settings UI.
+  if (shouldAutoProbe && !input.skipAutoProbe) {
+    setImmediate(() => {
+      probeAndPersist(workspaceId, targetId, { userId: userId || null }).catch(() => {
+        // Best-effort: probe failures don't propagate. The route is
+        // already persisted; the UI shows `capabilities: null` until
+        // the operator retries via the manual probe endpoint.
+      });
+    });
+  }
   return getById(workspaceId, targetId);
 }
 /**
@@ -321,6 +401,64 @@ export function upsert(input) {
  * @param {string} [opts.userId]   — Audit actor.
  * @returns {{ deleted: number, fallbacksCleared: number }} better-sqlite3 changes counts.
  */
+/**
+ * B2.2 — Run a real network capability probe against an existing
+ * route and persist the result to `provider_routes.capabilities`.
+ *
+ * Two-phase write so a flaky probe can't leave the row half-updated:
+ *   1. `runCapabilityProbe(route)` returns a `capabilities` payload
+ *      OUTSIDE the transaction. The probe itself does network I/O
+ *      and can take seconds — holding a SQLite write lock that long
+ *      would serialise the rest of the deployment.
+ *   2. The transaction is opened only AFTER the probe resolves, then
+ *      writes the JSON column + appends the audit row atomically.
+ *
+ * Audit entry is `action: "probe"` with `metadata: { capabilities }`
+ * — never the secret. Lifeguard-flagged: the older endpoint at
+ * `routes/settings.js` was a catalog copy with `action: "probe"`,
+ * which is misleading. Once the route uses this helper, every
+ * `action: "probe"` audit row reflects a real network confirmation.
+ *
+ * @param {string} workspaceId
+ * @param {string} routeId
+ * @param {Object} [opts]
+ * @param {string} [opts.userId] - Audit actor; null for system probes.
+ * @param {number} [opts.timeoutMs=10000]
+ * @returns {Promise<Object|null>} The freshly persisted route row, or
+ *   `null` when the routeId doesn't exist in this workspace (caller
+ *   should 404).
+ */
+export async function probeAndPersist(workspaceId, routeId, { userId = null, timeoutMs } = {}) {
+  const route = getById(workspaceId, routeId);
+  if (!route) return null;
+  // Probe runs OUTSIDE the transaction — see JSDoc.
+  const capabilities = await runCapabilityProbe(route, { timeoutMs });
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const tx = db.transaction(() => {
+    db.prepare(
+      "UPDATE provider_routes SET capabilities = ?, updatedAt = ? WHERE id = ? AND workspaceId = ?",
+    ).run(stringifyJson(capabilities), now, routeId, workspaceId);
+    auditRepo.append({
+      workspaceId,
+      routeId,
+      userId,
+      action: "probe",
+      metadata: {
+        capabilities,
+        // Surface probe outcome at the top level of metadata too so
+        // audit-log filters (B3.9) can `WHERE metadata LIKE '%"reachable":false%'`
+        // without parsing the nested `capabilities` JSON.
+        reachable: capabilities.reachable,
+        source: capabilities.source,
+        errorReason: capabilities.errorReason || null,
+      },
+    });
+  });
+  tx();
+  return getById(workspaceId, routeId);
+}
+
 export function remove(workspaceId, id, { userId } = {}) {
   const db = getDatabase();
   const tx = db.transaction(() => {

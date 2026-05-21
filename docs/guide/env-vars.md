@@ -75,6 +75,35 @@ There is no `COMPAT_<ID>_API_KEY` env equivalent — OpenAI-compatible slots (De
 | `LLM_MAX_BACKOFF_MS` | `30000` | Max backoff delay (ms) |
 | `LLM_MAX_TOKENS` | `16384` | Max output tokens per AI call |
 
+### AI Request Log (B2.5)
+
+Sentri persists per-call AI request metadata to the `ai_request_log` table on every dispatch — see [`backend/src/aiProvider/requestLog.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/aiProvider/requestLog.js). Storage mode is **per-workspace** (configured via the Settings UI, persisted in `workspaces.aiRequestLogMode`). The env var below acts as a single-tenant default for deployments that haven't enabled per-workspace settings:
+
+| Variable | Default | Description |
+|---|---|---|
+| `AI_REQUEST_LOG_STORAGE_MODE` | `none` | Single-tenant fallback storage mode: `none` (metadata only — prompt + response are NULL; default), `redacted` (PII patterns stripped before persist), or `full` (raw prompt + response stored — required for replay; admin opt-in with compliance acknowledgement). Per-workspace settings always win over this env var. Replay endpoint refuses non-`full` rows with HTTP 400. |
+| `AI_REQUEST_LOG_RETENTION_DAYS` | `30` | Daily 04:45 UTC sweep deletes `ai_request_log` rows older than this many days. Set `0` to disable the retention sweep entirely. |
+
+**Per-workspace overrides:** Admins can set `aiRequestLogMode` and `aiRequestLogCustomRedactionRules` (JSON array of `{ pattern, flags?, replacement? }`) on the `workspaces` row via the Settings UI (Bundle 3) or direct SQL. The dispatcher reads workspace settings on every AI call via [`workspaceRepo.getAiRequestLogSettings`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/database/repositories/workspaceRepo.js); workspace mode `none` falls through to the env-default; workspace `redacted` or `full` always wins.
+
+**Built-in PII redactors:** email, phone (international + national), US SSN, credit-card (13–19 digits). Workspace-supplied custom rules apply AFTER the built-ins. Malformed custom regex is silently skipped — built-in redactors still fire.
+
+### Provider Routes Audit Log (B3.9)
+
+Sentri appends a `provider_route_audit` row on every mutation to a `provider_routes` row (create / update / delete / rotate_key / probe / export / import). Retention is operator-tunable so compliance windows can be longer than the default 90 days. See [`backend/src/database/repositories/providerRouteAuditRepo.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/database/repositories/providerRouteAuditRepo.js#L92) for the sweep query.
+
+| Variable | Default | Description |
+|---|---|---|
+| `AI_ROUTES_AUDIT_RETENTION_DAYS` | `90` | Daily 05:00 UTC sweep deletes `provider_route_audit` rows older than this many days. Set `0` to disable retention entirely (rows accumulate forever). Distinct from `AUDIT_RETENTION_DAYS` (SEC-007 `activities` table) — the two audit logs serve different compliance scopes and are tuned independently. |
+
+### AI Spend Alert Webhook (B4.0.1)
+
+The B3.7 spend-cap path can deliver a Slack-compatible webhook payload to `workspaces.spendAlertWebhookUrl` when current spend crosses `cap × spendAlertThresholdPct / 100`. A cooldown prevents flooding when sustained-high-spend workspaces re-cross the threshold on every AI call — see [`backend/src/aiProvider/spendAlert.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/aiProvider/spendAlert.js).
+
+| Variable | Default | Description |
+|---|---|---|
+| `SPEND_ALERT_COOLDOWN_MS` | `3600000` (1h) | Minimum interval between successive webhook fires for the same workspace. The cooldown timestamp lives on `workspaces.spendAlertLastFiredAt` (durable across restarts + shared across replicas). Set `0` to fire on every threshold crossing — useful for testing but will flood the channel under sustained load. |
+
 ### Server
 
 | Variable | Default | Description |
@@ -327,3 +356,5 @@ Counter naming uses `app_*` rather than a product-name prefix so Prometheus dash
 | `VITE_GOOGLE_CLIENT_ID` | — | Google OAuth client ID (passed to frontend) |
 | `VITE_SENTRY_DSN` | — | Frontend Sentry DSN. When set, `Sentry.init()` runs at app boot with `browserTracingIntegration()` so React Router navigations emit pageload + navigation breadcrumbs, and `ErrorBoundary` reports caught exceptions via `Sentry.captureException`. Unset → SDK is a no-op (no network traffic). |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | `0` | Fraction (0–1) of frontend transactions sampled for Sentry performance traces. Default `0` keeps Sentry to crash reporting + breadcrumbs only. |
+
+

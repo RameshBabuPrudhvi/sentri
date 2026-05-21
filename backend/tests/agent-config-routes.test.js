@@ -28,14 +28,38 @@ async function main() {
     const cookieB = `access_token=${b.token}`;
 
     await test("CRUD round-trip", async () => {
-      let out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", provider: "openai", fallbackRole: "reviewer" } });
+      // B2.1 — `agent_configs.provider` + `model` columns were dropped
+      // in migration 048. The role's dispatch target now lives on a
+      // `provider_routes` row referenced by `routeId`. POST below
+      // creates the role; the PATCH assignment exercises the new
+      // route-driven update surface instead of the dropped `model`
+      // field.
+      let out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "reviewer" } });
       assert.equal(out.res.status, 201);
       out = await apiReq(base, "/api/settings/agent-roles", { cookie: cookieA });
       assert.equal(out.res.status, 200);
       assert.equal(out.json.roles.length, 1);
-      out = await apiReq(base, "/api/settings/agent-roles/planner", { method: "PATCH", cookie: cookieA, body: { model: "gpt-4o-mini" } });
+      // Create a real `provider_routes` row in workspace A so the PATCH
+      // below has a valid routeId target. `providerRouteRepo.upsert` is
+      // workspace-scoped by `agentConfigRepo.upsert`'s validation, so
+      // creating in A and PATCHing planner@A is the canonical flow an
+      // admin would use from Settings → Provider Routes → Agent Roles.
+      const routeRes = await apiReq(base, "/api/settings/provider-routes", {
+        method: "POST",
+        cookie: cookieA,
+        body: {
+          name: "openai-gpt-4o-mini",
+          family: "openai",
+          protocol: "openai",
+          model: "gpt-4o-mini",
+        },
+      });
+      assert.equal(routeRes.res.status, 201);
+      const routeId = routeRes.json.id;
+      assert.ok(routeId?.startsWith("pr-"), "provider_routes upsert must return pr-... id");
+      out = await apiReq(base, "/api/settings/agent-roles/planner", { method: "PATCH", cookie: cookieA, body: { routeId } });
       assert.equal(out.res.status, 200);
-      assert.equal(out.json.model, "gpt-4o-mini");
+      assert.equal(out.json.routeId, routeId, "routeId persists on the agent_configs row post-PATCH");
       out = await apiReq(base, "/api/settings/agent-roles/planner", { method: "DELETE", cookie: cookieA });
       assert.equal(out.res.status, 200);
     });
@@ -73,25 +97,16 @@ async function main() {
       assert.equal(out.res.status, 400);
     });
 
-    await test("deleting a role clears dangling fallbackRole refs in siblings", async () => {
-      // planner → healer; deleting healer should null planner.fallbackRole
-      // so AI-005 dispatch never resolves a dangling reference.
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "healer" } });
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "healer" } });
-      let out = await apiReq(base, "/api/settings/agent-roles/healer", { method: "DELETE", cookie: cookieA });
-      assert.equal(out.res.status, 200);
-      out = await apiReq(base, "/api/settings/agent-roles", { cookie: cookieA });
-      const planner = (out.json.roles || []).find((r) => r.role === "planner");
-      assert.ok(planner, "planner row should still exist");
-      assert.equal(planner.fallbackRole, null, "planner.fallbackRole should be nulled after healer delete");
-    });
-
-    await test("fallback cycle detection", async () => {
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "reviewer" } });
-      await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "reviewer", fallbackRole: "author" } });
-      const out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "author", fallbackRole: "planner" } });
-      assert.equal(out.res.status, 400);
-    });
+    // B4.3 — `agent_configs.fallbackRole` was dropped by migration 053.
+    // The role-level cascade-null and the cycle detector were both
+    // removed; the canonical per-route fallback now lives on
+    // `provider_routes.fallbackRouteId` with cycle protection enforced
+    // in `providerRouteRepo.upsert` (ERR_ROUTE_FALLBACK_CYCLE). The two
+    // tests that lived here ("deleting a role clears dangling
+    // fallbackRole refs in siblings" + "fallback cycle detection")
+    // exercised behaviour that no longer exists at the column level and
+    // are intentionally removed rather than ported — re-adding them
+    // would test dead code.
 
     summary("agent-config-routes");
   } finally { await new Promise((r) => server.close(r)); }

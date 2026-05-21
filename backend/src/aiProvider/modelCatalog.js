@@ -31,13 +31,31 @@ export const CLOUD_KEY_MAP = {
 // slots (handled by the orchestrator), then Ollama.
 export const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google", "openrouter"];
 
-// Per-provider default models — overridable via env vars.
+// Per-provider default models — overridable via env vars. B4.1: the
+// `color` field is the brand-aligned hex for Settings UI / dropdowns.
+// Co-located here so `providerInfo.js#buildProviderMeta` derives the
+// full per-family record from a single source of truth instead of
+// re-hardcoding the family enum (which used to drift between this
+// catalog and the meta builder).
 export const CLOUD_DEFAULT_MODELS = {
-  anthropic:  { envVar: "ANTHROPIC_MODEL",  fallback: "claude-sonnet-4-20250514", name: "Claude Sonnet" },
-  openai:     { envVar: "OPENAI_MODEL",     fallback: "gpt-4o-mini",              name: "GPT-4o-mini" },
-  google:     { envVar: "GOOGLE_MODEL",     fallback: "gemini-2.5-flash",         name: "Gemini 2.5 Flash" },
-  openrouter: { envVar: "OPENROUTER_MODEL", fallback: "openrouter/auto",          name: "OpenRouter" },
+  anthropic:  { envVar: "ANTHROPIC_MODEL",  fallback: "claude-sonnet-4-20250514", name: "Claude Sonnet",   color: "#cd7f32" },
+  openai:     { envVar: "OPENAI_MODEL",     fallback: "gpt-4o-mini",              name: "GPT-4o-mini",     color: "#10a37f" },
+  google:     { envVar: "GOOGLE_MODEL",     fallback: "gemini-2.5-flash",         name: "Gemini 2.5 Flash", color: "#4285f4" },
+  openrouter: { envVar: "OPENROUTER_MODEL", fallback: "openrouter/auto",          name: "OpenRouter",      color: "#6466f1" },
 };
+
+/**
+ * B4.1 — Resolve the brand-aligned hex color for a provider family.
+ * Used by the Settings UI / header dropdown / Provider Routes badges.
+ * Falls back to the generic accent for compat slots and Ollama (which
+ * are handled outside `CLOUD_DEFAULT_MODELS`).
+ *
+ * @param {string} provider
+ * @returns {string} hex colour
+ */
+export function getCloudColor(provider) {
+  return CLOUD_DEFAULT_MODELS[provider]?.color || "#6466f1";
+}
 
 export const PROVIDER_DOCS = {
   anthropic:  "https://console.anthropic.com/settings/keys",

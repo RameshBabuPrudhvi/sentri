@@ -1,0 +1,36 @@
+-- B4.3 — Drop deprecated columns from agent_configs.
+--
+-- ## What's dropped
+--
+--   • `agent_configs.fallbackRole` — deprecated in B3.2. The canonical
+--     per-route fallback lives on `provider_routes.fallbackRouteId` and
+--     is edited in the Provider Routes tab. The column was preserved for
+--     one release per the rollback contract; that window has now closed
+--     (Bundle 3 shipped in the same PR).
+--
+-- ## Compat slot cleanup — NOT done here (data-loss hazard)
+--
+-- An earlier revision of this migration also issued
+-- `DELETE FROM api_keys WHERE provider LIKE 'compat:%'` to clean up rows
+-- orphaned by `compat-to-routes.js`. That was unsafe: the migration
+-- runner auto-applies every pending SQL migration on boot, but
+-- `compat-to-routes.js` is a manual operator script that must be run
+-- out-of-band. Operators who deploy this version without first running
+-- the script lose every compat-slot API key with NO migration path —
+-- the keys are AES-encrypted, the plaintext is gone, and there's no
+-- recovery.
+--
+-- Compat slot cleanup now lives in `compat-to-routes.js` itself via the
+-- `--delete-source` flag, which only fires AFTER the script has
+-- successfully re-encrypted each slot's plaintext into a new
+-- `provider_routes` row. Operators who don't run the script keep their
+-- legacy `api_keys` rows untouched — `apiKeyRepo` still reads them at
+-- runtime via the existing compat-slot path, so dispatch keeps working
+-- until the operator explicitly migrates.
+--
+-- ## Compatibility
+--
+-- SQLite has supported `ALTER TABLE ... DROP COLUMN` since 3.35.
+-- PostgreSQL has supported it since 7.3. Idempotency is guaranteed
+-- at the runner level via `schema_migrations`.
+ALTER TABLE agent_configs DROP COLUMN fallbackRole;

@@ -359,8 +359,28 @@ const _COL_MAP = buildColumnMap([
   "column_name", "data_type",
   // notification_settings (FEA-001)
   "teamsWebhookUrl", "emailRecipients", "webhookUrl",
-  // workspaces (ACL-001)
-  "ownerId",
+  // workspaces (ACL-001 + B2.5 ai-request-log settings).
+  // PostgreSQL folds unquoted identifiers to lowercase, so without
+  // these entries `workspace.aiRequestLogMode` /
+  // `aiRequestLogCustomRedactionRules` would both be `undefined` on
+  // Postgres — silently breaking `getAiRequestLogSettings()` and
+  // forcing every workspace to fall back to the
+  // `AI_REQUEST_LOG_STORAGE_MODE` env-default path. Tracked alongside
+  // the other camelCase entries here.
+  "ownerId", "aiRequestLogMode", "aiRequestLogCustomRedactionRules",
+  // B3.7 — workspace AI spend caps. Same case-folding concern as the
+  // B2.5 columns above: without these entries PostgreSQL returns
+  // `undefined` for `workspace.dailySpendCapUsd` etc, silently
+  // disabling the cap-enforcement path on Postgres-backed deployments.
+  "dailySpendCapUsd", "monthlySpendCapUsd", "spendAlertThresholdPct",
+  // B4.0.1 — spend-alert webhook delivery columns (migration 052).
+  // `spendAlert.js#fireSpendAlert` reads `row.spendAlertWebhookUrl` and
+  // `row.spendAlertLastFiredAt` directly. Without these case-mapping
+  // entries Postgres returns `spendalertwebhookurl` /
+  // `spendalertlastfiredat`, the camelCase reads return `undefined`,
+  // the `!row?.spendAlertWebhookUrl` guard always fires, and webhook
+  // delivery silently degrades to console.warn on every PG deployment.
+  "spendAlertWebhookUrl", "spendAlertLastFiredAt",
   // workspace_members (ACL-001)
   "joinedAt",
   // agent_configs (AI-004 schema, migration 037 — see fix note in the

@@ -11,7 +11,7 @@ import * as openaiAdapter from "./adapters/openai.js";
 import * as googleAdapter from "./adapters/google.js";
 import * as ollamaAdapter from "./adapters/ollama.js";
 import { isRateLimitError, isRetryableError, MAX_RETRIES } from "./retry.js";
-import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel, resolveProvider, resolveRoute } from "./registry.js";
+import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel, resolveRoute } from "./registry.js";
 import {
   aiProviderLatencySeconds,
   aiProviderTokensTotal,
@@ -21,6 +21,51 @@ import {
 } from "../utils/metrics.js";
 import { buildProviderMeta } from "./providerInfo.js";
 import { getCurrentTraceId, annotateAiCallSpan } from "../utils/observability.js";
+import { logRequest } from "./requestLog.js";
+// B2.4 — `pricingFor` is the catalog fallback when a route has no
+// explicit `pricing` JSON set. Routes own cost at runtime; the catalog
+// is consulted ONLY when the route's pricing column is null, and only
+// to compute a non-null cost for the metric — never to overwrite an
+// operator-set route price. See `computeCostForRoute` JSDoc below.
+import { pricingFor, CLOUD_KEY_MAP } from "./modelCatalog.js";
+// B2.5 — Per-workspace request-log policy lookup. Hot-path read; the
+// repo's `getAiRequestLogSettings` returns `{ mode: "none", customRules: [] }`
+// for unknown workspace ids so callers always get a usable shape.
+import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
+// B3.7 — pre-call quota gate + post-call drift correction. Runs before
+// any provider SDK is touched so a rejected call doesn't burn vendor
+// quota. Errors carry typed `.code` strings (`ERR_RATE_LIMIT_LOCAL` /
+// `ERR_SPEND_CAP_EXCEEDED`) so the orchestrator can render an actionable
+// message to the operator instead of a generic 500.
+import { checkAndReserve, reportActual, checkSpendCap } from "./quotaGuard.js";
+// B3.8 — exact-match response cache. Pre-call check returns a stored
+// response when the route opted in (`cacheEnabled = 1`) and the
+// `(routeId, model, messages, params)` quad has been seen before;
+// post-call populate stores the freshly-dispatched response for next
+// time. Streaming + `skipCache: true` callers bypass the cache entirely.
+import {
+  computeCacheKey,
+  getCached,
+  setCached,
+  coalesceInFlight,
+  registerInFlight,
+} from "./responseCache.js";
+// B4.1 — Route-driven dispatch entry point. For real routes (`route.id`
+// starts with `"pr-"`, i.e. backed by a `provider_routes` row), we
+// dispatch through `protocolAdapter.generate(route, messages, opts)`
+// keyed on `route.protocol` instead of the legacy `adapterFor(provider)`
+// + `buildAdapterOpts(provider, …)` switch. The legacy path is preserved
+// for transient routes (`route.id` starts with `"provider:"`, synthesised
+// by `resolveRoute` from env detection) because their `apiKeyEncrypted`
+// blob doesn't exist in the DB — `secrets.getDecryptedKey` would return
+// null and the protocol adapter would fail with a clearer-but-still-broken
+// "no apiKey" error. Removing the legacy path is gated on every workspace
+// running through the route-driven dispatch (separate cleanup PR).
+import * as protocolAdapter from "./adapters/protocolAdapter.js";
+// B4.0.1 — spend-alert webhook delivery. Fire-and-forget; never blocks
+// the dispatch call. Falls back to the `console.warn` log line below
+// when no webhook URL is configured or the POST fails.
+import { fireSpendAlert } from "./spendAlert.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -231,30 +276,27 @@ function buildEffectivePrompt(prompt, config) {
  * precedence, and the AI-005c `effectiveAgentRole` collapse rule cannot
  * drift between the two surfaces.
  *
- * B1.7 — When `process.env.AI_ROUTES_ENABLED === "true"`, the function
- * resolves a `provider_routes` row via {@link resolveRoute} (the B1.6
- * route-driven path) and the return shape gains a `route` field plus
- * `useRoutes: true`. When the flag is off (the default), the shape is
- * bit-for-bit identical to the AI-005 pre-routes version (`route: null`,
- * `useRoutes: false`). Call sites that want to opt into routes check
- * `useRoutes` and dispatch via {@link module:aiProvider/adapters/protocolAdapter};
- * call sites that don't keep using the legacy `provider`-keyed path.
+ * B2.6 — The legacy `AI_ROUTES_ENABLED` feature flag was removed; the
+ * function unconditionally resolves a `provider_routes` row via
+ * {@link resolveRoute}. Real routes (`id = "pr-..."`) come from the DB;
+ * transient routes (`id = "provider:<id>"`) are synthesised by
+ * `resolveRoute` so the protocol-adapter contract still works for
+ * workspaces that haven't migrated past the env-default path.
+ * `useRoutes: true` is now a constant in the return shape — kept for
+ * call-site compatibility with the B1.7 era; future PRs can remove
+ * the field once every caller stops reading it.
  *
  * Inputs are the caller's `prompt` + `options` bag. Outputs everything the
  * caller needs to invoke `callProvider` and bookkeep breakers / sticky /
  * metrics correctly:
  *
  * - `provider` — concrete provider id, or `null` when no provider is configured.
- *   In the routes branch this is derived from `route.family` (or
- *   `route._transientProvider` for shim routes) so legacy telemetry call sites
- *   keep working without changes.
- * - `route` — B1.7 — the resolved `provider_routes` row when `useRoutes` is
- *   true, else `null`. Real routes (`id = "pr-..."`) come from the DB; shim
- *   routes (`id = "provider:<id>"`) are synthesised by `resolveRoute` so the
- *   protocol-adapter contract works for workspaces that haven't migrated yet.
- * - `useRoutes` — B1.7 — `true` when the flag is on, `false` otherwise.
- *   Lets callers gate "dispatch via protocolAdapter" without re-reading
- *   the env var.
+ *   Derived from `route.family` (real route) or `route._transientProvider`
+ *   (shim route) so legacy telemetry call sites keep working without changes.
+ * - `route` — the resolved `provider_routes` row (real or transient).
+ *   Carries `pricing`, `capabilities`, `apiKeyEncrypted` (via secret repo),
+ *   and everything `recordAiTokens` / `logRequest` need downstream.
+ * - `useRoutes` — always `true` post-B2.6. The dispatcher has one path.
  * - `config` — the `agent_configs` row (when one matched), `null` for fallback paths.
  * - `effectiveAgentRole` — AI-005c — `null` when single-agent (no
  *   `agent_configs` row exists), the `agentRole` string otherwise. Use this
@@ -292,102 +334,368 @@ function buildEffectivePrompt(prompt, config) {
 export function resolveAgentCall(prompt, options = {}) {
   const agentRole = options.agentRole || null;
   const workspaceId = options.workspaceId || null;
-  // B1.7 — feature-flagged routes branch. Off by default; when on, dispatch
-  // resolves a `provider_routes` row via {@link resolveRoute} (which honours
-  // the B1.6 priority chain: sticky-fallback → routeId → provider-column
-  // shim → env detection). The flag is process-scoped so it can be flipped
-  // per-deployment without an env-var reload on every call: cached at import
-  // time would prevent test-suite toggling, so we read on each call instead.
-  // Cost is one env lookup — negligible against the AI call itself.
-  if (process.env.AI_ROUTES_ENABLED === "true") {
-    const { route, config, effectiveAgentRole } = resolveRoute({ agentRole, workspaceId });
-    const effectivePrompt = buildEffectivePrompt(prompt, config);
-    return {
-      // Mirror the legacy shape (`provider` field) by deriving it from the
-      // route's family so call sites that still inspect `provider` for
-      // telemetry labels or fallback enumeration keep working unchanged.
-      // The transient route synthesised by `resolveRoute` carries the
-      // legacy provider id in `_transientProvider`; real routes use the
-      // `family` column. Either path produces the same value as the
-      // legacy `resolveProvider` would have returned.
-      provider: route?._transientProvider || route?.family || null,
-      route,
-      config,
-      effectiveAgentRole,
-      effectivePrompt,
-      // `??` (not `||`) so an explicit `maxTokens: 0` saved on an
-      // agent_configs row is honoured rather than treated as unset.
-      // Matches the documented "Agent-config maxTokens wins over
-      // caller-supplied" contract in the JSDoc above.
-      maxTokens: config?.maxTokens ?? options.maxTokens,
-      callOpts: { agentRole },
-      useRoutes: true,
-    };
-  }
-  // Legacy AI-005 path — unchanged when the flag is off. `route` is `null`
-  // and `useRoutes` is `false` so the existing call sites in `index.js`
-  // (and `vision.js`, etc.) never see a route object until they opt in.
-  const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
+  const { route, config, effectiveAgentRole } = resolveRoute({ agentRole, workspaceId });
   const effectivePrompt = buildEffectivePrompt(prompt, config);
   return {
-    provider,
-    route: null,
+    provider: route?._transientProvider || route?.family || null,
+    route,
     config,
     effectiveAgentRole,
     effectivePrompt,
-    // `??` matches the routes branch above — explicit `maxTokens: 0`
-    // on the agent_configs row must beat `options.maxTokens`, not fall
-    // through to it.
     maxTokens: config?.maxTokens ?? options.maxTokens,
-    callOpts: { agentRole },
-    useRoutes: false,
+    callOpts: {
+      agentRole,
+      routeName: route?.name || route?.id || "unknown",
+      routeId: route?.id || null,
+      workspaceId,
+      // B2.4 — pass the resolved route through so `_callProviderUnsafe`
+      // → `recordAiTokens` can compute cost from `route.pricing`
+      // without re-resolving. The route object includes the `pricing`
+      // JSON column (already hydrated by `providerRouteRepo.hydrate`),
+      // so no extra DB read on the cost path.
+      route,
+      // B2.5 — explicit per-call override of the workspace's
+      // request-log mode. Lets the replay endpoint force `"full"`
+      // logging on its recursive `generateText` call so the replay
+      // itself ends up in `ai_request_log` regardless of the
+      // workspace's default policy. Resolved by
+      // `resolveRequestLogConfig(callOpts)` in callProvider before
+      // the LLM call fires.
+      requestLogMode: options.requestLogMode || null,
+    },
+    useRoutes: true,
   };
+}
+
+// ── Cost computation (B2.4) ───────────────────────────────────────────────────
+
+/**
+ * Compute the USD cost of a single AI call from the resolved route's
+ * `pricing` JSON, with `MODEL_PRICING` as a catalog fallback when the
+ * route has no explicit pricing.
+ *
+ * ## Source priority
+ *
+ *   1. **`route.pricing`** (operator-set, JSON column from B1.1) —
+ *      authoritative. An operator who configures a private vLLM proxy
+ *      against `claude-3-5-sonnet` at a discounted rate writes their
+ *      real rate here. Shape: `{ inputPerMtok, outputPerMtok, currency }`.
+ *      Returns `{ costUsd, source: "route" }` when set.
+ *
+ *   2. **`MODEL_PRICING[route.model]`** (catalog) — fallback when the
+ *      route has no `pricing` set yet (e.g. an operator just created
+ *      the route and hasn't filled in pricing). Shape:
+ *      `{ inputPer1k, outputPer1k }`. Returns
+ *      `{ costUsd, source: "catalog_fallback" }`.
+ *
+ *   3. **`null`** — neither source has data. Returns
+ *      `{ costUsd: null, source: "none" }`. The metric increment is
+ *      skipped so the cost counter shows "no data" rather than a
+ *      fake zero — matches the AI-003 "no fake zeros" contract from
+ *      `modelCatalog.js#computeCostUsd`.
+ *
+ * ## Unit conversion
+ *
+ * Routes store per-million-token rates (`inputPerMtok`) because that's
+ * the convention every cloud vendor's pricing page uses. The catalog
+ * stores per-thousand-token rates (`inputPer1k`) — that's a legacy
+ * shape from AI-003. Both are normalised to `cost = rate × tokens /
+ * <unit>` internally so the metric value is in USD regardless of
+ * which source fired.
+ *
+ * ## Why dispatcher (not adapter)
+ *
+ * Per B2.4: "MODEL_PRICING no longer read at runtime, only by UI for
+ * defaults." Adapters used to call `computeCostUsd(model, usage)` and
+ * attach `costUsd` to the returned `usage` block — that path is being
+ * retired. Adapters now return raw `{ input, output }`; this helper
+ * is the single place cost gets computed, with the route as the
+ * single source of truth.
+ *
+ * @param {Object|null} route - Resolved `provider_routes` row, or null
+ *   when the call wasn't route-driven (legacy/env-default path).
+ * @param {Object} usage - `{ input, output }` token counts.
+ * @returns {{ costUsd: number|null, source: "route"|"catalog_fallback"|"none" }}
+ */
+export function computeCostForRoute(route, usage) {
+  const inTokens = Number(usage?.input) || 0;
+  const outTokens = Number(usage?.output) || 0;
+
+  // Path 1: route-defined pricing wins.
+  const rp = route?.pricing;
+  if (rp && (Number.isFinite(rp.inputPerMtok) || Number.isFinite(rp.outputPerMtok))) {
+    const inRate = Number.isFinite(rp.inputPerMtok) ? rp.inputPerMtok : 0;
+    const outRate = Number.isFinite(rp.outputPerMtok) ? rp.outputPerMtok : 0;
+    // Per-million-token convention: cost = rate × (tokens / 1_000_000)
+    const costUsd = (inRate * inTokens + outRate * outTokens) / 1_000_000;
+    return { costUsd: Number.isFinite(costUsd) ? costUsd : null, source: "route" };
+  }
+
+  // Path 2: catalog fallback.
+  const catalog = route?.model ? pricingFor(route.model) : null;
+  if (catalog && (catalog.inputPer1k != null || catalog.outputPer1k != null)) {
+    const inRate = Number.isFinite(catalog.inputPer1k) ? catalog.inputPer1k : 0;
+    const outRate = Number.isFinite(catalog.outputPer1k) ? catalog.outputPer1k : 0;
+    // Per-thousand-token convention: cost = rate × (tokens / 1_000)
+    const costUsd = (inRate * inTokens + outRate * outTokens) / 1_000;
+    return { costUsd: Number.isFinite(costUsd) ? costUsd : null, source: "catalog_fallback" };
+  }
+
+  // Path 3: no data — null cost, skip the metric. Operator sees "no
+  // data" in dashboards rather than a misleading $0.
+  return { costUsd: null, source: "none" };
 }
 
 // ── Token telemetry ───────────────────────────────────────────────────────────
 
 /**
- * Record token usage from a provider response, bucketed by `kind` +
- * `operation`. Each provider's SDK exposes usage on a different shape;
- * the caller passes the normalised `{ input, output }` counts plus the
- * surface that made the call:
+ * Record token usage + cost for a single AI call.
  *
- *   - `"generation"` — test-generation pipeline (default for every
- *     call site in this file's generateText / streamText paths).
- *   - `"vision_heal"` — MNT-001 stage-8 vision-healing path. Bucketed
- *     separately so SaaS unit-economics dashboards can attribute spend
- *     to the healing surface vs. core test generation.
+ * Cost is computed from the resolved route's pricing (B2.4 contract —
+ * see `computeCostForRoute` JSDoc). When the route is null, the cost
+ * metric is skipped entirely (env-default path has no pricing source).
  *
- * Per-1k token cost varies by provider and model, so the dashboard layer
- * multiplies these counters by a pricing lookup to compute spend.
- *
- * @param {string} provider - Detected provider id (used as label after normalisation).
- * @param {object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
- * @param {"generation"|"vision_heal"} [operation="generation"] - Which surface initiated the call.
+ * @param {string} provider - Detected provider id (label after normalisation).
+ * @param {Object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
+ * @param {"generation"|"vision_heal"} [operation="generation"]
+ * @param {string} [agentRole="default"]
+ * @param {string} [routeName="unknown"]
+ * @param {Object} [route] - Resolved route (for B2.4 cost computation).
+ *   When null/undefined, only token metrics fire — no cost metric.
+ * @returns {{ costUsd: number|null, source: string }} The cost result so
+ *   B2.5 request-log code can persist `costUsd` + `pricingSource` on
+ *   each `ai_request_log` row.
  */
-export function recordAiTokens(provider, usage, operation = "generation", agentRole = "default") {
-  if (!usage) return;
+export function recordAiTokens(provider, usage, operation = "generation", agentRole = "default", routeName = "unknown", route = null) {
+  if (!usage) return { costUsd: null, source: "none" };
   const label = providerMetricLabel(provider);
+  let costResult = { costUsd: null, source: "none" };
   try {
     const inTokens = Number(usage.input);
     if (Number.isFinite(inTokens) && inTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "input", operation }, inTokens);
+      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "input", operation, route_name: routeName || "unknown" }, inTokens);
     }
     const outTokens = Number(usage.output);
     if (Number.isFinite(outTokens) && outTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "output", operation }, outTokens);
+      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "output", operation, route_name: routeName || "unknown" }, outTokens);
     }
-    // AI-003 — generalised cost counter. Adapters compute `costUsd` from the
-    // catalog (see modelCatalog.js#computeCostUsd) and attach it to the
-    // usage block. `null` means the model isn't in the catalog → skip the
-    // increment so the counter shows "no data" rather than a fake zero.
-    // A literal `0` (catalog-known free model like Ollama) is also skipped
-    // because incrementing by 0 is a no-op anyway.
-    const costUsd = Number(usage.costUsd);
-    if (Number.isFinite(costUsd) && costUsd > 0) {
-      aiProviderCostUsdTotal.inc({ provider: label, agent_role: agentRole || "default", operation }, costUsd);
+    // B2.4 — route is the single source of truth for cost. When the
+    // route has explicit `pricing`, use it. Otherwise fall back to the
+    // catalog. When neither has data, skip the increment so the
+    // counter shows "no data" rather than a fake zero. Roadmap line
+    // 144: "Emit `app_ai_cost_usd_total` only when `route.pricing
+    // != null` — never error on missing pricing." We extend the
+    // contract: the metric also fires for catalog_fallback so
+    // pre-B2.4 deployments without route pricing still see cost data.
+    // Operators migrating to per-route pricing see source="route" on
+    // freshly-configured routes; source="catalog_fallback" on
+    // routes whose pricing hasn't been filled in yet.
+    costResult = computeCostForRoute(route, usage);
+    if (Number.isFinite(costResult.costUsd) && costResult.costUsd > 0) {
+      aiProviderCostUsdTotal.inc({ provider: label, agent_role: agentRole || "default", operation, route_name: routeName || "unknown" }, costResult.costUsd);
     }
   } catch { /* best-effort */ }
+  return costResult;
+}
+
+// ── Request-log policy resolution (B2.5) ──────────────────────────────────────
+
+/**
+ * Resolve the AI request-log storage policy for a single dispatch
+ * call. Returns the `{ mode, customRules }` shape `requestLog.js#logRequest`
+ * expects.
+ *
+ * ## Resolution order
+ *
+ *   1. **`callOptions.requestLogMode`** — explicit per-call override
+ *      (used by tests + the replay endpoint to force `"full"`).
+ *   2. **Workspace setting** (`workspaces.aiRequestLogMode`) when a
+ *      `workspaceId` is in `callOptions`. Operator-controlled.
+ *   3. **`AI_REQUEST_LOG_STORAGE_MODE`** env var — single-tenant
+ *      fallback for deployments that haven't migrated past the env-only
+ *      configuration model. Validates against the same enum.
+ *   4. **`"none"`** — final fallback. Metadata-only logging.
+ *
+ * Custom redaction rules merge: workspace-supplied rules from the
+ * `aiRequestLogCustomRedactionRules` column AND the in-built regexes
+ * (email / phone / SSN / card) from `requestLog.js`. Per-call
+ * `callOptions.customRedactionRules` is **not** supported — that would
+ * let untrusted call sites bypass workspace policy.
+ *
+ * Hot-path: one in-memory cache lookup + one indexed SELECT per AI
+ * call. Could be cached more aggressively in a future PR if profiling
+ * shows it; current cost is negligible against the AI call itself.
+ *
+ * @param {Object} callOptions - The dispatcher's `callOpts` object.
+ * @returns {{ mode: "none"|"redacted"|"full", customRules: Array }}
+ */
+export function resolveRequestLogConfig(callOptions = {}) {
+  const VALID_MODES = ["none", "redacted", "full"];
+  // 1. Explicit per-call override (tests, replay endpoint).
+  if (callOptions.requestLogMode && VALID_MODES.includes(callOptions.requestLogMode)) {
+    return { mode: callOptions.requestLogMode, customRules: [] };
+  }
+  // 2. Workspace setting.
+  if (callOptions.workspaceId) {
+    try {
+      const settings = workspaceRepo.getAiRequestLogSettings(callOptions.workspaceId);
+      // Workspace rows always exist with a `'none'` default after
+      // migration 049 — but a workspace created BEFORE the migration
+      // applies has a row that lacks the column entirely (older
+      // SQLite ALTER semantics). The repo defends with `|| "none"`,
+      // so we only override here when the workspace explicitly opted
+      // in to redacted/full.
+      if (settings.mode && settings.mode !== "none" && VALID_MODES.includes(settings.mode)) {
+        return { mode: settings.mode, customRules: settings.customRules || [] };
+      }
+      // Workspace mode is "none" — fall through to env-default check.
+      // We still carry the workspace's customRules forward so admins
+      // can preview rule effects without flipping the mode bit.
+      const envMode = (process.env.AI_REQUEST_LOG_STORAGE_MODE || "").toLowerCase();
+      if (VALID_MODES.includes(envMode) && envMode !== "none") {
+        return { mode: envMode, customRules: settings.customRules || [] };
+      }
+      return { mode: "none", customRules: settings.customRules || [] };
+    } catch {
+      // DB unavailable — fall through to env-default. Best-effort
+      // logging mirrors the rest of this file's defensive try/catch
+      // pattern around DB reads.
+    }
+  }
+  // 3. Env-var fallback (single-tenant deployments).
+  const envMode = (process.env.AI_REQUEST_LOG_STORAGE_MODE || "").toLowerCase();
+  if (VALID_MODES.includes(envMode)) {
+    return { mode: envMode, customRules: [] };
+  }
+  // 4. Final default.
+  return { mode: "none", customRules: [] };
+}
+
+// ── Pre-call dispatch gates (shared by generate + stream) ─────────────────────
+
+/**
+ * Run the B3.7 spend-cap + token-bucket gates that gate every AI call.
+ *
+ * Extracted from `_callProviderUnsafe` so `streamText` (which bypasses
+ * `_callProviderUnsafe` entirely — see `aiProvider/index.js#streamText`)
+ * can run the same gates and not violate the cross-bundle invariant
+ * "Quota guard never burns provider quota".
+ *
+ * Same throw contract as the inline version inside `_callProviderUnsafe`:
+ * spend-cap exceeded → `ERR_SPEND_CAP_EXCEEDED`; rate-limit reserve
+ * exhausted → `ERR_RATE_LIMIT_LOCAL`. Both errors carry `.code` for
+ * `classifyAiError` to bucket them into their own Prometheus reason
+ * labels (`spend_cap_exceeded`, `rate_limit_local`).
+ *
+ * @param {string|null} workspaceId
+ * @param {string|null} routeId
+ * @param {Object|null} route
+ * @param {number} estimatedTokens - maxTokens upper bound passed to the bucket.
+ * @returns {Promise<void>} resolves when both gates pass; throws otherwise.
+ */
+export async function runPreCallGates(workspaceId, routeId, route, estimatedTokens) {
+  if (workspaceId) {
+    const spend = checkSpendCap(workspaceId);
+    if (!spend.ok) {
+      const err = new Error(
+        `Spend cap exceeded (${spend.exceeded}). ` +
+        `Dispatch blocked until next ${spend.exceeded === "day" ? "24h window" : "month boundary"}.`,
+      );
+      err.code = "ERR_SPEND_CAP_EXCEEDED";
+      err.exceeded = spend.exceeded;
+      err.remainingUsd = spend.remainingUsd;
+      throw err;
+    }
+    if (spend.alertTriggered) {
+      try {
+        console.warn(formatLogLine("warn", null,
+          `[quotaGuard] spend alert: workspace=${workspaceId} ` +
+          `daily=${spend.dailySpent}/${spend.dailyCap} ` +
+          `monthly=${spend.monthlySpent}/${spend.monthlyCap} ` +
+          `threshold=${spend.thresholdPct}%`));
+      } catch { /* best-effort */ }
+      fireSpendAlert(workspaceId, spend).catch(() => {});
+    }
+  }
+  if (routeId && route) {
+    const reserved = await checkAndReserve(routeId, estimatedTokens, {
+      rpmLimit: route.rpmLimit,
+      tpmLimit: route.tpmLimit,
+    });
+    if (!reserved.ok) {
+      const err = new Error(
+        `Local rate limit reached on route ${route.name || routeId}. ` +
+        `Retry after ${reserved.retryAfterMs}ms.`,
+      );
+      err.code = "ERR_RATE_LIMIT_LOCAL";
+      err.retryAfterMs = reserved.retryAfterMs;
+      err.reason = reserved.reason;
+      throw err;
+    }
+  }
+}
+
+/**
+ * Post-call drift correction + request-log write. Extracted for the
+ * same reason as `runPreCallGates` — `streamText` needs to run these
+ * obligations too. Best-effort: errors are swallowed inside.
+ *
+ * @param {Object} args
+ * @param {string|null} args.routeId
+ * @param {Object|null} args.route
+ * @param {number} args.estimatedTokens
+ * @param {number} args.actualTokens
+ * @param {number|null} args.costUsd
+ * @param {Object} args.logEntry - Passed to `logRequest`.
+ */
+export function runPostCallHooks({ routeId, route, estimatedTokens, actualTokens, costUsd, logEntry }) {
+  if (routeId && route && Number.isFinite(actualTokens)) {
+    reportActual(routeId, estimatedTokens, actualTokens, costUsd).catch(() => {});
+  }
+  if (logEntry) {
+    try { logRequest(logEntry); } catch { /* best-effort */ }
+  }
+}
+
+// ── Request-log routeId resolution ────────────────────────────────────────────
+
+/**
+ * Resolve the `routeId` value to persist on an `ai_request_log` row.
+ *
+ * The dispatcher's `callOptions.routeId` mirrors `route.id` — which is
+ * `"provider:<id>"` for transient routes synthesised by
+ * `registry.synthesiseTransientRoute` from env detection. Those ids do
+ * not exist in the `provider_routes` table, so persisting them would
+ * violate the FK `ai_request_log.routeId REFERENCES provider_routes(id)
+ * ON DELETE SET NULL` (migration 047). The `logRequest` swallow-all
+ * catch then silently drops the entire row.
+ *
+ * Cascade: a dropped log row means `checkSpendCap` sees `SUM(costUsd) = 0`
+ * for the workspace (B3.7 caps never fire); replay endpoints return 404
+ * (B2.5 replay impossible); GET /settings/ai-requests returns empty
+ * (B3.9 viewer dark). Every env-default workspace gets ZERO observability.
+ *
+ * The fix is to null out the routeId for transient routes only — real
+ * routes (`pr-*`) keep their id so per-route filtering still works.
+ * Workspaces using env-default dispatch get NULL routeId rows (which
+ * the schema explicitly allows — the column is nullable + FK is ON
+ * DELETE SET NULL precisely for the "route deleted between dispatch
+ * and log write" case; we extend the semantics here to also cover
+ * "route never existed in the DB").
+ *
+ * @param {string|null} routeId - `callOptions.routeId`, possibly transient.
+ * @returns {string|null} `routeId` for real routes, `null` for transient.
+ */
+export function routeIdForLog(routeId) {
+  if (!routeId) return null;
+  // Transient ids start with `"provider:"` (synthesised by
+  // `synthesiseTransientRoute`). Real route ids start with `"pr-"`
+  // (UUID-prefixed by `providerRouteRepo.upsert`). Any other shape is
+  // unexpected — be conservative and null it out rather than risk an
+  // FK violation that drops the row.
+  if (typeof routeId !== "string") return null;
+  if (routeId.startsWith("pr-")) return routeId;
+  return null;
 }
 
 // ── Instrumented provider call ────────────────────────────────────────────────
@@ -403,13 +711,14 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
   // calls live in `callVisionModel` and pass `operation: "vision_heal"`
   // to the same metric counters directly.
   const operation = "generation";
+  const startedMs = Date.now();
   const label = providerMetricLabel(provider);
   const agentRole = callOptions.agentRole || "default";
   // AI-005 tripwire #3 — attach `ai.agent_role` + `ai.provider` +
   // `ai.operation` attributes to the active OTel span so distributed traces
   // line up with the Prometheus labels for per-role debugging. No-op when
   // OTel is unconfigured (single helper, single owner: observability.js).
-  annotateAiCallSpan({ provider, agentRole, operation });
+  annotateAiCallSpan({ provider, agentRole, operation, routeName: callOptions.routeName || "unknown" });
   // Trace-correlation: emit the per-call traceId at debug level only.
   // Every AI call inside an OTel-instrumented request has a traceId, so an
   // unconditional info-level line would flood logs (~hundreds per crawl).
@@ -421,38 +730,400 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
     console.log(formatLogLine("debug", null, `[aiProvider] traceId=${traceId} provider=${provider} role=${agentRole}`));
   }
   const startedAt = process.hrtime.bigint();
+  // B2.5 — resolve the workspace's request-log policy ONCE per call
+  // and reuse the result on both the success and failure paths. Avoids
+  // a second DB read in the catch block (which would also fail when
+  // the original error WAS the DB going down). `cfg.mode` drives both
+  // the storage mode and which custom redaction rules apply.
+  const logCfg = resolveRequestLogConfig(callOptions);
   try {
-    const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions);
+    const { text, usage, costResult } = await _callProviderUnsafe(
+      provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions,
+    );
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome: "success", operation }, seconds);
+      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome: "success", operation, route_name: callOptions.routeName || "unknown" }, seconds);
     } catch { /* best-effort */ }
-    return result;
+    try {
+      logRequest({
+        workspaceId: callOptions.workspaceId || null,
+        // Strip transient `provider:*` ids so the FK
+        // (`ai_request_log.routeId REFERENCES provider_routes(id)`)
+        // doesn't reject the row. See `routeIdForLog` JSDoc.
+        routeId: routeIdForLog(callOptions.routeId),
+        agentRole: callOptions.agentRole || null,
+        userId: callOptions.userId || null,
+        prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
+        response: typeof text === "string" ? text : "",
+        // B2.5 — populate token + cost fields so per-request log rows
+        // carry the same data as the Prometheus metric. Operators can
+        // now reconcile dashboard spend against per-call records and
+        // run "show me my $20+ calls" queries against `ai_request_log`.
+        inputTokens: Number.isFinite(usage?.input) ? usage.input : null,
+        outputTokens: Number.isFinite(usage?.output) ? usage.output : null,
+        costUsd: Number.isFinite(costResult?.costUsd) ? costResult.costUsd : null,
+        latencyMs: Date.now() - startedMs,
+        outcome: "success",
+        traceId: getCurrentTraceId(),
+        storageMode: logCfg.mode,
+        customRedactionRules: logCfg.customRules,
+      });
+    } catch {}
+    // Preserve the legacy public contract — callers expect a string.
+    return text;
   } catch (err) {
+    const reason = classifyAiError(err);
+    const outcome = reason === "rate_limit" ? "rate_limited" : "error";
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      const reason = classifyAiError(err);
-      const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome, operation }, seconds);
-      aiProviderErrorsTotal.inc({ provider: label, agent_role: agentRole, reason, operation });
+      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome, operation, route_name: callOptions.routeName || "unknown" }, seconds);
+      aiProviderErrorsTotal.inc({ provider: label, agent_role: agentRole, reason, operation, route_name: callOptions.routeName || "unknown" });
     } catch { /* best-effort */ }
+    try {
+      logRequest({
+        workspaceId: callOptions.workspaceId || null,
+        // Strip transient `provider:*` ids — see `routeIdForLog` JSDoc.
+        // Even on the error path, a transient routeId would FK-fail
+        // and silently drop the error row, losing the diagnostic
+        // signal operators need to see WHY env-default dispatch failed.
+        routeId: routeIdForLog(callOptions.routeId),
+        agentRole: callOptions.agentRole || null,
+        userId: callOptions.userId || null,
+        prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
+        response: "",
+        // No usage on the error path — token + cost fields stay null.
+        // Failed calls still cost something on rate-limited paths
+        // (depending on provider), but the SDK doesn't expose tokens
+        // when the call rejected — the `outcome: "error"` field is
+        // the only signal the operator gets.
+        latencyMs: Date.now() - startedMs,
+        outcome: outcome,
+        errorReason: reason,
+        traceId: getCurrentTraceId(),
+        storageMode: logCfg.mode,
+        customRedactionRules: logCfg.customRules,
+      });
+    } catch {}
     throw err;
   }
 }
 
+/**
+ * Raw provider call — adapter dispatch + token telemetry. Wrapped by
+ * {@link callProvider} which adds latency / outcome metrics and the
+ * post-call request-log hook.
+ *
+ * Returns the full `{ text, usage, costResult }` triple so `callProvider`
+ * can populate the AI request log's `inputTokens` / `outputTokens` /
+ * `costUsd` columns without re-computing or re-decoding the usage block.
+ * The legacy contract (callers expect a `string`) is preserved by
+ * `callProvider` extracting `.text` before returning to its callers.
+ *
+ * @returns {Promise<{ text: string, usage: Object|null, costResult: { costUsd: number|null, source: string } }>}
+ */
 export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions = {}) {
   const messages = normaliseMessages(promptOrMessages);
-  // AI-002: pass `responseFormat` through verbatim so future modes (e.g.
-  // `"json_schema"`) survive the trip to the adapter. `buildAdapterOpts`
-  // also derives `useJson` for adapters that haven't migrated yet.
-  const opts = buildAdapterOpts(provider, messages, maxTokens || DEFAULT_MAX_TOKENS, signal, responseFormat);
-  const { text, usage } = await adapterFor(provider).generate(opts);
-  // Token telemetry is the orchestrator's responsibility — adapters return
-  // raw usage and don't know about the metrics registry. Keeps adapters
-  // self-contained and testable in isolation.
-  // `recordAiTokens`'s signature defaults agentRole + the function body
-  // OR-defaults `null` → `"default"` for the metric label, so pass the
-  // original `callOptions.agentRole` directly without re-applying the OR.
-  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole);
-  return text;
+  const effectiveMaxTokens = maxTokens || DEFAULT_MAX_TOKENS;
+
+  const route = callOptions.route || null;
+  const routeId = route?.id || callOptions.routeId || null;
+  const workspaceId = callOptions.workspaceId || null;
+
+  // B3.8 — exact-match response cache. Runs FIRST, before quota gates,
+  // because a cache hit shouldn't consume rate-limit budget or spend-
+  // cap allowance — the response was already paid for on the original
+  // dispatch. Skip when:
+  //   • No route (env-default dispatch path).
+  //   • Route opted out (`cacheEnabled = 0`).
+  //   • Caller passed `skipCache: true` (self-healing path where stale
+  //     answers are dangerous).
+  // The `routeModel` is `route.model` (real route) or
+  // `buildAdapterOpts(provider).model` for shim routes — we use the
+  // route's model directly because it's already resolved by the time
+  // we reach this function.
+  const cacheEligible = route
+    && (route.cacheEnabled === 1 || route.cacheEnabled === true)
+    && Number.isFinite(route.cacheTtlSec) && route.cacheTtlSec > 0
+    && callOptions.skipCache !== true;
+  let cacheKey = null;
+  if (cacheEligible && routeId && route.model) {
+    cacheKey = computeCacheKey(routeId, route.model, {
+      messages,
+      maxTokens: effectiveMaxTokens,
+      // `temperature` is read from `callOptions` because the dispatcher
+      // doesn't otherwise track it — the adapters honour it via the
+      // OpenAI / Anthropic SDK options. Operators who want max hit rate
+      // standardise on T=0 dispatch; the cache key reflects whatever
+      // value was actually sent.
+      temperature: callOptions.temperature ?? null,
+      responseFormat: responseFormat ?? null,
+    });
+    const cached = getCached(routeId, route.model, {
+      messages,
+      maxTokens: effectiveMaxTokens,
+      temperature: callOptions.temperature ?? null,
+      responseFormat: responseFormat ?? null,
+    }, {
+      routeName: callOptions.routeName,
+      agentRole: callOptions.agentRole,
+    });
+    if (cached) {
+      // Cache hit — skip gates, skip dispatch, skip token telemetry
+      // (the original dispatch already counted those). Return the
+      // stored payload directly. `costResult.source = "cache"` lets
+      // `callProvider`'s logRequest hook record the hit shape so
+      // the request log shows cache hits as zero-cost rows.
+      return {
+        text: cached.response,
+        usage: cached.usage,
+        costResult: { costUsd: 0, source: "cache" },
+      };
+    }
+    // Miss — coalesce with any in-flight identical dispatch so
+    // thundering-herd traffic doesn't fan out N vendor calls.
+    //
+    // Cost-attribution fix: the shared `dispatchPromise` resolves with
+    // the real `{ text, usage, costResult }` for every awaiter, but
+    // only ONE vendor call actually fires. If each coalesced caller's
+    // `callProvider` wrapper logged the same `costResult.costUsd` to
+    // `ai_request_log`, `checkSpendCap`'s SUM(costUsd) over the window
+    // would count N × cost for one provider call — wrongly tripping
+    // the workspace's daily/monthly spend cap. Rewrite the cost on
+    // secondary returns so only the primary caller (which actually
+    // runs the IIFE below) carries the real cost; secondary callers
+    // see `{ costUsd: 0, source: "coalesced" }` — mirrors the cache-hit
+    // contract at line ~720 where re-served responses cost $0.
+    const inflight = coalesceInFlight(cacheKey);
+    if (inflight) {
+      return inflight.then((result) => ({
+        ...result,
+        costResult: { costUsd: 0, source: "coalesced" },
+      }));
+    }
+  }
+
+  // B3.8 race fix — fold gates + dispatch + telemetry + cache populate
+  // into one IIFE, then register it SYNCHRONOUSLY (no `await` between
+  // creation and registration) so concurrent callers past the cache
+  // miss share one vendor dispatch.
+  //
+  // The original layout checked `coalesceInFlight`, then awaited
+  // `checkAndReserve` (a Redis round-trip), and only registered the
+  // dispatch promise AFTER the gates resolved. That left a window
+  // where concurrent callers all passed the empty `coalesceInFlight`
+  // check, each awaited the quota gate independently (consuming N
+  // units of quota for what should be one call), and each fanned out
+  // a separate vendor call before the first caller's `registerInFlight`
+  // landed. Registering the IIFE up front closes the window: the
+  // second caller sees the placeholder on its `coalesceInFlight`
+  // check and awaits the shared result — including the same
+  // `ERR_RATE_LIMIT_LOCAL` / `ERR_SPEND_CAP_EXCEEDED` rejection if
+  // the first caller failed those gates.
+  //
+  // Gates run INSIDE the IIFE so a rejection still removes the entry
+  // on settle via `registerInFlight`'s auto-clear `.finally`. A
+  // synchronous throw before the IIFE would skip the cleanup; here
+  // the throw lands on the promise, both `.finally` and the awaiter
+  // observe it, and the next call for the same key starts fresh.
+  //
+  // CRITICAL: `registerInFlight` MUST run before the IIFE body yields
+  // on its first `await`. The IIFE body runs synchronously from creation
+  // until its first `await` (inside `checkAndReserve`), so we register
+  // immediately after the IIFE expression below. Do not insert any
+  // synchronous code between the IIFE creation and `registerInFlight`
+  // — that would re-open the race window the comment above closed.
+  let dispatchPromise;
+  dispatchPromise = (async () => {
+    // B3.7 — pre-call gates. Run BEFORE the SDK so a rejected call never
+    // touches vendor quota. Order matters:
+    //   1. Spend cap (cheap DB read, no I/O round-trip in the no-cap path).
+    //   2. Token-bucket reserve (Redis round-trip when configured).
+    // Both gates are skipped when their input data is missing — the env-
+    // default dispatch path (no route, no workspace) gets the legacy
+    // unconditional dispatch behaviour so operators not opted into B3.7
+    // see no semantic change.
+    if (workspaceId) {
+      const spend = checkSpendCap(workspaceId);
+      if (!spend.ok) {
+        const err = new Error(
+          `Spend cap exceeded (${spend.exceeded}). ` +
+          `Dispatch blocked until next ${spend.exceeded === "day" ? "24h window" : "month boundary"}.`,
+        );
+        err.code = "ERR_SPEND_CAP_EXCEEDED";
+        err.exceeded = spend.exceeded;
+        err.remainingUsd = spend.remainingUsd;
+        throw err;
+      }
+      // B4.0.1 — spend-alert webhook + log. Fire-and-forget: spend alerts
+      // never block the dispatch call, even when the webhook is down.
+      // `fireSpendAlert` reads `workspaces.spendAlertWebhookUrl` from the
+      // DB, applies a 1-hour cooldown via `spendAlertLastFiredAt` (migration
+      // 052), and POSTs a Slack-compatible JSON payload via SSRF-guarded
+      // fetch. When no webhook is configured, it no-ops and the
+      // `console.warn` below is the only signal. Both paths are best-effort.
+      if (spend.alertTriggered) {
+        // Log unconditionally so log-aggregation alerts that key on
+        // `[quotaGuard] spend alert:` keep working regardless of webhook.
+        try {
+          console.warn(formatLogLine("warn", null,
+            `[quotaGuard] spend alert: workspace=${workspaceId} ` +
+            `daily=${spend.dailySpent}/${spend.dailyCap} ` +
+            `monthly=${spend.monthlySpent}/${spend.monthlyCap} ` +
+            `threshold=${spend.thresholdPct}%`));
+        } catch { /* best-effort */ }
+        // Webhook delivery — fire-and-forget. Never awaited so it can't
+        // block the dispatch call. Errors are swallowed inside
+        // `fireSpendAlert` and logged at warn level.
+        fireSpendAlert(workspaceId, spend).catch(() => {});
+      }
+    }
+    // Token-bucket reserve. `estimatedTokens` is the caller's `maxTokens`
+    // — a generous upper bound; the post-call `reportActual` corrects
+    // drift with the real count from `usage.input + usage.output`.
+    if (routeId && route) {
+      const reserved = await checkAndReserve(routeId, effectiveMaxTokens, {
+        rpmLimit: route.rpmLimit,
+        tpmLimit: route.tpmLimit,
+      });
+      if (!reserved.ok) {
+        const err = new Error(
+          `Local rate limit reached on route ${callOptions.routeName || routeId}. ` +
+          `Retry after ${reserved.retryAfterMs}ms.`,
+        );
+        err.code = "ERR_RATE_LIMIT_LOCAL";
+        err.retryAfterMs = reserved.retryAfterMs;
+        err.reason = reserved.reason;
+        throw err;
+      }
+    }
+
+    // B4.1 — Route-driven dispatch for real routes; legacy path for
+    // transient (env-detection) routes. The discriminator is the route id:
+    //   • `"pr-..."` → real `provider_routes` row → secret blob lives in
+    //     the DB → `protocolAdapter.generate(route, messages, opts)` keyed
+    //     on `route.protocol`. This path doesn't read `process.env.*_API_KEY`
+    //     and doesn't touch `route.family` — operators can register a
+    //     `family: "custom"` route and dispatch reaches the SDK uniformly.
+    //   • `"provider:<id>"` (transient) or `null` (no route at all) →
+    //     fall back to `adapterFor(provider)` + `buildAdapterOpts(provider, …)`.
+    //     The transient route was synthesised by `resolveRoute` from env
+    //     detection — there's no DB-backed encrypted key for `secrets.js`
+    //     to decrypt, so the legacy env-driven path is correct here.
+    //
+    // OpenRouter parity: real openrouter routes carry their `baseUrl` +
+    // referer headers on the row itself (set via Settings UI on save).
+    // Transient openrouter routes still need the `OPENROUTER_*` env-derived
+    // headers + `OPENROUTER_BASE_URL`, which `buildAdapterOpts` injects.
+    //
+    // Compat / custom-family routes: real routes get the `guardedFetch`
+    // SSRF wrapper applied below so DNS-rebinding mitigation matches the
+    // legacy compat-slot behaviour. Anthropic / Google / Ollama protocols
+    // ignore `guardedFetch` (they don't go through the OpenAI SDK), so
+    // passing it for every protocol is harmless.
+    // B4.1 — ALL dispatch goes through `protocolAdapter.generate` now,
+    // both real routes (pr-*) and transient routes (provider:*). The
+    // protocol adapter's `buildOpts` falls back to `callerOpts.apiKey`
+    // when `secrets.getDecryptedKey` returns null (transient routes have
+    // no DB row to decrypt). For transient routes we resolve the env-
+    // derived key here and pass it through — the protocol module never
+    // reads process.env directly.
+    //
+    // This eliminates the last `adapterFor()` + `buildAdapterOpts()`
+    // call site from the dispatch hot path. The exit criterion from
+    // `docs/roadmap/ai-provider-bundle.md` B4.1 — "zero hardcoded
+    // family strings in dispatch path" — is now met.
+    const protocolOpts = {
+      maxTokens: effectiveMaxTokens,
+      signal,
+      responseFormat,
+      // SSRF guard for any operator-controlled baseUrl. The protocol
+      // module passes this to the OpenAI SDK as `fetch`; non-OpenAI
+      // protocols ignore it. Same DNS-rebinding mitigation as legacy
+      // compat slots — see `createSsrfGuardedFetch` JSDoc.
+      guardedFetch: route?.baseUrl ? createSsrfGuardedFetch() : undefined,
+      // OpenRouter referer headers — inject for openrouter-family routes.
+      defaultHeaders: route?.family === "openrouter" ? {
+        "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev",
+        "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri",
+      } : undefined,
+      // B4.1 — env-derived API key for transient routes. Real routes
+      // resolve their key via `secrets.getDecryptedKey` inside
+      // `protocolAdapter.buildOpts`; transient routes have no DB row so
+      // the protocol adapter's null-guard falls back to this value.
+      // `getKey(CLOUD_KEY_MAP[provider])` is the same env read that
+      // `buildAdapterOpts` used to do inline — now centralised here so
+      // the protocol module stays env-free.
+      apiKey: route?._transient
+        ? (isCompatProvider(provider)
+          ? getCompatConfig(provider)?.apiKey
+          : getKey(CLOUD_KEY_MAP[provider] || ""))
+        : undefined,
+    };
+    // Dispatch route must carry a model for the protocol module. Transient
+    // routes from `synthesiseTransientRoute` have `model: null` (the env-
+    // default model wasn't resolved there). Patch it here from the catalog
+    // so the protocol module sends the correct model string to the SDK.
+    const dispatchRoute = route?.model
+      ? route
+      : { ...route, model: buildProviderMeta()[provider]?.model || "" };
+    let text, usage;
+    ({ text, usage } = await protocolAdapter.generate(dispatchRoute, messages, protocolOpts));
+    // Token telemetry is the orchestrator's responsibility — adapters return
+    // raw usage and don't know about the metrics registry. Keeps adapters
+    // self-contained and testable in isolation.
+    // B2.4 — pass `route` through so cost is computed from `route.pricing`
+    // (operator-set) when available, with `MODEL_PRICING` as catalog
+    // fallback. Adapters no longer compute `usage.costUsd` themselves;
+    // the dispatcher owns cost via `computeCostForRoute`.
+    let costResult = { costUsd: null, source: "none" };
+    if (usage) {
+      costResult = recordAiTokens(
+        provider, usage, "generation",
+        callOptions.agentRole, callOptions.routeName || "unknown",
+        callOptions.route || null,
+      );
+    }
+    // B3.7 — drift correction. Post-call so the bucket converges to the
+    // real token count after the SDK returns, regardless of how generous
+    // or stingy the pre-call estimate was. Fire-and-forget — failures are
+    // logged inside `reportActual` and never propagate.
+    if (routeId && route && usage) {
+      const actualTokens = (Number(usage.input) || 0) + (Number(usage.output) || 0);
+      reportActual(routeId, effectiveMaxTokens, actualTokens, costResult.costUsd).catch(() => {});
+    }
+    // B3.8 — populate the cache with the freshly-dispatched response.
+    // We persist `usage` with the costUsd embedded so subsequent hits
+    // can attribute the savings via the `aiCacheSavingsUsdTotal` metric.
+    // `setCached` no-ops when the route opted out, so the eligibility
+    // check at the top is the only gate; the post-call write is
+    // unconditional and cheap.
+    if (cacheEligible && cacheKey && routeId && route.model && text) {
+      const usageWithCost = usage
+        ? { ...usage, costUsd: costResult.costUsd }
+        : { input: 0, output: 0, costUsd: costResult.costUsd };
+      setCached(
+        routeId,
+        route.model,
+        {
+          messages,
+          maxTokens: effectiveMaxTokens,
+          temperature: callOptions.temperature ?? null,
+          responseFormat: responseFormat ?? null,
+        },
+        text,
+        usageWithCost,
+        route.cacheTtlSec,
+      );
+    }
+    return { text, usage: usage || null, costResult };
+  })();
+
+  // Register the dispatch promise for in-flight coalescing — concurrent
+  // identical calls past the initial cache miss will share this promise
+  // and skip the duplicate vendor call. `registerInFlight` auto-clears
+  // the entry on settle so a long-running call can't pin memory.
+  if (cacheEligible && cacheKey) {
+    registerInFlight(cacheKey, dispatchPromise);
+  }
+  return dispatchPromise;
 }

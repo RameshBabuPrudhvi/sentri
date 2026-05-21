@@ -29,6 +29,9 @@ import * as scheduleRepo from "./database/repositories/scheduleRepo.js";
 import * as projectRepo from "./database/repositories/projectRepo.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
+import * as aiRequestLogRepo from "./database/repositories/aiRequestLogRepo.js";
+import { purgeExpired as purgeExpiredCacheRows } from "./aiProvider/responseCache.js";
+import * as providerRouteAuditRepo from "./database/repositories/providerRouteAuditRepo.js";
 import * as activityRepo from "./database/repositories/activityRepo.js";
 import { generateRunId } from "./utils/idGenerator.js";
 import { runWithAbort } from "./utils/runWithAbort.js";
@@ -52,6 +55,15 @@ let _auditRetentionTask = null;
 
 /** @type {Object|null} Daily AUTO-009j coverage retention sweep task. */
 let _coverageRetentionTask = null;
+
+/** @type {Object|null} B3.8 — daily AI response-cache janitor task. */
+let _aiCacheJanitorTask = null;
+
+/** @type {Object|null} B3.9 — daily provider-routes audit retention sweep. */
+let _providerAuditRetentionTask = null;
+
+/** @type {Object|null} B2.5 — daily AI request-log retention sweep. */
+let _aiRequestLogRetentionTask = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -433,6 +445,90 @@ export function initScheduler() {
     }
   }, { timezone: "UTC", scheduled: true });
 
+  
+  // B3.8 — daily AI response-cache janitor. Sweeps expired rows from
+  // `ai_response_cache` so the table doesn't grow unbounded over time.
+  // Runs at 04:30 UTC, after the coverage sweep, so SQLite write
+  // contention is staggered across the morning maintenance window.
+  // `purgeExpired` is best-effort — `getCached` already double-checks
+  // `expiresAt` on every read, so a janitor failure can't return stale
+  // data, just delays the storage reclaim.
+  _aiCacheJanitorTask = cron.schedule("30 4 * * *", () => {
+    try {
+      const deleted = purgeExpiredCacheRows();
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] AI response-cache janitor swept ${deleted} expired row(s)`));
+      }
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[scheduler] AI response-cache janitor failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
+  // B3.9 — daily provider-routes audit retention sweep. Runs at 05:00
+  // UTC, after the cache janitor, so the morning maintenance window
+  // stays staggered on a single SQLite writer. Honours
+  // `AI_ROUTES_AUDIT_RETENTION_DAYS` (renamed from the brand-leaking
+  // `SENTRI_AUDIT_RETENTION_DAYS` per `docs/guide/rebranding.md` —
+  // every operator-facing env var should survive a `Sentri → YourName`
+  // find-and-replace unchanged):
+  //   • unset / empty → default 90 days (roadmap baseline)
+  //   • 0            → never delete (task is armed but is a no-op)
+  //   • > 0          → delete rows older than the configured window
+  // Operators who need longer retention for compliance can bump the
+  // env var without redeploying — `purgeOlderThan` reads the cutoff
+  // on every fire.
+  _providerAuditRetentionTask = cron.schedule("0 5 * * *", () => {
+    try {
+      const raw = process.env.AI_ROUTES_AUDIT_RETENTION_DAYS;
+      const days = raw === undefined || raw === "" ? 90 : Number.parseInt(raw, 10);
+      if (!Number.isFinite(days) || days <= 0) return; // disabled
+      const deleted = providerRouteAuditRepo.purgeOlderThan(days);
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] Provider-routes audit retention swept ${deleted} row(s) older than ${days} days`));
+      }
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[scheduler] Provider-routes audit retention failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
+  // B2.5: daily AI request-log retention sweep — runs at 04:45 UTC,
+  // slotted between the B3.8 response-cache janitor (04:30) and the
+  // B3.9 provider-routes audit sweep (05:00) so all four daily AI
+  // maintenance tasks stay staggered on a single SQLite writer and
+  // never contend for the write lock on the same minute.
+  // Honours `AI_REQUEST_LOG_RETENTION_DAYS`:
+  //   • unset / empty → default 30 days
+  //   • 0            → never delete (task is armed but is a no-op)
+  //   • > 0          → delete rows older than the configured window
+  //
+  // Bugfix from the original B2.5 wiring: this block previously called
+  // `schedules.push(schedule(...))` which threw `ReferenceError:
+  // schedule is not defined` at boot (no such helper exists in this
+  // module — `schedules` at this scope is the SQL result array from
+  // `scheduleRepo.getAllEnabled`, not a task registry). Converted to
+  // the same `cron.schedule()` shape as the sibling daily tasks above
+  // and stored on `_aiRequestLogRetentionTask` so graceful shutdown
+  // can stop it via `stopAllTasks()` below.
+  _aiRequestLogRetentionTask = cron.schedule("45 4 * * *", () => {
+    try {
+      const raw = process.env.AI_REQUEST_LOG_RETENTION_DAYS;
+      const days = raw === undefined || raw === "" ? 30 : Number.parseInt(raw, 10);
+      if (!Number.isFinite(days) || days <= 0) return; // disabled
+      const deleted = aiRequestLogRepo.purgeOlderThan(days);
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] AI request-log retention sweep deleted ${deleted} row(s) older than ${days} days`));
+      }
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[scheduler] AI request-log retention sweep failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
   console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded), stale detection + audit retention + coverage retention armed`));
 }
 
@@ -483,6 +579,21 @@ export function stopAllTasks() {
   if (_coverageRetentionTask) {
     _coverageRetentionTask.stop();
     _coverageRetentionTask = null;
+  }
+  // B3.8 — graceful shutdown of the response-cache janitor.
+  if (_aiCacheJanitorTask) {
+    _aiCacheJanitorTask.stop();
+    _aiCacheJanitorTask = null;
+  }
+  // B3.9 — graceful shutdown of the provider-routes audit retention sweep.
+  if (_providerAuditRetentionTask) {
+    _providerAuditRetentionTask.stop();
+    _providerAuditRetentionTask = null;
+  }
+  // B2.5 — graceful shutdown of the AI request-log retention sweep.
+  if (_aiRequestLogRetentionTask) {
+    _aiRequestLogRetentionTask.stop();
+    _aiRequestLogRetentionTask = null;
   }
 }
 

@@ -89,21 +89,39 @@ test("(3) provider-column shim → synthetic transient route", () => {
   assert.equal(route.id, "provider:anthropic");
   assert.equal(effectiveAgentRole, "author");
 });
-test("(3) provider=openai shim → protocol=openai", () => {
+// B2.1 — Migration 048 dropped `agent_configs.provider` + `model`, so
+// the pre-existing "provider-column shim" path the next two tests
+// exercised (set `cfg.provider` → `resolveRoute` reads it and
+// synthesises a transient route) no longer exists at the schema level.
+// `agentConfigRepo.upsert` silently drops the `provider` / `model`
+// keys post-048 because they aren't in MUTABLE_FIELDS, and
+// `resolveRoute` reads `cfg.routeId` exclusively.
+//
+// The post-048 equivalent is: an admin assigns a routeId pointing at
+// a `provider_routes` row of the matching family. The tests below
+// preserve the original intent (verifying that a role's configured
+// dispatch family produces the right `protocol` + `model` on the
+// resolved route) but use the canonical post-migration shape — a
+// real provider_routes row instead of the dropped column.
+test("(3) routeId → protocol=openai + model preserved", () => {
   const ws = seedWorkspace();
-  upsertAgent(ws, "explorer", { provider: "openai", model: "gpt-4o-mini" });
-  const { route } = resolveRoute({ agentRole: "explorer", workspaceId: ws });
-  assert.equal(route.protocol, "openai");
-  assert.equal(route.model, "gpt-4o-mini");
+  const route = makeRoute(ws, { family: "openai", protocol: "openai", model: "gpt-4o-mini" });
+  upsertAgent(ws, "explorer", { routeId: route.id });
+  const { route: got } = resolveRoute({ agentRole: "explorer", workspaceId: ws });
+  assert.equal(got.protocol, "openai");
+  assert.equal(got.model, "gpt-4o-mini");
 });
-test("(3) provider=google shim → protocol=gemini", () => {
+test("(3) routeId → protocol=gemini for family=google", () => {
   const ws = seedWorkspace();
-  // Need a google key for isProviderUsable to pass.
-  process.env.GOOGLE_API_KEY = "test-google-key";
-  upsertAgent(ws, "explorer", { provider: "google" });
-  const { route } = resolveRoute({ agentRole: "explorer", workspaceId: ws });
-  assert.equal(route.protocol, "gemini");
-  delete process.env.GOOGLE_API_KEY;
+  // No env-key check needed on the route-driven path —
+  // `isProviderUsable` only gates env-detection fallbacks. A real
+  // `provider_routes` row carries its own (encrypted) key on the
+  // row, so the family is dispatch-usable regardless of env vars.
+  const route = makeRoute(ws, { family: "google", protocol: "gemini", model: "gemini-1.5-pro" });
+  upsertAgent(ws, "explorer", { routeId: route.id });
+  const { route: got } = resolveRoute({ agentRole: "explorer", workspaceId: ws });
+  assert.equal(got.protocol, "gemini");
+  assert.equal(got.family, "google");
 });
 test("(4) no agent_configs row → AI-005c collapse (effectiveAgentRole=null)", () => {
   const ws = seedWorkspace();

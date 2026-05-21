@@ -129,7 +129,7 @@ export const pipelineStageDurationSeconds = new client.Histogram({
 export const aiProviderLatencySeconds = new client.Histogram({
   name: "app_ai_provider_latency_seconds",
   help: "Latency of outbound LLM calls. `provider` ∈ {anthropic, openai, google, openrouter, ollama, compat}; `outcome` ∈ {success, rate_limited, error}; `operation` ∈ {generation, vision_heal}. Histograms enable p99 SLO dashboards per provider so a degraded vendor can be detected and the fallback chain (FEA-003) verified.",
-  labelNames: ["provider", "agent_role", "outcome", "operation"],
+  labelNames: ["provider", "agent_role", "outcome", "operation", "route_name"],
   buckets: AI_BUCKETS,
   registers: [register],
 });
@@ -137,14 +137,14 @@ export const aiProviderLatencySeconds = new client.Histogram({
 export const aiProviderTokensTotal = new client.Counter({
   name: "app_ai_provider_tokens_total",
   help: "Total tokens consumed across all LLM calls. `kind` ∈ {input, output}; `operation` ∈ {generation, vision_heal}. Combined with provider-specific pricing, this is the canonical SaaS unit-economics input: cost per workspace per day = sum(rate(app_ai_provider_tokens_total[1d])) × price_per_token, split by operation so vision-heal cost can be tracked against the per-project budget cap.",
-  labelNames: ["provider", "agent_role", "kind", "operation"],
+  labelNames: ["provider", "agent_role", "kind", "operation", "route_name"],
   registers: [register],
 });
 
 export const aiProviderErrorsTotal = new client.Counter({
   name: "app_ai_provider_errors_total",
-  help: "AI provider failures bucketed by category. `reason` ∈ {rate_limit, timeout, auth, server_error, network, unknown}; `operation` ∈ {generation, vision_heal}. Drives the AI provider health alert and the circuit-breaker (FEA-003) trip decisions.",
-  labelNames: ["provider", "agent_role", "reason", "operation"],
+  help: "AI provider failures bucketed by category. `reason` ∈ {rate_limit, rate_limit_local, spend_cap_exceeded, timeout, auth, server_error, network, unknown}; `operation` ∈ {generation, vision_heal}. `rate_limit` = vendor-side 429; `rate_limit_local` = B3.7 quotaGuard rejected before SDK; `spend_cap_exceeded` = B3.7 workspace USD cap reached. Drives the AI provider health alert and the circuit-breaker (FEA-003) trip decisions.",
+  labelNames: ["provider", "agent_role", "reason", "operation", "route_name"],
   registers: [register],
 });
 
@@ -164,7 +164,38 @@ export const aiProviderErrorsTotal = new client.Counter({
 export const aiProviderCostUsdTotal = new client.Counter({
   name: "app_ai_cost_usd_total",
   help: "Cumulative LLM spend in USD, bucketed by provider + operation. Computed per call from the per-(provider, model) catalog at aiProvider/modelCatalog.js#MODEL_PRICING. Catalog misses emit no increment (no fake zeros); known-free models (Ollama) emit increment of 0. Vision-heal uses the MNT-001 $5/M input + $15/M output midpoint when the model isn't in the catalog. SaaS unit-economics dashboard divides by workspace count to get cost-per-customer.",
-  labelNames: ["provider", "agent_role", "operation"],
+  labelNames: ["provider", "agent_role", "operation", "route_name"],
+  registers: [register],
+});
+
+// B3.8 — Response-cache telemetry. Three counters give the operator a
+// per-route view of cache effectiveness:
+//
+//   • hits / misses → hit rate per route + role
+//   • savings_usd  → cumulative dollars saved (sum of `costUsd` from the
+//                    original dispatch on every hit)
+//
+// All three carry `route_name` + `agent_role` to match the existing AI
+// dispatch label set. `route_name` is operator-controlled free text,
+// same cardinality concern documented in `aiProviderLatencySeconds`.
+export const aiCacheHitsTotal = new client.Counter({
+  name: "app_ai_cache_hits_total",
+  help: "B3.8 — Response cache hits. Each increment represents one AI call returned from `ai_response_cache` instead of dispatching to the provider. Combined with misses, gives the cache hit rate; combined with savings_usd, gives the spend reduction operators get from caching deterministic prompts.",
+  labelNames: ["route_name", "agent_role"],
+  registers: [register],
+});
+
+export const aiCacheMissesTotal = new client.Counter({
+  name: "app_ai_cache_misses_total",
+  help: "B3.8 — Response cache misses. Includes both first-time prompts (cold cache) and TTL expiries. Hit rate = hits / (hits + misses).",
+  labelNames: ["route_name", "agent_role"],
+  registers: [register],
+});
+
+export const aiCacheSavingsUsdTotal = new client.Counter({
+  name: "app_ai_cache_savings_usd_total",
+  help: "B3.8 — Cumulative USD saved by cache hits. Computed by summing the `costUsd` field stored alongside each cached response, so the metric represents what the operator WOULD have paid had the cache been disabled. Catalog-miss responses contribute 0.",
+  labelNames: ["route_name", "agent_role"],
   registers: [register],
 });
 
@@ -250,10 +281,24 @@ export function recordRunOutcome(run, defaultType = "unknown") {
  * emit raw error messages as labels (cardinality bomb).
  *
  * @param {unknown} err
- * @returns {"rate_limit"|"timeout"|"auth"|"server_error"|"network"|"unknown"}
+ * @returns {"rate_limit"|"rate_limit_local"|"spend_cap_exceeded"|"timeout"|"auth"|"server_error"|"network"|"unknown"}
  */
 export function classifyAiError(err) {
   if (!err) return "unknown";
+  // B4.2 — typed `.code` errors thrown by the dispatcher's pre-call gates
+  // (B3.7 `quotaGuard`) deserve their own reason buckets so dashboards can
+  // distinguish "we rejected the call locally" (operator config / workspace
+  // policy) from "the vendor rejected it" (rate_limit / auth / server_error).
+  // Without this branch every `ERR_RATE_LIMIT_LOCAL` lands under
+  // `reason="unknown"` alongside genuinely unclassifiable failures, which
+  // (a) hides the most actionable signal — a route's `rpmLimit`/`tpmLimit`
+  // is too tight — inside a noisy bucket, and (b) bankrupts the
+  // observability runbook recipe at `docs/guide/observability.md` (which
+  // documents `reason="rate_limit_local"` as the rate-limit-rejection key).
+  // Check `.code` BEFORE status / message heuristics so a typed error wins
+  // over any incidental status that happens to be set on the Error object.
+  if (err?.code === "ERR_RATE_LIMIT_LOCAL") return "rate_limit_local";
+  if (err?.code === "ERR_SPEND_CAP_EXCEEDED") return "spend_cap_exceeded";
   const status = Number(err?.status || err?.statusCode || err?.response?.status);
   if (status === 429) return "rate_limit";
   if (status === 401 || status === 403) return "auth";
