@@ -258,14 +258,14 @@ The `LLMStreamPanel.jsx` shows raw streaming tokens from the AI during generatio
 ### DS-001 — Inline Styles Contaminate Component Boundaries
 **Severity: High**
 
-Despite the AGENT.md rule "no inline `style={{}}` except for data-driven values," `TopBar.jsx` contains extensive inline styles for nearly every element: the header, user menu button, dropdown panel, and menu items. `Settings.jsx` has inline styles throughout its OllamaStatusPanel and provider cards.
+Despite the AGENT.md rule "no inline `style={ {} }` (double-brace JSX expressions) except for data-driven values," `TopBar.jsx` contains extensive inline styles for nearly every element: the header, user menu button, dropdown panel, and menu items. `Settings.jsx` has inline styles throughout its OllamaStatusPanel and provider cards.
 
 The design system has excellent token coverage in `tokens.css` but these tokens are not being used consistently at the component level. This makes theming unpredictable and dark-mode behaviour inconsistent.
 
 **Audit findings:**
-- `TopBar.jsx` — header element uses `style={{ height: 52, background: "var(--surface)", ... }}` — should be `.topbar` CSS class
+- `TopBar.jsx` — header element uses `style={ { height: 52, background: "var(--surface)", ... } }` — should be `.topbar` CSS class
 - `TopBar.jsx` — user menu uses `onMouseEnter`/`onMouseLeave` for hover states — should be CSS `:hover`
-- `Settings.jsx` — OllamaStatusPanel panel uses `style={{ marginTop: 16, display: "grid", gap: 12 }}` — should be utility classes
+- `Settings.jsx` — OllamaStatusPanel panel uses `style={ { marginTop: 16, display: "grid", gap: 12 } }` — should be utility classes
 - `NotFound` component (App.jsx) uses entirely inline styles
 
 **Fix:** Migrate all layout and theme-dependent styles from inline to CSS classes. Create a `topbar.css` feature partial. Establish a lint rule (ESLint `react/forbid-component-props`) to prevent new inline style additions except for genuinely data-driven values.
