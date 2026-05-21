@@ -61,18 +61,38 @@ ensureLegacyColumns();
 // Reset DB state between tests so one test's writes can't leak into
 // the next test's assertions. `:memory:` is process-scoped, so the
 // only safe option is DELETE FROM the tables this file touches.
+//
+// The DELETE ordering matters: FKs are ON for `:memory:` SQLite by
+// default, and several tables in this file's path cascade-reference
+// workspaces (`agent_configs.workspaceId`, `provider_routes.workspaceId`).
+// We wrap the resets in `defer_foreign_keys = ON` so the ordering of
+// DELETEs inside the transaction doesn't trip cascading FK checks
+// mid-reset (e.g. deleting `users` before `workspace_members` resolves
+// the membership rows' FK on users — without deferral, the runtime
+// CASCADE for that delete would race the subsequent statement and
+// surface as `FOREIGN KEY constraint failed`). `defer_foreign_keys`
+// is per-transaction and resets automatically on COMMIT, so it can't
+// leak across tests.
 function resetTables() {
   const db = getDatabase();
-  db.exec("DELETE FROM provider_route_audit");
-  db.exec("DELETE FROM provider_routes");
-  db.exec("DELETE FROM agent_configs");
-  db.exec("DELETE FROM api_keys");
-  // Workspaces + users are seeded per test via seedWorkspace below,
-  // so clear them too. The `__system__` sentinel from migration 033
-  // gets re-seeded by `ensureDefaultWorkspaces` on demand.
-  db.exec("DELETE FROM workspace_members");
-  db.exec("DELETE FROM workspaces WHERE id != '__system__'");
-  db.exec("DELETE FROM users WHERE id != '__system__'");
+  db.exec("BEGIN");
+  try {
+    db.exec("PRAGMA defer_foreign_keys = ON");
+    db.exec("DELETE FROM provider_route_audit");
+    db.exec("DELETE FROM provider_routes");
+    db.exec("DELETE FROM agent_configs");
+    db.exec("DELETE FROM api_keys");
+    // Workspaces + users are seeded per test via seedWorkspace below,
+    // so clear them too. The `__system__` sentinel from migration 033
+    // is preserved via the explicit `id != '__system__'` filter.
+    db.exec("DELETE FROM workspace_members");
+    db.exec("DELETE FROM workspaces WHERE id != '__system__'");
+    db.exec("DELETE FROM users WHERE id != '__system__'");
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
 }
 /**
  * Seed a workspace row (with a user as ownerId) so FK constraints

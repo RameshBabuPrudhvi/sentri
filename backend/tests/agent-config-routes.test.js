@@ -28,14 +28,38 @@ async function main() {
     const cookieB = `access_token=${b.token}`;
 
     await test("CRUD round-trip", async () => {
-      let out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", provider: "openai", fallbackRole: "reviewer" } });
+      // B2.1 — `agent_configs.provider` + `model` columns were dropped
+      // in migration 048. The role's dispatch target now lives on a
+      // `provider_routes` row referenced by `routeId`. POST below
+      // creates the role; the PATCH assignment exercises the new
+      // route-driven update surface instead of the dropped `model`
+      // field.
+      let out = await apiReq(base, "/api/settings/agent-roles", { method: "POST", cookie: cookieA, body: { role: "planner", fallbackRole: "reviewer" } });
       assert.equal(out.res.status, 201);
       out = await apiReq(base, "/api/settings/agent-roles", { cookie: cookieA });
       assert.equal(out.res.status, 200);
       assert.equal(out.json.roles.length, 1);
-      out = await apiReq(base, "/api/settings/agent-roles/planner", { method: "PATCH", cookie: cookieA, body: { model: "gpt-4o-mini" } });
+      // Create a real `provider_routes` row in workspace A so the PATCH
+      // below has a valid routeId target. `providerRouteRepo.upsert` is
+      // workspace-scoped by `agentConfigRepo.upsert`'s validation, so
+      // creating in A and PATCHing planner@A is the canonical flow an
+      // admin would use from Settings → Provider Routes → Agent Roles.
+      const routeRes = await apiReq(base, "/api/settings/provider-routes", {
+        method: "POST",
+        cookie: cookieA,
+        body: {
+          name: "openai-gpt-4o-mini",
+          family: "openai",
+          protocol: "openai",
+          model: "gpt-4o-mini",
+        },
+      });
+      assert.equal(routeRes.res.status, 201);
+      const routeId = routeRes.json.id;
+      assert.ok(routeId?.startsWith("pr-"), "provider_routes upsert must return pr-... id");
+      out = await apiReq(base, "/api/settings/agent-roles/planner", { method: "PATCH", cookie: cookieA, body: { routeId } });
       assert.equal(out.res.status, 200);
-      assert.equal(out.json.model, "gpt-4o-mini");
+      assert.equal(out.json.routeId, routeId, "routeId persists on the agent_configs row post-PATCH");
       out = await apiReq(base, "/api/settings/agent-roles/planner", { method: "DELETE", cookie: cookieA });
       assert.equal(out.res.status, 200);
     });
