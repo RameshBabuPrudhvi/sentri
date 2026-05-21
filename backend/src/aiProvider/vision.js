@@ -2,13 +2,34 @@
  * @module vision
  * @description Vision (multimodal) provider abstraction — MNT-001 stage-8 healing.
  *
- * VISION_CAPABLE_MODELS lives in modelCatalog.js — operators add new vision-
- * capable model IDs there, not here. An explicit VISION_MODEL env var
- * bypasses the whitelist for opt-in coverage of new models.
+ * Vision-model resolution priority (B2.3):
+ *   1. `VISION_MODEL` env override — explicit operator opt-in, no
+ *      whitelist check (lets operators try a brand-new vision model
+ *      before the catalog is updated).
+ *   2. Workspace healer route's `capabilities.vision === true` AND
+ *      its `model` — the route-driven canonical path. Set up by an
+ *      admin in Settings → Agent Roles → healer with a route whose
+ *      capability probe (B2.2) confirmed vision support.
+ *   3. `AI_MODEL` env, GUARDED by `VISION_CAPABLE_MODELS` — single-
+ *      tenant deployments without per-workspace routes that just want
+ *      "the same model the rest of the platform uses, if it's vision-
+ *      capable".
+ *   4. Active provider's default model, GUARDED by `VISION_CAPABLE_MODELS` —
+ *      catch-all when no agent_config and no override exist.
+ *   5. `null` — no vision-capable model is available; the caller
+ *      degrades to non-LLM healing.
+ *
+ * Why both `route.capabilities.vision` (route path) AND `VISION_CAPABLE_MODELS`
+ * (env path) coexist: routes carry first-hand network probe evidence
+ * (B2.2 — what the provider actually accepts). Env paths don't have a
+ * route to probe, so they fall back to the static catalog. When B3
+ * lands the Settings UI for routes, the env paths become legacy and
+ * eventually retire alongside `resolveProvider` (B2.6).
  */
 
 import { getProvider, getProviderMeta } from "./providerInfo.js";
-import { resolveProvider, resolveRoute, isProviderUsable } from "./registry.js";
+import { resolveRoute, isProviderUsable } from "./registry.js";
+import { VISION_CAPABLE_MODELS } from "./modelCatalog.js";
 import {
   providerMetricLabel,
   buildAdapterOpts,
@@ -32,31 +53,42 @@ import { parseJSON } from "./index.js";
  * `PATCH /projects/:id` to reject `pixelmatch_and_llm` mode with
  * `VISION_PROVIDER_NOT_CONFIGURED` when no usable model exists.
  *
- * Resolution order:
- *   1. `VISION_MODEL` env var (explicit override, no whitelist check).
- *   2. `AI_MODEL` env var if it's in `VISION_CAPABLE_MODELS`.
- *   3. AI-005: `agent_configs[healer].model` for the supplied workspaceId,
- *      when it's whitelist-vision-capable.
- *   4. The active provider's default model if vision-capable.
- *   5. `null`.
+ * See module-level JSDoc for the full resolution priority. In short:
+ * `VISION_MODEL` env override → workspace healer route (B1.6 +
+ * B2.2 probe) → guarded `AI_MODEL` env → guarded provider default.
  *
  * @param {Object}  [opts]
- * @param {string}  [opts.workspaceId] - AI-005: when present, the healer
- *   agent config's `model` is preferred over the workspace default so a
- *   per-role override (e.g. claude-3-5-sonnet) actually drives the call.
+ * @param {string}  [opts.workspaceId] - B1.6: when present, the healer
+ *   agent_config's `routeId` drives selection so a per-role override
+ *   (e.g. claude-3-5-sonnet on a different workspace's anthropic
+ *   route) actually drives the call. The route's `capabilities.vision`
+ *   field (set by B2.2 probe) is the authoritative vision-support
+ *   signal — operators no longer have to keep `VISION_CAPABLE_MODELS`
+ *   in sync with their actual provider config.
  * @returns {string|null}
  */
 export function resolveVisionModel({ workspaceId = null } = {}) {
+  // 1. Explicit operator override — no whitelist check.
   if (process.env.VISION_MODEL) return process.env.VISION_MODEL;
-  if (process.env.AI_MODEL) return process.env.AI_MODEL;
+  // 2. Route-driven path: healer agent_config → routeId → route with
+  //    capabilities.vision === true. This is the canonical multi-
+  //    tenant path; B2.2's probe wrote the capability evidence so we
+  //    trust the route here.
   if (workspaceId) {
     const { route } = resolveRoute({ agentRole: "healer", workspaceId });
     if (route?.capabilities?.vision && route?.model) return route.model;
   }
+  // 3. AI_MODEL env, guarded against accidentally sending image data
+  //    to a text-only model (regression Lifeguard flagged when the
+  //    guard was removed earlier in this PR).
+  if (process.env.AI_MODEL && VISION_CAPABLE_MODELS.has(process.env.AI_MODEL)) {
+    return process.env.AI_MODEL;
+  }
+  // 4. Active provider's default model, same guard.
   const provider = getProvider();
   if (!provider) return null;
   const meta = getProviderMeta();
-  if (meta?.model) return meta.model;
+  if (meta?.model && VISION_CAPABLE_MODELS.has(meta.model)) return meta.model;
   return null;
 }
 
@@ -124,14 +156,27 @@ export async function callVisionModel({ screenshot, intent, contextHtml, signal,
   if (!screenshot || !intent?.label) return null;
   const model = resolveVisionModel({ workspaceId });
   if (!model) return null;
-  // AI-005: prefer the healer agent_config provider when configured;
-  // fall back to the workspace default exactly the same way generateText
-  // does for unconfigured roles. `resolveProvider` itself enforces the
-  // detection priority (sticky-fallback > agentRole > env detection).
+  // B2.3: switched from `resolveProvider` (broken post-048 — reads the
+  // dropped `cfg.provider` column) to `resolveRoute` so the per-role
+  // route assignment actually drives provider selection. Mirrors the
+  // pattern in `dispatcher.resolveAgentCall`: provider id comes from
+  // the route's `family` (real route) or `_transientProvider` (shim).
+  // `routeName` is captured for the `route_name` Prometheus label so
+  // vision-heal metrics stay split per-route alongside generation
+  // metrics (B2.4 — already added the label dimension to the four
+  // AI metric definitions).
+  // `routeId` (B2.5 request log linkage) is intentionally NOT captured
+  // here — vision-heal doesn't route through `callProvider`'s
+  // `logRequest()` post-call hook (it dispatches via
+  // `adapterFor(provider).generateVision()` directly). When
+  // vision-heal request logging lands as a follow-up, the resolved
+  // route should be threaded into a dedicated `logRequest` call here.
   let provider;
+  let routeName = "unknown";
   if (workspaceId) {
-    const resolved = resolveProvider({ agentRole, workspaceId });
-    provider = resolved.provider;
+    const { route } = resolveRoute({ agentRole, workspaceId });
+    provider = route?._transientProvider || route?.family || null;
+    routeName = route?.name || route?.id || "unknown";
   } else {
     provider = getProvider();
   }
@@ -167,7 +212,7 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // `ai.agent_role=healer` (or whatever role the caller passed). Matches the
   // Prometheus labels written below so a "spend by role" Grafana query
   // and a "spans by role" Tempo / Jaeger query stay in sync.
-  annotateAiCallSpan({ provider, agentRole, operation: "vision_heal" });
+  annotateAiCallSpan({ provider, agentRole, operation: "vision_heal", routeName });
 
   // Build a vision-specific opts bag. We reuse buildAdapterOpts() shape
   // for the auth/baseUrl/SSRF fields, then layer the image fields on top.
@@ -193,8 +238,8 @@ ${String(contextHtml).slice(0, 800)}` : "");
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
       const reason = classifyAiError(err);
       const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome, operation: "vision_heal" }, seconds);
-      aiProviderErrorsTotal.inc({ provider: metricLabel, agent_role: agentRole, reason, operation: "vision_heal" });
+      aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome, operation: "vision_heal", route_name: routeName }, seconds);
+      aiProviderErrorsTotal.inc({ provider: metricLabel, agent_role: agentRole, reason, operation: "vision_heal", route_name: routeName });
     } catch {}
     return null;
   }
@@ -203,7 +248,7 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // `usage.costUsd` (catalog-derived) for every adapter call, including
   // vision-heal. We let it run for tokens, but the cost increment here is
   // gated below so we don't double-count when the catalog has pricing.
-  if (usage) recordAiTokens(provider, usage, "vision_heal", agentRole);
+  if (usage) recordAiTokens(provider, usage, "vision_heal", agentRole, routeName);
   let parsed;
   try { parsed = parseJSON(raw); } catch { return null; }
   const confidence = Number(parsed?.confidence);
@@ -237,13 +282,13 @@ ${String(contextHtml).slice(0, 800)}` : "");
     costUsd = inK * 5 + outK * 15;
     try {
       if (Number.isFinite(costUsd) && costUsd > 0) {
-        aiProviderCostUsdTotal.inc({ provider: metricLabel, agent_role: agentRole, operation: "vision_heal" }, costUsd);
+        aiProviderCostUsdTotal.inc({ provider: metricLabel, agent_role: agentRole, operation: "vision_heal", route_name: routeName }, costUsd);
       }
     } catch {}
   }
   try {
     const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-    aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome: "success", operation: "vision_heal" }, seconds);
+    aiProviderLatencySeconds.observe({ provider: metricLabel, agent_role: agentRole, outcome: "success", operation: "vision_heal", route_name: routeName }, seconds);
   } catch {}
   return { confidence: Math.min(1, Math.max(0, confidence)), box, model, costUsd, reasoning: typeof parsed?.reasoning === "string" ? parsed.reasoning.slice(0, 200) : null };
 }

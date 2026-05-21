@@ -21,7 +21,13 @@
 
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { generateText } from "./index.js";
-import { resolveProvider } from "./registry.js";
+// B2.3 — `resolveRoute` replaces the legacy `resolveProvider` for both
+// the per-role provider lookup AND the dedup-bucket key. After
+// migration 048 dropped `agent_configs.provider`, `resolveProvider`
+// silently falls through to env detection, which collapses every
+// role into the same bucket and defeats the per-(workspace, route)
+// probe granularity multi-tenant deployments expect.
+import { resolveRoute } from "./registry.js";
 
 /**
  * Canonical AI-005 **user-configurable** agent role names — the closed set
@@ -77,20 +83,24 @@ export const METRIC_AGENT_ROLES = Object.freeze([...AGENT_ROLES, "default"]);
  * @returns {Promise<{ok: boolean, reason: string|null, provider: string|null}>}
  */
 async function probeRole(workspaceId, role, signal) {
-  // The try/catch wraps BOTH `resolveProvider` and `generateText` because
-  // `resolveProvider` itself can throw (e.g. forced `AI_PROVIDER` pointing
-  // at an unknown id surfaces as a synchronous throw from `detectProvider`).
-  // Without this wrapper, the throw would propagate through `Promise.all`
-  // in `validateAgentConfigs` and abandon the probe results for every
-  // other role — converting a one-role config error into a total
-  // health-check failure for the workspace.
+  // The try/catch wraps BOTH `resolveRoute` and `generateText` because
+  // `resolveRoute` itself can throw (e.g. forced `AI_PROVIDER` pointing
+  // at an unknown id surfaces as a synchronous throw from `detectProvider`,
+  // and `synthesiseTransientRoute` throws `ERR_UNKNOWN_PROTOCOL` on an
+  // unmapped provider). Without this wrapper, the throw would propagate
+  // through `Promise.all` in `validateAgentConfigs` and abandon the probe
+  // results for every other role — converting a one-role config error
+  // into a total health-check failure for the workspace.
   let provider = null;
   try {
     // Resolve first so we can report which provider would have been used
-    // even when the probe call fails. `resolveProvider` returns
-    // `{ provider: null }` when nothing is usable — surface that as a
-    // config error, not a network failure.
-    ({ provider } = resolveProvider({ agentRole: role, workspaceId }));
+    // even when the probe call fails. `resolveRoute` returns `route:
+    // null` when nothing is usable — surface that as a config error,
+    // not a network failure. Provider id comes from `route.family`
+    // (real route) or `route._transientProvider` (shim) — same pattern
+    // as `dispatcher.resolveAgentCall`.
+    const { route } = resolveRoute({ agentRole: role, workspaceId });
+    provider = route?._transientProvider || route?.family || null;
     if (!provider) {
       return { ok: false, reason: "no_provider_configured", provider: null };
     }
@@ -180,29 +190,47 @@ export async function validateAgentConfigs(workspaceId, { signal, roles } = {}) 
   probeRoles = [...new Set(probeRoles.filter((r) => allowed.has(r)))];
   if (probeRoles.length === 0) return { ok: true, agentRoles: {} };
 
-  // Cost optimisation: dedupe probes by resolved provider id. A workspace
-  // with 7 roles all pointing at one Anthropic key would otherwise burn 7
-  // paid API calls per crawl. We resolve each role's provider via
-  // `resolveProvider` (cheap — it's an in-process state machine), bucket
-  // roles by provider, probe ONE role per provider, then fan the result
-  // back out to every role in the bucket. Roles that can't be resolved
-  // (provider=null) get their own bucket per role so each surfaces the
-  // `no_provider_configured` reason in the result map.
+  // Cost optimisation: dedupe probes by resolved route id (or provider
+  // id when no route exists yet — the AI-005 shim path). A workspace
+  // with 7 roles all pointing at the same `provider_routes` row would
+  // otherwise burn 7 paid API calls per crawl. We resolve each role's
+  // route via `resolveRoute` (cheap — in-process state machine, same
+  // path the dispatcher uses), bucket roles by route, probe ONE role
+  // per route, then fan the result back out to every role in the
+  // bucket. Roles that can't be resolved (route=null) get their own
+  // bucket per role so each surfaces the `no_provider_configured`
+  // reason in the result map.
+  //
+  // B2.3 change: bucketing on `routeId` (was `provider`) gives true
+  // per-route granularity — two anthropic routes pointing at different
+  // models legitimately get separate probes. The previous provider-
+  // keyed bucket would have collapsed them into one.
   //
   // Trade-off: roles in the same bucket share the probe's `reason` field —
-  // an Anthropic outage looks identical for planner / author / critic.
-  // That's fine for "reachability" semantics; per-role failure isolation
-  // is meaningful only when the providers themselves differ.
+  // an Anthropic outage on one route looks identical for every role
+  // assigned to that route. That's correct for "reachability" semantics;
+  // per-role failure isolation only becomes meaningful when the route
+  // assignments themselves differ.
   const buckets = new Map(); // dedupKey → { canonicalRole, roles[] }
   for (const role of probeRoles) {
     let dedupKey;
-    let canonicalRole = role;
+    const canonicalRole = role;
     try {
-      const resolved = resolveProvider({ agentRole: role, workspaceId });
-      dedupKey = resolved?.provider ? `provider:${resolved.provider}` : `role:${role}`;
+      const { route } = resolveRoute({ agentRole: role, workspaceId });
+      if (route?.id) {
+        // Real routes (`pr-...`) AND transient routes (`provider:...`)
+        // both carry a stable id we can dedupe on. Two roles with the
+        // same routeId share one probe; two roles with different routeIds
+        // get their own.
+        dedupKey = `route:${route.id}`;
+      } else {
+        dedupKey = `role:${role}`;
+      }
     } catch {
-      // resolveProvider can throw on misconfig (forced AI_PROVIDER pointing
-      // at unknown id). Fall back to per-role probe so the error surfaces.
+      // resolveRoute can throw on misconfig (forced AI_PROVIDER pointing
+      // at unknown id, or ERR_UNKNOWN_PROTOCOL on a legacy provider
+      // value that's not in the protocolForProvider map). Fall back to
+      // per-role probe so the error surfaces in the result map.
       dedupKey = `role:${role}`;
     }
     if (!buckets.has(dedupKey)) buckets.set(dedupKey, { canonicalRole, roles: [role] });
