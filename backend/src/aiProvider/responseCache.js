@@ -107,8 +107,8 @@ export function computeCacheKey(routeId, model, params = {}) {
  * @param {string} routeId
  * @param {string} model
  * @param {Object} params
- * @param {{ agentRole?: string, routeName?: string }} [labels] - For metrics.
- * @returns {{ response: string, usage: Object|null, fromCache: true }|null}
+ * @param {Object} [labels] - For metrics: `{ agentRole?: string, routeName?: string }`.
+ * @returns {Object|null} `{ response, usage, fromCache: true }` on hit, `null` on miss.
  */
 export function getCached(routeId, model, params, labels = {}) {
   if (!routeId || !model) return null;

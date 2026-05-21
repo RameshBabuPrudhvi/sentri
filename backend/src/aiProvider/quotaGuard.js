@@ -313,8 +313,8 @@ function readWindowedSpend(workspaceId) {
  * @param {string} routeId
  * @param {number} estimatedTokens - Best-effort estimate. The post-call
  *   `reportActual` corrects drift after the SDK returns.
- * @param {{rpmLimit?: number|null, tpmLimit?: number|null}} [limits]
- * @returns {Promise<{ok: boolean, retryAfterMs: number, reason?: string}>}
+ * @param {Object} [limits] - `{ rpmLimit?: number|null, tpmLimit?: number|null }`.
+ * @returns {Promise<Object>} `{ ok: boolean, retryAfterMs: number, reason?: string }`.
  */
 export async function checkAndReserve(routeId, estimatedTokens, limits = {}) {
   if (!routeId) return { ok: true, retryAfterMs: 0 };
@@ -353,7 +353,7 @@ export async function reportActual(routeId, estimatedTokens, actualTokens, _cost
  * unconditionally; the function never queries `ai_request_log` for them.
  *
  * @param {string} workspaceId
- * @returns {{ ok: boolean, remainingUsd: number|null, exceeded?: "day"|"month", alertTriggered?: boolean, dailyCap?: number|null, monthlyCap?: number|null, dailySpent?: number, monthlySpent?: number, thresholdPct?: number }}
+ * @returns {Object} `{ ok, remainingUsd, exceeded?: "day"|"month", alertTriggered?, dailyCap?, monthlyCap?, dailySpent?, monthlySpent?, thresholdPct? }`.
  */
 export function checkSpendCap(workspaceId) {
   if (!workspaceId) return { ok: true, remainingUsd: null };

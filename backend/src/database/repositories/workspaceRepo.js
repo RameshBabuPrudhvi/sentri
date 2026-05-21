@@ -118,7 +118,8 @@ export function getOwnedWorkspaceIds(userId) {
  * replacement }` objects that the redaction pipeline already iterates.
  *
  * @param {string} workspaceId
- * @returns {{ mode: "none"|"redacted"|"full", customRules: Array<{pattern: string, flags?: string, replacement?: string}> }}
+ * @returns {Object} `{ mode: "none"|"redacted"|"full", customRules: Array }` —
+ *   each custom rule is `{ pattern: string, flags?: string, replacement?: string }`.
  *   When the workspace has never been migrated through B2.5 the row
  *   has the column DEFAULT `'none'` so callers always get a usable
  *   shape — never `undefined`.
