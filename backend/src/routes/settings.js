@@ -608,13 +608,40 @@ router.patch("/settings/provider-routes/:id", requireRole("admin"), (req, res) =
 });
 
 /**
- * Delete a route. Sibling `fallbackRouteId` references to this route
- * are nulled in the same transaction by the repo so dispatch can rely
- * on every non-null fallback pointing at an existing row.
+ * Delete a route. Two referential-integrity guards run before the repo
+ * touches the row:
+ *
+ *   1. **`agent_configs.routeId` references** — checklist B3.3 requires
+ *      the DELETE to REFUSE when any agent role is pinned to this
+ *      route. Without this gate an admin could one-click-break every
+ *      workspace pipeline by deleting the route those roles dispatch
+ *      against. We list the offending roles in the 409 response so
+ *      the Settings UI can show the operator "reassign these roles
+ *      first" rather than a bare "in use" error.
+ *
+ *   2. **Sibling `provider_routes.fallbackRouteId` references** — the
+ *      repo nulls these in the same transaction as the delete (see
+ *      `providerRouteRepo.remove` JSDoc) so dispatch can rely on every
+ *      non-null fallback pointing at an existing row. No HTTP-level
+ *      guard needed because the cascading null is the documented
+ *      contract, not a footgun.
  */
 router.delete("/settings/provider-routes/:id", requireRole("admin"), (req, res) => {
   const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
   if (!existing) return res.status(404).json({ error: "Route not found" });
+  // B3.3 guard — refuse with 409 when any agent_configs row pins this
+  // routeId. `listByWorkspace` is cheap (workspace-scoped index) so we
+  // don't pay for a dedicated repo helper just for this check.
+  const pinnedRoles = agentConfigRepo.listByWorkspace(req.workspaceId)
+    .filter((c) => c.routeId === existing.id)
+    .map((c) => c.role);
+  if (pinnedRoles.length > 0) {
+    return res.status(409).json({
+      error: `Route is in use by agent role(s): ${pinnedRoles.join(", ")}. Reassign or clear those roles before deleting.`,
+      code: "ERR_ROUTE_IN_USE",
+      pinnedRoles,
+    });
+  }
   const result = providerRouteRepo.remove(req.workspaceId, req.params.id, { userId: req.authUser?.sub || null });
   logActivity({ ...actor(req), type: "settings.update", detail: `Provider route deleted: ${existing.name}` });
   res.json({ ok: true, ...result });
