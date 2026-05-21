@@ -30,6 +30,7 @@ const agentConfigRepo = await import("../src/database/repositories/agentConfigRe
 const {
   breakerKey,
   resolveProvider,
+  resolveRoute,
   recordProviderFailure,
   recordProviderSuccess,
   isCircuitBreakerOpen,
@@ -71,13 +72,57 @@ function seedWorkspace() {
   return wsId;
 }
 
+/**
+ * Seed an `agent_configs` row pinned to a `provider_routes` row.
+ *
+ * B2.1 — `agent_configs.provider` + `model` were dropped in migration
+ * 048; dispatch now keys on `routeId`. Tests that previously passed
+ * `provider: "openai"` to drive a planner toward OpenAI now seed a
+ * matching `provider_routes` row and write its id as `routeId`.
+ *
+ * The helper find-or-creates a route per (workspaceId, family) so
+ * multiple `upsertConfig` calls for the same family in one workspace
+ * share a single route — mirrors how the real backfill script
+ * dedupes, and keeps test setup compact.
+ *
+ * `family` defaults to `"anthropic"` to match the original
+ * `provider: "anthropic"` default. Tests that need a specific
+ * family pass `{ family: "openai" }` etc.
+ */
+function ensureRouteForFamily(workspaceId, family) {
+  const db = getDatabase();
+  const existing = db.prepare(
+    "SELECT id FROM provider_routes WHERE workspaceId = ? AND family = ? LIMIT 1",
+  ).get(workspaceId, family);
+  if (existing) return existing.id;
+  const id = `pr-${randomUUID().slice(0, 8)}`;
+  // Protocol mapping mirrors `protocolForProvider.js` — kept inline so
+  // this test doesn't take an import dependency on the runtime helper
+  // for a one-line lookup.
+  const protocol =
+    family === "anthropic" ? "anthropic"
+    : family === "google" ? "gemini"
+    : family === "local" ? "ollama"
+    : "openai";
+  db.prepare(
+    "INSERT INTO provider_routes (id, workspaceId, name, family, protocol, baseUrl, model, " +
+    "enabled, cacheEnabled, cacheTtlSec, createdAt, updatedAt) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?)",
+  ).run(id, workspaceId, `route-${family}-${id.slice(-4)}`, family, protocol, null, null, now(), now());
+  return id;
+}
+
 function upsertConfig(workspaceId, role, overrides = {}) {
+  // `provider`/`model` columns are gone post-048. Tests that pass
+  // `{ provider: "openai" }` now produce a routeId pointing at an
+  // openai-family `provider_routes` row.
+  const family = overrides.provider ?? overrides.family ?? "anthropic";
+  const routeId = overrides.routeId ?? ensureRouteForFamily(workspaceId, family);
   return agentConfigRepo.upsert({
     id: `cfg-${randomUUID().slice(0, 8)}`,
     workspaceId,
     role,
-    provider: overrides.provider ?? "anthropic",
-    model: overrides.model ?? null,
+    routeId,
     systemPromptOverride: overrides.systemPromptOverride ?? null,
     temperature: overrides.temperature ?? 0.2,
     maxTokens: overrides.maxTokens ?? null,
@@ -112,11 +157,15 @@ test("returns null provider when nothing configured for unknown env", () => {
   assert.ok(provider, "expected env detection to find ANTHROPIC or OPENAI");
 });
 
-test("agent_configs row drives provider selection for (role, workspaceId)", () => {
+test("agent_configs row drives route selection for (role, workspaceId)", () => {
+  // B2.1 — assertion switched from `provider` (post-048 always undefined
+  // on the cfg row) to `route.family` (the canonical dispatch target
+  // post-migration). The roadmap pins this exact migration in
+  // `docs/roadmap/ai-provider-bundle.md:189`.
   const workspaceId = seedWorkspace();
   upsertConfig(workspaceId, "planner", { provider: "openai" });
-  const { provider, config } = resolveProvider({ agentRole: "planner", workspaceId });
-  assert.equal(provider, "openai");
+  const { route, config } = resolveRoute({ agentRole: "planner", workspaceId });
+  assert.equal(route?.family, "openai");
   assert.equal(config?.role, "planner");
 });
 
@@ -146,9 +195,13 @@ test("AI-005c: unconfigured role returns effectiveAgentRole=null (single-agent c
 });
 
 test("AI-005c: configured role returns effectiveAgentRole=role (multi-agent isolation)", () => {
+  // B2.1 — switched to `resolveRoute` because `resolveProvider`'s
+  // multi-agent branch keys on `cfg.provider` which migration 048
+  // removed. `resolveRoute` reads `cfg.routeId`, the post-migration
+  // canonical multi-agent signal.
   const workspaceId = seedWorkspace();
   upsertConfig(workspaceId, "planner", { provider: "openai" });
-  const result = resolveProvider({ agentRole: "planner", workspaceId });
+  const result = resolveRoute({ agentRole: "planner", workspaceId });
   assert.equal(result.effectiveAgentRole, "planner",
     "multi-agent workspaces keep per-role breaker isolation");
 });
@@ -188,15 +241,22 @@ test("sticky fallback for the role WINS over agent_configs (tripwire #1)", () =>
 });
 
 test("sticky fallback for a DIFFERENT role does not leak", () => {
+  // B2.1 — switched to `resolveRoute` for the `route.family` assertion.
+  // Post-048 the agent_configs row no longer carries a `provider`
+  // column, so `resolveProvider` would fall through to env detection
+  // and return whichever key happens to be first in `CLOUD_DETECT_ORDER`
+  // — masking the actual contract under test (per-role sticky isolation).
+  // `resolveRoute` reads `cfg.routeId` → `provider_routes.family`,
+  // which is what the test really intends to pin.
   const workspaceId = seedWorkspace();
   upsertConfig(workspaceId, "planner", { provider: "anthropic" });
   upsertConfig(workspaceId, "author", { provider: "openai" });
   setStickyFallback("openai", "planner");
   try {
-    // Author's resolution must stay on openai (its configured provider),
+    // Author's resolution must stay on openai (its configured route),
     // not be perturbed by planner's sticky-fallback entry.
-    const { provider } = resolveProvider({ agentRole: "author", workspaceId });
-    assert.equal(provider, "openai");
+    const { route } = resolveRoute({ agentRole: "author", workspaceId });
+    assert.equal(route?.family, "openai");
     // And the planner sticky entry is still active.
     assert.equal(stickyFallbackActive("planner"), true);
     assert.equal(stickyFallbackActive("author"), false);
