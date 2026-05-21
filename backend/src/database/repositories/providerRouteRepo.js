@@ -23,6 +23,12 @@
 import { randomUUID } from "crypto";
 import { getDatabase } from "../sqlite.js";
 import * as auditRepo from "./providerRouteAuditRepo.js";
+// B1.4 — invalidate the plaintext cache when an apiKey is rotated or the
+// row is deleted. The cycle (`secrets.js` imports this repo for
+// `getSecretById`; this repo imports `secrets.js` for cache invalidation)
+// is safe under Node ESM: neither module calls an imported function at
+// top-level, so both finish initialisation before any cache method runs.
+import * as secrets from "../../aiProvider/secrets.js";
 const SECRET_COLUMNS = Object.freeze(["apiKeyEncrypted", "apiKeyNonce"]);
 const SAFE_COLUMNS = [
   "id", "workspaceId", "name", "family", "protocol", "baseUrl", "model",
@@ -270,6 +276,13 @@ export function upsert(input) {
           action: "rotate_key",
           metadata: { lastFour: input.apiKeyLastFour ?? null },
         });
+        // B1.4 — drop the cached plaintext so the next adapter call
+        // re-decrypts the freshly-rotated ciphertext. Inside the tx so a
+        // rolled-back rotate doesn't leave dispatch using a stale key
+        // (the cache is a soft optimisation — a redundant invalidation
+        // after rollback is harmless, the next call re-decrypts from
+        // the unchanged blob).
+        secrets.invalidateRouteSecret(existing.id);
       } else {
         auditRepo.append({
           workspaceId, routeId: existing.id, userId,
@@ -318,6 +331,10 @@ export function remove(workspaceId, id, { userId } = {}) {
       action: "delete",
       metadata: { name: existing.name, family: existing.family },
     });
+    // B1.4 — drop the cached plaintext for the deleted route so a stale
+    // dispatch call that races the delete doesn't continue using a
+    // tombstoned key for up to 5 minutes after the row is gone.
+    secrets.invalidateRouteSecret(id);
     return { deleted: deleted.changes, fallbacksCleared: cleared.changes };
   });
   return tx();
