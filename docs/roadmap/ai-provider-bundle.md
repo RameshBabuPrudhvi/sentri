@@ -498,5 +498,3 @@ These are intentionally NOT in this roadmap. Document the decision so future con
 - ❌ **Per-`(workspace, role)` API keys distinct from per-route keys** — separate work item (AI-005b)
 - ❌ **Route groups with weighted/latency/cost-aware routing** (B4.6) — built only on operator demand
 ```
-That's the complete industry-standard roadmap. Four bundles, ~36 task groups, ~90 files, ~19-28 agent-days, with explicit cross-bundle invariants, risk register, sequencing rationale, definition of done, and out-of-scope list.
-Want me to also generate the **PR description template**
