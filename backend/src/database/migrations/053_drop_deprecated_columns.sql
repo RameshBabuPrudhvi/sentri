@@ -1,0 +1,31 @@
+-- B4.3 — Drop deprecated columns from agent_configs and clean up
+-- legacy compat-slot data from api_keys.
+--
+-- ## What's dropped
+--
+--   • `agent_configs.fallbackRole` — deprecated in B3.2. The canonical
+--     per-route fallback lives on `provider_routes.fallbackRouteId` and
+--     is edited in the Provider Routes tab. The column was preserved for
+--     one release per the rollback contract; that window has now closed
+--     (Bundle 3 shipped in the same PR).
+--
+-- ## Compat slot cleanup
+--
+--   The `compat-to-routes.js` migration script (B3.10) converts every
+--   `compat:<id>` row in `api_keys` into a proper `provider_routes` row.
+--   After that script has run, the `api_keys` rows with
+--   `provider LIKE 'compat:%'` are orphaned — nothing reads them at
+--   runtime. We delete them here so operators don't see stale entries
+--   in any direct-DB tooling.
+--
+-- ## Compatibility
+--
+-- SQLite has supported `ALTER TABLE ... DROP COLUMN` since 3.35.
+-- PostgreSQL has supported it since 7.3. Idempotency is guaranteed
+-- at the runner level via `schema_migrations`.
+ALTER TABLE agent_configs DROP COLUMN fallbackRole;
+-- Clean up orphaned compat-slot rows from api_keys. The
+-- compat-to-routes.js script already migrated the data; these rows
+-- are dead weight. DELETE (not DROP TABLE) so the api_keys table
+-- itself survives for cloud-provider key storage.
+DELETE FROM api_keys WHERE provider LIKE 'compat:%';
