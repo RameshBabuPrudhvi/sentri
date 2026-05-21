@@ -691,6 +691,12 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
       apiKeyEncrypted: enc.ciphertext,
       apiKeyNonce: enc.nonce,
       apiKeyLastFour: enc.lastFour,
+      // B2.2 — suppress the auto-probe-on-upsert here. We run the
+      // probe SYNCHRONOUSLY immediately below (the probe-before-
+      // persist gate needs the result inline), so letting the
+      // setImmediate auto-probe fire too would double-probe on every
+      // key rotation.
+      skipAutoProbe: true,
     });
     // Probe the freshly-rotated key. If it fails reachability or auth,
     // restore the previous ciphertext+nonce so the rotation is a no-op.
@@ -714,6 +720,13 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
         apiKeyEncrypted: priorSecret?.apiKeyEncrypted ?? null,
         apiKeyNonce: priorSecret?.apiKeyNonce ?? null,
         apiKeyLastFour: priorSecret?.apiKeyLastFour ?? null,
+        // B2.2 — suppress auto-probe on the rollback write. The prior
+        // key was already known-good (it was working before this
+        // attempt); re-probing it on rollback would waste an API call
+        // confirming what we already know. The operator sees the
+        // failed-rotation probe result in `capabilities` via the
+        // synchronous `probeAndPersist` above.
+        skipAutoProbe: true,
       });
       return res.status(400).json({
         error: "Probe failed — new key was rejected",
@@ -1013,6 +1026,12 @@ router.post("/settings/provider-routes/import", requireRole("admin"), async (req
         pricing: incoming.pricing ?? null,
         workspaceId: req.workspaceId,
         userId: req.authUser?.sub || null,
+        // B2.2 — suppress auto-probe per row. Phase 3 below probes
+        // every landed route with bounded parallelism so the import
+        // doesn't fan out N simultaneous provider calls. Letting the
+        // setImmediate auto-probe ALSO fire would defeat that bound
+        // and double-probe every imported route.
+        skipAutoProbe: true,
       });
       importedNames.add(finalName);
       if (incoming.id) idMap.set(incoming.id, saved.id);
@@ -1045,6 +1064,13 @@ router.post("/settings/provider-routes/import", requireRole("admin"), async (req
         workspaceId: req.workspaceId,
         userId: req.authUser?.sub || null,
         fallbackRouteId: destFallbackId,
+        // B2.2 — `fallbackRouteId` isn't in PROBE_RELEVANT_FIELDS
+        // (it's a routing-chain field, not a reachability field), so
+        // the auto-probe wouldn't fire on this change anyway.
+        // Setting `skipAutoProbe: true` makes the intent explicit so a
+        // future change to PROBE_RELEVANT_FIELDS doesn't accidentally
+        // double-probe the import.
+        skipAutoProbe: true,
       });
     } catch (err) {
       // Cycle in the source export — landed row keeps fallbackRouteId

@@ -191,10 +191,37 @@ function toWireValue(field, value) {
  *     metadata={ lastFour }   (never cleartext or ciphertext)
  *   • other update → action="update", metadata={ changed: [<field>…] }
  *
+ * ## B2.2 — Auto-probe-on-upsert
+ *
+ * After the transaction commits, schedules a fire-and-forget capability
+ * probe (`probeAndPersist`) via `setImmediate` when:
+ *   • The route is new (insert), OR
+ *   • Any **routing-relevant** field changed: `apiKeyEncrypted`,
+ *     `apiKeyNonce`, `model`, `baseUrl`, `family`, `protocol`.
+ *
+ * Pricing-only / quota-only / cache-only / name-only updates DON'T
+ * trigger a re-probe because the network result wouldn't change.
+ *
+ * The probe runs OUTSIDE the transaction — never blocks the upsert's
+ * synchronous return, never holds a SQLite write lock during the 10s
+ * network call. Capabilities land asynchronously on the row; clients
+ * polling the row see `null → {probed result}` within a few seconds.
+ *
+ * Opt out via `input.skipAutoProbe: true` — used by:
+ *   • The backfill script (inherited global keys may not work in every
+ *     workspace; operators expected to rotate before relying on probe).
+ *   • The manual `probeAndPersist` endpoint when it calls upsert
+ *     internally (would otherwise probe twice).
+ *
+ * Errors in the deferred probe are swallowed (best-effort) — the route
+ * stays persisted with `capabilities: null` and the operator can hit
+ * the manual probe button via the Settings UI to retry.
+ *
  * @param {Object} input
  * @param {string} [input.id]
  * @param {string} input.workspaceId
  * @param {string} [input.userId]    — Audit actor; null for system writes.
+ * @param {boolean} [input.skipAutoProbe] — When true, suppress B2.2 auto-probe.
  * @returns {Object} The freshly persisted row (re-read via getById).
  * @throws {Error} An Error with `code === "ERR_ROUTE_FALLBACK_CYCLE"`.
  * @throws {Error} An Error with `code === "ERR_ROUTE_MISSING_FIELD"`.
@@ -224,6 +251,13 @@ export function upsert(input) {
     throw err;
   }
   const now = new Date().toISOString();
+  // B2.2 — fields whose change invalidates the prior probe result.
+  // Pricing / quotas / cache / name changes leave dispatch reachability
+  // unchanged, so we don't burn a probe on them. Apikey changes
+  // (rotation) DO invalidate the probe because the new key might not
+  // work — same row, different result.
+  const PROBE_RELEVANT_FIELDS = ["apiKeyEncrypted", "apiKeyNonce", "model", "baseUrl", "family", "protocol"];
+  let shouldAutoProbe = false;
   const tx = db.transaction(() => {
     if (!existing) {
       // ── INSERT ────────────────────────────────────────────────────────────
@@ -261,6 +295,10 @@ export function upsert(input) {
           protocol: input.protocol, model: input.model,
         },
       });
+      // New route → always probe (any of family / protocol / model
+      // / baseUrl / apiKey could be wrong; the operator needs the
+      // network-evidence badge to know).
+      shouldAutoProbe = true;
     } else {
       // ── UPDATE (partial-patch) ────────────────────────────────────────────
       const changed = diffFields(existing, input);
@@ -269,6 +307,14 @@ export function upsert(input) {
         // agentConfigRepo.upsert contract: idempotent saves don't pollute
         // the audit log with phantom "update" events.
         return;
+      }
+      // B2.2 — re-probe only when something probe-relevant changed.
+      // A rename or pricing-only update leaves dispatch reachability
+      // unchanged; skipping the probe there saves a network call per
+      // edit (matters at scale when admins iterate on cache TTL /
+      // pricing without rotating keys).
+      if (changed.some((f) => PROBE_RELEVANT_FIELDS.includes(f))) {
+        shouldAutoProbe = true;
       }
       const setClauses = changed.map((c) => `${c} = ?`).concat("updatedAt = ?");
       const setValues = changed.map((c) => {
@@ -305,6 +351,35 @@ export function upsert(input) {
     }
   });
   tx();
+  // B2.2 — Auto-probe-on-upsert. Fire-and-forget so the upsert's
+  // synchronous return contract is preserved. `setImmediate` schedules
+  // the probe on the next event-loop tick — by then the tx is committed
+  // and the row is visible to other queries (including the probe's own
+  // `getById` lookup).
+  //
+  // We deliberately don't await the probe here even though we COULD —
+  // upsert is sync from a better-sqlite3 perspective, and making it
+  // async would force every call site (settings routes, tests, the
+  // backfill script) to flip to `await`. Fire-and-forget keeps the
+  // contract intact AND lets the probe run while the HTTP response
+  // is already on its way back to the operator.
+  //
+  // Skipped when:
+  //   • `input.skipAutoProbe === true` (backfill, manual-probe path)
+  //   • No probe-relevant field changed (renames, pricing edits)
+  //   • `tx()` returned early on no-op write (caught by !shouldAutoProbe)
+  //
+  // Errors swallowed — the row stays with `capabilities: null` and the
+  // operator can hit the manual probe button in the Settings UI.
+  if (shouldAutoProbe && !input.skipAutoProbe) {
+    setImmediate(() => {
+      probeAndPersist(workspaceId, targetId, { userId: userId || null }).catch(() => {
+        // Best-effort: probe failures don't propagate. The route is
+        // already persisted; the UI shows `capabilities: null` until
+        // the operator retries via the manual probe endpoint.
+      });
+    });
+  }
   return getById(workspaceId, targetId);
 }
 /**
