@@ -67,6 +67,41 @@ export function routeBreakerKey(routeId, agentRole) {
   return breakerKey(routeId, agentRole);
 }
 
+/**
+ * B1.6 — Extract the stable breaker-key discriminator from a resolved
+ * route. **This is the only function B2 dispatch should use** when
+ * keying breakers / sticky-fallback / metrics off a route, because it
+ * preserves the AI-005 breaker namespace across the transient-route
+ * shim.
+ *
+ * Without this helper, single-agent workspaces would silently shift
+ * from the `anthropic` breaker key (AI-005 today) to `provider:anthropic`
+ * (B1.6 synthetic-route id) on first call after B2 ships, resetting
+ * every workspace's breaker state mid-flight. Operators watching a
+ * 429-incident dashboard would see the breaker counts collapse to zero
+ * without an obvious cause. By stripping the `provider:` prefix here,
+ * transient routes collapse back to the legacy bare-provider key and
+ * dispatch accounting stays continuous across the bundle.
+ *
+ * Real routes (id = `pr-<uuid>`) pass through unchanged — they get
+ * their own breaker key, isolated from every other route.
+ *
+ * @param {Object} route - A route object from {@link resolveRoute}.
+ * @returns {string} The breaker-key discriminator.
+ */
+export function breakerDiscriminator(route) {
+  if (!route?.id) return "unknown";
+  // Transient routes synthesised by `synthesiseTransientRoute` carry
+  // both the `_transient` marker and an id prefixed `provider:`. Either
+  // check is sufficient; we use the marker (cheaper, type-stable) with
+  // the prefix as a defensive fallback in case a future code path
+  // builds a transient route without setting the marker.
+  if (route._transient || (typeof route.id === "string" && route.id.startsWith("provider:"))) {
+    return route._transientProvider || route.id.slice("provider:".length);
+  }
+  return route.id;
+}
+
 // ── Compat helpers ───────────────────────────────────────────────────────────
 export function isCompatProvider(provider) {
   return typeof provider === "string"
@@ -434,10 +469,14 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
  * protocol-adapter contract without a real `provider_routes` row.
  *
  * The transient route has:
- *   • `id` = the synthetic `provider:<id>` discriminator. Breakers and
- *     sticky-fallback entries keyed off this id are stable across
- *     calls for the same provider, so the single-agent shim path
- *     gets the same accounting it had pre-B1.6.
+ *   • `id` = the synthetic `provider:<id>` discriminator. **Dispatch
+ *     callers MUST use {@link breakerDiscriminator}(route) — NOT
+ *     `route.id` directly — when keying breakers / sticky-fallback /
+ *     metrics.** That helper strips the `provider:` prefix so single-
+ *     agent workspaces collapse back to the legacy bare-provider
+ *     breaker namespace (`anthropic`, not `provider:anthropic`).
+ *     Without it, every workspace's breaker state resets to zero on
+ *     first call after B2 ships — see the helper's JSDoc for why.
  *   • `protocol` = the wire protocol the legacy provider speaks
  *     (anthropic / openai / gemini / ollama). Compat slots and
  *     OpenRouter both speak the OpenAI protocol.
