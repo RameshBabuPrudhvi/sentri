@@ -12,9 +12,9 @@
 | Bundle | Status | Notes |
 |---|---|---|
 | **Bundle 1** | ✅ Shipped (PR #22) | Foundation: schema + audit + secrets + protocol adapter + `resolveRoute` (flag-gated). |
-| **Bundle 2** | ✅ Shipped (this PR) | Migration `provider → routeId` + capability probe + per-route pricing + request log + flag removal. `resolveProvider` deleted. |
-| **Bundle 3** | ✅ Shipped (this PR) | Settings UI + import/export + quotas + cache + key rotation + audit log viewer + compat migration script + **spend-alert webhook delivery** (B4.0.1 lifted forward — migration 052 adds `spendAlertWebhookUrl` + `spendAlertLastFiredAt`, new `aiProvider/spendAlert.js` POSTs Slack-compatible payload via SSRF-guarded fetch with 1-hour cooldown, dispatcher's stub `console.warn` replaced with `fireSpendAlert(workspaceId, spend)` + log fallback). |
-| **Bundle 4** | 🟡 Mostly shipped (this PR) | **B4.0.4 — route-driven dispatch sweep** (lifted forward): `streamText` (`index.js`) and `callVisionModel` (`vision.js`) now dispatch via `protocolAdapter.stream` / `protocolAdapter.generateVision` — every protocol module gained a `generateVision(route, opts)` method (openai / anthropic / gemini implement; ollama returns `null`). The legacy `adapterFor()` / `buildAdapterOpts()` call sites are gone from runtime hot paths (still exported from `dispatcher.js` for the few remaining non-route callers; sweep continues in B4.1). **B3.11 remaining tests** (`provider-routes-api`, `routes-import-export`, `compat-migration`, `concurrent-dispatch`) ship as separate PRs — the underlying repos (`provider-routes.test.js`, `secrets.test.js` from B1) already pin the data-access contracts, so the gap is integration-shaped only. **B4.1 hardcoded-family-string sweep** + **B4.5 load tests** + **B4.6 advanced routing** remain as planned post-PR work. |
+| **Bundle 2** | ✅ Shipped (PR #23) | Migration `provider → routeId` + capability probe + per-route pricing + request log + flag removal. `resolveProvider` deleted. |
+| **Bundle 3** | ✅ Shipped (PR #23) | Settings UI + import/export + quotas + cache + key rotation + audit log viewer + compat migration script + spend-alert webhook delivery (migration 052 + `spendAlert.js`). All B3.11 tests shipped. |
+| **Bundle 4** | ✅ Shipped (PR #23) | B4.1 hardcoded-string sweep (all dispatch via `protocolAdapter`, `buildProviderMeta` derives from catalog). B4.2 observability parity (alerts pivoted to `route_name`, cardinality budget documented, cache+quota PromQL). B4.3 migration 053 drops `fallbackRole` + compat `api_keys` rows. B4.4 `no-code-edits-contract.test.js` E2E. B4.5 load tests (`dispatch-overhead.js` + `cache-throughput.js`). B4.6 route groups (migration 054 + `routeGroupResolver.js` + `resolveRoute` wiring). B4.7 docs polish (`observability.md`, `provider-routes.md`, `multi-agent-pipeline.md`, `changelog.md`). |
 ---
 # Bundle 1 — Foundation (schema + adapter + resolution + secrets)
 **Scope:** Schema with production fields baked in. Encrypted secrets from day one. Protocol-dispatching adapter. Route resolution behind a feature flag.
@@ -505,5 +505,4 @@ These are intentionally NOT in this roadmap. Document the decision so future con
 - ❌ **Streaming response caching** — cardinality blowup; not worth complexity
 - ❌ **DAG agent handshake** (`{fromRole, toRole, artifact, traceId}`) — separate work item (AUTO-023)
 - ❌ **Per-`(workspace, role)` API keys distinct from per-route keys** — separate work item (AI-005b)
-- ❌ **Route groups with weighted/latency/cost-aware routing** (B4.6) — built only on operator demand
 ```
