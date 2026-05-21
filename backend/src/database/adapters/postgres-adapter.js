@@ -373,6 +373,14 @@ const _COL_MAP = buildColumnMap([
   // `undefined` for `workspace.dailySpendCapUsd` etc, silently
   // disabling the cap-enforcement path on Postgres-backed deployments.
   "dailySpendCapUsd", "monthlySpendCapUsd", "spendAlertThresholdPct",
+  // B4.0.1 — spend-alert webhook delivery columns (migration 052).
+  // `spendAlert.js#fireSpendAlert` reads `row.spendAlertWebhookUrl` and
+  // `row.spendAlertLastFiredAt` directly. Without these case-mapping
+  // entries Postgres returns `spendalertwebhookurl` /
+  // `spendalertlastfiredat`, the camelCase reads return `undefined`,
+  // the `!row?.spendAlertWebhookUrl` guard always fires, and webhook
+  // delivery silently degrades to console.warn on every PG deployment.
+  "spendAlertWebhookUrl", "spendAlertLastFiredAt",
   // workspace_members (ACL-001)
   "joinedAt",
   // agent_configs (AI-004 schema, migration 037 — see fix note in the
