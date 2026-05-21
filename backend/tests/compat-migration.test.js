@@ -17,6 +17,21 @@ getDatabase();
 ensureDefaultWorkspaces();
 const { test, summary } = createTestRunner();
 const now = () => new Date().toISOString();
+
+/**
+ * Clean up ALL compat slots + migrated routes between tests so each
+ * test starts from a known-empty state. Without this, compat slots
+ * accumulate across tests (the `:memory:` DB is shared) and
+ * `runMigration` counts all of them — making `stats.created` return
+ * the cumulative total instead of the per-test count.
+ */
+function resetCompatState() {
+  const db = getDatabase();
+  try { db.exec("DELETE FROM api_keys WHERE provider LIKE 'compat:%'"); } catch { /* table may not exist */ }
+  try { db.exec("DELETE FROM provider_routes WHERE name LIKE 'compat-%'"); } catch { /* table may not exist */ }
+  try { db.exec("DELETE FROM provider_route_audit"); } catch { /* table may not exist */ }
+}
+
 function seedWorkspace() {
   const db = getDatabase();
   const userId = `usr-${Math.random().toString(36).slice(2, 10)}`;
@@ -27,6 +42,7 @@ function seedWorkspace() {
   return wsId;
 }
 test("compat slot migrates to provider_routes with family=custom, protocol=openai", () => {
+  resetCompatState();
   const wsId = seedWorkspace();
   apiKeyRepo.setCompatSlot("compat:testllm", {
     apiKey: "fake-compat-key-aaaaaaaaa1234",
@@ -46,6 +62,7 @@ test("compat slot migrates to provider_routes with family=custom, protocol=opena
   assert.ok(route.apiKeyEncrypted, "key must be encrypted");
 });
 test("re-run is idempotent (skips existing)", () => {
+  resetCompatState();
   const wsId = seedWorkspace();
   apiKeyRepo.setCompatSlot("compat:idempotent", {
     apiKey: "fake-compat-key-bbbbbbbbb5678",
@@ -60,6 +77,7 @@ test("re-run is idempotent (skips existing)", () => {
   assert.equal(second.skippedReasons.exists, 1);
 });
 test("dry-run commits nothing", () => {
+  resetCompatState();
   const wsId = seedWorkspace();
   apiKeyRepo.setCompatSlot("compat:dryrun", {
     apiKey: "fake-compat-key-ccccccccc9012",
@@ -75,6 +93,7 @@ test("dry-run commits nothing", () => {
   assert.equal(after, before, "dry-run must not persist any rows");
 });
 test("incomplete slot (missing apiKey/baseUrl/model) is skipped", () => {
+  resetCompatState();
   const wsId = seedWorkspace();
   apiKeyRepo.setCompatSlot("compat:incomplete", {
     apiKey: "",
