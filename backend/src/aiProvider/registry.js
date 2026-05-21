@@ -12,6 +12,7 @@
  */
 import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
+import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER } from "./modelCatalog.js";
@@ -30,8 +31,40 @@ const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
 
 /** @type {Object<string, {failures: number, disabledUntil: number}>} */
 const circuitBreakers = {};
-export function breakerKey(provider, agentRole) {
-  return agentRole ? `${provider}::${agentRole}` : provider;
+/**
+ * Compose a circuit-breaker / sticky-fallback / metric key from a primary
+ * discriminator and an optional agent role.
+ *
+ * The primary discriminator was originally a `provider` id (AI-005) and is
+ * now ALSO a `routeId` (B1.6) — same shape, different opaque string. Two
+ * named wrappers are exported so call sites are explicit about which axis
+ * they're keying on, but they share one implementation because the
+ * breaker map doesn't care which kind of id keys it:
+ *
+ *   • {@link breakerKey} — legacy alias kept for AI-005 callers that still
+ *     key breakers by provider.
+ *   • {@link routeBreakerKey} — B1.6 callers keying by `provider_routes.id`.
+ *
+ * Both produce `${id}` or `${id}::${agentRole}`. Mixing kinds in a single
+ * deployment is safe (provider ids and route ids are disjoint namespaces
+ * — providers are short enum strings like `"anthropic"`, route ids are
+ * UUIDv4 prefixed `"pr-..."`).
+ */
+export function breakerKey(idOrProvider, agentRole) {
+  return agentRole ? `${idOrProvider}::${agentRole}` : idOrProvider;
+}
+
+/**
+ * B1.6 — same shape as {@link breakerKey} but documents the route-id
+ * call site. Use when the breaker is being keyed off a `provider_routes`
+ * row rather than the legacy provider enum.
+ *
+ * @param {string} routeId
+ * @param {string|null} [agentRole]
+ * @returns {string}
+ */
+export function routeBreakerKey(routeId, agentRole) {
+  return breakerKey(routeId, agentRole);
 }
 
 // ── Compat helpers ───────────────────────────────────────────────────────────
@@ -269,6 +302,194 @@ export function resolveProvider({ agentRole = null, workspaceId = null } = {}) {
   const provider = detectProvider();
   if (!provider) return { provider: null, config: null, effectiveAgentRole: null };
   return { provider, config: null, effectiveAgentRole: null };
+}
+
+/**
+ * B1.6 — Route-driven counterpart to {@link resolveProvider}.
+ *
+ * Returns the concrete `provider_routes` row a dispatch call should fire
+ * against. Additive: callers that opt in get rows from the B1.x route
+ * table; callers that don't keep using `resolveProvider` and the legacy
+ * env-driven `buildAdapterOpts` path. The two helpers will coexist
+ * through B2; a later bundle retires `resolveProvider` once every call
+ * site is route-aware.
+ *
+ * ### Resolution priority
+ *
+ *   1. **Sticky-fallback for this role** — if a recent failover pinned
+ *      a route for this (role, ttl) tuple, return it. Mirrors the
+ *      AI-005 tripwire #1 invariant from `resolveProvider`: an active
+ *      sticky-fallback MUST beat the configured route so a rate-
+ *      limited primary stops being retried under the agent override.
+ *   2. **`agent_configs.routeId`** — explicit per-role route assignment
+ *      written by the Settings UI. Honoured when the route is usable
+ *      (`provider_routes.enabled = 1` and a decryptable secret exists).
+ *   3. **Provider-column shim** — when no `routeId` is set, the legacy
+ *      `agent_configs.provider` column still drives selection. We
+ *      synthesise a **transient** route — an in-memory object that
+ *      satisfies the B1.5 protocol-adapter contract without ever
+ *      hitting `provider_routes`. Lets workspaces adopt AI-005 dispatch
+ *      semantics without migrating to routes first.
+ *   4. **`null`** — when neither column is set, return a null route
+ *      and let the caller fall through to {@link resolveProvider} for
+ *      env-default detection. Preserves AI-005c single-agent
+ *      collapse (`effectiveAgentRole: null`).
+ *
+ * ### `effectiveAgentRole` collapse
+ *
+ * Same rule as `resolveProvider`: workspaces with no `agent_configs`
+ * row for the role get `effectiveAgentRole: null` so downstream
+ * breakers / sticky / metrics collapse to the bare-discriminator key
+ * path. Workspaces WITH a row (route-driven or shim) get the role
+ * string back so per-role isolation kicks in.
+ *
+ * @param {Object} [opts]
+ * @param {string} [opts.agentRole]
+ * @param {string} [opts.workspaceId]
+ * @returns {{ route: Object|null, config: Object|null, effectiveAgentRole: string|null }}
+ */
+export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
+  // (1) Sticky-fallback wins — same shape as resolveProvider's check.
+  // The sticky map stores `{ provider, expiry }` keyed by either a
+  // provider id or a route id (B1.6 reuses the existing map; the
+  // value's `provider` field becomes "the discriminator to dispatch
+  // against", interpreted by the caller). Route-shaped stickies
+  // populate the synthetic-route shape so downstream code never has
+  // to know it's looking at a fallback.
+  if (agentRole) {
+    for (const [key, entry] of stickyFallbacks) {
+      if (!key.endsWith(`::${agentRole}`)) continue;
+      if (Date.now() < entry.expiry) {
+        // Sticky entries written by `resolveProvider`'s fallback path
+        // carry a `provider` (not a route id). Synthesise a transient
+        // route from it so callers see a uniform shape.
+        if (entry.route) {
+          return { route: entry.route, config: null, effectiveAgentRole: agentRole };
+        }
+        if (entry.provider && isProviderUsable(entry.provider)) {
+          return {
+            route: synthesiseTransientRoute({ provider: entry.provider, workspaceId }),
+            config: null,
+            effectiveAgentRole: agentRole,
+          };
+        }
+      }
+      if (Date.now() >= entry.expiry) stickyFallbacks.delete(key);
+    }
+  }
+
+  // (2) + (3): consult agent_configs for this (workspaceId, role).
+  if (agentRole && workspaceId) {
+    let cfg;
+    try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole); }
+    catch { /* DB unavailable — fall through to env detection */ }
+    if (cfg) {
+      // (2) Explicit route assignment. The route row carries everything
+      // dispatch needs (protocol + baseUrl + model + encrypted secret).
+      if (cfg.routeId) {
+        let route;
+        try { route = providerRouteRepo.getById(workspaceId, cfg.routeId); }
+        catch { /* DB unavailable */ }
+        // Route must exist, be enabled, and belong to the same
+        // workspace (getById is workspace-scoped, so the second
+        // check is implicit but spelled out for clarity).
+        if (route && route.enabled && route.workspaceId === workspaceId) {
+          return { route, config: cfg, effectiveAgentRole: agentRole };
+        }
+        // Route id pointed at a disabled / deleted row. Don't silently
+        // fall back to the provider shim — that would hide a misconfig.
+        // Return null so the caller surfaces a config error to the user.
+        return { route: null, config: cfg, effectiveAgentRole: agentRole };
+      }
+      // (3) No routeId — synthesise a transient route from the legacy
+      // provider column. This is the AI-005 shim that lets workspaces
+      // dispatch via routes WITHOUT having migrated their config yet.
+      if (cfg.provider && isProviderUsable(cfg.provider)) {
+        return {
+          route: synthesiseTransientRoute({ provider: cfg.provider, model: cfg.model, workspaceId }),
+          config: cfg,
+          effectiveAgentRole: agentRole,
+        };
+      }
+    }
+  }
+
+  // (4) No agent_configs row → AI-005c single-agent collapse. Return
+  // a route synthesised from the workspace-default provider so
+  // dispatch can still go through the B1.5 protocol adapter, but
+  // collapse `effectiveAgentRole` to null so breakers / sticky /
+  // metrics use the bare-discriminator path.
+  const provider = detectProvider();
+  if (!provider) return { route: null, config: null, effectiveAgentRole: null };
+  return {
+    route: synthesiseTransientRoute({ provider, workspaceId }),
+    config: null,
+    effectiveAgentRole: null,
+  };
+}
+
+/**
+ * B1.6 — Build an in-memory route object from a legacy `provider` id
+ * (and optional model override) so callers can dispatch via the B1.5
+ * protocol-adapter contract without a real `provider_routes` row.
+ *
+ * The transient route has:
+ *   • `id` = the synthetic `provider:<id>` discriminator. Breakers and
+ *     sticky-fallback entries keyed off this id are stable across
+ *     calls for the same provider, so the single-agent shim path
+ *     gets the same accounting it had pre-B1.6.
+ *   • `protocol` = the wire protocol the legacy provider speaks
+ *     (anthropic / openai / gemini / ollama). Compat slots and
+ *     OpenRouter both speak the OpenAI protocol.
+ *   • `apiKey` is NOT carried — protocol modules expect the caller
+ *     (B1.5 `protocolAdapter`) to resolve the decrypted key via
+ *     `secrets.getDecryptedKey`. For the transient path, the caller
+ *     falls back to the legacy `getKey(envName)` route in dispatch.
+ *
+ * Synthetic ids stay in their own namespace (`provider:*`) so they
+ * never collide with real route ids (`pr-...`).
+ *
+ * @param {Object} args
+ * @param {string} args.provider
+ * @param {string} [args.model]
+ * @param {string} [args.workspaceId]
+ * @returns {Object} A transient route object.
+ * @internal — exported for tests via the module surface; not part of the public API.
+ */
+function synthesiseTransientRoute({ provider, model, workspaceId }) {
+  const protocolMap = {
+    anthropic: "anthropic",
+    openai:    "openai",
+    openrouter: "openai",
+    google:    "gemini",
+    local:     "ollama",
+  };
+  const protocol = isCompatProvider(provider)
+    ? "openai"
+    : protocolMap[provider] || "openai";
+  return {
+    id: `provider:${provider}`,
+    workspaceId: workspaceId || null,
+    name: `transient:${provider}`,
+    family: provider,
+    protocol,
+    baseUrl: null,
+    model: model || null,
+    apiKeyLastFour: null,
+    capabilities: null,
+    pricing: null,
+    rpmLimit: null,
+    tpmLimit: null,
+    cacheEnabled: 0,
+    cacheTtlSec: 0,
+    fallbackRouteId: null,
+    enabled: 1,
+    // Marker — lets the protocol-adapter caller detect a synthetic
+    // route and resolve the apiKey via the legacy `getKey(envName)`
+    // path instead of `secrets.getDecryptedKey(workspaceId, routeId)`.
+    _transient: true,
+    _transientProvider: provider,
+  };
 }
 
 export function detectProvider({ agentRole = null } = {}) {

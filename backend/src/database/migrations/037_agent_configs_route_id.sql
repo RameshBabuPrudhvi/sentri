@@ -1,0 +1,23 @@
+-- B1.6 — agent_configs.routeId
+--
+-- Extend the AI-004 agent_configs table with an optional FK to
+-- `provider_routes.id` (B1.1). When set, `resolveRoute({ agentRole,
+-- workspaceId })` returns the matching route row directly. When null,
+-- `resolveRoute` falls back to synthesising a transient route from the
+-- legacy `provider` column (the AI-005 shim path) so dispatch keeps
+-- working unchanged for workspaces that have NOT yet migrated to routes.
+--
+-- The legacy `provider` column stays in place — both columns coexist so
+-- a workspace can adopt routes per-role without an all-or-nothing
+-- migration. B2 (dispatch wiring) decides priority:
+--   routeId set → use the route (B1.1 row).
+--   routeId null, provider set → shim into a transient route.
+--   both null → fall through to workspace-default env detection.
+--
+-- FK with ON DELETE SET NULL so deleting a route doesn't cascade-delete
+-- the agent config — the agent simply reverts to the provider-column
+-- shim path until an admin assigns a new route. Mirrors the
+-- self-referential FK semantics on provider_routes.fallbackRouteId
+-- from migration 035.
+
+ALTER TABLE agent_configs ADD COLUMN routeId TEXT REFERENCES provider_routes(id) ON DELETE SET NULL;

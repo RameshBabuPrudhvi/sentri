@@ -78,18 +78,24 @@ export function upsert(config) {
     throw err;
   }
   const db = getDatabase();
+  // B1.6 — include `routeId` (migration 037) so workspaces can pin a
+  // specific `provider_routes` row to a role. `routeId` defaults to null
+  // when callers omit it, which keeps the AI-005 `provider`-column shim
+  // path intact: `resolveRoute` synthesises a transient route from the
+  // legacy `provider` column when no routeId is set.
   db.prepare(`
-    INSERT INTO agent_configs (id, workspaceId, role, provider, model, systemPromptOverride, temperature, maxTokens, fallbackRole, createdAt, updatedAt)
-    VALUES (@id, @workspaceId, @role, @provider, @model, @systemPromptOverride, @temperature, @maxTokens, @fallbackRole, @createdAt, @updatedAt)
+    INSERT INTO agent_configs (id, workspaceId, role, provider, routeId, model, systemPromptOverride, temperature, maxTokens, fallbackRole, createdAt, updatedAt)
+    VALUES (@id, @workspaceId, @role, @provider, @routeId, @model, @systemPromptOverride, @temperature, @maxTokens, @fallbackRole, @createdAt, @updatedAt)
     ON CONFLICT(workspaceId, role) DO UPDATE SET
       provider=excluded.provider,
+      routeId=excluded.routeId,
       model=excluded.model,
       systemPromptOverride=excluded.systemPromptOverride,
       temperature=excluded.temperature,
       maxTokens=excluded.maxTokens,
       fallbackRole=excluded.fallbackRole,
       updatedAt=excluded.updatedAt
-  `).run(config);
+  `).run({ ...config, routeId: config.routeId ?? null });
   return getByRole(config.workspaceId, config.role);
 }
 
