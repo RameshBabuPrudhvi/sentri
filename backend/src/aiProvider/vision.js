@@ -7,9 +7,8 @@
  * bypasses the whitelist for opt-in coverage of new models.
  */
 
-import { VISION_CAPABLE_MODELS } from "./modelCatalog.js";
 import { getProvider, getProviderMeta } from "./providerInfo.js";
-import { resolveProvider, isProviderUsable } from "./registry.js";
+import { resolveProvider, resolveRoute, isProviderUsable } from "./registry.js";
 import {
   providerMetricLabel,
   buildAdapterOpts,
@@ -49,18 +48,15 @@ import { parseJSON } from "./index.js";
  */
 export function resolveVisionModel({ workspaceId = null } = {}) {
   if (process.env.VISION_MODEL) return process.env.VISION_MODEL;
-  if (process.env.AI_MODEL && VISION_CAPABLE_MODELS.has(process.env.AI_MODEL)) return process.env.AI_MODEL;
-  // AI-005: if the workspace has a healer agent config with a vision-capable
-  // model, honour it. The role's `provider` is applied separately in
-  // `callVisionModel` via `resolveProvider`; this only chooses the model id.
+  if (process.env.AI_MODEL) return process.env.AI_MODEL;
   if (workspaceId) {
-    const { config: healer } = resolveProvider({ agentRole: "healer", workspaceId });
-    if (healer?.model && VISION_CAPABLE_MODELS.has(healer.model)) return healer.model;
+    const { route } = resolveRoute({ agentRole: "healer", workspaceId });
+    if (route?.capabilities?.vision && route?.model) return route.model;
   }
   const provider = getProvider();
   if (!provider) return null;
   const meta = getProviderMeta();
-  if (meta?.model && VISION_CAPABLE_MODELS.has(meta.model)) return meta.model;
+  if (meta?.model) return meta.model;
   return null;
 }
 

@@ -14,7 +14,7 @@
 
 import { Router } from "express";
 import { logActivity } from "../utils/activityLogger.js";
-import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders } from "../aiProvider.js";
+import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders, generateText } from "../aiProvider.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { isDemoEnabled, getDemoQuotaStatus } from "../middleware/demoQuota.js";
@@ -24,6 +24,12 @@ import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
+import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
+import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
+import * as providerRouteAuditRepo from "../database/repositories/providerRouteAuditRepo.js";
+import { capabilitiesFor } from "../aiProvider/modelCatalog.js";
+import { getDatabase } from "../database/sqlite.js";
+
 
 const router = Router();
 
@@ -401,4 +407,48 @@ router.get("/ollama/status", async (req, res) => {
   res.json(status);
 });
 
+router.post("/settings/provider-routes/:id/probe", requireRole("admin"), (req, res) => {
+  const route = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!route) return res.status(404).json({ error: "Route not found" });
+  const family = route.family === "custom" ? "openai" : route.family;
+  const base = capabilitiesFor(family);
+  const capabilities = {
+    vision: Boolean(base?.supportsVision),
+    jsonMode: Boolean(base?.supportsJsonMode),
+    tools: false,
+    streaming: Boolean(base?.supportsStreaming),
+    contextWindow: Number.isFinite(base?.contextWindow) ? base.contextWindow : null,
+    maxOutputTokens: Number.isFinite(base?.maxOutputTokens) ? base.maxOutputTokens : null,
+    probedAt: new Date().toISOString(),
+  };
+  const updated = providerRouteRepo.upsert({ ...route, workspaceId: req.workspaceId, userId: req.authUser?.sub || null, capabilities });
+  providerRouteAuditRepo.append({
+    workspaceId: req.workspaceId,
+    routeId: route.id,
+    userId: req.authUser?.sub || null,
+    action: "probe",
+    metadata: { capabilities },
+  });
+  return res.json({ ok: true, route: updated, capabilities });
+});
+
+
+router.post("/settings/ai-requests/:id/replay", requireRole("admin"), async (req, res) => {
+  const row = aiRequestLogRepo.getById(req.workspaceId, req.params.id);
+  if (!row) return res.status(404).json({ error: "Request log not found" });
+  const prompt = row.promptRedacted || "";
+  if (!prompt) return res.status(400).json({ error: "Prompt payload unavailable for replay in current storage mode" });
+  const routeId = req.body?.routeId || null;
+  const text = await generateText(prompt, { workspaceId: req.workspaceId, agentRole: row.agentRole || undefined, routeId });
+  return res.json({ ok: true, replayedFrom: row.id, routeId, text });
+});
+
+router.get("/settings/ai-requests", requireRole("admin"), (req, res) => {
+  const rows = aiRequestLogRepo.list(req.workspaceId, req.query || {});
+  res.json({ items: rows, nextCursor: rows.length ? rows[rows.length - 1].createdAt : null });
+});
+
 export default router;
+
+
+

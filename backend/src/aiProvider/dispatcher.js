@@ -21,6 +21,7 @@ import {
 } from "../utils/metrics.js";
 import { buildProviderMeta } from "./providerInfo.js";
 import { getCurrentTraceId, annotateAiCallSpan } from "../utils/observability.js";
+import { logRequest } from "./requestLog.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -292,55 +293,17 @@ function buildEffectivePrompt(prompt, config) {
 export function resolveAgentCall(prompt, options = {}) {
   const agentRole = options.agentRole || null;
   const workspaceId = options.workspaceId || null;
-  // B1.7 — feature-flagged routes branch. Off by default; when on, dispatch
-  // resolves a `provider_routes` row via {@link resolveRoute} (which honours
-  // the B1.6 priority chain: sticky-fallback → routeId → provider-column
-  // shim → env detection). The flag is process-scoped so it can be flipped
-  // per-deployment without an env-var reload on every call: cached at import
-  // time would prevent test-suite toggling, so we read on each call instead.
-  // Cost is one env lookup — negligible against the AI call itself.
-  if (process.env.AI_ROUTES_ENABLED === "true") {
-    const { route, config, effectiveAgentRole } = resolveRoute({ agentRole, workspaceId });
-    const effectivePrompt = buildEffectivePrompt(prompt, config);
-    return {
-      // Mirror the legacy shape (`provider` field) by deriving it from the
-      // route's family so call sites that still inspect `provider` for
-      // telemetry labels or fallback enumeration keep working unchanged.
-      // The transient route synthesised by `resolveRoute` carries the
-      // legacy provider id in `_transientProvider`; real routes use the
-      // `family` column. Either path produces the same value as the
-      // legacy `resolveProvider` would have returned.
-      provider: route?._transientProvider || route?.family || null,
-      route,
-      config,
-      effectiveAgentRole,
-      effectivePrompt,
-      // `??` (not `||`) so an explicit `maxTokens: 0` saved on an
-      // agent_configs row is honoured rather than treated as unset.
-      // Matches the documented "Agent-config maxTokens wins over
-      // caller-supplied" contract in the JSDoc above.
-      maxTokens: config?.maxTokens ?? options.maxTokens,
-      callOpts: { agentRole },
-      useRoutes: true,
-    };
-  }
-  // Legacy AI-005 path — unchanged when the flag is off. `route` is `null`
-  // and `useRoutes` is `false` so the existing call sites in `index.js`
-  // (and `vision.js`, etc.) never see a route object until they opt in.
-  const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
+  const { route, config, effectiveAgentRole } = resolveRoute({ agentRole, workspaceId });
   const effectivePrompt = buildEffectivePrompt(prompt, config);
   return {
-    provider,
-    route: null,
+    provider: route?._transientProvider || route?.family || null,
+    route,
     config,
     effectiveAgentRole,
     effectivePrompt,
-    // `??` matches the routes branch above — explicit `maxTokens: 0`
-    // on the agent_configs row must beat `options.maxTokens`, not fall
-    // through to it.
     maxTokens: config?.maxTokens ?? options.maxTokens,
-    callOpts: { agentRole },
-    useRoutes: false,
+    callOpts: { agentRole, routeName: route?.name || route?.id || "unknown", routeId: route?.id || null, workspaceId },
+    useRoutes: true,
   };
 }
 
@@ -365,17 +328,17 @@ export function resolveAgentCall(prompt, options = {}) {
  * @param {object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
  * @param {"generation"|"vision_heal"} [operation="generation"] - Which surface initiated the call.
  */
-export function recordAiTokens(provider, usage, operation = "generation", agentRole = "default") {
+export function recordAiTokens(provider, usage, operation = "generation", agentRole = "default", routeName = "unknown") {
   if (!usage) return;
   const label = providerMetricLabel(provider);
   try {
     const inTokens = Number(usage.input);
     if (Number.isFinite(inTokens) && inTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "input", operation }, inTokens);
+      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "input", operation, route_name: routeName || "unknown" }, inTokens);
     }
     const outTokens = Number(usage.output);
     if (Number.isFinite(outTokens) && outTokens > 0) {
-      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "output", operation }, outTokens);
+      aiProviderTokensTotal.inc({ provider: label, agent_role: agentRole || "default", kind: "output", operation, route_name: routeName || "unknown" }, outTokens);
     }
     // AI-003 — generalised cost counter. Adapters compute `costUsd` from the
     // catalog (see modelCatalog.js#computeCostUsd) and attach it to the
@@ -385,7 +348,7 @@ export function recordAiTokens(provider, usage, operation = "generation", agentR
     // because incrementing by 0 is a no-op anyway.
     const costUsd = Number(usage.costUsd);
     if (Number.isFinite(costUsd) && costUsd > 0) {
-      aiProviderCostUsdTotal.inc({ provider: label, agent_role: agentRole || "default", operation }, costUsd);
+      aiProviderCostUsdTotal.inc({ provider: label, agent_role: agentRole || "default", operation, route_name: routeName || "unknown" }, costUsd);
     }
   } catch { /* best-effort */ }
 }
@@ -403,13 +366,14 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
   // calls live in `callVisionModel` and pass `operation: "vision_heal"`
   // to the same metric counters directly.
   const operation = "generation";
+  const startedMs = Date.now();
   const label = providerMetricLabel(provider);
   const agentRole = callOptions.agentRole || "default";
   // AI-005 tripwire #3 — attach `ai.agent_role` + `ai.provider` +
   // `ai.operation` attributes to the active OTel span so distributed traces
   // line up with the Prometheus labels for per-role debugging. No-op when
   // OTel is unconfigured (single helper, single owner: observability.js).
-  annotateAiCallSpan({ provider, agentRole, operation });
+  annotateAiCallSpan({ provider, agentRole, operation, routeName: callOptions.routeName || "unknown" });
   // Trace-correlation: emit the per-call traceId at debug level only.
   // Every AI call inside an OTel-instrumented request has a traceId, so an
   // unconditional info-level line would flood logs (~hundreds per crawl).
@@ -425,17 +389,46 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
     const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat, callOptions);
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome: "success", operation }, seconds);
+      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome: "success", operation, route_name: callOptions.routeName || "unknown" }, seconds);
     } catch { /* best-effort */ }
+    try {
+      logRequest({
+        workspaceId: callOptions.workspaceId || null,
+        routeId: callOptions.routeId || null,
+        agentRole: callOptions.agentRole || null,
+        userId: callOptions.userId || null,
+        prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
+        response: typeof result === "string" ? result : "",
+        latencyMs: Date.now() - startedMs,
+        outcome: "success",
+        traceId: getCurrentTraceId(),
+        storageMode: callOptions.requestLogMode || "none",
+      });
+    } catch {}
     return result;
   } catch (err) {
+    const reason = classifyAiError(err);
+    const outcome = reason === "rate_limit" ? "rate_limited" : "error";
     try {
       const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
-      const reason = classifyAiError(err);
-      const outcome = reason === "rate_limit" ? "rate_limited" : "error";
-      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome, operation }, seconds);
-      aiProviderErrorsTotal.inc({ provider: label, agent_role: agentRole, reason, operation });
+      aiProviderLatencySeconds.observe({ provider: label, agent_role: agentRole, outcome, operation, route_name: callOptions.routeName || "unknown" }, seconds);
+      aiProviderErrorsTotal.inc({ provider: label, agent_role: agentRole, reason, operation, route_name: callOptions.routeName || "unknown" });
     } catch { /* best-effort */ }
+    try {
+      logRequest({
+        workspaceId: callOptions.workspaceId || null,
+        routeId: callOptions.routeId || null,
+        agentRole: callOptions.agentRole || null,
+        userId: callOptions.userId || null,
+        prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
+        response: "",
+        latencyMs: Date.now() - startedMs,
+        outcome: outcome,
+        errorReason: reason,
+        traceId: getCurrentTraceId(),
+        storageMode: callOptions.requestLogMode || "none",
+      });
+    } catch {}
     throw err;
   }
 }
@@ -453,6 +446,6 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
   // `recordAiTokens`'s signature defaults agentRole + the function body
   // OR-defaults `null` → `"default"` for the metric label, so pass the
   // original `callOptions.agentRole` directly without re-applying the OR.
-  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole);
+  if (usage) recordAiTokens(provider, usage, "generation", callOptions.agentRole, callOptions.routeName || "unknown");
   return text;
 }

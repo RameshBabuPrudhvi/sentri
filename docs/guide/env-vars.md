@@ -327,3 +327,5 @@ Counter naming uses `app_*` rather than a product-name prefix so Prometheus dash
 | `VITE_GOOGLE_CLIENT_ID` | — | Google OAuth client ID (passed to frontend) |
 | `VITE_SENTRY_DSN` | — | Frontend Sentry DSN. When set, `Sentry.init()` runs at app boot with `browserTracingIntegration()` so React Router navigations emit pageload + navigation breadcrumbs, and `ErrorBoundary` reports caught exceptions via `Sentry.captureException`. Unset → SDK is a no-op (no network traffic). |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | `0` | Fraction (0–1) of frontend transactions sampled for Sentry performance traces. Default `0` keeps Sentry to crash reporting + breadcrumbs only. |
+
+| `AI_REQUEST_LOG_RETENTION_DAYS` | `30` | Daily 04:30 UTC sweep deletes `ai_request_log` rows older than this many days. Set `0` to disable request-log retention sweep. |

@@ -29,6 +29,7 @@ import * as scheduleRepo from "./database/repositories/scheduleRepo.js";
 import * as projectRepo from "./database/repositories/projectRepo.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
+import * as aiRequestLogRepo from "./database/repositories/aiRequestLogRepo.js";
 import * as activityRepo from "./database/repositories/activityRepo.js";
 import { generateRunId } from "./utils/idGenerator.js";
 import { runWithAbort } from "./utils/runWithAbort.js";
@@ -432,6 +433,25 @@ export function initScheduler() {
         `[scheduler] Coverage retention sweep failed: ${err.message}`));
     }
   }, { timezone: "UTC", scheduled: true });
+
+  
+  // B2.5: daily AI request-log retention sweep — default 30 days.
+  schedules.push(schedule(
+    "30 4 * * *",
+    () => {
+      try {
+        const days = Number(process.env.AI_REQUEST_LOG_RETENTION_DAYS || 30);
+        if (!Number.isFinite(days) || days <= 0) return;
+        const deleted = aiRequestLogRepo.purgeOlderThan(days);
+        if (deleted > 0) {
+          console.log(formatLogLine("info", null, `[scheduler] AI request-log retention sweep deleted ${deleted} row(s) older than ${days} days`));
+        }
+      } catch (err) {
+        console.warn(formatLogLine("warn", null, `[scheduler] AI request-log retention sweep failed: ${err.message}`));
+      }
+    },
+    "ai-request-log-retention"
+  ));
 
   console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded), stale detection + audit retention + coverage retention armed`));
 }
