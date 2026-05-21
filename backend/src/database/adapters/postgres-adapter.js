@@ -363,6 +363,31 @@ const _COL_MAP = buildColumnMap([
   "ownerId",
   // workspace_members (ACL-001)
   "joinedAt",
+  // agent_configs (AI-004 schema, migration 037 — see fix note in the
+  // migration file). PostgreSQL folds unquoted identifiers to lowercase,
+  // so without these entries `agentConfig.systemPromptOverride` /
+  // `fallbackRole` / `maxTokens` / `routeId` would all be `undefined` on
+  // Postgres — silently breaking the AI-005 per-role provider lookup,
+  // the AI-005 fallback chain, the per-role token budget, and the B1.6
+  // route-driven dispatch path. `provider` / `model` / `temperature` /
+  // `role` are already single-case and don't need an entry. `id` /
+  // `workspaceId` / `createdAt` / `updatedAt` are covered above.
+  "systemPromptOverride", "maxTokens", "fallbackRole", "routeId",
+  // provider_routes (B1.1, migration 035). Same rationale — these all
+  // need lowercase→camelCase remap so dispatch reads work on Postgres.
+  // `id` / `workspaceId` / `name` / `family` / `protocol` / `baseUrl` /
+  // `model` / `pricing` / `capabilities` / `enabled` / `createdAt` /
+  // `updatedAt` are already covered or single-case. The encrypted blobs
+  // (`apiKeyEncrypted`, `apiKeyNonce`) only flow through `getSecretById`
+  // and must round-trip as Buffers; PostgreSQL `BYTEA` columns return
+  // Buffers natively via pg-native + node-pg, so no extra remap is
+  // required for the byte payload — only the key spellings below.
+  "apiKeyEncrypted", "apiKeyNonce", "apiKeyLastFour",
+  "rpmLimit", "tpmLimit",
+  "cacheEnabled", "cacheTtlSec",
+  "fallbackRouteId",
+  // provider_route_audit (B1.2, migration 036). `routeId` / `userId` are
+  // covered above; `action` / `metadata` are single-case.
 ]);
 
 /**
