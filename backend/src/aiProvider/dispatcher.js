@@ -11,7 +11,7 @@ import * as openaiAdapter from "./adapters/openai.js";
 import * as googleAdapter from "./adapters/google.js";
 import * as ollamaAdapter from "./adapters/ollama.js";
 import { isRateLimitError, isRetryableError, MAX_RETRIES } from "./retry.js";
-import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel, resolveProvider } from "./registry.js";
+import { isCompatProvider, getCompatConfig, getKey, getOllamaBaseUrl, getOllamaModel, resolveProvider, resolveRoute } from "./registry.js";
 import {
   aiProviderLatencySeconds,
   aiProviderTokensTotal,
@@ -195,11 +195,30 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, response
  * precedence, and the AI-005c `effectiveAgentRole` collapse rule cannot
  * drift between the two surfaces.
  *
+ * B1.7 — When `process.env.AI_ROUTES_ENABLED === "true"`, the function
+ * resolves a `provider_routes` row via {@link resolveRoute} (the B1.6
+ * route-driven path) and the return shape gains a `route` field plus
+ * `useRoutes: true`. When the flag is off (the default), the shape is
+ * bit-for-bit identical to the AI-005 pre-routes version (`route: null`,
+ * `useRoutes: false`). Call sites that want to opt into routes check
+ * `useRoutes` and dispatch via {@link module:aiProvider/adapters/protocolAdapter};
+ * call sites that don't keep using the legacy `provider`-keyed path.
+ *
  * Inputs are the caller's `prompt` + `options` bag. Outputs everything the
  * caller needs to invoke `callProvider` and bookkeep breakers / sticky /
  * metrics correctly:
  *
  * - `provider` — concrete provider id, or `null` when no provider is configured.
+ *   In the routes branch this is derived from `route.family` (or
+ *   `route._transientProvider` for shim routes) so legacy telemetry call sites
+ *   keep working without changes.
+ * - `route` — B1.7 — the resolved `provider_routes` row when `useRoutes` is
+ *   true, else `null`. Real routes (`id = "pr-..."`) come from the DB; shim
+ *   routes (`id = "provider:<id>"`) are synthesised by `resolveRoute` so the
+ *   protocol-adapter contract works for workspaces that haven't migrated yet.
+ * - `useRoutes` — B1.7 — `true` when the flag is on, `false` otherwise.
+ *   Lets callers gate "dispatch via protocolAdapter" without re-reading
+ *   the env var.
  * - `config` — the `agent_configs` row (when one matched), `null` for fallback paths.
  * - `effectiveAgentRole` — AI-005c — `null` when single-agent (no
  *   `agent_configs` row exists), the `agentRole` string otherwise. Use this
@@ -237,17 +256,52 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, response
 export function resolveAgentCall(prompt, options = {}) {
   const agentRole = options.agentRole || null;
   const workspaceId = options.workspaceId || null;
+  // B1.7 — feature-flagged routes branch. Off by default; when on, dispatch
+  // resolves a `provider_routes` row via {@link resolveRoute} (which honours
+  // the B1.6 priority chain: sticky-fallback → routeId → provider-column
+  // shim → env detection). The flag is process-scoped so it can be flipped
+  // per-deployment without an env-var reload on every call: cached at import
+  // time would prevent test-suite toggling, so we read on each call instead.
+  // Cost is one env lookup — negligible against the AI call itself.
+  if (process.env.AI_ROUTES_ENABLED === "true") {
+    const { route, config, effectiveAgentRole } = resolveRoute({ agentRole, workspaceId });
+    const effectivePrompt = (config?.systemPromptOverride && typeof prompt === "string")
+      ? { system: config.systemPromptOverride, user: prompt }
+      : prompt;
+    return {
+      // Mirror the legacy shape (`provider` field) by deriving it from the
+      // route's family so call sites that still inspect `provider` for
+      // telemetry labels or fallback enumeration keep working unchanged.
+      // The transient route synthesised by `resolveRoute` carries the
+      // legacy provider id in `_transientProvider`; real routes use the
+      // `family` column. Either path produces the same value as the
+      // legacy `resolveProvider` would have returned.
+      provider: route?._transientProvider || route?.family || null,
+      route,
+      config,
+      effectiveAgentRole,
+      effectivePrompt,
+      maxTokens: config?.maxTokens || options.maxTokens,
+      callOpts: { agentRole },
+      useRoutes: true,
+    };
+  }
+  // Legacy AI-005 path — unchanged when the flag is off. `route` is `null`
+  // and `useRoutes` is `false` so the existing call sites in `index.js`
+  // (and `vision.js`, etc.) never see a route object until they opt in.
   const { provider, config, effectiveAgentRole } = resolveProvider({ agentRole, workspaceId });
   const effectivePrompt = (config?.systemPromptOverride && typeof prompt === "string")
     ? { system: config.systemPromptOverride, user: prompt }
     : prompt;
   return {
     provider,
+    route: null,
     config,
     effectiveAgentRole,
     effectivePrompt,
     maxTokens: config?.maxTokens || options.maxTokens,
     callOpts: { agentRole },
+    useRoutes: false,
   };
 }
 
