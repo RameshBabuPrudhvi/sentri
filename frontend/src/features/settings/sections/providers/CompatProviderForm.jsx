@@ -157,9 +157,16 @@ export default function CompatProviderForm({ compatProviders, reload, onDelete }
           <input className="input" name="compat-model"        autoComplete="off" placeholder="Model" value={form.model}  onChange={(e) => setForm((s) => ({ ...s, model:  e.target.value }))} />
           <input className="input" name="compat-api-key"      type="password" autoComplete="new-password" placeholder="API key" value={form.apiKey} onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))} />
           {error && <div className="text-sm st-compat-form__error">{error}</div>}
-          <button className="btn btn-primary btn-sm" disabled={saving}>
-            {saving ? "Saving..." : "Save compat provider"}
-          </button>
+          {/* Action row uses the same `.st-provider-actions` container as
+              the Ollama "Activate" button at ProviderCard.jsx:154-172 so the
+              CTA visually matches the rest of the providers page (icon +
+              label, 14px top margin, flex-wrap on narrow viewports). */}
+          <div className="st-provider-actions">
+            <button className="btn btn-primary btn-sm" disabled={saving}>
+              {saving ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
+              {saving ? "Saving…" : "Save provider"}
+            </button>
+          </div>
         </form>
       </div>
       {/* Existing compat slots as full provider cards (parity with the
