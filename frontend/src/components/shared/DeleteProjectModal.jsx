@@ -55,7 +55,7 @@ export default function DeleteProjectModal({ project, onClose, onDeleted }) {
   const hasAutomation = tokenCount > 0 || hasSchedule;
 
   return (
-    <ModalShell onClose={onClose} style={{ padding: "28px 32px" }}>
+    <ModalShell onClose={onClose} ariaLabelledBy="delete-project-modal-title" style={{ padding: "28px 32px" }}>
       <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 20 }}>
         <div style={{
           width: 40, height: 40, borderRadius: 10, background: "var(--red-bg)",
@@ -64,7 +64,7 @@ export default function DeleteProjectModal({ project, onClose, onDeleted }) {
           <AlertTriangle size={18} color="var(--red)" />
         </div>
         <div>
-          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 6 }}>
+          <div id="delete-project-modal-title" style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 6 }}>
             Delete "{project.name}"?
           </div>
           <div style={{ fontSize: "0.875rem", color: "var(--text2)", lineHeight: 1.6 }}>

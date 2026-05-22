@@ -1502,8 +1502,8 @@ export default function ReviewQueue() {
           } : null;
         if (!config) return null;
         return (
-          <ModalShell onClose={() => setConfirmDialog(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
-            <div className="rq-confirm__title">{config.title}</div>
+          <ModalShell onClose={() => setConfirmDialog(null)} width="min(420px, 95vw)" ariaLabelledBy="rq-confirm-title" style={{ padding: "28px 32px" }}>
+            <div id="rq-confirm-title" className="rq-confirm__title">{config.title}</div>
             <div className="rq-confirm__body">{config.body}</div>
             <div className="rq-confirm__actions">
               <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDialog(null)}>

@@ -934,8 +934,8 @@ export default function Tests() {
 
       {/* Bulk delete confirmation modal */}
       {bulkConfirm && bulkConfirm.action === "delete" && (
-        <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
-          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Delete {bulkConfirm.ids.length} tests?</div>
+        <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" ariaLabelledBy="tests-bulk-delete-title" style={{ padding: "28px 32px" }}>
+          <div id="tests-bulk-delete-title" style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Delete {bulkConfirm.ids.length} tests?</div>
           <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
             These tests will be moved to the recycle bin. This cannot be undone easily.
           </div>
