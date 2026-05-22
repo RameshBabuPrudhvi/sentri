@@ -201,8 +201,18 @@ export default function ProviderRoutesSection() {
   const cycleAt = detectFallbackCycle(rows, form.id, form.fallbackRouteId);
   const cycleAtName = cycleAt ? (rows.find((r) => r.id === cycleAt)?.name || cycleAt) : null;
 
+  // UX-AUDIT (May 2026): the legacy "everything in one big card" layout
+  // made it impossible to tell where one form ended and the next began —
+  // operators couldn't distinguish "Save caps" (spend-caps form) from
+  // "Create route" (route-create form), and the IO bar looked like a
+  // field of the create form. Industry-standard pattern (Stripe Dashboard,
+  // Vercel project settings, AWS Console): page title sits OUTSIDE any
+  // card; each logical unit (caps, IO, create-form, route list, audit
+  // log, request log) gets its OWN card with its own heading. Visual
+  // separation between cards (24px gap) makes the form boundaries
+  // immediately legible.
   return (
-    <div className="card card-padded">
+    <div className="st-pr-section">
       <SectionTitle
         icon={<RouteIcon size={16} color="var(--accent)" />}
         title="Provider Routes"
@@ -213,52 +223,86 @@ export default function ProviderRoutesSection() {
           <AlertCircle size={12} /> {error}
         </div>
       )}
-      <WorkspaceSpendCapsPanel />
-      <ProviderRoutesIO
-        onExport={exportRoutes}
-        onImport={importRoutes}
-        busy={ioBusy}
-        importMsg={importMsg}
-      />
-      <ProviderRoutesForm
-        form={form}
-        setForm={setForm}
-        busy={busy}
-        showKey={showKey}
-        setShowKey={setShowKey}
-        fallbackOptions={fallbackOptions}
-        cycleAtName={cycleAtName}
-        onSave={save}
-        onCancel={resetForm}
-      />
-      {loading ? (
-        <div className="text-sm text-muted st-pr-loading">Loading provider routes…</div>
-      ) : rows.length === 0 ? (
-        <div className="text-sm text-muted st-pr-empty">
-          No provider routes configured. Create one above — agent roles need a routeId to dispatch.
-        </div>
-      ) : (
-        <div className="st-pr-rows">
-          {rows.map((row) => (
-            <ProviderRouteRow
-              key={row.id}
-              row={row}
-              rows={rows}
-              rowState={rowState[row.id]}
-              rotateOpen={rotateOpen === row.id}
-              setRotateOpen={setRotateOpen}
-              rotateBuf={rotateBuf}
-              setRotateBuf={setRotateBuf}
-              onEdit={edit}
-              onDelete={del}
-              onProbe={probe}
-              onRotate={rotate}
-            />
-          ))}
-        </div>
-      )}
-      <AuditLogSubtab rows={rows} />
-      <AiRequestLogSubtab rows={rows} />
+
+      {/* Card #1 — Workspace spend caps. Distinct form with its own
+          "Save caps" CTA. No overlap with the route create form below. */}
+      <div className="card card-padded">
+        <WorkspaceSpendCapsPanel />
+      </div>
+
+      {/* Card #2 — Export / import bar. Sibling action surface, NOT a
+          field of any form. Visually separated so the user doesn't
+          mistake the file-mode dropdown for a route attribute. */}
+      <div className="card card-padded">
+        <ProviderRoutesIO
+          onExport={exportRoutes}
+          onImport={importRoutes}
+          busy={ioBusy}
+          importMsg={importMsg}
+        />
+      </div>
+
+      {/* Card #3 — Create / edit route form. The "Create route" CTA is
+          unambiguously the submit for this card only. When the user
+          clicks "Edit" on a route below, the form re-binds to that
+          row and the CTA reads "Update route" (handled inside
+          ProviderRoutesForm). */}
+      <div className="card card-padded">
+        <ProviderRoutesForm
+          form={form}
+          setForm={setForm}
+          busy={busy}
+          showKey={showKey}
+          setShowKey={setShowKey}
+          fallbackOptions={fallbackOptions}
+          cycleAtName={cycleAtName}
+          onSave={save}
+          onCancel={resetForm}
+        />
+      </div>
+
+      {/* Card #4 — Existing routes list. Empty-state message lives
+          inside the card so an empty workspace still has a visible
+          surface to read against. */}
+      <div className="card card-padded">
+        {loading ? (
+          <div className="text-sm text-muted st-pr-loading">Loading provider routes…</div>
+        ) : rows.length === 0 ? (
+          <div className="text-sm text-muted st-pr-empty">
+            No provider routes configured. Create one above — agent roles need a routeId to dispatch.
+          </div>
+        ) : (
+          <div className="st-pr-rows">
+            {rows.map((row) => (
+              <ProviderRouteRow
+                key={row.id}
+                row={row}
+                rows={rows}
+                rowState={rowState[row.id]}
+                rotateOpen={rotateOpen === row.id}
+                setRotateOpen={setRotateOpen}
+                rotateBuf={rotateBuf}
+                setRotateBuf={setRotateBuf}
+                onEdit={edit}
+                onDelete={del}
+                onProbe={probe}
+                onRotate={rotate}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Cards #5 + #6 — Audit log + AI request log. Each subtab
+          already renders its own internal padding/panel chrome, so
+          we just wrap them in a card surface for visual parity with
+          the forms above. */}
+      <div className="card card-padded">
+        <AuditLogSubtab rows={rows} />
+      </div>
+      <div className="card card-padded">
+        <AiRequestLogSubtab rows={rows} />
+      </div>
     </div>
   );
 }

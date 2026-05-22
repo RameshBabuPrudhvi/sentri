@@ -518,6 +518,20 @@
 /* Per-row form + list inside the ProviderRoutesTab. Class names follow the
    `.st-pr-*` prefix to stay scoped to the Settings page; no inline styles so
    the same look survives theme changes and the AGENT.md "no inline CSS" rule. */
+
+/* UX-AUDIT (May 2026) — page-level wrapper that stacks every Provider Routes
+   sub-card (spend caps, IO bar, create form, route list, audit log, request
+   log) with consistent vertical rhythm. Replaces the legacy "everything in
+   one big card" layout where users couldn't tell where one form ended and
+   the next began. 24px gap matches the `.flex-col.gap-lg` rhythm used by
+   the built-in provider list on /settings/providers so the two pages feel
+   like siblings. */
+.st-pr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
 .st-pr-form {
   display: grid;
   gap: 12px;
