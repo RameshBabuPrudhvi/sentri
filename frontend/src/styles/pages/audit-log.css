@@ -81,6 +81,27 @@
   cursor: pointer;
 }
 
+/* SEC-007 UX: "Audit reads" toggle — hides high-volume meta-audit rows
+   (`audit.read` / `audit.export`) from the default feed. Sits in the
+   toolbar next to the sort selector so admins doing forensic review can
+   flip it on without leaving the page. */
+.al-toolbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text2);
+  cursor: pointer;
+  user-select: none;
+  padding: 0 8px;
+  height: 36px;
+}
+
+.al-toolbar__toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
 /* ── Type chips ──────────────────────────────────────────────────────────── */
 .al-chips {
   display: flex;

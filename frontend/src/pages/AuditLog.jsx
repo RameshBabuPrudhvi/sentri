@@ -528,6 +528,13 @@ export default function AuditLog() {
   const [searchParams, setSearchParams] = useSearchParams();
   const projectId = searchParams.get("projectId") || "all";
   const sortOrder = searchParams.get("sort")    || "newest";
+  // SEC-007 UX: meta-audit `audit.read` / `audit.export` rows are emitted
+  // every time the Audit Log page loads (PCI-DSS 10.2.6 / SOC 2 CC7.2),
+  // which on low-activity workspaces dominates the feed with the
+  // operator's own page reloads. Default to hiding them — admins doing
+  // forensic review opt back in via the "Audit reads" toggle in the
+  // toolbar. URL-driven so the toggle state survives reload + share.
+  const includeAuditReads = searchParams.get("includeAuditReads") === "true";
 
   function setParam(key, value) {
     setSearchParams((prev) => {
@@ -680,6 +687,9 @@ export default function AuditLog() {
     const filters = {
       projectId: projectId !== "all" ? projectId : undefined,
       type: filterTypes || undefined,
+      // Forwarded to the backend's `excludeTypes` filter — see comment on
+      // the URL-driven `includeAuditReads` flag above for the rationale.
+      includeAuditReads: includeAuditReads ? "true" : undefined,
       limit: PAGE_SIZE,
     };
 
@@ -716,7 +726,7 @@ export default function AuditLog() {
     // Including them here would trigger a server fetch (and a meta-audit
     // `audit.read` row) on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, typeKey, projectId, sortOrder, filterTypes]);
+  }, [workspaceId, typeKey, projectId, sortOrder, filterTypes, includeAuditReads]);
 
   // ── Load more (cursor-paginated) ───────────────────────────────────────────
   async function loadMore() {
@@ -726,6 +736,9 @@ export default function AuditLog() {
       const filters = {
         projectId: projectId !== "all" ? projectId : undefined,
         type: filterTypes || undefined,
+        // Keep the same `includeAuditReads` shape on subsequent pages so
+        // the cursor walk sees the same row set as the initial fetch.
+        includeAuditReads: includeAuditReads ? "true" : undefined,
         cursor: nextCursor,
         limit: PAGE_SIZE,
       };
@@ -1410,6 +1423,24 @@ export default function AuditLog() {
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
         </select>
+
+        {/* SEC-007: include `audit.read` / `audit.export` meta-audit rows.
+            Hidden by default — these fire on every page load + filter
+            change and otherwise dominate the feed. The rows still get
+            persisted server-side (PCI-DSS 10.2.6 / SOC 2 CC7.2 require
+            this) so an auditor who flips the toggle on sees the full
+            trail. */}
+        <label
+          className="al-toolbar__toggle"
+          title="Include meta-audit rows that record reads of the audit log itself. Hidden by default to keep the feed readable."
+        >
+          <input
+            type="checkbox"
+            checked={includeAuditReads}
+            onChange={(e) => setParam("includeAuditReads", e.target.checked ? "true" : null)}
+          />
+          <span>Audit reads</span>
+        </label>
       </div>
 
       {/* ── Type chips ── */}

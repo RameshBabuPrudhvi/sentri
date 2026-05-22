@@ -645,7 +645,7 @@ export function purgeOlderThan(days) {
  *   first order; `nextCursor` is the timestamp to pass to the next call,
  *   or `null` when there are no more rows.
  */
-export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
+export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [], excludeTypes = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
   const db = getDatabase();
   // Hard-cap defensively even though the route handler also clamps — a
   // direct repo caller (test, future internal job) shouldn't be able to
@@ -656,6 +656,14 @@ export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [
   if (userId) { sql += " AND userId = ?"; params.push(userId); }
   if (projectId) { sql += " AND projectId = ?"; params.push(projectId); }
   if (types?.length) { sql += ` AND type IN (${types.map(() => "?").join(",")})`; params.push(...types); }
+  // `excludeTypes` lets the route layer hide high-volume meta-audit types
+  // (`audit.read`, `audit.export`) from the default Audit Log view without
+  // skipping the rows themselves — PCI-DSS 10.2.6 / SOC 2 CC7.2 still
+  // require them to be persisted and reachable; this is a UX filter, not
+  // an audit-trail filter. Server-side so pagination math (`limit + 1`,
+  // `nextCursor`) stays correct vs. a client-side post-filter that would
+  // leave sparse pages and miscount "load more" boundaries.
+  if (excludeTypes?.length) { sql += ` AND type NOT IN (${excludeTypes.map(() => "?").join(",")})`; params.push(...excludeTypes); }
   if (dateFrom) { sql += " AND createdAt >= ?"; params.push(dateFrom); }
   if (dateTo) { sql += " AND createdAt <= ?"; params.push(dateTo); }
   if (ipAddress) { sql += " AND ipAddress = ?"; params.push(ipAddress); }

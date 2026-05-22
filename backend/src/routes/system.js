@@ -226,11 +226,27 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), auditExpo
       ? req.query.cursor
       : undefined;
 
+    // ── Default-hide meta-audit reads ───────────────────────────────────────
+    // Every audit-log view itself emits a `audit.read` (or `audit.export`)
+    // row for SOC 2 / PCI-DSS 10.2.6 compliance. On a low-activity
+    // workspace those rows dominate the feed — the operator's own page
+    // reloads bury actual events. Hide them by default; admins doing
+    // forensic review can opt back in with `?includeAuditReads=true` (the
+    // "Audit reads" filter chip in the UI). Skipped when the caller has
+    // explicitly filtered TO audit.read/export via `?type=` so the chip
+    // still works.
+    const wantsAuditReads = req.query.includeAuditReads === "true";
+    const filteringToAuditReads = types.some((t) => t === "audit.read" || t === "audit.export");
+    const excludeTypes = (wantsAuditReads || filteringToAuditReads)
+      ? undefined
+      : ["audit.read", "audit.export"];
+
     // ── Fetch ──
     const { rows, nextCursor } = activityRepo.getWorkspaceAuditLog(req.workspaceId, {
       userId: req.query.userId || undefined,
       projectId: req.query.projectId || undefined,
       types,
+      excludeTypes,
       dateFrom: req.query.dateFrom || undefined,
       dateTo: req.query.dateTo || undefined,
       ipAddress: req.query.ipAddress || undefined,

@@ -19,6 +19,7 @@
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import { coerceText as coerceTextPure, isBadStringified } from "../utils/notificationCoerce.js";
 
 const NotificationContext = createContext();
 
@@ -28,42 +29,28 @@ const MAX_NOTIFICATIONS = 50;
 /**
  * Coerce arbitrary input to a readable string for notification title/body.
  *
- * Historically some callsites passed `Error` instances or API envelopes
- * (`{ type, message }`) directly to `addNotification()`, which rendered as
- * the literal `"[object Object]"` once persisted to localStorage. This
- * helper produces a sensible string for the common shapes and emits a
- * dev-mode `console.warn` so the offending callsite can be hunted down.
+ * Thin wrapper around the pure helper in `utils/notificationCoerce.js` that
+ * wires a dev-mode `console.warn` for non-string inputs. The pure helper is
+ * unit-tested under `frontend/tests/notification-coerce.test.js`; this layer
+ * is the React-bundle integration point (it's the one that knows about
+ * `import.meta.env.DEV`).
  *
  * @param {unknown} value
  * @param {string} field   Field name used in the dev warning ("title" | "body").
  * @returns {string}
  */
 function coerceText(value, field = "value") {
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-
-  // Warn in dev so regressions are easy to find. Vite exposes import.meta.env.DEV.
-  try {
-    if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn(`[NotificationContext] non-string ${field} passed to addNotification; coercing.`, value);
-    }
-  } catch { /* ignore */ }
-
-  if (value instanceof Error) return value.message || value.toString();
-  if (typeof value === "object") {
-    if (typeof value.message === "string") return value.message;
-    if (typeof value.title === "string") return value.title;
-    if (typeof value.error === "string") return value.error;
-    try { return JSON.stringify(value); } catch { return ""; }
-  }
-  return String(value);
-}
-
-/** True if a stored string looks like the result of `Object.prototype.toString()`. */
-function isBadStringified(s) {
-  return typeof s === "string" && (s === "[object Object]" || s.startsWith("[object "));
+  return coerceTextPure(value, field, (fieldName, badValue) => {
+    // Warn in dev so regressions are easy to find. Vite exposes
+    // `import.meta.env.DEV`; the try guard covers test runners (jest,
+    // node esm) where `import.meta.env` may be undefined.
+    try {
+      if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn(`[NotificationContext] non-string ${fieldName} passed to addNotification; coercing.`, badValue);
+      }
+    } catch { /* ignore */ }
+  });
 }
 
 /** Read persisted notifications from localStorage, sanitizing legacy bad entries. */
