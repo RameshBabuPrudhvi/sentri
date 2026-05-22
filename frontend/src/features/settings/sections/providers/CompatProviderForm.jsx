@@ -126,21 +126,28 @@ export default function CompatProviderForm({ compatProviders, reload, onDelete }
           </div>
         </div>
       </div>
-      <h3 className="st-compat-card__title">Add provider</h3>
-      <form onSubmit={handleSave} className="st-compat-form">
-        <input className="input" placeholder="Slot id (e.g. deepseek)" value={form.slotId}        onChange={(e) => setForm((s) => ({ ...s, slotId:      e.target.value }))} />
-        <input className="input" placeholder="Display name"             value={form.displayName}  onChange={(e) => setForm((s) => ({ ...s, displayName: e.target.value }))} />
-        <input className="input" placeholder="Base URL"                  value={form.baseUrl}      onChange={(e) => setForm((s) => ({ ...s, baseUrl:     e.target.value }))} list="compat-baseurl-hints" />
-        <datalist id="compat-baseurl-hints">
-          {OPENAI_COMPAT_HINTS.map((url) => <option key={url} value={url} />)}
-        </datalist>
-        <input className="input" placeholder="Model" value={form.model}  onChange={(e) => setForm((s) => ({ ...s, model:  e.target.value }))} />
-        <input className="input" type="password" autoComplete="off" placeholder="API key" value={form.apiKey} onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))} />
-        {error && <div className="text-sm st-compat-form__error">{error}</div>}
-        <button className="btn btn-primary btn-sm" disabled={saving}>
-          {saving ? "Saving..." : "Save compat provider"}
-        </button>
-      </form>
+      {/* Add-provider form wrapped in its own card box so it visually matches
+          the built-in ProviderCard list above (each provider sits in its own
+          surface-coloured card). Without this wrapper the form inputs floated
+          against the page background and the section read as a broken layout
+          compared to GPT-4o-mini / Claude / Gemini cards. */}
+      <div className="card-padded st-compat-form-card">
+        <h3 className="st-compat-card__title">Add provider</h3>
+        <form onSubmit={handleSave} className="st-compat-form">
+          <input className="input" placeholder="Slot id (e.g. deepseek)" value={form.slotId}        onChange={(e) => setForm((s) => ({ ...s, slotId:      e.target.value }))} />
+          <input className="input" placeholder="Display name"             value={form.displayName}  onChange={(e) => setForm((s) => ({ ...s, displayName: e.target.value }))} />
+          <input className="input" placeholder="Base URL"                  value={form.baseUrl}      onChange={(e) => setForm((s) => ({ ...s, baseUrl:     e.target.value }))} list="compat-baseurl-hints" />
+          <datalist id="compat-baseurl-hints">
+            {OPENAI_COMPAT_HINTS.map((url) => <option key={url} value={url} />)}
+          </datalist>
+          <input className="input" placeholder="Model" value={form.model}  onChange={(e) => setForm((s) => ({ ...s, model:  e.target.value }))} />
+          <input className="input" type="password" autoComplete="off" placeholder="API key" value={form.apiKey} onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))} />
+          {error && <div className="text-sm st-compat-form__error">{error}</div>}
+          <button className="btn btn-primary btn-sm" disabled={saving}>
+            {saving ? "Saving..." : "Save compat provider"}
+          </button>
+        </form>
+      </div>
       {/* Existing compat slots as full provider cards (parity with the
           built-in ProviderCard list above). Empty state is intentionally
           silent — the "Add provider" form sits right above this block. */}

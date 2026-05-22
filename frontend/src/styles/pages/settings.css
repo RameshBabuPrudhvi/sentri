@@ -86,10 +86,23 @@
 .st-provider-banner--ok { background: rgba(0,229,255,0.05); border: 1px solid rgba(0,229,255,0.15); }
 .st-provider-banner--missing { background: rgba(255,71,87,0.05); border: 1px solid rgba(255,71,87,0.2); }
 .st-provider-banner__title-missing { color: var(--red); font-weight: 700; }
-.st-compat-card { margin-top: 16px; }
+/* UX-AUDIT (May 2026) — compat provider section now renders each saved slot
+   as a full `.st-provider-card` (see CompatProviderForm.jsx). The outer
+   `.st-compat-card` is a flex column that stacks the section title, the
+   add-provider form card, and the provider-card list with consistent gap
+   matching the built-in ProviderCard rhythm in `.st-provider-cards`. */
+.st-compat-card {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.st-compat-form-card { /* the boxed "Add provider" form */ }
 .st-compat-card__title { margin-bottom: 10px; }
 .st-compat-form { display: grid; gap: 8px; }
 .st-compat-form__error { color: var(--red); font-size: 0.875rem; }
+/* Legacy classes kept for backward compatibility with any external CSS
+   overrides; the new card-shaped rendering no longer uses these selectors. */
 .st-compat-list { margin-top: 12px; display: grid; gap: 8px; }
 .st-compat-row { display: flex; justify-content: space-between; align-items: center; }
 .st-compat-row__actions { display: flex; gap: 6px; }
