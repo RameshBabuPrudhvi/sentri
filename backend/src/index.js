@@ -64,6 +64,8 @@ import chatRouter from "./routes/chat.js";
 import testFixRouter from "./routes/testFix.js";
 import recycleBinRouter from "./routes/recycleBin.js";
 import healingRouter from "./routes/healing.js";
+// GAP-001 (audit) — Global data search (workspace-scoped) backing the ⌘K palette.
+import searchRouter from "./routes/search.js";
 import workspacesRouter from "./routes/workspaces.js";
 import githubIntegrationsRouter from "./routes/integrations/github.js";
 import { spec as openapiSpec } from "./openapi.js";
@@ -324,6 +326,7 @@ app.use(API_PREFIX, requireAuth, workspaceScope, chatRouter);
 app.use(API_PREFIX, requireAuth, workspaceScope, testFixRouter);
 app.use(API_PREFIX, requireAuth, workspaceScope, recycleBinRouter);
 app.use(API_PREFIX, requireAuth, workspaceScope, healingRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, searchRouter);
 app.use(`${API_PREFIX}/workspaces`, requireAuth, workspaceScope, workspacesRouter);
 
 // ─── INF-005: Legacy /api/* → /api/v1/* 308 redirects ────────────────────────

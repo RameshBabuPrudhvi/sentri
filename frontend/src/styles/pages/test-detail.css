@@ -37,31 +37,10 @@
   gap: 6px;
 }
 
-/* ── Breadcrumb ─────────────────────────────────────────────────────────────── */
-.td-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.82rem;
-  color: var(--text3);
-}
-
-.td-breadcrumb-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text3);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-  font-size: 0.82rem;
-  transition: color 0.12s;
-}
-
-.td-breadcrumb-btn:hover { color: var(--text); }
-
-.td-breadcrumb-current { color: var(--text); }
+/* NAV-002 (audit): the page-scoped `.td-breadcrumb*` rules were
+   removed when TestDetail switched to the shared `<Breadcrumb>`
+   component (`components/shared/Breadcrumb.jsx`). The shared
+   `.breadcrumb*` rules live in `frontend/src/styles/components.css`. */
 
 /* ── Action button group: primary + dropdown trigger ────────────────────────── */
 /* Split-button: Run Test primary + caret for extra options */
@@ -1094,14 +1073,6 @@
 }
 .td-runs-status-text { text-transform: capitalize; }
 .td-runs-empty-run-btn { margin-left: 4px; }
-
-/* ── Sidebar — quality score badge ─────────────────────────────────────────── */
-.td-quality-score {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  min-width: 32px;
-  justify-content: center;
-}
 
 /* ── Sidebar — source URL external icon ────────────────────────────────────── */
 .td-source-url-icon {

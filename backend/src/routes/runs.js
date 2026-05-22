@@ -502,7 +502,11 @@ router.get("/runs/:runId", (req, res) => {
   // Verify the run's project belongs to the user's workspace (ACL-001)
   const project = projectRepo.getByIdInWorkspace(run.projectId, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
-  res.json(signRunArtifacts(run));
+  // NAV-002 (audit): hydrate `projectName` onto the response so RunDetail's
+  // breadcrumb (Dashboard › Projects › [Project Name] › Runs › Run #abc) can
+  // render without a second `GET /projects/:id` round-trip. `project` is
+  // already in scope from the ACL check above — adding the name is free.
+  res.json({ ...signRunArtifacts(run), projectName: project.name });
 });
 
 // ─── Abort a running task ─────────────────────────────────────────────────────

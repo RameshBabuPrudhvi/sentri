@@ -10,25 +10,22 @@ import { useNavigate } from "react-router-dom";
 import {
   Globe, Cpu, ChevronRight, CheckCircle2,
   XCircle, Settings as SettingsIcon,
-  RefreshCw, Shield,
+  RefreshCw, Shield, Server,
 } from "lucide-react";
 import { fmtRelativeDate } from "../utils/formatters";
 import useProjectData from "../hooks/useProjectData";
 import { useSettingsBundleQuery } from "../hooks/queries/useSettingsQueries.js";
+import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
 import usePageTitle from "../hooks/usePageTitle.js";
+import WorkerPoolPanel from "../components/shared/WorkerPoolPanel.jsx";
 
 function SectionHeader({ icon, title, sub }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-      <div style={{
-        width: 32, height: 32, borderRadius: 8, background: "var(--bg2)",
-        border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        {icon}
-      </div>
+    <div className="sys-section-header">
+      <div className="sys-section-header__icon">{icon}</div>
       <div>
-        <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>{title}</div>
-        {sub && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{sub}</div>}
+        <div className="sys-section-header__title">{title}</div>
+        {sub && <div className="sys-section-header__sub">{sub}</div>}
       </div>
     </div>
   );
@@ -36,9 +33,9 @@ function SectionHeader({ icon, title, sub }) {
 
 function InfoRow({ label, children }) {
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-      <span style={{ fontSize: "0.8rem", color: "var(--text3)", fontWeight: 500, minWidth: 140 }}>{label}</span>
-      <span style={{ fontSize: "0.82rem", color: "var(--text)", textAlign: "right", flex: 1 }}>{children}</span>
+    <div className="sys-info-row">
+      <span className="sys-info-row__label">{label}</span>
+      <span className="sys-info-row__value">{children}</span>
     </div>
   );
 }
@@ -49,6 +46,13 @@ export default function Systems() {
   const { projects, allTests, allRuns, loading } = useProjectData();
   const bundleQuery = useSettingsBundleQuery();
   const config = bundleQuery.data?.config ?? null;
+  // DASH-003 (audit): worker-pool telemetry moved off the dashboard onto
+  // this page. Reuses the dashboard query so a user navigating Dashboard
+  // → System gets the cached payload immediately (TanStack Query caches
+  // by query key — `useDashboardQuery` mounts in both surfaces share one
+  // cache entry).
+  const dashboardQuery = useDashboardQuery();
+  const workerPool = dashboardQuery.data?.workerPool ?? null;
   const navigate = useNavigate();
 
   // Build crawl summary per project from already-fetched allRuns and allTests
@@ -66,9 +70,13 @@ export default function Systems() {
   }, [projects, allRuns, allTests]);
 
   if (loading) return (
-    <div className="page-container" style={{ maxWidth: 880 }}>
+    <div className="page-container sys-page">
+      {/* Skeleton heights are genuinely continuous (60/200/200/180) and
+          drive layout shape — kept inline per AGENT.md §127's data-driven
+          carve-out. Everything else (border-radius, margin-bottom) lives
+          on `.sys-skeleton`. */}
       {[60, 200, 200, 180].map((h, i) => (
-        <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 14 }} />
+        <div key={i} className="skeleton sys-skeleton" style={{ height: h }} />
       ))}
     </div>
   );
@@ -76,7 +84,7 @@ export default function Systems() {
   const hasProjects = projects.length > 0;
 
   return (
-    <div className="fade-in page-container" style={{ maxWidth: 880 }}>
+    <div className="fade-in page-container sys-page">
 
       {/* Header */}
       <div className="mb-lg">
@@ -87,7 +95,7 @@ export default function Systems() {
       </div>
 
       {/* AI Provider — compact status with link to Settings */}
-      <div className="card" style={{ padding: 24, marginBottom: 16 }}>
+      <div className="card card-padded mb-md">
         <SectionHeader
           icon={<Cpu size={15} color="var(--accent)" />}
           title="AI Provider"
@@ -105,30 +113,56 @@ export default function Systems() {
             {config.hasProvider && (
               <>
                 <InfoRow label="Provider">
-                  <span style={{ fontWeight: 500 }}>{config.providerName || "—"}</span>
+                  <span className="sys-info-row__provider">{config.providerName || "—"}</span>
                 </InfoRow>
                 {config.model && (
                   <InfoRow label="Model">
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--accent)" }}>
-                      {config.model}
-                    </span>
+                    <span className="sys-info-row__model">{config.model}</span>
                   </InfoRow>
                 )}
               </>
             )}
-            <div style={{ marginTop: 14 }}>
+            <div className="sys-provider-actions">
               <button className="btn btn-ghost btn-sm" onClick={() => navigate("/settings")}>
                 <SettingsIcon size={13} /> {config.hasProvider ? "Manage in Settings" : "Configure API Key"}
               </button>
             </div>
           </div>
         ) : (
-          <div style={{ color: "var(--text3)", fontSize: "0.85rem" }}>Could not load provider config.</div>
+          <div className="sys-load-error">Could not load provider config.</div>
+        )}
+      </div>
+
+      {/* Worker pool telemetry (DASH-003, audit) — relocated from Dashboard.
+          The /dashboard page now shows a single Platform Health card; the
+          full 4-card breakdown lives here for operators who need the
+          actual queue depth / active worker count / failed job tally.
+          Uses the shared `.card-padded` + `.mb-md` utilities rather than
+          inline padding/margin (DS-001). The sibling AI-Provider and
+          Application-Environments sections in this file still use the
+          inline pattern — migrating them is tracked as a separate
+          page-level cleanup. */}
+      <div className="card card-padded mb-md">
+        <SectionHeader
+          icon={<Server size={15} color="var(--accent)" />}
+          title="Worker Pool"
+          sub={workerPool?.mode === "distributed"
+            ? "Distributed BullMQ runners — Redis queue active"
+            : workerPool
+            ? "Single-process mode — no Redis configured"
+            : "Telemetry unavailable"}
+        />
+        {workerPool ? (
+          <WorkerPoolPanel workerPool={workerPool} variant="full" />
+        ) : (
+          <div className="text-sm text-muted">
+            Worker pool telemetry will appear once the dashboard payload loads.
+          </div>
         )}
       </div>
 
       {/* Applications context */}
-      <div className="card" style={{ padding: 24, marginBottom: 16 }}>
+      <div className="card card-padded mb-md">
         <SectionHeader
           icon={<Globe size={15} color="var(--purple)" />}
           title="Application Environments"
@@ -136,9 +170,8 @@ export default function Systems() {
         />
 
         {!hasProjects ? (
-          // Fix #17: proper empty state card with clear CTA
-          <div className="empty-state" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", background: "var(--surface)" }}>
-            <Globe size={32} color="var(--text3)" style={{ marginBottom: 14 }} />
+          <div className="empty-state sys-empty">
+            <Globe size={32} color="var(--text3)" className="sys-empty__icon" />
             <div className="empty-state-title">No applications registered</div>
             <div className="empty-state-desc">
               Add a project to see crawl context, test counts, and AI configuration for each application.
@@ -148,7 +181,7 @@ export default function Systems() {
             </button>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="sys-app-list">
             {projects.map(p => {
               const cd = crawlData[p.id] || {};
               const crawl = cd.lastCrawl;
@@ -156,27 +189,20 @@ export default function Systems() {
               return (
                 <div
                   key={p.id}
-                  style={{
-                    padding: "16px 18px", background: "var(--bg2)",
-                    borderRadius: 10, border: "1px solid var(--border)",
-                    cursor: "pointer",
-                  }}
+                  className="sys-app-card"
                   onClick={() => navigate(`/projects/${p.id}`)}
                 >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{
-                        width: 28, height: 28, borderRadius: 7, background: "var(--purple-bg)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}>
+                  <div className="sys-app-card__head">
+                    <div className="sys-app-card__head-left">
+                      <div className="sys-app-card__avatar">
                         <Globe size={13} color="var(--purple)" />
                       </div>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>{p.name}</div>
+                        <div className="sys-app-card__name">{p.name}</div>
                         <a
                           href={p.url} target="_blank" rel="noreferrer"
                           onClick={e => e.stopPropagation()}
-                          style={{ fontSize: "0.72rem", fontFamily: "var(--font-mono)", color: "var(--accent)" }}
+                          className="sys-app-card__url"
                         >
                           {p.url}
                         </a>
@@ -185,7 +211,7 @@ export default function Systems() {
                     <ChevronRight size={14} color="var(--text3)" />
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+                  <div className="sys-app-card__stats">
                     {[
                       { label: "Total Tests",  value: tests.length },
                       { label: "Approved",     value: tests.filter(t => t.reviewStatus === "approved").length },
@@ -193,19 +219,19 @@ export default function Systems() {
                       { label: "Pages Found",  value: crawl?.pagesFound ?? "—" },
                     ].map((item, i) => (
                       <div key={i}>
-                        <div className="section-label" style={{ marginBottom: 2 }}>
+                        <div className="section-label sys-app-card__stat-label">
                           {item.label}
                         </div>
-                        <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text)" }}>{item.value}</div>
+                        <div className="sys-app-card__stat-value">{item.value}</div>
                       </div>
                     ))}
                   </div>
 
                   {/* Crawl row */}
-                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className="sys-app-card__crawl">
                     <RefreshCw size={11} color="var(--text3)" />
-                    <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>
-                      Last crawl: <strong style={{ color: "var(--text2)" }}>{fmtRelativeDate(crawl?.startedAt, "Never")}</strong>
+                    <span className="sys-app-card__crawl-text">
+                      Last crawl: <strong className="sys-app-card__crawl-time">{fmtRelativeDate(crawl?.startedAt, "Never")}</strong>
                     </span>
                     {crawl && (
                       <span className={`badge ${crawl.status === "completed" ? "badge-green" : crawl.status === "failed" ? "badge-red" : "badge-amber"}`}>
@@ -213,7 +239,7 @@ export default function Systems() {
                       </span>
                     )}
                     {p.credentials && (
-                      <span className="badge badge-gray" style={{ marginLeft: "auto" }}>
+                      <span className="badge badge-gray sys-app-card__crawl-auth">
                         <Shield size={9} /> Auth configured
                       </span>
                     )}

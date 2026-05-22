@@ -43,10 +43,7 @@ export default function TopBar({ onOpenPalette, onOpenChat }) {
     : user?.email?.[0]?.toUpperCase() ?? "?";
 
   return (
-    <header style={{
-      height: 52, background: "var(--surface)", borderBottom: "1px solid var(--border)",
-      display: "flex", alignItems: "center", padding: "0 24px", gap: 12, flexShrink: 0,
-    }}>
+    <header className="topbar">
       {/* Command palette trigger */}
       <button
         onClick={() => onOpenPalette()}
@@ -60,91 +57,64 @@ export default function TopBar({ onOpenPalette, onOpenChat }) {
         </span>
       </button>
 
-      <div style={{ flex: 1 }} />
+      <div className="topbar__spacer" />
       <ProviderBadge />
       <ThemeToggle />
       <NotificationBell />
 
       {/* User menu */}
-      <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
+      <div ref={menuRef} className="topbar-user">
         <button
           onClick={() => setMenuOpen(v => !v)}
-          style={{
-            display: "flex", alignItems: "center", gap: 6,
-            background: "none", border: "1px solid transparent", borderRadius: 8,
-            padding: "3px 6px 3px 3px", cursor: "pointer",
-            transition: "border-color 0.15s, background 0.15s",
-            ...(menuOpen ? { background: "var(--bg2)", borderColor: "var(--border)" } : {}),
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
-          onMouseLeave={e => { if (!menuOpen) { e.currentTarget.style.background = "none"; e.currentTarget.style.borderColor = "transparent"; } }}
+          className={`topbar-user__btn${menuOpen ? " topbar-user__btn--open" : ""}`}
           aria-label="User menu"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
         >
-          <div style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: "0.72rem" }}>
+          <div className="topbar-user__avatar">
             {initials}
           </div>
-          <ChevronDown size={13} color="var(--text3)" style={{ transition: "transform 0.2s", transform: menuOpen ? "rotate(180deg)" : "none" }} />
+          <ChevronDown
+            size={13}
+            color="var(--text3)"
+            className={`topbar-user__chevron${menuOpen ? " topbar-user__chevron--open" : ""}`}
+          />
         </button>
 
         {menuOpen && (
-          <div style={{
-            position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 100,
-            background: "var(--surface)", border: "1px solid var(--border)",
-            borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-            minWidth: 200, overflow: "hidden",
-          }}>
+          <div className="topbar-user-dropdown" role="menu">
             {/* User info */}
-            <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{user?.name || "User"}</div>
-              <div style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{user?.email}</div>
+            <div className="topbar-user-dropdown__info">
+              <div className="topbar-user-dropdown__name">{user?.name || "User"}</div>
+              <div className="topbar-user-dropdown__email">{user?.email}</div>
             </div>
             {/* Command palette shortcut */}
             <button
               onClick={() => { setMenuOpen(false); onOpenPalette(); }}
-              style={{
-                display: "flex", alignItems: "center", gap: 9,
-                width: "100%", padding: "10px 14px",
-                background: "none", border: "none", cursor: "pointer",
-                fontSize: "0.83rem", color: "var(--text2)", textAlign: "left",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+              className="topbar-user-dropdown__item"
+              role="menuitem"
             >
               <Search size={14} />
               Search / AI
-              <span style={{ marginLeft: "auto", fontSize: "0.68rem", color: "var(--text3)", fontFamily: "monospace" }}>⌘K</span>
+              <span className="topbar-user-dropdown__item-meta">⌘K</span>
             </button>
             {/* Docs */}
             <a
               href={`${import.meta.env.BASE_URL}docs/`}
               target="_blank"
               rel="noopener noreferrer"
-              style={{
-                display: "flex", alignItems: "center", gap: 9,
-                width: "100%", padding: "10px 14px",
-                fontSize: "0.83rem", color: "var(--text2)", textDecoration: "none",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+              className="topbar-user-dropdown__item"
+              role="menuitem"
             >
               <BookOpen size={14} />
               Documentation
-              <ExternalLink size={10} style={{ marginLeft: "auto", opacity: 0.4 }} />
+              <ExternalLink size={10} className="topbar-user-dropdown__item-icon-end" />
             </a>
             {/* Sign out */}
             <button
               onClick={handleLogout}
-              style={{
-                display: "flex", alignItems: "center", gap: 9,
-                width: "100%", padding: "10px 14px",
-                background: "none", border: "none", cursor: "pointer",
-                fontSize: "0.83rem", color: "var(--text2)", textAlign: "left",
-                transition: "background 0.12s, color 0.12s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.color = "#ef4444"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text2)"; }}
+              className="topbar-user-dropdown__item topbar-user-dropdown__item--danger"
+              role="menuitem"
             >
               <LogOut size={14} />
               Sign out

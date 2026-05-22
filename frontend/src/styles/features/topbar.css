@@ -1,0 +1,140 @@
+/**
+ * styles/features/topbar.css
+ *
+ * App-shell top bar (`<TopBar>` in `components/layout/TopBar.jsx`). Hosts
+ * the command-palette trigger, provider badge, theme toggle, notification
+ * bell, and the user menu (avatar + dropdown).
+ *
+ * DS-001 (audit): replaces the inline `style={{...}}` blocks that used
+ * to live on every TopBar element. Hover states now use CSS `:hover`
+ * pseudo-classes instead of `onMouseEnter`/`onMouseLeave` handlers — the
+ * audit calls those out as anti-pattern (extra renders, no specificity
+ * for theming, no `:focus-visible` integration).
+ *
+ * Layer: Features (ITCSS) — imported from index.css after the components
+ * layer so component-level rules can be overridden here when needed.
+ */
+
+/* ── Header bar ───────────────────────────────────────────────────────────── */
+.topbar {
+  height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* Spacer between the command-palette trigger and the right-side cluster
+   (provider badge / theme toggle / notification bell / user menu). */
+.topbar__spacer { flex: 1; }
+
+/* ── User menu (avatar + chevron + dropdown) ──────────────────────────────── */
+.topbar-user {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.topbar-user__btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 3px 6px 3px 3px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.topbar-user__btn:hover,
+.topbar-user__btn--open {
+  background: var(--bg2);
+  border-color: var(--border);
+}
+
+.topbar-user__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+
+.topbar-user__chevron { transition: transform 0.2s; }
+.topbar-user__chevron--open { transform: rotate(180deg); }
+
+/* ── Dropdown panel ───────────────────────────────────────────────────────── */
+.topbar-user-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  min-width: 200px;
+  overflow: hidden;
+}
+
+.topbar-user-dropdown__info {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.topbar-user-dropdown__name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.topbar-user-dropdown__email {
+  font-size: 0.75rem;
+  color: var(--text3);
+}
+
+/* Shared item styling — applies to <button> and <a> alike so the
+   dropdown rows feel uniform regardless of element type. */
+.topbar-user-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.83rem;
+  color: var(--text2);
+  text-align: left;
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+  font-family: inherit;
+}
+.topbar-user-dropdown__item:hover {
+  background: var(--bg2);
+}
+
+/* Sign-out variant — turns red on hover so the destructive action reads
+   without a confirmation dialog. */
+.topbar-user-dropdown__item--danger:hover {
+  color: #ef4444;
+}
+
+/* Trailing label / icon nudged to the right edge of the row. */
+.topbar-user-dropdown__item-meta {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--text3);
+  font-family: var(--font-mono);
+}
+.topbar-user-dropdown__item-icon-end {
+  margin-left: auto;
+  opacity: 0.4;
+}

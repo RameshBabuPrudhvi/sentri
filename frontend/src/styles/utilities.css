@@ -141,6 +141,17 @@
 .text-xs    { font-size: 0.75rem; }
 .text-mono  { font-family: var(--font-mono); }
 .text-muted { color: var(--text3); }
+
+/* Screen-reader-only — visually hidden but announced by assistive tech.
+   Standard pattern from Bootstrap / Tailwind / Radix. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
 .text-sub   { color: var(--text2); }
 .font-bold  { font-weight: 700; }
 .font-semi  { font-weight: 600; }

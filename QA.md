@@ -745,7 +745,7 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 20. Revoke writes a `test.revoke` activity with `meta.wasAutoApproved` set to `true` for auto-approved tests, `false` for human-approved.
 
 **ReviewQueue 24h auto-approval tray** (`frontend/src/pages/ReviewQueue.jsx`, AUTO-003b):
-21. With a single project selected (project filter, not "All") AND `autoApproveThreshold` set, open the Draft tab → a tray strip renders above the draft list: `🤖 N auto-approved (24h):` followed by clickable test chips with `Q:NN` quality scores (`qualityColor()` styling).
+21. With a single project selected (project filter, not "All") AND `autoApproveThreshold` set, open the Draft tab → a tray strip renders above the draft list: `🤖 N auto-approved (24h):` followed by clickable test chips with `Q:NN` quality scores (tier-aware green/amber/red via `quality-explainer--<tier>` modifier).
 22. Click a chip → navigates to `/tests/:testId` for a 30-second spot-audit.
 23. Tray is suppressed on the Approved / Rejected tabs, when "All projects" is selected, or when the selected project has no threshold configured.
 24. Tray is empty (renders nothing) when no auto-approvals have fired in the last 24h.

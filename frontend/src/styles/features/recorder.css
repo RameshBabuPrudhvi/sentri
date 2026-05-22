@@ -110,6 +110,10 @@
   color: var(--text3);
   text-transform: uppercase; letter-spacing: 0.06em;
 }
+/* DS-001 (audit): tighter spacing for the heading above the "Add verification"
+   stack in the footer — replaces `style={{ marginBottom: 2 }}` so the
+   inline-style purge for RecorderModal is complete. */
+.recorder-sidebar__heading--tight { margin-bottom: 2px; }
 .recorder-sidebar__steps-list {
   flex: 1; min-height: 0;
   border: 1px solid var(--border); border-radius: 8px;

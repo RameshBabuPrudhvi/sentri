@@ -1,10 +1,232 @@
 /**
  * Settings — page-specific styles
  *
- * Tab bar, key-value rows, info rows, and code blocks used
- * exclusively on the Settings page.
- * Scoped by descriptive class names (`.tab-*`, `.kv-*`, `.info-row`, `.code-block`).
+ * GAP-002 (audit, May 2026): the legacy single-file Settings.jsx was decomposed
+ * into a sidebar-driven shell + per-section route components under
+ * `frontend/src/features/settings/`. The new shell classes implement the
+ * industry-standard left-rail layout used by GitHub / Vercel / Linear / Sentry
+ * Settings. All inline styles in extracted components were replaced with the
+ * utility classes below per AGENT.md §127.
  */
+
+/* ── GAP-002 — Settings shell (sidebar + content) ───────────────────────────── */
+.settings-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 32px;
+  align-items: start;
+}
+.settings-header { margin-bottom: 24px; }
+.settings-header__title { font-weight: 800; font-size: 1.9rem; }
+.settings-header__sub { margin-top: 6px; font-size: 0.875rem; color: var(--text2); }
+.settings-back { margin-bottom: 16px; }
+.settings-sidebar {
+  position: sticky;
+  top: calc(52px + 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-right: 8px;
+}
+.settings-sidebar__group { display: flex; flex-direction: column; gap: 2px; }
+.settings-sidebar__group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 12px 6px;
+}
+.settings-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text2);
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+}
+.settings-nav-link:hover { background: var(--bg2); color: var(--text); }
+.settings-nav-link.active,
+.settings-nav-link[aria-current="page"] {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-nav-link__icon { display: inline-flex; align-items: center; flex-shrink: 0; }
+.settings-main { min-width: 0; }
+
+/* GAP-002 — Replacements for inline styles in extracted components */
+.st-section-title__heading { font-size: 1.05rem; }
+.st-section-title__sub { margin-top: 1px; }
+.st-admin-locked { text-align: center; padding: 40px 24px; }
+.st-admin-locked__icon { margin-bottom: 12px; }
+.st-admin-locked__title { font-size: 1.05rem; margin-bottom: 6px; }
+.st-admin-locked__body { max-width: 420px; margin: 0 auto; }
+.st-data-action__title { font-size: 0.88rem; }
+.st-data-action__count { font-weight: 400; margin-left: 6px; }
+.st-data-action__sub { margin-top: 2px; }
+.st-data-action__status { margin-top: 0; }
+.st-data-action__btn { flex-shrink: 0; }
+.st-provider-loading-grid { display: flex; flex-direction: column; gap: 24px; }
+.st-provider-skeleton { height: 200px; border-radius: 16px; }
+.st-provider-cards { display: flex; flex-direction: column; gap: 24px; }
+.st-provider-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.st-provider-active-text { font-size: 0.7rem; font-weight: 700; }
+.st-provider-key-input { padding-right: 40px; }
+.st-key-remove-btn { padding: 3px 8px; }
+.st-key-status-inner { display: flex; align-items: center; gap: 8px; }
+.st-provider-actions { margin-top: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.st-provider-icon-emoji { font-size: 20px; }
+.st-provider-banner__title-ok { font-weight: 700; }
+.st-provider-banner__model { font-family: var(--font-mono); }
+.st-provider-banner--ok { background: rgba(0,229,255,0.05); border: 1px solid rgba(0,229,255,0.15); }
+.st-provider-banner--missing { background: rgba(255,71,87,0.05); border: 1px solid rgba(255,71,87,0.2); }
+.st-provider-banner__title-missing { color: var(--red); font-weight: 700; }
+.st-compat-card { margin-top: 16px; }
+.st-compat-card__title { margin-bottom: 10px; }
+.st-compat-form { display: grid; gap: 8px; }
+.st-compat-form__error { color: var(--red); font-size: 0.875rem; }
+.st-compat-list { margin-top: 12px; display: grid; gap: 8px; }
+.st-compat-row { display: flex; justify-content: space-between; align-items: center; }
+.st-compat-row__actions { display: flex; gap: 6px; }
+.st-env-tip__row { display: flex; align-items: flex-start; gap: 8px; }
+.st-env-tip__icon { color: var(--text3); margin-top: 2px; }
+.st-env-tip__body { line-height: 1.6; }
+
+/* GAP-002 — Ollama panel */
+.ollama-panel { margin-top: 16px; display: grid; gap: 12px; }
+.ollama-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+}
+.ollama-status--ok { background: var(--green-bg); border: 1px solid #86efac; }
+.ollama-status--err { background: var(--red-bg); border: 1px solid #fca5a5; }
+.ollama-status--unknown { background: var(--bg3); border: 1px solid var(--border); }
+.ollama-status__icon { flex-shrink: 0; margin-top: 1px; }
+.ollama-status__body { flex: 1; min-width: 0; }
+.ollama-status__error {
+  font-size: 0.75rem;
+  color: var(--red);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ollama-status__connected { font-size: 0.875rem; font-weight: 600; color: var(--green); }
+.ollama-status__check-btn { flex-shrink: 0; }
+.ollama-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--text2);
+}
+.ollama-select { height: 38px; font-family: var(--font-mono); font-size: 0.82rem; }
+.ollama-input--mono { font-family: var(--font-mono); }
+.ollama-input--url { font-family: var(--font-mono); font-size: 0.82rem; }
+.ollama-quickstart-card { background: var(--bg3); }
+.ollama-quickstart__title {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ollama-quickstart__pre {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.9;
+  white-space: pre-wrap;
+}
+.ollama-tip { display: flex; align-items: flex-start; gap: 6px; }
+.ollama-tip__icon { flex-shrink: 0; margin-top: 2px; }
+.ollama-italic-hint { font-style: italic; }
+.ollama-code-inline { background: var(--bg3); padding: 1px 5px; border-radius: 3px; }
+
+/* GAP-002 — Members tab */
+.members-loading { padding: 32px 0; text-align: center; }
+.members-error {
+  border-color: var(--danger);
+  color: var(--danger);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.members-invite-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.members-invite__email { flex: 1 1 220px; min-width: 180px; }
+.members-invite__role { flex: 0 0 130px; }
+.members-invite__input { height: 36px; font-size: 0.85rem; }
+.members-invite__label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--text2);
+}
+.members-invite__label-icon { margin-right: 4px; vertical-align: middle; }
+.members-invite__submit { height: 36px; }
+
+/* GAP-002 — Integrations tab */
+.integrations-intro__title { margin-bottom: 6px; }
+.integrations-intro__body { margin-bottom: 14px; }
+.integrations-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr auto auto;
+  gap: 12px;
+  align-items: end;
+}
+.integrations-row__toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* GAP-002 — Account tab */
+.account-confirm__input { margin-top: 8px; }
+.account-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.account-oauth-hint { display: flex; align-items: center; gap: 6px; }
+
+/* GAP-002 — Execution tab */
+.execution-hint { margin-top: 8px; padding-left: 2px; }
+.execution-hint__icon { vertical-align: middle; margin-right: 4px; }
+.execution-hint__path { background: var(--bg3); padding: 1px 5px; border-radius: 3px; }
+.execution-gap { height: 32px; }
+.execution-info-label { min-width: 130px; }
+.execution-info-value { color: var(--text); }
+.execution-card { overflow: hidden; }
+.execution-no-info { padding: 20px 0; }
+.execution-value--enabled { color: var(--green); }
+
+/* GAP-002 — Data + RecycleBin */
+.data-recycle-empty { text-align: center; color: var(--text2); }
+.data-recycle-empty__emoji { font-size: 2rem; margin-bottom: 8px; }
+.data-recycle-empty__hint { margin-top: 4px; }
+.recycle-section__title {
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.recycle-section__title-icon { display: inline; margin-right: 4px; }
+.recycle-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+.recycle-item__body { flex: 1; min-width: 0; }
+.recycle-item__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recycle-item__sub {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recycle-item__deleted { margin-top: 2px; }
+.recycle-item__actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 /* ── Tab bar ────────────────────────────────────────────────────────────────── */
 .tab-bar {
@@ -605,6 +827,137 @@
     gap: 10px;
     padding: 14px 16px;
   }
+}
+
+/* GAP-002 — Member rows + role legend */
+.members-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.members-row__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--bg3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text2);
+  overflow: hidden;
+}
+.members-row__avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.members-row__body { flex: 1; min-width: 0; }
+.members-row__name-line { display: flex; align-items: center; gap: 6px; }
+.members-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.members-row__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.members-row__you-badge {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+}
+.members-row__role-select {
+  width: 110px;
+  height: 32px;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.members-row__remove-btn { color: var(--text3); flex-shrink: 0; }
+.members-legend-card { background: var(--bg3); }
+.members-legend__title {
+  margin-bottom: 10px;
+  color: var(--text2);
+}
+.members-legend__row { display: flex; gap: 10px; align-items: baseline; }
+.members-legend__label { width: 70px; flex-shrink: 0; }
+
+/* GAP-002 — MFA / Security panels */
+.recovery-panel { display: flex; flex-direction: column; gap: 14px; }
+.recovery-panel__header { display: flex; align-items: flex-start; gap: 10px; }
+.recovery-panel__icon { margin-top: 2px; }
+.recovery-panel__title { font-size: 0.95rem; }
+.recovery-panel__hint { margin-top: 4px; line-height: 1.5; }
+.recovery-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  padding: 12px;
+  background: var(--bg3);
+  border-radius: var(--radius);
+}
+.recovery-panel__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.recovery-panel__confirm { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+/* PasswordConfirmModal now wraps in `<ModalShell>`, which provides the
+   backdrop, centering, and focus trap (A11Y-002, audit). The previous
+   `.pwd-modal-overlay` div was replaced; only the inner form classes
+   below remain in use. (`.pwd-modal*` is also defined in
+   `features/mfa.css`; the rules below win via ITCSS layer order — pages
+   load after features — and are the production-canonical values.) */
+.pwd-modal { display: flex; flex-direction: column; gap: 12px; }
+.pwd-modal__title { margin: 0; font-size: 1rem; }
+.pwd-modal__desc { margin: 0; }
+.pwd-modal__label { display: flex; flex-direction: column; gap: 6px; }
+.pwd-modal__input { margin-top: 0; }
+.pwd-modal__error { margin-top: 0; }
+.pwd-modal__actions { display: flex; gap: 8px; justify-content: flex-end; }
+.totp-enroll { align-items: stretch; }
+.totp-enroll__qr-wrap { display: flex; justify-content: center; }
+.totp-enroll__qr { border-radius: 8px; }
+.totp-enroll__secret-label { margin-bottom: 4px; }
+.totp-enroll__secret {
+  padding: 8px 12px;
+  background: var(--bg3);
+  border-radius: var(--radius);
+  word-break: break-all;
+}
+.totp-enroll__code-input { margin-top: 6px; letter-spacing: 0.2em; font-family: var(--font-mono); }
+.totp-enroll__actions { display: flex; gap: 8px; justify-content: flex-end; }
+.factor-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.factor-row__info { flex: 1; min-width: 200px; }
+.factor-row__sub { margin-top: 2px; }
+.mfa-label { display: flex; flex-direction: column; gap: 6px; }
+.passkey-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg2);
+}
+.passkey-item__info { flex: 1; min-width: 0; }
+.passkey-item__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.passkey-item__meta { margin-top: 2px; }
+.ws-enforce__loading { padding: 16px 0; }
+.ws-enforce__title { display: flex; align-items: center; gap: 8px; }
+.ws-enforce__compliance-note { margin-left: 6px; }
+.ws-enforce__require-label { display: flex; align-items: center; gap: 8px; }
+.ws-enforce__compliance { display: flex; flex-direction: column; gap: 4px; }
+.ws-enforce__compliance-title { text-transform: uppercase; letter-spacing: 0.06em; }
+.ws-enforce__grace-input { max-width: 120px; margin-top: 8px; }
+.ws-enforce__grace-hint { margin-top: 6px; }
+
+/* GAP-002 — Sidebar responsiveness */
+@media (max-width: 900px) {
+  .settings-shell { grid-template-columns: 1fr; gap: 16px; }
+  .settings-sidebar { position: static; padding-right: 0; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+  .settings-sidebar__group { flex: 1 1 220px; }
 }
 
 /* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */

@@ -27,8 +27,16 @@
   --border: #e5e8ef;
   --border2: #d0d5e0;
   --text: #111827;
-  --text2: #6b7280;
-  --text3: #9ca3af;
+  --text2: #4b5563;
+  /* A11Y-004 (audit) — lifted from #9ca3af (2.8:1 on --bg, fails WCAG AA
+     for normal text at 4.5:1) to #6b7280 (4.6:1, passes AA). Used widely
+     as `text-muted` for timestamps, secondary labels, and metadata where
+     the prior contrast made meaningful text illegible for low-vision
+     users. The legible large-text rule (3:1) at SC 1.4.3 is unaffected.
+     `--text2` is darkened to #4b5563 (7.5:1) so the secondary/tertiary
+     hierarchy survives: .text-sub (var(--text2)) stays visibly darker
+     than .text-muted (var(--text3)). */
+  --text3: #6b7280;
   --accent: #5b6ef5;
   --accent2: #4455e8;
   --accent-bg: #eef0fe;
@@ -55,6 +63,33 @@
   /* ── Spacing / Radii ── */
   --radius: 8px;
   --radius-lg: 12px;
+
+  /* DS-002 (audit) — Spacing scale. Industry-standard 4px base unit
+     matching Tailwind / Radix / Linear / Vercel conventions. Existing
+     raw pixel values (`marginTop: 16`, `gap: 12`, `padding: "0 24px"`)
+     stay valid; future CSS should reference these tokens so visual
+     rhythm is consistent across pages. Migration is opportunistic —
+     adopt per-component as features land, not via a single mass rewrite. */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* DS-003 (audit) — Type scale. Locks in the de-facto sizes already
+     scattered across the codebase (0.72rem … 1.25rem) so future text
+     elements pick from a discrete set rather than inventing new sizes.
+     Mirrors Tailwind's `text-xs … text-xl` ladder. `--leading-*` covers
+     the two line-height regimes the app uses today (tight for badges /
+     headlines, normal for body / hint copy). */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
 
   /* ── Shadows ── */
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
@@ -108,8 +143,9 @@
   --border: #e5e8ef;
   --border2: #d0d5e0;
   --text: #111827;
-  --text2: #6b7280;
-  --text3: #9ca3af;
+  --text2: #4b5563;
+  /* A11Y-004 (audit) — keep parity with the :root default. See note above. */
+  --text3: #6b7280;
   --accent: #5b6ef5;
   --accent2: #4455e8;
   --accent-bg: #eef0fe;

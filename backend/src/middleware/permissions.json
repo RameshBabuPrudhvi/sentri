@@ -426,6 +426,7 @@
     "GET /api/v1/projects/:id/last-deployment-run",
     "GET /api/v1/tests/:testId",
     "GET /api/v1/tests/counts",
+    "GET /api/v1/search",
     "GET /api/v1/recycle-bin",
     "GET /api/v1/auth/export",
     "DELETE /api/v1/auth/account",

@@ -20,6 +20,21 @@ const PIPELINE_STAGES = [
   { label: "Done",                icon: "🎉", step: 8 },
 ];
 
+// AI-004 (audit): map each generate-flow pipeline step to the AI agent role
+// that owns it. The roles match the dispatch values in
+// `backend/src/aiProvider/registry.js#resolveProvider` so when the backend
+// later wires `run.modelByStage` per stage (B2.5), we can correlate the
+// streaming output to a specific (role, model) pair without a schema change.
+// Stages 1-2 (Crawl, Filter) are skipped in Generate flow — they belong to
+// the crawl pipeline and never produce LLM tokens here.
+const STEP_TO_AGENT_ROLE = {
+  3: "planner",   // Classify Intent
+  4: "author",    // Generate Tests via AI — the heavy LLM stage
+  5: "author",    // Deduplicate (LLM-assisted dedup)
+  6: "author",    // Enhance Assertions
+  7: "author",    // Validate
+};
+
 export default function GenerateView({ run, isRunning, llmTokens = "" }) {
   const logs = useLogBuffer(run);
   const ps = run?.pipelineStats || {};
@@ -64,8 +79,41 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
 
         <ActivityLogCard logs={logs} isRunning={isRunning} emptyLabel="Starting generation…" />
 
-        {/* ── LLM streaming panel — sits below the pipeline/log card ── */}
-        <LLMStreamPanel tokens={llmTokens} isRunning={isRunning} />
+        {/* ── LLM streaming panel — sits below the pipeline/log card ──
+            AI-004 (audit): pass pipeline + agent context so the
+            panel's new context line ("Author agent · generate tests via ai
+            — Stage 4/8") replaces the prior raw-tokens void. `currentStep`
+            is the 1-based step index the backend writes on every pipeline
+            transition.
+
+            Model name (`run.modelUsed`) is intentionally read off the run
+            even though the `runs` table doesn't currently persist it — the
+            `LLMStreamPanel` skips the "with <model>" fragment cleanly when
+            it's null. A future PR that wires per-run model attribution
+            (tracked under GAP-005's backend work) will populate it and the
+            context line will start rendering "with claude-sonnet-4"
+            without any frontend change. */}
+        {(() => {
+          const currentStep = Number.isFinite(run?.currentStep) ? Number(run.currentStep) : null;
+          const activeStage = currentStep != null
+            ? PIPELINE_STAGES.find((s) => s.step === currentStep)
+            : null;
+          // Only stages that have an active LLM agent get a roleLabel —
+          // skipped stages (Crawl, Filter) and the "Done" terminal step
+          // would otherwise mis-attribute streaming output.
+          const agentRole = currentStep != null ? STEP_TO_AGENT_ROLE[currentStep] || null : null;
+          return (
+            <LLMStreamPanel
+              tokens={llmTokens}
+              isRunning={isRunning}
+              stageLabel={activeStage?.label || null}
+              stageIndex={currentStep}
+              totalStages={PIPELINE_STAGES.length}
+              agentRole={agentRole}
+              modelName={run?.modelUsed || null}
+            />
+          );
+        })()}
 
       </div>
 

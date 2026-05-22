@@ -3,13 +3,15 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp, AlertTriangle,
   SquareCheckBig, FileText, Wrench, Clock, Plus, Shield, Crosshair, Activity,
-  Download, RefreshCw,
+  Download, RefreshCw, Rocket, CloudOff,
 } from "lucide-react";
 import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
+import EmptyState from "../components/shared/EmptyState.jsx";
 import { fmtDurationMs } from "../utils/formatters.js";
 import { generateExecutivePDF } from "../utils/pdfReportGenerator.js";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import StatCard from "../components/shared/StatCard.jsx";
+import WorkerPoolPanel from "../components/shared/WorkerPoolPanel.jsx";
 import PassFailChart from "../components/charts/PassFailChart.jsx";
 import SparklineChart from "../components/charts/SparklineChart.jsx";
 import StackedBar from "../components/charts/StackedBar.jsx";
@@ -367,23 +369,33 @@ export default function Dashboard() {
         <ExportPDFButton />
       </div>
 
-      {/* Error banner */}
+      {/* ONB-002 (audit): API error → shared empty-state shape so the
+          Dashboard's error surface matches the four pages retrofitted in
+          this PR. The Retry CTA was always there; now it lives in the
+          standard `.empty-state-actions` row instead of dangling below
+          the raw description. */}
       {loadError && (
-        <div className="card empty-state mb-md" style={{ border: "1px solid #fca5a5" }}>
-          <div className="empty-state-icon">⚠️</div>
-          <div className="empty-state-title">Could not load dashboard data</div>
-          <div className="empty-state-desc">The API may be temporarily unavailable. Your data is safe.</div>
-          <button className="btn btn-ghost btn-sm" onClick={() => dashboardQuery.refetch()}>Retry</button>
+        <div className="mb-md">
+          <EmptyState
+            icon={<CloudOff size={32} color="var(--red)" />}
+            title="Could not load dashboard data"
+            description="The API may be temporarily unavailable. Your data is safe."
+            action={{ label: "Retry", onClick: () => dashboardQuery.refetch(), variant: "ghost" }}
+          />
         </div>
       )}
 
-      {/* First-time onboarding */}
+      {/* ONB-002 (audit): first-run onboarding via the shared primitive.
+          Same Rocket icon used by Tests.jsx's onboarding branch so the two
+          surfaces read as related once a user signs in. */}
       {isEmpty ? (
-        <div className="card empty-state mb-md">
-          <div className="empty-state-icon">🚀</div>
-          <div className="empty-state-title">Welcome to Sentri!</div>
-          <div className="empty-state-desc">Create your first project to start crawling your web app and AI-generating tests automatically.</div>
-          <button className="btn btn-primary" onClick={() => navigate("/projects/new")}>Create First Project</button>
+        <div className="mb-md">
+          <EmptyState
+            icon={<Rocket size={32} color="var(--accent)" />}
+            title="Welcome to Sentri!"
+            description="Create your first project to start crawling your web app and AI-generating tests automatically."
+            action={{ label: "Create First Project", onClick: () => navigate("/projects/new") }}
+          />
         </div>
       ) : (
         <>
@@ -415,36 +427,21 @@ export default function Dashboard() {
 
 
 
-          {/* ── Row 2b: Distributed worker pool status (AUTO-008) ── */}
+          {/* ── Row 2b: Platform Health (DASH-003, audit) ──
+              The four BullMQ worker stat cards (Runner Mode / Queue Depth /
+              Active Workers / Completed Jobs) moved to `/system` per the
+              audit's recommendation — that's operator infrastructure data
+              that occupies dashboard real estate without serving the QA
+              persona. The single Platform Health card here collapses the
+              same signals into one green/amber/red indicator: green when
+              the queue is healthy, amber on backed-up queues or missing
+              workers, red on any failed job. Drill into /system for the
+              full breakdown.
+
+              `stat-grid` keeps the 4-column track even with one card so
+              the dashboard's row rhythm doesn't shift below it. */}
           <div className="stat-grid">
-            <StatCard
-              label="Runner Mode"
-              value={data?.workerPool?.mode === "distributed" ? "Distributed" : "Single-process"}
-              sub={data?.workerPool?.mode === "distributed" ? "Redis queue enabled" : "Redis not configured"}
-              color={data?.workerPool?.mode === "distributed" ? "var(--blue)" : "var(--text3)"}
-              icon={<Activity size={16} />}
-            />
-            <StatCard
-              label="Queue Depth"
-              value={data?.workerPool?.queue?.waiting ?? 0}
-              sub={`${data?.workerPool?.queue?.active ?? 0} active · ${data?.workerPool?.queue?.failed ?? 0} failed`}
-              color="var(--purple)"
-              icon={<FileText size={16} />}
-            />
-            <StatCard
-              label="Active Workers"
-              value={data?.workerPool?.activeWorkers ?? 0}
-              sub={`${data?.workerPool?.idleWorkers ?? 0} idle`}
-              color="var(--green)"
-              icon={<CheckCircle2 size={16} />}
-            />
-            <StatCard
-              label="Completed Jobs"
-              value={data?.workerPool?.queue?.completed ?? 0}
-              sub="BullMQ completions"
-              color="var(--accent)"
-              icon={<SquareCheckBig size={16} />}
-            />
+            <WorkerPoolPanel workerPool={data?.workerPool} variant="health" />
           </div>
 
           {/* ── Row 3: Flaky Tests + Defect Breakdown ── */}

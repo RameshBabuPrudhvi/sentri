@@ -145,9 +145,9 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
   }
 
   return (
-    <ModalShell onClose={onClose} width="min(420px, 95vw)">
+    <ModalShell onClose={onClose} width="min(420px, 95vw)" ariaLabelledBy="run-regression-modal-title">
       <div className="modal-form-header">
-        <h2 className="modal-form-title">Run Regression Tests</h2>
+        <h2 id="run-regression-modal-title" className="modal-form-title">Run Regression Tests</h2>
         <button className="modal-close" onClick={onClose}>
           <X size={18} />
         </button>
