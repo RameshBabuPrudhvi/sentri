@@ -253,6 +253,16 @@
   margin-left: 6px;
 }
 
+/* GAP-004 (audit): pending-review pill on the Tests nav entry. Reuses the
+   `.sidebar-nav__auto-badge` shape but swaps the amber palette for red —
+   drafts awaiting review are an action-required signal (a QA Lead should
+   open Review Queue), not the passive "look what fired overnight" status
+   that the auto-approval badge conveys. */
+.sidebar-nav__auto-badge--pending {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
 /* AUTO-003b: rail-mode dot — a small amber pip in the top-right of the
    Approvals icon when there's auto-approval activity today. Uses the
    nav-item's relative positioning so the absolute placement anchors to
@@ -268,6 +278,11 @@
   /* Subtle ring so the dot reads as a notification on both light and
      dark backgrounds without relying on a single contrast assumption. */
   box-shadow: 0 0 0 2px var(--surface);
+}
+/* GAP-004 (audit): red pip for pending-review drafts on the Tests rail
+   icon — semantic parity with the expanded-mode red pill. */
+.sidebar-rail__nav-dot--pending {
+  background: var(--red);
 }
 
 /* ── Settings footer (expanded) ────────────────────────────────────── */

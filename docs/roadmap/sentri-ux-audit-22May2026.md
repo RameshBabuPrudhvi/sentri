@@ -82,7 +82,7 @@ This also opens the door for a Settings sidebar (secondary navigation) that show
 ---
 
 ### GAP-004 — Review Queue Has No Notification of Pending Work
-**Severity: High**
+**Severity: High** · ✅ _Sidebar badge landed in PR #25 — red pill on the Tests nav entry (expanded mode) + red pip on the icon (rail mode) when `useReviewQueueCounts().draft > 0`. Reuses the existing TanStack Query cache shared with `ReviewQueue.jsx`, so the badge and page stay in sync. The health-banner entry and daily digest are deferred to Phase 2._
 
 The Review Queue (`/review-queue`) is reachable only via the Tests page quick-action card. There is no persistent indicator in the sidebar, no toast on login, and no email-on-queue-fill behaviour that would alert a QA Lead that tests are waiting for review. The sidebar auto-approvals badge (`🤖 N today`) tells users what was auto-approved, not what is still waiting for human action.
 
