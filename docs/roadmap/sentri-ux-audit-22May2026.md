@@ -218,7 +218,7 @@ The 4 BullMQ worker stat cards (Runner Mode, Queue Depth, Active Workers, Comple
 ## 5. AI/Agent UX Issues
 
 ### AI-001 — Confidence Score Is a Number Without Context
-**Severity: High**
+**Severity: High** · ✅ _Landed in PR #25 — `QualityScoreChip` + factor-breakdown popover extracted from `pages/ReviewQueue.jsx` to a shared `frontend/src/components/shared/QualityScoreChip.jsx` module, and a new `<QualityScoreExplainer>` companion renders the audit's recommended plain-English tier copy ("Scores above 75 are typically safe to auto-approve.", etc.). Tier thresholds (≥75 / ≥50 / <50) now live in one `qualityTier()` helper consumed by every score surface — the popover header, the explainer line, and the colour ramp. **TestDetail** swaps its bare numeric badge for the shared chip + explainer so the explainability gap is closed end-to-end; the previously-inconsistent 70/40 colour cutoffs are unified with ReviewQueue's 75/50 via `qualityColor()`. ReviewQueue keeps using the same component via the new shared import._
 
 Generated tests display a quality score (0–100) and a factor breakdown via `QualityScoreChip`, but this exists only in the ReviewQueue. The TestDetail page shows a plain `qualityScore` number with no explanation. New users have no mental model for what "score 62" means compared to "score 88."
 

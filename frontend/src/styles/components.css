@@ -280,6 +280,49 @@
   color: var(--text);
 }
 
+/* AI-001 (audit) — shared quality-score primitives.
+   Used by `<QualityScoreChip>` + `<QualityScoreExplainer>` to render
+   tier-aware colour (high / medium / low) without per-component inline
+   `style={{ color }}` blocks. Tier modifier classes encode the colour
+   ramp once; the chip's circular arc inherits via `currentColor`, and
+   the explainer line + bar fill expose CSS variables that callers can
+   reference for their own value-driven UI (e.g. TestDetail's quality
+   bar `background`). */
+.quality-chip-wrap { position: relative; display: inline-flex; }
+
+.quality-chip {
+  --quality-color: var(--text3);
+  color: var(--quality-color);
+}
+.quality-chip--high   { --quality-color: var(--green); }
+.quality-chip--medium { --quality-color: var(--amber); }
+.quality-chip--low    { --quality-color: var(--red);   }
+
+/* Ring track (the unfilled circle behind the score arc). */
+.quality-chip__ring-track {
+  stroke: var(--border);
+}
+
+/* Plain-English tier explainer rendered by `<QualityScoreExplainer>`. */
+.quality-explainer {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+.quality-explainer--high    { color: var(--green); }
+.quality-explainer--medium  { color: var(--amber); }
+.quality-explainer--low     { color: var(--red);   }
+.quality-explainer--unknown { color: var(--text3); }
+
+/* Tier-aware bar fill — used by callers that render their own progress
+   bar with a `width: N%` inline (the only legitimate inline style left,
+   since width is genuinely continuous). Apply alongside `.quality-bar-fill--<tier>`
+   so the colour ramp is consistent with the chip + explainer. */
+.quality-bar-fill--high    { background: var(--green); }
+.quality-bar-fill--medium  { background: var(--amber); }
+.quality-bar-fill--low     { background: var(--red);   }
+.quality-bar-fill--unknown { background: var(--text3); }
+
 /* ── Empty state ────────────────────────────────────────────────────────────── */
 .empty-state { padding: 52px 40px; text-align: center; }
 .empty-state-icon { font-size: 2rem; margin-bottom: 14px; }

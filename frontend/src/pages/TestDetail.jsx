@@ -16,6 +16,11 @@ import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
 import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/shared/TestBadges.jsx";
+import {
+  QualityScoreChip,
+  QualityScoreExplainer,
+  qualityTierKey,
+} from "../components/shared/QualityScoreChip.jsx";
 import { fmtDate, fmtDateTime, fmtRelativeTimeFull } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
@@ -744,21 +749,31 @@ export default function TestDetail() {
           </InfoRow>
 
           {typeof test.qualityScore === "number" && (
+            // AI-001 (audit): the bare numeric badge was a number-without-
+            // context. The shared `QualityScoreChip` carries the
+            // factor breakdown popover (same component used in ReviewQueue)
+            // and `QualityScoreExplainer` renders the plain-English tier
+            // line ("Scores above 75 are typically safe to auto-approve")
+            // so reviewers have a mental model for the value before they
+            // click into the breakdown. The bar's colour ramp is unified
+            // through the shared `quality-bar-fill--<tier>` class so
+            // green/amber/red thresholds match every other surface that
+            // shows a score (previously TestDetail used 70/40 cutoffs vs
+            // ReviewQueue's 75/50 — confusing).
             <InfoRow label="Quality score">
               <div className="td-quality-wrap">
-                <span
-                  className={`badge td-quality-score ${test.qualityScore >= 70 ? "badge-green" : test.qualityScore >= 40 ? "badge-amber" : "badge-red"}`}
-                  title="AI-computed quality score (0–100)"
-                >
-                  {test.qualityScore}
-                </span>
+                <QualityScoreChip
+                  score={test.qualityScore}
+                  factors={test.qualityScoreFactors}
+                />
                 <div className="td-quality-bar-bg" title={`${test.qualityScore} / 100`}>
-                  <div className="td-quality-bar-fill" style={{
-                    width: `${test.qualityScore}%`,
-                    background: test.qualityScore >= 70 ? "var(--green)" : test.qualityScore >= 40 ? "var(--amber)" : "var(--red)",
-                  }} />
+                  <div
+                    className={`td-quality-bar-fill quality-bar-fill--${qualityTierKey(test.qualityScore)}`}
+                    style={{ width: `${test.qualityScore}%` }}
+                  />
                 </div>
               </div>
+              <QualityScoreExplainer score={test.qualityScore} />
             </InfoRow>
           )}
 
