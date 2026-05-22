@@ -50,7 +50,7 @@ export default function SettingsLayout() {
   // lived here are intentionally gone; do not re-add them.
 
   return (
-    <div className="fade-in page-container-md">
+    <div className="fade-in page-container-xl">
       <button className="btn btn-ghost btn-sm settings-back" onClick={() => navigate(-1)}>
         <ArrowLeft size={14} /> Back
       </button>

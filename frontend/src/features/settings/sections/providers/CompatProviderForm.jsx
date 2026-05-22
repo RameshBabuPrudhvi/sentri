@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import {
-  Check, ExternalLink, RefreshCw, Server, Trash2, Zap,
+  AlertCircle, Check, ExternalLink, RefreshCw, Server, Trash2, Zap,
 } from "lucide-react";
 import { api } from "../../../../api.js";
 import { invalidateConfigCache } from "../../../../components/layout/ProviderBadge.jsx";
@@ -147,21 +147,63 @@ export default function CompatProviderForm({ compatProviders, reload, onDelete }
           one-off secret entry (it suppresses the "Save password?" prompt that
           fires on plain `autoComplete="off"` in Chrome).
         */}
+        {/* 2-column grid form (Vercel AI Gateway / Stripe pattern):
+            - Slot id + Display name side-by-side (short fields)
+            - Base URL spans full width (URLs are long)
+            - Model + API key side-by-side
+            - Submit row right-aligned on its own row
+            Collapses to single column at 700px via media query in
+            settings.css. Each field has an explicit label for keyboard
+            users + screen readers (WCAG 1.3.1 Info and Relationships). */}
         <form onSubmit={handleSave} className="st-compat-form" autoComplete="off">
-          <input className="input" name="compat-slot-id"      autoComplete="off" placeholder="Slot id (e.g. deepseek)" value={form.slotId}        onChange={(e) => setForm((s) => ({ ...s, slotId:      e.target.value }))} />
-          <input className="input" name="compat-display-name" autoComplete="off" placeholder="Display name"             value={form.displayName}  onChange={(e) => setForm((s) => ({ ...s, displayName: e.target.value }))} />
-          <input className="input" name="compat-base-url"     autoComplete="off" placeholder="Base URL"                  value={form.baseUrl}      onChange={(e) => setForm((s) => ({ ...s, baseUrl:     e.target.value }))} list="compat-baseurl-hints" />
-          <datalist id="compat-baseurl-hints">
-            {OPENAI_COMPAT_HINTS.map((url) => <option key={url} value={url} />)}
-          </datalist>
-          <input className="input" name="compat-model"        autoComplete="off" placeholder="Model" value={form.model}  onChange={(e) => setForm((s) => ({ ...s, model:  e.target.value }))} />
-          <input className="input" name="compat-api-key"      type="password" autoComplete="new-password" placeholder="API key" value={form.apiKey} onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))} />
-          {error && <div className="text-sm st-compat-form__error">{error}</div>}
-          {/* Action row uses the same `.st-provider-actions` container as
-              the Ollama "Activate" button at ProviderCard.jsx:154-172 so the
-              CTA visually matches the rest of the providers page (icon +
-              label, 14px top margin, flex-wrap on narrow viewports). */}
-          <div className="st-provider-actions">
+          <div className="st-compat-form__field">
+            <label className="st-compat-form__label" htmlFor="compat-slot-id">Slot ID</label>
+            <input id="compat-slot-id" className="input" name="compat-slot-id" autoComplete="off"
+              placeholder="deepseek" value={form.slotId}
+              onChange={(e) => setForm((s) => ({ ...s, slotId: e.target.value }))} />
+            <div className="st-compat-form__hint">Lowercase letters, numbers, _ or - only.</div>
+          </div>
+
+          <div className="st-compat-form__field">
+            <label className="st-compat-form__label" htmlFor="compat-display-name">Display name</label>
+            <input id="compat-display-name" className="input" name="compat-display-name" autoComplete="off"
+              placeholder="DeepSeek" value={form.displayName}
+              onChange={(e) => setForm((s) => ({ ...s, displayName: e.target.value }))} />
+            <div className="st-compat-form__hint">Shown on the provider card. Defaults to the slot ID.</div>
+          </div>
+
+          <div className="st-compat-form__field st-compat-form__field--wide">
+            <label className="st-compat-form__label" htmlFor="compat-base-url">Base URL</label>
+            <input id="compat-base-url" className="input" name="compat-base-url" autoComplete="off"
+              placeholder="https://api.deepseek.com/v1" value={form.baseUrl} list="compat-baseurl-hints"
+              onChange={(e) => setForm((s) => ({ ...s, baseUrl: e.target.value }))} />
+            <datalist id="compat-baseurl-hints">
+              {OPENAI_COMPAT_HINTS.map((url) => <option key={url} value={url} />)}
+            </datalist>
+          </div>
+
+          <div className="st-compat-form__field">
+            <label className="st-compat-form__label" htmlFor="compat-model">Model</label>
+            <input id="compat-model" className="input" name="compat-model" autoComplete="off"
+              placeholder="deepseek-chat" value={form.model}
+              onChange={(e) => setForm((s) => ({ ...s, model: e.target.value }))} />
+          </div>
+
+          <div className="st-compat-form__field">
+            <label className="st-compat-form__label" htmlFor="compat-api-key">API key</label>
+            <input id="compat-api-key" className="input" name="compat-api-key"
+              type="password" autoComplete="new-password"
+              placeholder="sk-..." value={form.apiKey}
+              onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))} />
+          </div>
+
+          {error && (
+            <div className="st-compat-form__error">
+              <AlertCircle size={13} /> {error}
+            </div>
+          )}
+
+          <div className="st-compat-form__actions">
             <button className="btn btn-primary btn-sm" disabled={saving}>
               {saving ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
               {saving ? "Saving…" : "Save provider"}
