@@ -427,6 +427,30 @@ export const api = {
     const qs = params.toString();
     return req("GET", `/tests/counts${qs ? `?${qs}` : ""}`);
   },
+  /**
+   * GAP-001 (audit) — Global data search across tests, projects, and runs.
+   * Powers the ⌘K command palette's data-search layer. Workspace-scoped
+   * server-side; cross-tenant rows are filtered out by `projectRepo.getAll`
+   * before the LIKE queries run.
+   *
+   * Returns an empty payload (not an error) when `q.length < 2` so the
+   * palette can render a "type to search" hint cleanly.
+   *
+   * @param {string} q - Free-text search query (caller is responsible for
+   *                     debouncing the keystroke firehose; backend caps q
+   *                     at 200 chars).
+   * @returns {Promise<{
+   *   query: string,
+   *   groups: {
+   *     projects: Array<{id: string, name: string, url: string}>,
+   *     tests:    Array<{id: string, name: string, projectId: string, projectName: string|null, reviewStatus: string}>,
+   *     runs:     Array<{id: string, projectId: string, projectName: string|null, type: string, status: string, startedAt: string}>,
+   *   },
+   *   totalCount: number,
+   *   truncated: boolean,
+   * }>}
+   */
+  search: (q) => req("GET", `/search?q=${encodeURIComponent(q || "")}`),
   /** @returns {Promise<Array>} All tests across all projects. */
   getAllTests:   ()                  => req("GET",    "/tests"),
   /**

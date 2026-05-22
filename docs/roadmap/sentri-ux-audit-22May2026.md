@@ -29,7 +29,7 @@ The platform sits at approximately **4.8 / 10** on enterprise UX maturity today.
 ## 2. Major UI/UX Gaps
 
 ### GAP-001 — No Global Data Search
-**Severity: Critical**
+**Severity: Critical** · ✅ _Landed in PR #25 — new `GET /api/v1/search?q=<query>` route at `backend/src/routes/search.js` does workspace-scoped LIKE-based fuzzy search across `tests`, `projects`, and `runs` (ACL-001 via `projectRepo.getAll(req.workspaceId)`; cross-tenant rows filtered out by construction). Prefix-first ranking, 5-result-per-type cap, `q.length < 2` short-circuit. SQLite + PostgreSQL portable (no FTS5 dependency). Integration tests at `backend/tests/search.test.js` cover cross-tenant isolation, LIKE escaping (`50%_off` literal), prefix ranking, per-type cap, and the `truncated` flag — registered in `backend/tests/run-tests.js`. Frontend `api.search()` helper + debounced (250ms) integration in `CommandPalette.jsx` renders results in three sub-groups (Projects / Tests / Runs) below the existing fuzzy command matches; keyboard nav (↑↓ Enter) and ⌘K toggle unchanged. Settings search is not in this slice — the slice covers the audit's three named entity types._
 
 The ⌘K command palette (`CommandPalette.jsx`) provides command navigation but does not search across data entities: tests, runs, projects, or settings. Users who want to find "the test named checkout flow" or "run abc123" have no path. They must know where to navigate, then scroll or use in-page filters.
 
@@ -347,7 +347,7 @@ Interactive elements (buttons, nav links, form inputs) do not have visible `:foc
 ---
 
 ### A11Y-002 — Modal Dialogs Missing Focus Trap
-**Severity: High**
+**Severity: High** · ✅ _Landed in PR #25 — `ModalShell.jsx` now implements a full focus trap: focus moves into the panel on open, Tab / Shift+Tab cycle within the focusable set, and focus returns to the previously-focused element on close. Adds `role="dialog"` + `aria-modal="true"` + optional `aria-label` / `aria-labelledby` props so callers can name the dialog semantically. Selector mirrors the proven trap in `pages/Login.jsx`. WCAG 2.1.2 (No Keyboard Trap) satisfied across every site that uses ModalShell (Tests bulk-action, ProjectDetail confirms, ReviewQueue diff)._
 
 `ModalShell.jsx` renders a modal overlay but does not implement focus trapping. When a modal opens, keyboard users can Tab through elements behind the modal overlay.
 
@@ -513,9 +513,7 @@ When a user approves a test in ReviewQueue, the UI waits for the API response be
 ## 10. Mobile & Responsive Issues
 
 ### MOB-001 — No Mobile Support
-**Severity: High**
-
-The application has no responsive layout. `Layout.jsx` uses a fixed sidebar that does not collapse on mobile viewport widths. There are no `@media` breakpoints in the page-level CSS files. Tables in ReviewQueue, Reports, and AuditLog do not adapt to narrow viewports.
+**Severity: High** · ⚠️ _Partially addressed prior to audit — the original "no responsive layout / no @media breakpoints" claim is stale. `frontend/src/styles/pages/layout.css:36-177` ships a 768px (sidebar narrows to icon-rail) and 480px (sidebar slides off-screen, hamburger toggle) breakpoint pair, and `Layout.jsx:44-65` renders the hamburger + overlay JSX. 30+ page-level `@media` queries exist across the CSS tree. Genuine remaining gaps: tablet-targeted table reflows, touch-target minimums (MOB-002), and audit of the responsive behaviour QA pass on every page. Reclassifying as **Medium** severity for the remaining work; the foundation is in place._
 
 On a 375px wide iPhone viewport, the sidebar likely obscures most of the main content area.
 
@@ -599,7 +597,7 @@ The wizard creates a real project and real tests as its deliverable, making the 
 ---
 
 ### ONB-002 — Empty States Are Informational, Not Actionable
-**Severity: High**
+**Severity: High** · ✅ _Landed in PR #25 — new shared `<EmptyState>` primitive at `frontend/src/components/shared/EmptyState.jsx` encapsulates the icon + title + description + CTA shape using the existing `.empty-state*` CSS classes (no new design tokens required). New `.empty-state-actions` flex row added to `frontend/src/styles/components.css` for primary/secondary CTA placement. Four pages retrofitted: **Tests.jsx** (three branches — Welcome / no-tests / filtered-empty, with lucide-react icons replacing emoji and the contextual hint preserved as a banner), **Projects.jsx** (no-projects onboarding + no-search-results with Clear search CTA), **Runs.jsx** (no-runs onboarding + filtered-empty with Clear filters + Run Tests CTA), **HealingDashboard.jsx** (savings trend + selectors table, both with Run Tests CTAs replacing the bare "No savings data yet." text). ReviewQueue.jsx's inbox-zero coaching pattern at `pages/ReviewQueue.jsx:1019-1075` is untouched — it has its own `.rq-empty*` classes for the two-pane layout and the coaching copy is page-specific. The shared component is `variant="card"` (full bordered card) or `variant="bare"` (used inside an existing card / table body)._
 
 Most empty state messages are plain text descriptions:
 - Empty tests list: "No tests yet. Run a crawl to generate tests."

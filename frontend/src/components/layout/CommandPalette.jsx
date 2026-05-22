@@ -21,9 +21,10 @@ import { useNavigate } from "react-router-dom";
 import {
   Search, X, LayoutDashboard, FolderOpen, Atom, SquareCheckBig, BarChart2,
   Briefcase, Layers, Settings, Sparkles, Plus, Play, ArrowRight,
-  Command, ChevronRight, Hash,
+  Command, ChevronRight, Hash, FolderKanban, PlayCircle,
 } from "lucide-react";
 import fuzzyMatch from "../../utils/fuzzyMatch.js";
+import { api } from "../../api.js";
 
 // ── Highlight matched ranges ──────────────────────────────────────────────────
 function HighlightedText({ text, ranges }) {
@@ -81,9 +82,81 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
       .sort((a, b) => a.score - b.score);
   }, [commands, cleanQuery, forceAI]);
 
+  // ── GAP-001 (audit): debounced data-search via api.search() ───────────────
+  // Backend caps the query at 200 chars and short-circuits on `q.length < 2`,
+  // so we only fire the request once the user has typed ≥ 2 chars. The 250ms
+  // debounce matches the Linear / Notion / GitHub search palettes — enough to
+  // skip the keystroke firehose without feeling laggy on a fast typist.
+  //
+  // AI mode disables data search (the user is asking a natural-language
+  // question, not pasting an entity name). Force-command mode (`>`) also
+  // disables it — those queries are commands by definition.
+  const [searchResults, setSearchResults] = useState(null); // null = not searched; {} = result
+  const [searchLoading, setSearchLoading] = useState(false);
+  useEffect(() => {
+    if (forceAI || forceCommand) { setSearchResults(null); return; }
+    if (cleanQuery.length < 2) { setSearchResults(null); return; }
+    let cancelled = false;
+    setSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.search(cleanQuery);
+        if (!cancelled) setSearchResults(res);
+      } catch {
+        // Network / auth failure: fall back to command-only mode silently —
+        // the palette's primary affordance is fuzzy nav, search is additive.
+        if (!cancelled) setSearchResults(null);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [cleanQuery, forceAI, forceCommand]);
+
+  // Flatten search results into a single addressable list for keyboard nav.
+  // Order: commands first (existing behaviour), then projects → tests → runs,
+  // then the AI-chat fallback row (when applicable). Each search row carries
+  // its own `action` so the existing `executeItem(idx)` path handles them
+  // identically to command rows.
+  const searchItems = useMemo(() => {
+    if (!searchResults) return [];
+    const items = [];
+    for (const p of (searchResults.groups?.projects || [])) {
+      items.push({
+        kind: "search-project",
+        id: `proj:${p.id}`,
+        label: p.name,
+        sub: p.url,
+        action: () => navigate(`/projects/${p.id}`),
+      });
+    }
+    for (const t of (searchResults.groups?.tests || [])) {
+      items.push({
+        kind: "search-test",
+        id: `test:${t.id}`,
+        label: t.name,
+        sub: t.projectName ? `${t.projectName} · ${t.id}` : t.id,
+        action: () => navigate(`/tests/${t.id}`),
+      });
+    }
+    for (const r of (searchResults.groups?.runs || [])) {
+      items.push({
+        kind: "search-run",
+        id: `run:${r.id}`,
+        label: r.id,
+        sub: r.projectName ? `${r.projectName} · ${r.type} · ${r.status}` : `${r.type} · ${r.status}`,
+        action: () => navigate(`/runs/${r.id}`),
+      });
+    }
+    return items;
+  }, [searchResults, navigate]);
+
   const showAIFallback = !forceCommand && cleanQuery.length > 0;
-  const aiRowIdx = results.length;
-  const totalItems = results.length + (showAIFallback ? 1 : 0);
+  // Combined keyboard nav order: commands → search results → AI fallback.
+  const commandCount = results.length;
+  const searchCount = searchItems.length;
+  const aiRowIdx = commandCount + searchCount;
+  const totalItems = commandCount + searchCount + (showAIFallback ? 1 : 0);
   const effectiveTotal = forceAI && cleanQuery ? 1 : totalItems;
 
   useEffect(() => { setSelectedIdx(0); }, [query]);
@@ -110,9 +183,19 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
 
   const executeItem = useCallback((idx) => {
     if (forceAI) { onClose(); onOpenAIChat(cleanQuery); return; }
-    if (idx === aiRowIdx && showAIFallback) { onClose(); onOpenAIChat(cleanQuery); }
-    else if (idx < results.length) { onClose(); results[idx].action(); }
-  }, [results, aiRowIdx, showAIFallback, cleanQuery, onClose, onOpenAIChat, forceAI]);
+    // Index order: [0..commandCount-1] commands, [commandCount..aiRowIdx-1]
+    // search results, then the AI fallback row at aiRowIdx (when shown).
+    if (idx === aiRowIdx && showAIFallback) {
+      onClose();
+      onOpenAIChat(cleanQuery);
+    } else if (idx < commandCount) {
+      onClose();
+      results[idx].action();
+    } else if (idx < commandCount + searchCount) {
+      onClose();
+      searchItems[idx - commandCount].action();
+    }
+  }, [results, commandCount, searchCount, searchItems, aiRowIdx, showAIFallback, cleanQuery, onClose, onOpenAIChat, forceAI]);
 
   function handleKeyDown(e) {
     if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, effectiveTotal - 1)); }
@@ -218,6 +301,54 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
                   })}
                 </div>
               ))}
+
+              {/* GAP-001 (audit): data-search results. Rendered as up to
+                  three sub-groups (Projects / Tests / Runs) so the type is
+                  obvious at a glance. Indices are offset by `commandCount`
+                  so the keyboard nav array stays flat. */}
+              {searchLoading && cleanQuery.length >= 2 && searchCount === 0 && (
+                <div className="cmdp-empty">
+                  <div>Searching…</div>
+                </div>
+              )}
+              {searchCount > 0 && (() => {
+                // Re-group the flat searchItems for rendering, preserving
+                // the index order set by `searchItems`.
+                const byKind = { "search-project": [], "search-test": [], "search-run": [] };
+                searchItems.forEach((it, i) => {
+                  byKind[it.kind].push({ ...it, flatIdx: commandCount + i });
+                });
+                const groupDefs = [
+                  { kind: "search-project", label: "Projects", Icon: FolderKanban },
+                  { kind: "search-test",    label: "Tests",    Icon: SquareCheckBig },
+                  { kind: "search-run",     label: "Runs",     Icon: PlayCircle },
+                ];
+                return groupDefs.map(({ kind, label, Icon }) => {
+                  const items = byKind[kind];
+                  if (items.length === 0) return null;
+                  return (
+                    <div className="cmdp-group" key={kind}>
+                      <div className="cmdp-group__label">{label}</div>
+                      {items.map((item) => (
+                        <div
+                          key={item.id}
+                          className={`cmdp-item${item.flatIdx === selectedIdx ? " cmdp-item--selected" : ""}`}
+                          data-idx={item.flatIdx}
+                          onClick={() => executeItem(item.flatIdx)}
+                          onMouseEnter={() => setSelectedIdx(item.flatIdx)}
+                        >
+                          <div className="cmdp-item__icon"><Icon size={14} /></div>
+                          <div className="cmdp-item__body">
+                            <div className="cmdp-item__label">{item.label}</div>
+                            {item.sub && <div className="cmdp-item__desc">{item.sub}</div>}
+                          </div>
+                          <ChevronRight size={13} className="cmdp-item__arrow" />
+                        </div>
+                      ))}
+                    </div>
+                  );
+                });
+              })()}
 
               {showAIFallback && (
                 <div className="cmdp-group">

@@ -4,7 +4,9 @@ import {
   Search, X, CheckCircle2, XCircle, Clock,
   Loader2, Play, Bot,
   AlertCircle, ArrowUpDown, Trash2, Inbox, Atom,
+  Rocket, FlaskConical, SearchX,
 } from "lucide-react";
+import EmptyState from "../components/shared/EmptyState.jsx";
 import { api } from "../api.js";
 import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import { queryClient, projectDataQueryKeys } from "../queryClient.js";
@@ -42,61 +44,54 @@ const PAGE_SIZE = 10;
 
 // ── Empty State ────────────────────────────────────────────────────────────────
 
-function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onClearSearch, onClearFilters, navigate }) {
-  // No projects at all — first-time user
+/**
+ * ONB-002 (audit) — Tests-page empty state. Branches over (no projects ⇒
+ * onboarding) → (has projects but no tests ⇒ generate-prompt) → (filtered
+ * to nothing ⇒ clear-filters). Delegates to the shared `<EmptyState>`
+ * primitive at `components/shared/EmptyState.jsx` so the icon + title +
+ * description + CTA shape stays uniform across Tests / Projects / Runs /
+ * Healing. Inline styles previously used here are gone — the primitive
+ * relies on the existing `.empty-state*` classes.
+ */
+function TestsEmptyState({ projects, tests, search, reviewFilter, onCreateTest, onClearFilters, navigate }) {
+  // No projects at all — first-time onboarding surface.
   if (projects.length === 0) {
     return (
-      <div style={{ padding: "52px 40px", textAlign: "center" }}>
-        <div style={{ fontSize: "2rem", marginBottom: 14 }}>🚀</div>
-        <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 8, color: "var(--text)" }}>
-          Welcome to Tests
-        </div>
-        <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 8, lineHeight: 1.7, maxWidth: 380, margin: "0 auto 20px" }}>
-          Start by creating a project. Sentri will crawl your app and AI-generate test cases for you to review and run.
-        </div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
-            Create first project
-          </button>
-        </div>
-      </div>
+      <EmptyState
+        variant="bare"
+        icon={<Rocket size={32} color="var(--accent)" />}
+        title="Welcome to Tests"
+        description="Start by creating a project. Sentri will crawl your app and AI-generate test cases for you to review and run."
+        action={{ label: "Create first project", onClick: () => navigate("/projects/new") }}
+      />
     );
   }
 
-  // Has projects, no tests at all — crawl hasn't been run yet
+  // Has projects, no tests at all — crawl hasn't been run yet.
   if (tests.length === 0) {
     return (
-      <div style={{ padding: "52px 40px", textAlign: "center" }}>
-        <div style={{ fontSize: "2rem", marginBottom: 14 }}>🧪</div>
-        <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 8, color: "var(--text)" }}>
-          No tests generated yet
-        </div>
-        <div style={{ fontSize: "0.875rem", color: "var(--text2)", lineHeight: 1.7, maxWidth: 400, margin: "0 auto 20px" }}>
-          Use <strong>Crawl</strong> above to auto-discover pages and generate tests, or <strong>Generate</strong> from a requirement.
-        </div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-          <button className="btn btn-ghost btn-sm" onClick={onCreateTest}>
-            Generate with AI ✦
-          </button>
-        </div>
-      </div>
+      <EmptyState
+        variant="bare"
+        icon={<FlaskConical size={32} color="var(--accent)" />}
+        title="No tests generated yet"
+        description={
+          <>Use <strong>Crawl</strong> above to auto-discover pages and generate tests, or <strong>Generate</strong> from a requirement.</>
+        }
+        action={{ label: "Generate with AI ✦", onClick: onCreateTest, variant: "ghost" }}
+      />
     );
   }
 
-  // Has tests, but the active filter hides them all
-  const draftCount  = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length;
+  // Has tests, but the active filter hides them all. Surface a contextual
+  // hint (drafts pending review / no drafts left) so the user knows whether
+  // to switch tabs or generate more — same coaching shape as ReviewQueue.
+  const draftCount    = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length;
   const approvedCount = tests.filter(t => t.reviewStatus === "approved").length;
 
-  // Contextual hint based on which filter is active
   let hint = null;
   if (reviewFilter === "Approved" && draftCount > 0) {
     hint = (
-      <div style={{
-        display: "inline-flex", alignItems: "center", gap: 10,
-        background: "var(--amber-bg)", border: "1px solid rgba(217,119,6,0.2)",
-        borderRadius: "var(--radius)", padding: "10px 16px",
-        fontSize: "0.82rem", color: "var(--amber)", marginBottom: 20, textAlign: "left",
-      }}>
+      <div className="banner banner-warning" style={{ marginBottom: 16, textAlign: "left" }}>
         <span style={{ fontSize: "1rem" }}>💡</span>
         <span>
           You have <strong>{draftCount} draft {draftCount === 1 ? "test" : "tests"}</strong> waiting for review.
@@ -106,12 +101,7 @@ function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onCle
     );
   } else if (reviewFilter === "Draft" && approvedCount > 0) {
     hint = (
-      <div style={{
-        display: "inline-flex", alignItems: "center", gap: 10,
-        background: "var(--blue-bg)", border: "1px solid rgba(37,99,235,0.15)",
-        borderRadius: "var(--radius)", padding: "10px 16px",
-        fontSize: "0.82rem", color: "var(--blue)", marginBottom: 20, textAlign: "left",
-      }}>
+      <div className="banner banner-info" style={{ marginBottom: 16, textAlign: "left" }}>
         <span style={{ fontSize: "1rem" }}>ℹ️</span>
         <span>No draft tests — all <strong>{approvedCount}</strong> tests have already been reviewed.</span>
       </div>
@@ -119,24 +109,15 @@ function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onCle
   }
 
   return (
-    <div style={{ padding: "52px 40px", textAlign: "center" }}>
-      <div style={{ fontSize: "2rem", marginBottom: 14 }}>🔍</div>
-      <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 8, color: "var(--text)" }}>
-        No tests match your filters
-      </div>
-      {hint && <div style={{ marginBottom: 4 }}>{hint}</div>}
-      <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20 }}>
-        {search ? `No results for "${search}".` : "Try adjusting your filters."}
-      </div>
-      <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-        <button className="btn btn-ghost btn-sm" onClick={onClearFilters}>
-          Clear filters
-        </button>
-        <button className="btn btn-primary btn-sm" onClick={onCreateTest}>
-          Generate with AI ✦
-        </button>
-      </div>
-    </div>
+    <EmptyState
+      variant="bare"
+      icon={<SearchX size={32} color="var(--text3)" />}
+      title="No tests match your filters"
+      description={search ? `No results for "${search}".` : "Try adjusting your filters."}
+      hint={hint}
+      secondaryAction={{ label: "Clear filters", onClick: onClearFilters }}
+      action={{ label: "Generate with AI ✦", onClick: onCreateTest }}
+    />
   );
 }
 
@@ -742,13 +723,12 @@ export default function Tests() {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <EmptyState
+          <TestsEmptyState
             projects={projects}
             tests={tests}
             search={search}
             reviewFilter={reviewFilter}
             onCreateTest={() => navigate(`/projects/${projects[0]?.id || ""}/test-lab?tab=requirement`)}
-            onClearSearch={() => setSearch("")}
             onClearFilters={() => { setSearch(""); setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); setStaleFilter(false); }}
             navigate={navigate}
           />

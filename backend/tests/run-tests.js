@@ -131,6 +131,8 @@ const files = [
   "tests/run-compare.test.js",
   "tests/metric-samples.test.js",
   "tests/healing-summary.test.js",
+  // GAP-001 — Global data search (workspace-scoped LIKE-based) backing ⌘K.
+  "tests/search.test.js",
   "tests/web-vitals-trend.test.js",
   "tests/auto-approval.test.js",
   "tests/auto-approval-routes.test.js",

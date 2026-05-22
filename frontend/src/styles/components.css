@@ -276,6 +276,16 @@
   font-size: 0.875rem; color: var(--text2); margin-bottom: 20px;
   line-height: 1.7; max-width: 420px; margin-left: auto; margin-right: auto;
 }
+/* ONB-002 (audit): action row for the shared `<EmptyState>` primitive.
+   Centred + 8px gap so primary/secondary CTAs sit together below the
+   description without each call site re-declaring the flex shape. */
+.empty-state-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
 
 /* ── List row ───────────────────────────────────────────────────────────────── */
 .list-row {
