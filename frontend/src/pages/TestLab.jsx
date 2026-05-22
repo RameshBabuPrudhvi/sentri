@@ -987,6 +987,39 @@ export default function TestLab() {
   const isRunFailed = runStatus === "failed" || runStatus === "aborted";
   const ps          = runData?.pipelineStats || {};
 
+  // ── Split generated-test outcomes (drafts vs auto-approved) ────────────
+  // The run payload reports `testsGenerated` as a single count and the SSE
+  // `done` event only carries that total — it has no per-outcome breakdown.
+  // Without splitting, the completion banner labels every test a "draft"
+  // even when the project's auto-approval threshold cleared some of them,
+  // contradicting what the user sees the moment they land in Review Queue.
+  //
+  // `runData.tests` is the canonical array of test IDs persisted on the run
+  // row (see `backend/src/database/repositories/runRepo.js#INSERT_COLS`),
+  // and `allTests` (from `useProjectData`) already carries the authoritative
+  // `reviewStatus` + `approvalSource` columns refreshed by the
+  // `invalidateProjectDataCache()` we fire on the SSE done event. So the
+  // split is a pure client-side derivation against data we already have.
+  const generatedOutcome = useMemo(() => {
+    const total = runData?.testsGenerated ?? 0;
+    const ids = Array.isArray(runData?.tests) ? runData.tests : [];
+    if (!ids.length || !allTests.length) {
+      // Fall back to the legacy "treat as drafts" shape until the tests
+      // cache refreshes — this matches pre-fix behaviour and avoids
+      // flashing "0 drafts" while the refetch is in flight.
+      return { total, drafts: total, autoApproved: 0 };
+    }
+    const idSet = new Set(ids);
+    let drafts = 0;
+    let autoApproved = 0;
+    for (const t of allTests) {
+      if (!idSet.has(t.id)) continue;
+      if (t.reviewStatus === "approved" && t.approvalSource === "auto") autoApproved++;
+      else if (!t.reviewStatus || t.reviewStatus === "draft") drafts++;
+    }
+    return { total, drafts, autoApproved };
+  }, [runData?.testsGenerated, runData?.tests, allTests]);
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -1249,14 +1282,21 @@ export default function TestLab() {
                 <div className="banner banner-success tl-banner-margin">
                   <CheckCircle2 size={16} />
                   <div className="tl-banner-body">
-                    <strong>Generation complete</strong> — {runData?.testsGenerated ?? 0} test{(runData?.testsGenerated ?? 0) !== 1 ? "s" : ""} generated.
+                    <strong>Generation complete</strong> — {generatedOutcome.total} test{generatedOutcome.total !== 1 ? "s" : ""} generated
+                    {generatedOutcome.autoApproved > 0 && (
+                      <> · <span className="text-green">{generatedOutcome.autoApproved} auto-approved</span></>
+                    )}
+                    {generatedOutcome.drafts > 0 && (
+                      <> · {generatedOutcome.drafts} awaiting review</>
+                    )}
+                    .
                     <div className="tl-banner-actions">
-                      {(runData?.testsGenerated ?? 0) > 0 && (
+                      {generatedOutcome.drafts > 0 && (
                         <button
                           className="btn btn-primary btn-xs"
                           onClick={() => navigate(`/review-queue?projectId=${activeRun.projectId}`)}
                         >
-                          Review {runData.testsGenerated} draft{runData.testsGenerated !== 1 ? "s" : ""} <ChevronRight size={12} />
+                          Review {generatedOutcome.drafts} draft{generatedOutcome.drafts !== 1 ? "s" : ""} <ChevronRight size={12} />
                         </button>
                       )}
                       <button
@@ -1691,12 +1731,20 @@ export default function TestLab() {
                     </button>
                   ) : (
                     <div className="tl-btn-stack">
-                      {isRunDone && (runData?.testsGenerated ?? 0) > 0 && (
+                      {isRunDone && generatedOutcome.drafts > 0 && (
                         <button
                           className="btn btn-primary tl-full-btn"
                           onClick={() => navigate(`/review-queue?projectId=${activeRun.projectId}`)}
                         >
-                          Review {runData.testsGenerated} draft{runData.testsGenerated !== 1 ? "s" : ""} <ChevronRight size={13} />
+                          Review {generatedOutcome.drafts} draft{generatedOutcome.drafts !== 1 ? "s" : ""} <ChevronRight size={13} />
+                        </button>
+                      )}
+                      {isRunDone && generatedOutcome.drafts === 0 && generatedOutcome.autoApproved > 0 && (
+                        <button
+                          className="btn btn-primary tl-full-btn"
+                          onClick={() => navigate(`/projects/${activeRun.projectId}?tab=tests`)}
+                        >
+                          View {generatedOutcome.autoApproved} auto-approved <ChevronRight size={13} />
                         </button>
                       )}
                       <button
