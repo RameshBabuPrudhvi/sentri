@@ -502,10 +502,10 @@ export const api = {
   deleteTest:   (projectId, testId) => req("DELETE", `/projects/${projectId}/tests/${testId}`),
 
   // ── Test review actions ─────────────────────────────────────────────────────
-  /** @param {string} projectId @param {string} testId - Promote Draft → Approved. */
-  approveTest:     (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/approve`),
-  /** @param {string} projectId @param {string} testId - Mark as Rejected. */
-  rejectTest:      (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/reject`),
+  /** @param {string} projectId @param {string} testId @param {Object} [body] - `{ reviewComment?: string }` */
+  approveTest:     (projectId, testId, body) => req("PATCH", `/projects/${projectId}/tests/${testId}/approve`, body || undefined),
+  /** @param {string} projectId @param {string} testId @param {Object} [body] - `{ reviewComment?: string }` */
+  rejectTest:      (projectId, testId, body) => req("PATCH", `/projects/${projectId}/tests/${testId}/reject`, body || undefined),
   /** @param {string} projectId @param {string} testId - Restore to Draft. */
   restoreTest:     (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/restore`),
   /**

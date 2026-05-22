@@ -364,6 +364,9 @@ export default function ReviewQueue() {
   // model. `kind` discriminates the copy; `payload` carries either the
   // single test or the array of selected ids. `null` = no modal.
   const [confirmDialog, setConfirmDialog] = useState(null);
+  // ENT-004: review comment typed inside the reject/approve modal.
+  // Cleared on modal close so stale text doesn't leak between actions.
+  const [modalComment, setModalComment] = useState("");
 
   // Debounced search — `searchDraft` mirrors the input field (immediate
   // feedback so typing feels responsive), and a 300ms idle timer commits
@@ -544,10 +547,11 @@ export default function ReviewQueue() {
     setConfirmDialog({ kind: "reject", payload: test });
   }
 
-  async function executeReject(test) {
+  async function executeReject(test, comment) {
     setActionLoading(`reject-${test.id}`);
     try {
-      await api.rejectTest(test.projectId, test.id);
+      const body = comment ? { reviewComment: comment } : undefined;
+      await api.rejectTest(test.projectId, test.id, body);
       const next = visibleTests.find((t, i) => i > activeIdx && t.id !== test.id);
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
@@ -1392,7 +1396,9 @@ export default function ReviewQueue() {
             body: <>Reject <strong>{cleanTestName(payload.name)}</strong>? You can restore it to Draft from the Rejected tab.</>,
             confirmLabel: "Reject test",
             confirmClass: "btn btn-danger btn-sm",
-            run: () => executeReject(payload),
+            showComment: true,
+            commentPlaceholder: "Reason for rejection (optional — visible on Test Detail)",
+            run: () => executeReject(payload, modalComment),
           } :
           kind === "delete" ? {
             title: "Delete test?",
@@ -1417,16 +1423,31 @@ export default function ReviewQueue() {
           } : null;
         if (!config) return null;
         return (
-          <ModalShell onClose={() => setConfirmDialog(null)} width="min(420px, 95vw)" ariaLabelledBy="rq-confirm-title" style={{ padding: "28px 32px" }}>
+          <ModalShell onClose={() => { setConfirmDialog(null); setModalComment(""); }} width="min(420px, 95vw)" ariaLabelledBy="rq-confirm-title" style={{ padding: "28px 32px" }}>
             <div id="rq-confirm-title" className="rq-confirm__title">{config.title}</div>
             <div className="rq-confirm__body">{config.body}</div>
+            {/* ENT-004: optional review comment textarea. Shown on reject
+                (and future approve-with-comment if wired). The comment is
+                persisted to `tests.reviewComment` and rendered on TestDetail
+                so the next reviewer sees "why was this rejected?" inline. */}
+            {config.showComment && (
+              <textarea
+                className="input rq-confirm__comment"
+                placeholder={config.commentPlaceholder || "Add a comment (optional)"}
+                value={modalComment}
+                onChange={(e) => setModalComment(e.target.value)}
+                rows={3}
+                maxLength={2000}
+                autoFocus
+              />
+            )}
             <div className="rq-confirm__actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDialog(null)}>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setConfirmDialog(null); setModalComment(""); }}>
                 Cancel
               </button>
               <button
                 className={config.confirmClass}
-                onClick={() => { setConfirmDialog(null); config.run(); }}
+                onClick={() => { setConfirmDialog(null); config.run(); setModalComment(""); }}
               >
                 {config.confirmLabel}
               </button>
