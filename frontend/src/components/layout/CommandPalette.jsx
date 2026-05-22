@@ -95,8 +95,8 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
   const [searchResults, setSearchResults] = useState(null); // null = not searched; {} = result
   const [searchLoading, setSearchLoading] = useState(false);
   useEffect(() => {
-    if (forceAI || forceCommand) { setSearchResults(null); return; }
-    if (cleanQuery.length < 2) { setSearchResults(null); return; }
+    if (forceAI || forceCommand) { setSearchResults(null); setSearchLoading(false); return; }
+    if (cleanQuery.length < 2) { setSearchResults(null); setSearchLoading(false); return; }
     let cancelled = false;
     setSearchLoading(true);
     const timer = setTimeout(async () => {

@@ -32,19 +32,19 @@ export default function DataAction({ icon, label, sub, count, btnLabel, onAction
     <div className="st-data-action">
       <div className="text-muted">{icon}</div>
       <div className="flex-1">
-        <div className="font-semi" style={{ fontSize: "0.88rem" }}>
+        <div className="font-semi st-data-action__title">
           {label}
-          {count != null && <span className="text-xs text-muted" style={{ fontWeight: 400, marginLeft: 6 }}>({count})</span>}
+          {count != null && <span className="text-xs text-muted st-data-action__count">({count})</span>}
         </div>
-        <div className="text-xs text-muted" style={{ marginTop: 2 }}>{sub}</div>
+        <div className="text-xs text-muted st-data-action__sub">{sub}</div>
       </div>
       {result ? (
-        <span className="st-status-ok" style={{ marginTop: 0 }}>
+        <span className="st-status-ok st-data-action__status">
           <Check size={12} /> {result}
         </span>
       ) : (
-        <button className={`btn btn-sm ${confirming ? "btn-danger" : "btn-ghost"}`}
-          onClick={handleClick} disabled={clearing || count === 0} style={{ flexShrink: 0 }}>
+        <button className={`btn btn-sm ${confirming ? "btn-danger" : "btn-ghost"} st-data-action__btn`}
+          onClick={handleClick} disabled={clearing || count === 0}>
           {clearing ? <RefreshCw size={12} className="spin" /> : <Trash2 size={12} />}
           {confirming ? "Confirm?" : btnLabel}
         </button>

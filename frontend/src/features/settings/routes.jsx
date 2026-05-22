@@ -36,12 +36,15 @@ function withSuspense(Component) {
 /**
  * Child route definitions for the Settings parent route in App.jsx. Renders
  * inside SettingsLayout's `<Outlet />`. The index route redirects to the
- * canonical first section so `/settings` always resolves to a real URL —
- * SettingsLayout also handles this redirect for role-aware fallbacks, but
- * a Navigate here keeps the URL contract explicit at the route level.
+ * `execution` section — the only section every role can view, so the
+ * fallback never lands a non-admin on an admin-locked surface.
+ * SettingsLayout still runs a role-aware redirect on top of this for admins
+ * who should land on `providers`, but the index Navigate eliminates the
+ * empty-Outlet flash on the first paint of `/settings`.
  */
 export const settingsRoutes = (
   <>
+    <Route index element={<Navigate to="execution" replace />} />
     <Route path="providers"       element={withSuspense(ProvidersSection)} />
     <Route path="provider_routes" element={withSuspense(ProviderRoutesSection)} />
     <Route path="agent_roles"     element={withSuspense(AgentRolesSection)} />

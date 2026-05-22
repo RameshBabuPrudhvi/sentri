@@ -11,8 +11,8 @@ export default function SectionTitle({ icon, title, sub }) {
     <div className="st-section-title">
       <div className="st-section-icon">{icon}</div>
       <div>
-        <div className="font-bold" style={{ fontSize: "1.05rem" }}>{title}</div>
-        {sub && <div className="text-xs text-muted" style={{ marginTop: 1 }}>{sub}</div>}
+        <div className="font-bold st-section-title__heading">{title}</div>
+        {sub && <div className="text-xs text-muted st-section-title__sub">{sub}</div>}
       </div>
     </div>
   );

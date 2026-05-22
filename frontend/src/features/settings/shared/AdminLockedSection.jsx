@@ -10,12 +10,12 @@ import { Shield } from "lucide-react";
  */
 export default function AdminLockedSection({ feature, role }) {
   return (
-    <div className="card card-padded" style={{ textAlign: "center", padding: "40px 24px" }}>
-      <Shield size={28} color="var(--text3)" style={{ marginBottom: 12 }} />
-      <div className="font-bold" style={{ fontSize: "1.05rem", marginBottom: 6 }}>
+    <div className="card card-padded st-admin-locked">
+      <Shield size={28} color="var(--text3)" className="st-admin-locked__icon" />
+      <div className="font-bold st-admin-locked__title">
         {feature} requires admin access
       </div>
-      <div className="text-sm text-muted" style={{ maxWidth: 420, margin: "0 auto" }}>
+      <div className="text-sm text-muted st-admin-locked__body">
         Your current role is <strong>{role || "viewer"}</strong>. Ask a workspace admin to grant you
         the <strong>admin</strong> role if you need to change these settings.
       </div>

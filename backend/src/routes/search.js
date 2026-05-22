@@ -29,30 +29,14 @@
 
 import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
-import { getDatabase } from "../database/sqlite.js";
+import * as searchRepo from "../database/repositories/searchRepo.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 const router = Router();
 
 const MAX_PER_TYPE = 5;
 const MIN_QUERY_LEN = 2;
 const MAX_QUERY_LEN = 200;
-
-/**
- * Escape SQL `LIKE` metacharacters in caller-supplied text so a search for
- * `"50%_off"` doesn't match unrelated rows. The returned string MUST be used
- * with a `LIKE ? ESCAPE '\\'` clause. Mirrors the pattern from
- * `testRepo.buildTagLikePattern` (`backend/src/database/repositories/testRepo.js:83`)
- * minus the JSON-encoding stage — we're searching `name` / `id` / `url`
- * columns, not JSON-encoded `tags` blobs.
- */
-function escapeLike(s) {
-  return String(s)
-    .replace(/\\/g, "\\\\")
-    .replace(/%/g, "\\%")
-    .replace(/_/g, "\\_");
-}
-
-const LIKE_ESCAPE = " ESCAPE '\\'";
 
 router.get("/search", (req, res) => {
   try {
@@ -76,118 +60,37 @@ router.get("/search", (req, res) => {
       });
     }
 
-    // ACL-001: workspace's project set first. Every subsequent query
+    // ACL-001: workspace's project set first. Every subsequent repo call
     // intersects against this list so a stray projectId can't widen scope.
     const projects = projectRepo.getAll(req.workspaceId);
     const projectIds = projects.map((p) => p.id);
     const projectsById = {};
     for (const p of projects) projectsById[p.id] = p;
 
-    const likeEscaped = escapeLike(rawQuery);
-    const prefixPattern = `${likeEscaped}%`;
-    const substringPattern = `%${likeEscaped}%`;
-    const db = getDatabase();
+    // Delegated to `searchRepo` (AGENT.md §117) — the route stays a thin
+    // HTTP shape + ACL layer; SQL lives in the repository module.
+    const projectMatches = searchRepo.searchProjects(projectIds, rawQuery, MAX_PER_TYPE);
 
-    // ── Projects ──────────────────────────────────────────────────────────
-    // Match against `name` (primary) + `url` (so "github.com" finds the
-    // wired-up repo). Two-pass ranking: prefix-on-name first (highest
-    // signal), then substring-on-(name|url) for the remainder.
-    const projectMatches = [];
-    if (projectIds.length > 0) {
-      const placeholders = projectIds.map(() => "?").join(", ");
-      const prefixRows = db.prepare(
-        `SELECT id, name, url FROM projects
-         WHERE id IN (${placeholders})
-           AND deletedAt IS NULL
-           AND name LIKE ?${LIKE_ESCAPE}
-         ORDER BY LENGTH(name) ASC
-         LIMIT ?`
-      ).all(...projectIds, prefixPattern, MAX_PER_TYPE);
-      const remaining = MAX_PER_TYPE - prefixRows.length;
-      let substringRows = [];
-      if (remaining > 0) {
-        const excludeIds = prefixRows.map((r) => r.id);
-        const excludeClause = excludeIds.length
-          ? ` AND id NOT IN (${excludeIds.map(() => "?").join(", ")})`
-          : "";
-        substringRows = db.prepare(
-          `SELECT id, name, url FROM projects
-           WHERE id IN (${placeholders})
-             AND deletedAt IS NULL
-             AND (name LIKE ?${LIKE_ESCAPE} OR url LIKE ?${LIKE_ESCAPE})${excludeClause}
-           ORDER BY LENGTH(name) ASC
-           LIMIT ?`
-        ).all(...projectIds, substringPattern, substringPattern, ...excludeIds, remaining);
-      }
-      projectMatches.push(...prefixRows, ...substringRows);
-    }
+    const testMatches = searchRepo
+      .searchTests(projectIds, rawQuery, MAX_PER_TYPE)
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        projectId: r.projectId,
+        projectName: projectsById[r.projectId]?.name || null,
+        reviewStatus: r.reviewStatus,
+      }));
 
-    // ── Tests ─────────────────────────────────────────────────────────────
-    // Match against `name` + `id` (so a paste of "TC-42" jumps straight to
-    // the test). Scoped to the workspace's project set.
-    const testMatches = [];
-    if (projectIds.length > 0) {
-      const placeholders = projectIds.map(() => "?").join(", ");
-      const prefixRows = db.prepare(
-        `SELECT id, name, projectId, reviewStatus FROM tests
-         WHERE projectId IN (${placeholders})
-           AND deletedAt IS NULL
-           AND name LIKE ?${LIKE_ESCAPE}
-         ORDER BY LENGTH(name) ASC
-         LIMIT ?`
-      ).all(...projectIds, prefixPattern, MAX_PER_TYPE);
-      const remaining = MAX_PER_TYPE - prefixRows.length;
-      let substringRows = [];
-      if (remaining > 0) {
-        const excludeIds = prefixRows.map((r) => r.id);
-        const excludeClause = excludeIds.length
-          ? ` AND id NOT IN (${excludeIds.map(() => "?").join(", ")})`
-          : "";
-        substringRows = db.prepare(
-          `SELECT id, name, projectId, reviewStatus FROM tests
-           WHERE projectId IN (${placeholders})
-             AND deletedAt IS NULL
-             AND (name LIKE ?${LIKE_ESCAPE} OR id LIKE ?${LIKE_ESCAPE})${excludeClause}
-           ORDER BY LENGTH(name) ASC
-           LIMIT ?`
-        ).all(...projectIds, substringPattern, substringPattern, ...excludeIds, remaining);
-      }
-      for (const r of [...prefixRows, ...substringRows]) {
-        testMatches.push({
-          id: r.id,
-          name: r.name,
-          projectId: r.projectId,
-          projectName: projectsById[r.projectId]?.name || null,
-          reviewStatus: r.reviewStatus,
-        });
-      }
-    }
-
-    // ── Runs ──────────────────────────────────────────────────────────────
-    // Runs have no `name` column — match on `id` only. Primary use case:
-    // operators paste run IDs from CI logs / Slack notifications.
-    const runMatches = [];
-    if (projectIds.length > 0) {
-      const placeholders = projectIds.map(() => "?").join(", ");
-      const rows = db.prepare(
-        `SELECT id, projectId, type, status, startedAt FROM runs
-         WHERE projectId IN (${placeholders})
-           AND deletedAt IS NULL
-           AND id LIKE ?${LIKE_ESCAPE}
-         ORDER BY startedAt DESC
-         LIMIT ?`
-      ).all(...projectIds, substringPattern, MAX_PER_TYPE);
-      for (const r of rows) {
-        runMatches.push({
-          id: r.id,
-          projectId: r.projectId,
-          projectName: projectsById[r.projectId]?.name || null,
-          type: r.type,
-          status: r.status,
-          startedAt: r.startedAt,
-        });
-      }
-    }
+    const runMatches = searchRepo
+      .searchRuns(projectIds, rawQuery, MAX_PER_TYPE)
+      .map((r) => ({
+        id: r.id,
+        projectId: r.projectId,
+        projectName: projectsById[r.projectId]?.name || null,
+        type: r.type,
+        status: r.status,
+        startedAt: r.startedAt,
+      }));
 
     const totalCount = projectMatches.length + testMatches.length + runMatches.length;
     // `truncated` flags the palette that there may be more matches the user
@@ -214,7 +117,7 @@ router.get("/search", (req, res) => {
     // the request hang on an unhandled rejection (Express 4 doesn't await
     // route handlers).
     // eslint-disable-next-line no-console
-    console.error(`[search] ${err?.stack || err?.message || err}`);
+    console.error(formatLogLine("error", null, `[search] ${err?.stack || err?.message || err}`));
     return res.status(500).json({ error: "Search unavailable." });
   }
 });
