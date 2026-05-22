@@ -256,7 +256,7 @@ The `LLMStreamPanel.jsx` shows raw streaming tokens from the AI during generatio
 ## 6. Design System Issues
 
 ### DS-001 — Inline Styles Contaminate Component Boundaries
-**Severity: High**
+**Severity: High** · ✅ _Landed in PR #25 (partial — TopBar + NotFound + Settings.jsx). Two of the four named offenders are already gone: **Settings.jsx** was deleted entirely under GAP-002, with `OllamaStatusPanel` extracted to `features/settings/sections/providers/OllamaStatusPanel.jsx` and every inline `style={{}}` from the legacy panel + provider cards replaced with `.ollama-*` / `.st-provider-*` classes; the only inline styles remaining there are the data-driven per-provider brand colors on `ProviderCard` (AGENT.md §127 carve-out). **TopBar.jsx** rewritten on top of a new `frontend/src/styles/features/topbar.css` partial — header, user-menu button, dropdown panel, and every menu item now use `.topbar*` / `.topbar-user*` / `.topbar-user-dropdown*` classes; `onMouseEnter` / `onMouseLeave` hover-state handlers replaced with CSS `:hover` pseudo-classes (the audit's anti-pattern call-out — extra renders, no `:focus-visible` integration, no theming hooks). **NotFound** in `App.jsx` migrated to the shared `.empty-state*` + `.btn .btn-primary` primitives. Lint rule (`react/forbid-component-props`) is **NOT** in this PR — that requires eslint config plumbing and is tracked as a separate follow-up._
 
 Despite the AGENT.md rule "no inline `style={ {} }` (double-brace JSX expressions) except for data-driven values," `TopBar.jsx` contains extensive inline styles for nearly every element: the header, user menu button, dropdown panel, and menu items. `Settings.jsx` has inline styles throughout its OllamaStatusPanel and provider cards.
 
