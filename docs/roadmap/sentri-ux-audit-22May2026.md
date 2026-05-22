@@ -158,7 +158,7 @@ System:     Settings (admin)
 ---
 
 ### NAV-002 — No Breadcrumb Navigation on Deep Pages
-**Severity: Medium**
+**Severity: Medium** · ✅ _Landed in PR #25 — new shared `<Breadcrumb>` at `frontend/src/components/shared/Breadcrumb.jsx` renders WAI-ARIA APG-compliant trails (`<nav aria-label="Breadcrumb">` + `<ol>` + per-item `<Link>` so middle-click "open in new tab" works and screen readers announce the chain). RunDetail's `navigate(-1)` back-arrow breadcrumb is replaced with `Dashboard › Projects › [Project Name] › Runs › Run #abc123`; the project name is hydrated onto the run response server-side (`backend/src/routes/runs.js` adds `projectName` from the ACL-resolved project, no extra round-trip). TestDetail's bespoke `.td-breadcrumb*` markup is replaced with the same shared component rendering `Dashboard › Projects › [Project Name] › Tests › [Test Name]`. The dead `.td-breadcrumb*` CSS is removed in the same commit. The footer "Back" button on RunDetail intentionally still uses `navigate(-1)` — it's a secondary scroll-position convenience, not the logical-parent navigation the audit calls out._
 
 Pages like `/runs/:runId` and `/tests/:testId` have a back-arrow (`ArrowLeft`) that navigates to the previous browser history entry — not necessarily the logical parent. If a user arrives at RunDetail from a notification link or a bookmark, the back arrow navigates nowhere useful.
 

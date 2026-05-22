@@ -280,6 +280,57 @@
   color: var(--text);
 }
 
+/* NAV-002 (audit) — Shared breadcrumb component.
+   Used by RunDetail + TestDetail to render the entity chain
+   (Dashboard › Projects › {Project} › Runs › Run #abc) so deep-page
+   navigation lands somewhere logical regardless of how the user arrived
+   (notification link, bookmark, direct URL). Mirrors the existing
+   `.td-breadcrumb*` look so the visual treatment is unchanged. */
+.breadcrumb { margin-bottom: 20px; }
+.breadcrumb__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: var(--text3);
+}
+.breadcrumb__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.breadcrumb__link {
+  color: var(--text3);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font-size: 0.82rem;
+  transition: color 0.12s;
+  /* `<Link>` keeps a real anchor tag so middle-click "open in new tab"
+     and screen-reader announcement work; we just style it to match the
+     surrounding text. */
+}
+.breadcrumb__link:hover { color: var(--text); }
+.breadcrumb__current {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+.breadcrumb__sep {
+  color: var(--text3);
+  flex-shrink: 0;
+}
+
 /* AI-001 (audit) — shared quality-score primitives.
    Used by `<QualityScoreChip>` + `<QualityScoreExplainer>` to render
    tier-aware colour (high / medium / low) without per-component inline

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Play, Edit2, RefreshCw, Download,
   CheckCircle2, Clock,
-  ChevronRight, Calendar, GitCommit,
+  Calendar, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, GitMerge,
   Link2, Tag, Clipboard, Wand2, MoreHorizontal,
 } from "lucide-react";
@@ -21,6 +21,7 @@ import {
   QualityScoreExplainer,
   qualityTierKey,
 } from "../components/shared/QualityScoreChip.jsx";
+import Breadcrumb from "../components/shared/Breadcrumb.jsx";
 import { fmtDate, fmtDateTime, fmtRelativeTimeFull } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
@@ -306,27 +307,36 @@ export default function TestDetail() {
   return (
     <div className="fade-in td-page">
 
-      {/* ── Breadcrumb + toolbar ── */}
+      {/* ── Breadcrumb + toolbar ──
+          NAV-002 (audit): swapped the bespoke `.td-breadcrumb*` markup for
+          the shared `<Breadcrumb>` so RunDetail and TestDetail render the
+          same WAI-ARIA-compliant trail (`<nav aria-label="Breadcrumb">` +
+          `<ol>` + per-item `<Link>`). The audit's recommended trail for
+          test detail is:
+              Dashboard › Projects › [Project Name] › Tests › [Test Name]
+          When `project` hasn't loaded yet (rare — useTestDetailQuery
+          hydrates `test` + `project` together), we fall back to a flat
+          "Tests" trail rather than a partial chain that would 404 on click. */}
       <div className="td-toolbar">
-        <div className="td-breadcrumb">
-          {project ? (
-            <>
-              <button className="td-breadcrumb-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
-                {project.name}
-              </button>
-              <ChevronRight size={13} />
-              <button className="td-breadcrumb-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
-                Tests
-              </button>
-            </>
-          ) : (
-            <button className="td-breadcrumb-btn" onClick={() => navigate("/tests")}>
-              Tests
-            </button>
-          )}
-          <ChevronRight size={13} />
-          <span className="td-breadcrumb-current">Test Details</span>
-        </div>
+        {project ? (
+          <Breadcrumb
+            items={[
+              { label: "Dashboard", to: "/dashboard" },
+              { label: "Projects",  to: "/projects" },
+              { label: project.name, to: `/projects/${test.projectId}` },
+              { label: "Tests",      to: `/projects/${test.projectId}` },
+              { label: cleanTestName(test.name) || "Test" },
+            ]}
+          />
+        ) : (
+          <Breadcrumb
+            items={[
+              { label: "Dashboard", to: "/dashboard" },
+              { label: "Tests",     to: "/tests" },
+              { label: cleanTestName(test.name) || "Test" },
+            ]}
+          />
+        )}
 
         {/* ── Action buttons ── */}
         <div className="td-toolbar-actions">

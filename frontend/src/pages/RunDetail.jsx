@@ -30,6 +30,7 @@ import RunCompareView from "../components/run/RunCompareView.jsx";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import GateBadge from "../components/shared/GateBadge.jsx";
+import Breadcrumb from "../components/shared/Breadcrumb.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { countNonExecutedSkips } from "../utils/skipReasons.js";
 
@@ -494,35 +495,31 @@ export default function RunDetail() {
       className="fade-in"
       style={{ maxWidth: 1200, margin: "0 auto", padding: "0 16px 40px", overflowX: "hidden" }}
     >
-      {/* ── Breadcrumb ─────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 20,
-          fontSize: "0.82rem",
-          color: "var(--text3)",
-        }}
-      >
-        <button
-          onClick={() => navigate(-1)}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            color: "var(--text2)",
-            fontWeight: 500,
-          }}
-        >
-          <ArrowLeft size={14} /> Runs
-        </button>
-        <span>›</span>
-        <span>Run Detail</span>
-      </div>
+      {/* ── Breadcrumb (NAV-002, audit) ─────────────────────────────────
+          Semantic trail using `<Breadcrumb>`: each segment is a real
+          `<Link>` so middle-click opens in a new tab and screen readers
+          announce the chain. Replaces the prior `navigate(-1)` back arrow
+          which was unreliable for users arriving via notification link,
+          bookmark, or direct URL (it landed on the previous browser-history
+          page, not the logical parent).
+          Project segment falls back to `null` when `projectName` isn't
+          hydrated yet (older cached run rows from before the backend
+          NAV-002 hydration shipped); `<Breadcrumb>` skips items with
+          neither label nor `to` cleanly. */}
+      <Breadcrumb
+        items={[
+          { label: "Dashboard", to: "/dashboard" },
+          { label: "Projects",  to: "/projects" },
+          run.projectName
+            ? { label: run.projectName, to: `/projects/${run.projectId}` }
+            : { label: "Project",       to: `/projects/${run.projectId}` },
+          { label: "Runs",      to: "/runs" },
+          { label: `Run #${runId.length > 6 ? runId.slice(0, 6).toUpperCase() : runId.toUpperCase()}` },
+        ]}
+      />
+      {/* Note: the `useNavigate`-based back arrow is intentionally gone.
+          Browser-history back is still one keystroke away (⌫ or browser
+          chrome); the breadcrumb above gives the *logical* path. */}
 
       {/* ── Task header ────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 16 }}>
@@ -1071,7 +1068,13 @@ export default function RunDetail() {
         </div>
       )}
 
-      {/* ── Footer ─────────────────────────────────────────────────────── */}
+      {/* ── Footer ─────────────────────────────────────────────────────
+          The footer "Back" still uses `navigate(-1)` deliberately — it's a
+          secondary convenience after long page content scroll, and the
+          NAV-002 breadcrumb at the top covers the *logical-parent*
+          navigation case. Removing this would force a scroll-to-top
+          before the user can navigate, which is worse UX than the
+          imprecise back-history step. */}
       <div
         style={{
           marginTop: 20,
