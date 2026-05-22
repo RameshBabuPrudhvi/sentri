@@ -1403,18 +1403,16 @@ export default function TestLab() {
                           <PipelinePanel run={runData} />
                         </div>
 
-                        {/* Sub-col 2: live log */}
+                        {/* Sub-col 2: progress narrative (not raw logs).
+                            Industry standard (Vercel, GitHub Actions, Cypress
+                            Cloud): the primary view shows human-readable
+                            stage summaries; the raw terminal lives in the
+                            dedicated Logs tab. This works for ALL providers
+                            (GPT-4o streaming, Gemini non-streaming, Ollama)
+                            because it reads from `runData` snapshots delivered
+                            via SSE, not from streamed tokens. */}
                         <div className="tl-pipeline-log-col">
-                          <div className="tl-pipeline-col-label">Live Output</div>
-                          {/* AI-004 (audit): context row above the log so
-                              operators running generation from TestLab see
-                              the same "Author agent · generate tests via ai —
-                              Stage 4/8" attribution that GenerateView's
-                              LLMStreamPanel surfaces. Identical mapping +
-                              shared component means the two surfaces stay
-                              in sync. `runData.modelUsed` forward-compat
-                              with GAP-005 — the model fragment hides
-                              cleanly while the backend column is null. */}
+                          <div className="tl-pipeline-col-label">Progress</div>
                           <LLMContextRow
                             stageLabel={runData?.currentStep != null
                               ? PIPELINE_STAGES[runData.currentStep - 1]?.label || null
@@ -1427,7 +1425,77 @@ export default function TestLab() {
                             modelName={runData?.modelUsed || null}
                             isRunning={isRunActive}
                           />
-                          <LiveLog lines={logLines} />
+                          {/* Stage-aware progress feed — each completed stage
+                              renders a one-line summary with its stat value.
+                              The active stage pulses. Works identically for
+                              streaming and non-streaming providers because
+                              it reads `runData.pipelineStats` (populated by
+                              SSE `snapshot` events), not `logLines`. */}
+                          <div className="tl-progress-feed">
+                            {PIPELINE_STAGES.map((stage) => {
+                              const state = stageStatus(stage.step, runData?.currentStep ?? null, runData?.status ?? "running");
+                              const statVal = stage.key ? (ps[stage.key] ?? null) : null;
+                              if (state === "pending") return null;
+                              // AI-005: surface the agent role so operators see
+                              // which agent handled each stage. Stages 1-2 are
+                              // pre-LLM (Playwright crawl + heuristic filter) so
+                              // they show "Sentri" instead of an AI agent name.
+                              const agentRole = STEP_TO_AGENT_ROLE[stage.step] || null;
+                              const agentLabel = agentRole
+                                ? agentRole.charAt(0).toUpperCase() + agentRole.slice(1) + " agent"
+                                : null;
+                              const model = runData?.modelUsed || null;
+                              // Human-readable messages with agent attribution.
+                              // Done states show the stat; active states show
+                              // what the agent is doing right now.
+                              const doneMessages = {
+                                1: `Discovered ${statVal ?? 0} pages on your site`,
+                                2: `Kept ${statVal ?? 0} interactive elements`,
+                                3: `${agentLabel ?? "AI"} identified ${statVal ?? 0} user flows`,
+                                4: `${agentLabel ?? "AI"} generated ${statVal ?? 0} raw test cases`,
+                                5: `${agentLabel ?? "AI"} removed ${statVal ?? 0} duplicate tests`,
+                                6: `${agentLabel ?? "AI"} enhanced ${statVal ?? 0} assertions`,
+                                7: `${agentLabel ?? "AI"} rejected ${statVal ?? 0} invalid tests`,
+                                8: "All stages complete",
+                              };
+                              const activeMessages = {
+                                1: "Crawling your site…",
+                                2: "Filtering page elements…",
+                                3: `${agentLabel ?? "AI"} is classifying user intents…`,
+                                4: `${agentLabel ?? "AI"} is writing test cases${model ? ` with ${model}` : ""}…`,
+                                5: `${agentLabel ?? "AI"} is deduplicating tests…`,
+                                6: `${agentLabel ?? "AI"} is strengthening assertions…`,
+                                7: `${agentLabel ?? "AI"} is validating test quality…`,
+                                8: "Finalizing…",
+                              };
+                              const msg = state === "done"
+                                ? doneMessages[stage.step]
+                                : activeMessages[stage.step];
+                              return (
+                                <div key={stage.step} className={`tl-progress-item tl-progress-item--${state}`}>
+                                  <span className="tl-progress-item__icon">
+                                    {state === "done" ? "✓" : "●"}
+                                  </span>
+                                  <span className="tl-progress-item__text">
+                                    {msg}
+                                  </span>
+                                  {/* Agent + model attribution on the active row
+                                      so operators know exactly which AI is working. */}
+                                  {state === "active" && agentRole && (
+                                    <span className="tl-progress-item__agent">
+                                      🤖 {agentLabel}{model ? ` · ${model}` : ""}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {isRunActive && !runData?.currentStep && (
+                              <div className="tl-progress-item tl-progress-item--active">
+                                <span className="tl-progress-item__icon">●</span>
+                                <span className="tl-progress-item__text">Starting pipeline…</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {/* Sub-col 3: so far stats + stop button */}
