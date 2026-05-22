@@ -21,7 +21,7 @@ export const SETTINGS_SECTIONS = [
   // ── Workspace group (admin surfaces — AI / org / data) ─────────────────
   { key: "providers",       label: "AI Providers",    icon: "Zap",          adminOnly: true,  group: "workspace" },
   { key: "provider_routes", label: "Provider Routes", icon: "Route",        adminOnly: true,  group: "workspace" },
-  { key: "agent_roles",     label: "Agent Roles",     icon: "Users",        adminOnly: true,  group: "workspace" },
+  { key: "agent_roles",     label: "Agent Roles",     icon: "Bot",          adminOnly: true,  group: "workspace" },
   { key: "members",         label: "Members",         icon: "Users",        adminOnly: true,  group: "workspace" },
   { key: "data",            label: "Data",            icon: "Database",     adminOnly: true,  group: "workspace" },
 

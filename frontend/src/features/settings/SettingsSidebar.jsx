@@ -1,7 +1,7 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import {
-  Cpu, Database, ExternalLink, KeyRound, Route as RouteIcon, Shield, Users, Zap,
+  Bot, Cpu, Database, ExternalLink, KeyRound, Route as RouteIcon, Shield, Users, Zap,
 } from "lucide-react";
 import { useSettingsSections } from "./hooks/useSettingsSections.js";
 
@@ -17,7 +17,7 @@ import { useSettingsSections } from "./hooks/useSettingsSections.js";
 // names as plain strings to keep that module JSX-free. Resolve to lucide
 // components here.
 const ICONS = {
-  Zap, Route: RouteIcon, Users, Cpu, ExternalLink, Database, KeyRound, Shield,
+  Zap, Route: RouteIcon, Bot, Users, Cpu, ExternalLink, Database, KeyRound, Shield,
 };
 
 const GROUP_LABELS = {
