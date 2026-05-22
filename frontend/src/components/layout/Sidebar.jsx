@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { Home, FolderKanban, SquareCheckBig, PlayCircle, BarChart3, Bot, Server,
     Settings, ChevronDown, Check, ChevronRight, PanelLeftClose, PanelLeftOpen,
-    Atom, Shield, ClipboardCheck, ScrollText,
+    Atom, Shield, ClipboardCheck, ScrollText, Inbox,
 } from "lucide-react";
 import AppLogo from "./AppLogo.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
@@ -11,11 +11,29 @@ import { api } from "../../api.js";
 import useAutoApprovalsQuery from "../../hooks/queries/useAutoApprovalsQuery.js";
 import { useReviewQueueCounts } from "../../hooks/queries/useReviewQueueQuery.js";
 
-// Review Queue intentionally has no sidebar entry — it's reached via the
-// "Review Drafts" quick-action card on the Tests page (`Tests.jsx`), which
-// carries the live draft count and project-scoped deep-link. Adding a
-// sidebar entry here would duplicate that surface; the `/review-queue`
-// route itself remains registered in `App.jsx` for the card's navigate().
+// NAV-001 (audit) — Sidebar IA restructured per the audit's recommended
+// grouping in `docs/roadmap/sentri-ux-audit-22May2026.md`:
+//
+//   Core:       Dashboard, Projects, Tests
+//   Work:       Runs, Review Queue, Approvals
+//   Automation: Test Lab, Healing, Automation
+//   Insights:   Reports, Audit Log (admin), System
+//   (Settings stays in the footer, admin-only.)
+//
+// Rationale highlights:
+//   - "Test Lab" demoted from Core → Automation (advanced feature, not a
+//     top-level destination alongside Dashboard/Projects/Tests).
+//   - "Approvals" lifted to Work (it's a sub-workflow of test management,
+//     not "automation"). Same group as Runs + Review Queue.
+//   - Review Queue gains a first-class entry — the prior assumption that
+//     the Tests-page quick-action card was sufficient was the source of
+//     the GAP-004 audit finding (drafts accumulating silently). The
+//     pending-review badge that already lives on the Tests entry stays;
+//     this entry is the canonical destination, the Tests-page card is
+//     a contextual shortcut.
+//   - Reports + Audit log + System grouped under Insights (admin
+//     observability surfaces). System is read-only telemetry, semantically
+//     closer to Audit log than to Automation.
 const NAV_GROUPS = [
   {
     label: "Core",
@@ -23,27 +41,33 @@ const NAV_GROUPS = [
       { to: "/dashboard",     icon: Home,          label: "Dashboard",     tour: "tour-dashboard" },
       { to: "/projects",      icon: FolderKanban,  label: "Projects",      tour: "tour-projects"  },
       { to: "/tests",         icon: SquareCheckBig,label: "Tests",         tour: "tour-tests"     },
-      { to: "/test-lab",      icon: Atom,          label: "Test Lab"                              },
     ],
   },
   {
-    label: "Activity",
+    label: "Work",
     items: [
-      { to: "/runs",    icon: PlayCircle, label: "Runs"    },
-      { to: "/reports", icon: BarChart3,  label: "Reports" },
+      { to: "/runs",          icon: PlayCircle,    label: "Runs"          },
+      { to: "/review-queue",  icon: Inbox,         label: "Review Queue"  },
+      { to: "/approvals",     icon: ClipboardCheck,label: "Approvals"     },
     ],
   },
   {
     label: "Automation",
     items: [
-      { to: "/automation", icon: Bot,    label: "Automation" },
-      { to: "/approvals",  icon: ClipboardCheck, label: "Approvals" },
-      { to: "/healing", icon: Shield, label: "Healing" },
+      { to: "/test-lab",      icon: Atom,          label: "Test Lab"      },
+      { to: "/healing",       icon: Shield,        label: "Healing"       },
+      { to: "/automation",    icon: Bot,           label: "Automation"    },
+    ],
+  },
+  {
+    label: "Insights",
+    items: [
+      { to: "/reports",       icon: BarChart3,     label: "Reports"       },
       // SEC-007: `/audit-log` is gated by `<ProtectedRoute requiredRole="admin">`
       // in App.jsx, so we hide the nav item from non-admins to avoid leading them
       // to a 403 panel — same pattern as the Settings link in the footer.
-      { to: "/audit-log",  icon: ScrollText,     label: "Audit log", adminOnly: true },
-      { to: "/system",     icon: Server, label: "System"     },
+      { to: "/audit-log",     icon: ScrollText,    label: "Audit log", adminOnly: true },
+      { to: "/system",        icon: Server,        label: "System"        },
     ],
   },
 ];

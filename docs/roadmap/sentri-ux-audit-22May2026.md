@@ -138,7 +138,7 @@ This pattern is used by every competitive platform (Cypress Cloud's Project Over
 ## 3. Navigation & Workflow Issues
 
 ### NAV-001 — Sidebar Information Architecture Needs Restructuring
-**Severity: High**
+**Severity: High** · ✅ _Landed in PR #25 — `frontend/src/components/layout/Sidebar.jsx` `NAV_GROUPS` restructured to the recommended 4-group layout: **Core** (Dashboard, Projects, Tests), **Work** (Runs, Review Queue, Approvals), **Automation** (Test Lab, Healing, Automation), **Insights** (Reports, Audit Log [admin], System). Test Lab demoted Core → Automation; Approvals lifted Automation → Work; Review Queue gets a first-class entry (closing the silent-drafts gap that GAP-004's badge mitigated); Reports + Audit Log + System cluster under Insights. Settings stays in the footer. Chat is intentionally still off-sidebar — the audit calls it out as missing, but a sidebar entry vs. TopBar discoverability is a separate decision tracked outside NAV-001._
 
 The sidebar has 3 groups (Core, Activity, Automation) with 12 items. Several items are inconsistently categorised:
 - "Chat" (`/chat`) is in no group at all — it's missing from the sidebar entirely (reachable only via TopBar AI button, not discoverable for new users)
