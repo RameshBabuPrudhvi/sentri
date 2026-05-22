@@ -446,12 +446,32 @@ export default function Dashboard() {
 
           {/* ── Row 3: Flaky Tests + Defect Breakdown ── */}
           {data?.totalRuns > 0 && (() => {
+            // The backend currently surfaces six named categories in
+            // `defectBreakdown` (BOT_BLOCK + SELECTOR_ISSUE + NAVIGATION_FAIL
+            // + TIMEOUT + ASSERTION_FAIL + UNKNOWN) and may add more without
+            // a frontend change — `backend/src/routes/dashboard.js:130` falls
+            // back to UNKNOWN for unrecognised keys. Three named categories
+            // exist in the classifier but aren't in the dashboard's init
+            // shape today (NETWORK_MOCK_FAIL / FRAME_FAIL / API_ASSERTION_FAIL);
+            // we still aggregate any value the API returns for them into the
+            // "Other" bucket so a backend update that wires them in doesn't
+            // silently drop counts from the chart total. BOT_BLOCK is its
+            // own segment with a distinct gray hue so operators can tell
+            // bot-blocked sites apart from real defects at a glance.
+            const NAMED_KEYS = new Set([
+              "BOT_BLOCK", "SELECTOR_ISSUE", "NAVIGATION_FAIL", "TIMEOUT", "ASSERTION_FAIL",
+            ]);
+            let otherCount = dfb.UNKNOWN || 0;
+            for (const [key, value] of Object.entries(dfb)) {
+              if (!NAMED_KEYS.has(key) && key !== "UNKNOWN") otherCount += Number(value) || 0;
+            }
             const defectSegs = [
-              { label: "Selector",   count: dfb.SELECTOR_ISSUE || 0,  color: "var(--purple)" },
-              { label: "Navigation", count: dfb.NAVIGATION_FAIL || 0, color: "var(--blue)"   },
-              { label: "Timeout",    count: dfb.TIMEOUT || 0,         color: "var(--amber)"  },
-              { label: "Assertion",  count: dfb.ASSERTION_FAIL || 0,  color: "var(--red)"    },
-              { label: "Other",      count: dfb.UNKNOWN || 0,         color: "#6b7280"       },
+              { label: "Bot-blocked", count: dfb.BOT_BLOCK || 0,       color: "#94a3b8"       },
+              { label: "Selector",    count: dfb.SELECTOR_ISSUE || 0,  color: "var(--purple)" },
+              { label: "Navigation",  count: dfb.NAVIGATION_FAIL || 0, color: "var(--blue)"   },
+              { label: "Timeout",     count: dfb.TIMEOUT || 0,         color: "var(--amber)"  },
+              { label: "Assertion",   count: dfb.ASSERTION_FAIL || 0,  color: "var(--red)"    },
+              { label: "Other",       count: otherCount,               color: "#6b7280"       },
             ];
             const totalDefects = defectSegs.reduce((s, x) => s + x.count, 0);
             return (
