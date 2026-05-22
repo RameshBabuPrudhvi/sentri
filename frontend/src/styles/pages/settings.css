@@ -903,13 +903,11 @@
   align-items: center;
 }
 .recovery-panel__confirm { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-.pwd-modal-overlay {
-  position: fixed; inset: 0; z-index: 1100;
-  background: rgba(0,0,0,0.45);
-  display: flex; align-items: center; justify-content: center;
-  padding: 16px;
-}
-.pwd-modal { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 12px; }
+/* PasswordConfirmModal now wraps in `<ModalShell>`, which provides the
+   backdrop, centering, and focus trap (A11Y-002, audit). The previous
+   `.pwd-modal-overlay` div was replaced; only the inner form classes
+   below remain in use. */
+.pwd-modal { display: flex; flex-direction: column; gap: 12px; }
 .pwd-modal__title { margin: 0; font-size: 1rem; }
 .pwd-modal__desc { margin: 0; }
 .pwd-modal__label { display: flex; flex-direction: column; gap: 6px; }

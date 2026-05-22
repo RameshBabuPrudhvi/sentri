@@ -1,34 +1,37 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import { AlertCircle, Check, RefreshCw } from "lucide-react";
+import ModalShell from "../../../components/shared/ModalShell.jsx";
 
 /**
  * Reusable password-confirm modal (SEC-004). Used by destructive Security
  * actions (disable MFA, regenerate recovery codes, remove passkey) — every
  * call site backs onto a backend route that reverifies the password before
- * acting. Esc cancels, click-outside cancels, autofocus on the input.
- * Extracted from Settings.jsx (GAP-002).
+ * acting.
+ *
+ * Built on `<ModalShell>` (A11Y-002, audit) so the focus trap, Escape
+ * handling, click-outside dismiss, focus restoration on close, and
+ * `role="dialog"` + `aria-modal="true"` + `aria-labelledby` semantics
+ * come for free — keeps every modal surface in the app accessibly
+ * uniform without duplicating the trap logic per dialog. Extracted from
+ * Settings.jsx (GAP-002).
+ *
+ * Autofocus: ModalShell focuses the first focusable child on mount,
+ * which is the password input by DOM order — no explicit `useRef` +
+ * `useEffect` needed. The previous bespoke focus + Escape + click-
+ * outside effects are deleted in favour of the shared shell.
  */
 export default function PasswordConfirmModal({ title, description, busy, error, onConfirm, onCancel }) {
   const [password, setPassword] = useState("");
-  const inputRef = useRef(null);
-
-  useEffect(() => { inputRef.current?.focus(); }, []);
-  useEffect(() => {
-    function onKey(e) { if (e.key === "Escape") onCancel(); }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="pwd-modal-title"
-      className="pwd-modal-overlay"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    <ModalShell
+      onClose={onCancel}
+      width="min(420px, 95vw)"
+      ariaLabelledBy="pwd-modal-title"
+      style={{ padding: "24px" }}
     >
       <form
-        className="card card-padded pwd-modal"
+        className="pwd-modal"
         onSubmit={(e) => { e.preventDefault(); onConfirm(password); }}
       >
         <h3 id="pwd-modal-title" className="pwd-modal__title">{title}</h3>
@@ -36,7 +39,6 @@ export default function PasswordConfirmModal({ title, description, busy, error, 
         <label className="text-sm font-semi pwd-modal__label">
           Password
           <input
-            ref={inputRef}
             className="input pwd-modal__input"
             type="password"
             value={password}
@@ -57,6 +59,6 @@ export default function PasswordConfirmModal({ title, description, busy, error, 
           </button>
         </div>
       </form>
-    </div>
+    </ModalShell>
   );
 }
