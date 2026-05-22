@@ -20,7 +20,7 @@ The platform sits at approximately **4.8 / 10** on enterprise UX maturity today.
 3. Dashboard information architecture is additive, not prioritised — 12+ panels render simultaneously with no visual hierarchy directing attention.
 4. The AI/agent experience has no real-time explanation layer — agents fire and complete with no visible reasoning, no decision trail, no "why did this happen" surface.
 5. Navigation has two top-level dead-ends (Chat History, Systems) that should live inside deeper contexts, inflating the sidebar.
-6. Mobile and tablet experience is partial — responsive breakpoints (768px / 480px) and hamburger sidebar exist, but touch-target minimums (MOB-002) and tablet-targeted table reflows on data-dense pages still need a pass.
+6. Mobile and tablet experience is **not production-ready**. A shell-level responsive scaffold (768px / 480px breakpoints, hamburger sidebar) exists in `layout.css`, but no individual page has been audited or fixed for narrow viewports — Dashboard panels, Runs / AuditLog / ReviewQueue tables, RunDetail tabs, and every modal still break or overflow on phones and small tablets. Touch-target minimums (MOB-002) are also unmet. A page-by-page responsive QA + fix pass is required before the app can be called mobile-responsive.
 7. No structured onboarding funnel beyond a tour overlay — first-run for a new workspace is blank-slate confusion.
 8. Empty states across many pages are placeholder text rather than actionable guidance.
 
@@ -513,7 +513,7 @@ When a user approves a test in ReviewQueue, the UI waits for the API response be
 ## 10. Mobile & Responsive Issues
 
 ### MOB-001 — No Mobile Support
-**Severity: Medium** (was High) · ✅ _Responsive breakpoint foundation is complete. The original "no responsive layout / no @media breakpoints" claim was stale at audit time. `frontend/src/styles/pages/layout.css:36-177` ships a 768px breakpoint (sidebar narrows to icon-rail, main padding tightens, command-palette placeholder hides) and a 480px breakpoint (sidebar slides off-screen behind a `.sidebar-overlay`, hamburger toggle shown via `.sidebar-toggle`, ProviderBadge collapses to icon-only). `Layout.jsx:44-65` renders the hamburger + overlay JSX driven by a `sidebar-open` class. 30+ page-level `@media` queries exist across the CSS tree (covering Dashboard / Tests / Runs / ReviewQueue / Settings — verified by `grep -r "@media" frontend/src/styles/`). This satisfies the Phase 1 "establish responsive breakpoints" deliverable in §16. Genuine remaining gaps are scoped to **MOB-002** (touch-target minimums) plus a tablet-targeted table-reflow pass on data-dense pages (Runs, AuditLog, ReviewQueue) — both are Phase 3 "Mobile-first responsive redesign" work, not Phase 1 foundation work._
+**Severity: High** · ⚠️ _**Shell-level scaffold only — the app is NOT mobile-responsive.** `frontend/src/styles/pages/layout.css:36-177` ships breakpoints for the **app shell** (768px → sidebar narrows to icon-rail; 480px → sidebar slides off-screen behind a `.sidebar-overlay` + hamburger toggle). That's the navigation chrome only. **No individual page has been audited or fixed for narrow viewports**: Dashboard's 12 stacked panels don't reflow, the Runs / AuditLog / ReviewQueue tables overflow horizontally without `overflow-x: auto`, RunDetail's tab bar wraps awkwardly, every modal assumes desktop width, stat-card rows don't collapse to single-column, and form layouts in Settings sections overflow at 375px. The 30+ existing page-level `@media` queries are scoped to component-internal tweaks (e.g. SettingsSidebar collapsing at 900px) — they are NOT a comprehensive responsive pass. **Phase 1 "establish responsive breakpoints" is partially met (shell only); a full page-by-page responsive QA + fix pass remains outstanding work** and should be elevated to its own roadmap item before any mobile-experience claim is made externally._
 
 On a 375px wide iPhone viewport, the sidebar likely obscures most of the main content area.
 
@@ -734,7 +734,7 @@ This is not just a UX polish exercise — it is the product narrative. The UI sh
 | Accessibility | 4/10 | ARIA live regions shipped; focus, contrast, and modal gaps remain |
 | Enterprise UX | 5/10 | RBAC, MFA, and audit log exist; UX surfaces them poorly |
 | Frontend Architecture | 6/10 | TanStack Query, lazy loading, error boundaries — good foundations |
-| Mobile/Responsive | 5/10 | 768px / 480px breakpoints + hamburger sidebar + 30+ page-level `@media` rules ship in `layout.css`; touch-target minimums (MOB-002) and data-dense table reflows still pending |
+| Mobile/Responsive | 3/10 | Shell-level breakpoints + hamburger sidebar ship in `layout.css`, but no page has been audited or fixed for narrow viewports — Dashboard panels, data tables, RunDetail tabs, modals, and Settings forms all break on phones. Touch-target minimums (MOB-002) unmet. A page-by-page responsive QA + fix pass is the next required step. |
 | Reporting/Visualization | 5/10 | Charts exist; shallow analytics compared to competitors |
 | Onboarding/Adoption | 3/10 | Tour exists; no guided workflow; empty states are bare |
 
