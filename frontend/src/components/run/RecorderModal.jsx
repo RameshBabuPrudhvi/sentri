@@ -957,7 +957,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 whole panel unmounts the moment the user clicks the button). */}
             {(phase === "recording" || phase === "stopping") && (
               <div className="recorder-sidebar__footer">
-                <div className="recorder-sidebar__heading" style={{ marginBottom: 2 }}>
+                <div className="recorder-sidebar__heading recorder-sidebar__heading--tight">
                   Add verification
                 </div>
                 {/* DIF-015c Gap 2 — Pick-by-click toggle. When on, the
