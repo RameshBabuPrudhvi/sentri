@@ -64,7 +64,7 @@ export default function DeleteProjectModal({ project, onClose, onDeleted }) {
           <AlertTriangle size={18} color="var(--red)" />
         </div>
         <div>
-          <div id="delete-project-modal-title" style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 6 }}>
+          <div id="delete-project-modal-title" className="modal-title">
             Delete "{project.name}"?
           </div>
           <div style={{ fontSize: "0.875rem", color: "var(--text2)", lineHeight: 1.6 }}>
