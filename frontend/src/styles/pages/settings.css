@@ -532,6 +532,32 @@
   gap: 24px;
 }
 
+/* UX-AUDIT (May 2026) — per-card heading + sub. Visual rhythm matches the
+   `.st-pr-spend-title` / `.st-pr-audit-title` patterns already used by
+   WorkspaceSpendCapsPanel + Audit/Request-log subtabs (font-semi 0.88rem,
+   icon + label inline) so every card on the Provider Routes page reads as
+   a sibling of the others. The `--count` modifier renders the row count
+   in a muted parenthetical (mirrors Stripe Dashboard / GitHub Settings
+   "Members (12)" pattern). */
+.st-pr-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.st-pr-card-title__count {
+  color: var(--text3);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.st-pr-card-sub {
+  margin-top: 4px;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
 .st-pr-form {
   display: grid;
   gap: 12px;

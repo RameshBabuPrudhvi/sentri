@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AlertCircle, Route as RouteIcon } from "lucide-react";
+import {
+  AlertCircle, Check, Download as DownloadIcon, ListChecks, Plus, Route as RouteIcon,
+} from "lucide-react";
 import { api } from "../../../../api.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
 import { PR_FORM_EMPTY } from "./providerRoutes.constants.js";
@@ -234,6 +236,12 @@ export default function ProviderRoutesSection() {
           field of any form. Visually separated so the user doesn't
           mistake the file-mode dropdown for a route attribute. */}
       <div className="card card-padded">
+        <div className="st-pr-card-title">
+          <DownloadIcon size={13} /> Backup &amp; restore
+        </div>
+        <div className="text-xs text-muted st-pr-card-sub">
+          Export every route as a schema-v1 JSON file, or import routes from another workspace. Secrets are never included — re-supply API keys via the per-row Rotate key after import.
+        </div>
         <ProviderRoutesIO
           onExport={exportRoutes}
           onImport={importRoutes}
@@ -248,6 +256,15 @@ export default function ProviderRoutesSection() {
           row and the CTA reads "Update route" (handled inside
           ProviderRoutesForm). */}
       <div className="card card-padded">
+        <div className="st-pr-card-title">
+          {form.id ? <Check size={13} /> : <Plus size={13} />}
+          {form.id ? "Edit route" : "Create a new route"}
+        </div>
+        <div className="text-xs text-muted st-pr-card-sub">
+          {form.id
+            ? "Update the configuration below. Leave the API key empty to keep the stored value."
+            : "Bundle a provider (family + protocol + model + key) into a named route. Agent roles pin a route via routeId so dispatch is deterministic."}
+        </div>
         <ProviderRoutesForm
           form={form}
           setForm={setForm}
@@ -265,6 +282,13 @@ export default function ProviderRoutesSection() {
           inside the card so an empty workspace still has a visible
           surface to read against. */}
       <div className="card card-padded">
+        <div className="st-pr-card-title">
+          <ListChecks size={13} />
+          Configured routes
+          {!loading && rows.length > 0 && (
+            <span className="st-pr-card-title__count">({rows.length})</span>
+          )}
+        </div>
         {loading ? (
           <div className="text-sm text-muted st-pr-loading">Loading provider routes…</div>
         ) : rows.length === 0 ? (
