@@ -527,6 +527,11 @@ export const api = {
     const params = new URLSearchParams();
     if (filters.type) params.set("type", filters.type);
     if (filters.projectId) params.set("projectId", filters.projectId);
+    // ENT-004 (audit) — per-entity scoping. Pass-through to the route's
+    // `testId = ?` filter so TestDetail's "View activity" link can hit
+    // the same workspace-scoped activities endpoint without pulling the
+    // whole project's feed and filtering client-side.
+    if (filters.testId) params.set("testId", filters.testId);
     if (filters.after) params.set("after", filters.after);
     if (filters.before) params.set("before", filters.before);
     if (filters.limit != null) params.set("limit", String(filters.limit));

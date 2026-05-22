@@ -977,6 +977,20 @@ export default function TestDetail() {
             <button className="btn btn-ghost btn-sm td-view-project-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
               View Project
             </button>
+            {/* ENT-004 (audit) — deep-link to the workspace Audit Log
+                pre-filtered to this test. Admins see the per-test slice
+                (approved by, rejected by, regenerated, healed) without
+                hunting through the workspace-wide feed. Non-admin users
+                land on the same route's permission gate; the audit's
+                follow-up to expose a viewer-friendly variant is tracked
+                separately. */}
+            <button
+              className="btn btn-ghost btn-sm td-view-project-btn"
+              onClick={() => navigate(`/audit-log?testId=${encodeURIComponent(test.id)}`)}
+              title="See approve / reject / regenerate / healing events for this test"
+            >
+              View activity →
+            </button>
           </div>
         </div>
       </div>

@@ -409,7 +409,7 @@ export function getAllAsDict() {
  *   result set; used by paginated UIs (Load more) to fetch the next page.
  * @returns {Object[]}
  */
-export function getFiltered({ type, projectId, workspaceId, after, before, limit, offset } = {}) {
+export function getFiltered({ type, projectId, testId, workspaceId, after, before, limit, offset } = {}) {
   const db = getDatabase();
   let sql = "SELECT * FROM activities WHERE 1=1";
   const params = [];
@@ -424,6 +424,16 @@ export function getFiltered({ type, projectId, workspaceId, after, before, limit
   if (projectId) {
     sql += " AND projectId = ?";
     params.push(projectId);
+  }
+  // ENT-004 (audit) — per-entity scoping so TestDetail can link directly
+  // to its own activity slice (`/audit-log?testId=…`). Indexed via the
+  // (workspaceId, testId) covering pattern used by the existing
+  // workspace-scoped queries; for older deployments without the dedicated
+  // index, the workspace+createdAt path narrows the row set enough that a
+  // tail SELECT on `testId` stays bounded.
+  if (testId) {
+    sql += " AND testId = ?";
+    params.push(testId);
   }
   if (after) {
     sql += " AND createdAt >= ?";
@@ -645,7 +655,7 @@ export function purgeOlderThan(days) {
  *   first order; `nextCursor` is the timestamp to pass to the next call,
  *   or `null` when there are no more rows.
  */
-export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [], excludeTypes = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
+export function getWorkspaceAuditLog(workspaceId, { userId, projectId, testId, types = [], excludeTypes = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
   const db = getDatabase();
   // Hard-cap defensively even though the route handler also clamps — a
   // direct repo caller (test, future internal job) shouldn't be able to
@@ -655,6 +665,10 @@ export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [
   const params = [workspaceId];
   if (userId) { sql += " AND userId = ?"; params.push(userId); }
   if (projectId) { sql += " AND projectId = ?"; params.push(projectId); }
+  // ENT-004 (audit) — per-test slice for the "View activity →" link on
+  // TestDetail. Workspace ACL is enforced by the leading `workspaceId = ?`
+  // predicate; the testId narrow is purely a render-time concern.
+  if (testId) { sql += " AND testId = ?"; params.push(testId); }
   if (types?.length) { sql += ` AND type IN (${types.map(() => "?").join(",")})`; params.push(...types); }
   // `excludeTypes` lets the route layer hide high-volume meta-audit types
   // (`audit.read`, `audit.export`) from the default Audit Log view without
