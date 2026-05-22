@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import {
-  AlertCircle, Check, ExternalLink, Info, RefreshCw, Shield, Trash2,
+  AlertCircle, Check, Compass, ExternalLink, Info, RefreshCw, Shield, Trash2,
 } from "lucide-react";
 import { api } from "../../../../api.js";
 import { useAuth } from "../../../../context/AuthContext.jsx";
+import { resetOnboarding } from "../../../../hooks/useOnboarding.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
 
 /**
@@ -77,6 +78,36 @@ export default function AccountSection() {
 
   return (
     <div className="flex-col gap-lg">
+      {/* UX-AUDIT (May 2026) — onboarding-tour restart card. Moved here
+          from `SettingsLayout.jsx` (which previously rendered it on every
+          settings sub-page = 9 places of visual noise after first-time
+          onboarding). Lives in Account because restart-tour is a personal
+          preference, not a workspace setting — same place GitHub /
+          Vercel / Linear put their "restart onboarding" entries. */}
+      <div className="st-tour-card">
+        <div className="st-section-icon icon-box-accent shrink-0">
+          <Compass size={16} color="var(--accent)" />
+        </div>
+        <div className="flex-1">
+          <div className="font-bold">Getting Started Tour</div>
+          <div className="text-xs text-muted">
+            Re-run the onboarding walkthrough that guides you through setup.
+          </div>
+        </div>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => {
+            resetOnboarding();
+            // Navigate away first (avoids beforeunload prompt from unsaved
+            // API key inputs in providers section), then reload so
+            // useOnboarding picks up the force flag on fresh mount.
+            window.location.href = import.meta.env.BASE_URL + "dashboard";
+          }}
+        >
+          <RefreshCw size={13} /> Restart Tour
+        </button>
+      </div>
+
       <SectionTitle icon={<Shield size={16} color="var(--red)" />} title="Account & Privacy" sub="Export your data or permanently delete your account." />
       <div className="card card-padded flex-col gap-md">
         {needsPassword ? (

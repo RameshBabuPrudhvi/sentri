@@ -1,8 +1,7 @@
 import React from "react";
 import { Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Compass, RefreshCw } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import usePageTitle from "../../hooks/usePageTitle.js";
-import { resetOnboarding } from "../../hooks/useOnboarding.js";
 import SettingsSidebar from "./SettingsSidebar.jsx";
 import AdminLockedSection from "./shared/AdminLockedSection.jsx";
 import { useSettingsSections, SETTINGS_SECTIONS } from "./hooks/useSettingsSections.js";
@@ -74,31 +73,13 @@ export default function SettingsLayout() {
             <Outlet />
           )}
 
-          {/* Restart onboarding tour — shown on every section so the entry
-              point is consistent regardless of which section the user is on. */}
-          <div className="st-tour-card">
-            <div className="st-section-icon icon-box-accent shrink-0">
-              <Compass size={16} color="var(--accent)" />
-            </div>
-            <div className="flex-1">
-              <div className="font-bold">Getting Started Tour</div>
-              <div className="text-xs text-muted">
-                Re-run the onboarding walkthrough that guides you through setup.
-              </div>
-            </div>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => {
-                resetOnboarding();
-                // Navigate away first (avoids beforeunload prompt from unsaved
-                // API key inputs in providers section), then reload so
-                // useOnboarding picks up the force flag on fresh mount.
-                window.location.href = import.meta.env.BASE_URL + "dashboard";
-              }}
-            >
-              <RefreshCw size={13} /> Restart Tour
-            </button>
-          </div>
+          {/* UX-AUDIT (May 2026): the "Getting Started Tour" card was
+              previously rendered here on EVERY settings section (9 places)
+              — visual noise after first-time onboarding. Moved into the
+              Account section's `RestartTourCard` so it lives in exactly
+              one place, alongside other personal preferences. Industry
+              precedent: GitHub Settings → Account, Vercel Account,
+              Linear Account → "Restart onboarding". */}
         </div>
       </div>
     </div>
