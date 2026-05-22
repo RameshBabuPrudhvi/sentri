@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp, AlertTriangle,
   SquareCheckBig, FileText, Wrench, Clock, Plus, Shield, Crosshair, Activity,
-  Download, RefreshCw,
+  Download, RefreshCw, Rocket, CloudOff,
 } from "lucide-react";
 import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
+import EmptyState from "../components/shared/EmptyState.jsx";
 import { fmtDurationMs } from "../utils/formatters.js";
 import { generateExecutivePDF } from "../utils/pdfReportGenerator.js";
 import AgentTag from "../components/shared/AgentTag.jsx";
@@ -367,23 +368,33 @@ export default function Dashboard() {
         <ExportPDFButton />
       </div>
 
-      {/* Error banner */}
+      {/* ONB-002 (audit): API error → shared empty-state shape so the
+          Dashboard's error surface matches the four pages retrofitted in
+          this PR. The Retry CTA was always there; now it lives in the
+          standard `.empty-state-actions` row instead of dangling below
+          the raw description. */}
       {loadError && (
-        <div className="card empty-state mb-md" style={{ border: "1px solid #fca5a5" }}>
-          <div className="empty-state-icon">⚠️</div>
-          <div className="empty-state-title">Could not load dashboard data</div>
-          <div className="empty-state-desc">The API may be temporarily unavailable. Your data is safe.</div>
-          <button className="btn btn-ghost btn-sm" onClick={() => dashboardQuery.refetch()}>Retry</button>
+        <div className="mb-md">
+          <EmptyState
+            icon={<CloudOff size={32} color="var(--red)" />}
+            title="Could not load dashboard data"
+            description="The API may be temporarily unavailable. Your data is safe."
+            action={{ label: "Retry", onClick: () => dashboardQuery.refetch(), variant: "ghost" }}
+          />
         </div>
       )}
 
-      {/* First-time onboarding */}
+      {/* ONB-002 (audit): first-run onboarding via the shared primitive.
+          Same Rocket icon used by Tests.jsx's onboarding branch so the two
+          surfaces read as related once a user signs in. */}
       {isEmpty ? (
-        <div className="card empty-state mb-md">
-          <div className="empty-state-icon">🚀</div>
-          <div className="empty-state-title">Welcome to Sentri!</div>
-          <div className="empty-state-desc">Create your first project to start crawling your web app and AI-generating tests automatically.</div>
-          <button className="btn btn-primary" onClick={() => navigate("/projects/new")}>Create First Project</button>
+        <div className="mb-md">
+          <EmptyState
+            icon={<Rocket size={32} color="var(--accent)" />}
+            title="Welcome to Sentri!"
+            description="Create your first project to start crawling your web app and AI-generating tests automatically."
+            action={{ label: "Create First Project", onClick: () => navigate("/projects/new") }}
+          />
         </div>
       ) : (
         <>
