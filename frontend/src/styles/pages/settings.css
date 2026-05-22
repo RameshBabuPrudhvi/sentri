@@ -73,28 +73,37 @@
 .st-data-action__btn { flex-shrink: 0; }
 /* Loading skeletons mirror the live grid (see `.st-provider-cards` below)
    so first-paint doesn't shift the layout when cards hydrate. Same
-   breakpoint + gap so the skeleton count visually matches the live card
-   count slot-for-slot. */
+   `auto-fill` recipe + gap so the skeleton count visually matches the
+   live card count slot-for-slot. */
 .st-provider-loading-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 20px;
 }
 .st-provider-skeleton { height: 200px; border-radius: 16px; }
 /* UX-AUDIT (May 2026) — provider cards in a responsive 2-column grid.
    With the Settings shell widened to `page-container-xl` (1200px), a
    single-column stack wastes ~half the content area. Switch to a CSS
-   grid with `auto-fit + minmax(360px, 1fr)` so:
+   grid with `auto-fill + minmax(360px, 1fr)` so:
      - Wide viewports (≥ ~860px content width) render two cards per row.
      - Narrow viewports automatically collapse to a single column with
        no extra media query.
+     - `auto-fill` (NOT `auto-fit`) is critical: when the last row has a
+       single orphan card (5 built-in providers = row 3 has Ollama
+       alone; or a workspace with one compat slot), `auto-fit` would
+       collapse the empty track and stretch the orphan to 100% width
+       — it then looks bigger than its peers and breaks the visual
+       grid. `auto-fill` keeps the empty track present so the orphan
+       stays at its natural ~400px width, sitting flush-left with empty
+       space to its right. This is the industry-standard recipe used by
+       Vercel AI Gateway, OpenRouter, LangSmith, and Stripe dashboard
+       card grids.
    360px is the breakpoint where a `.st-provider-card` (44px icon + name
    + masked-key row + actions) stays legible without text wrapping its
-   provider description. Matches the pattern used by Vercel AI Gateway,
-   OpenRouter, and LangSmith provider list pages. */
+   provider description. */
 .st-provider-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 20px;
   align-items: start;
 }
