@@ -213,7 +213,7 @@ function PipelinePanel({ run }) {
               </span>
             )}
             {state === "active" && statVal == null && (
-              <span className="tl-stage-stat" style={{ color: "var(--accent)" }}>running…</span>
+              <span className="tl-stage-stat tl-stage-stat--running">running…</span>
             )}
           </div>
         );
@@ -344,29 +344,27 @@ function QueueRow({ run, project, onStop, onAttach }) {
       )}
 
       {isCompleted && (
-        <span className="badge badge-green" style={{ flexShrink: 0 }}>done</span>
+        <span className="badge badge-green tl-queue-row__pin">done</span>
       )}
       {isFailed && (
-        <span className="badge badge-red" style={{ flexShrink: 0 }}>failed</span>
+        <span className="badge badge-red tl-queue-row__pin">failed</span>
       )}
       {isAborted && (
-        <span className="badge badge-amber" style={{ flexShrink: 0 }}>aborted</span>
+        <span className="badge badge-amber tl-queue-row__pin">aborted</span>
       )}
 
       {isActive ? (
         <>
           <button
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost btn-sm tl-queue-row__pin"
             onClick={() => onAttach?.(run)}
             title="Attach the live pipeline view to this run"
-            style={{ flexShrink: 0 }}
           >
             View <ArrowRight size={13} />
           </button>
           <button
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost btn-sm tl-queue-row__pin"
             onClick={() => onStop(run.id)}
-            style={{ flexShrink: 0 }}
           >
             <StopCircle size={14} />
             Stop
@@ -374,9 +372,8 @@ function QueueRow({ run, project, onStop, onAttach }) {
         </>
       ) : (
         <button
-          className="btn btn-ghost btn-sm"
+          className="btn btn-ghost btn-sm tl-queue-row__pin"
           onClick={() => navigate(`/runs/${run.id}`)}
-          style={{ flexShrink: 0 }}
         >
           View <ArrowRight size={13} />
         </button>
@@ -979,10 +976,10 @@ export default function TestLab() {
 
       {/* ── Tab bar ── */}
       <div className="tl-topbar">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 24, paddingRight: 24, borderRight: "1px solid var(--border)" }}>
-          <Atom size={16} style={{ color: "var(--accent)" }} />
-          <span style={{ fontWeight: 700, fontSize: "0.92rem", color: "var(--text)" }}>Test Lab</span>
-          <span style={{ fontSize: "0.78rem", color: "var(--text3)", fontWeight: 400 }}>AI test generation workspace</span>
+        <div className="tl-topbar__brand">
+          <Atom size={16} className="tl-topbar__brand-icon" />
+          <span className="tl-topbar__brand-title">Test Lab</span>
+          <span className="tl-topbar__brand-tagline">AI test generation workspace</span>
         </div>
 
         <button
@@ -1016,16 +1013,7 @@ export default function TestLab() {
             provides the launch point. Disabled until a project is selected
             so we have a valid `projectId` to seed. */}
         <button
-          className="btn btn-primary btn-sm"
-          style={{
-            marginLeft: "auto",
-            marginRight: 16,
-            gap: 6,
-            fontWeight: 600,
-            background: "var(--red)",
-            borderColor: "var(--red)",
-            color: "#fff",
-          }}
+          className="btn btn-primary btn-sm tl-record-btn"
           onClick={() => setShowRecorder(true)}
           disabled={!selectedProject}
           title={selectedProject
@@ -1042,21 +1030,20 @@ export default function TestLab() {
         <div className="tl-queue-wrap fade-in">
           <div className="tl-queue-header">
             <div>
-              <h2 className="page-title" style={{ marginBottom: 2 }}>Queue</h2>
+              <h2 className="page-title tl-queue-title">Queue</h2>
               <p className="page-subtitle">All active and recent generation runs across projects</p>
             </div>
-            <div className="flex-between gap-sm" style={{ alignItems: "center" }}>
+            <div className="flex-between gap-sm tl-queue-actions">
               <span className="badge badge-blue">{activeQueueRuns.length} active</span>
               {activeQueueRuns.length > 0 && (
-                <span className="badge badge-green" style={{ animation: "pulse 1.5s infinite" }}>running</span>
+                <span className="badge badge-green tl-queue-pulse-badge">running</span>
               )}
               {/* Project filter — shown when there are multiple projects */}
               {projects.length > 1 && (
                 <select
-                  className="tl-select"
+                  className="tl-select tl-queue-filter-select"
                   value={queueFilter}
                   onChange={e => setQueueFilter(e.target.value)}
-                  style={{ height: 30, fontSize: "0.78rem", padding: "0 26px 0 9px", minWidth: 140 }}
                 >
                   <option value="all">All projects</option>
                   {projects.map(p => (
@@ -1117,7 +1104,7 @@ export default function TestLab() {
 
                 {filteredRecent.length > 0 && (
                   <>
-                    <div className="section-label mb-sm" style={{ marginTop: 20 }}>Recent</div>
+                    <div className="section-label mb-sm tl-queue-recent-label">Recent</div>
                     {filteredRecent.map(run => (
                       <QueueRow
                         key={run.id}
@@ -1171,7 +1158,7 @@ export default function TestLab() {
             <div className="tl-proj-list">
               {loadingProjects
                 ? [1, 2].map(i => (
-                    <div key={i} className="skeleton" style={{ height: 48, borderRadius: 8, marginBottom: 4 }} />
+                    <div key={i} className="skeleton tl-proj-skeleton" />
                   ))
                 : projects.map(p => (
                     <div
@@ -1196,7 +1183,7 @@ export default function TestLab() {
                 <div className="tl-proj-meta-value">
                   {fmtRelativeDate(lastCrawlRun.startedAt)}
                 </div>
-                <div className="tl-proj-meta-value" style={{ marginTop: 2 }}>
+                <div className="tl-proj-meta-value tl-proj-meta-value--row2">
                   {lastCrawlRun.pagesFound ?? "?"} pages · {lastCrawlRun.testsGenerated ?? "?"} tests
                 </div>
               </div>
@@ -1214,9 +1201,9 @@ export default function TestLab() {
             <div className="tl-run-center">
               <div className="tl-run-label">
                 {selectedProject?.name?.toUpperCase()} · {activeRun?.type === "crawl" ? "LINK CRAWL" : "REQUIREMENT"}
-                {isRunDone && <span style={{ marginLeft: 8, color: "var(--green)", fontWeight: 700 }}>· COMPLETED</span>}
+                {isRunDone && <span className="tl-run-status-suffix tl-run-status-suffix--done">· COMPLETED</span>}
                 {isRunFailed && (
-                  <span style={{ marginLeft: 8, color: "var(--red)", fontWeight: 700 }}>
+                  <span className="tl-run-status-suffix tl-run-status-suffix--failed">
                     · {runStatus === "aborted" ? "ABORTED" : "FAILED"}
                   </span>
                 )}
@@ -1226,14 +1213,14 @@ export default function TestLab() {
                   while the run is actively running. Mirrors RunDetail.jsx so
                   users get the same feedback wherever they monitor a run. */}
               {isRunActive && retryIn != null && !sseDown && (
-                <div className="banner banner-info" style={{ margin: "10px 14px 0", display: "flex", alignItems: "center", gap: 8 }}>
-                  <RefreshCw size={13} style={{ flexShrink: 0 }} />
+                <div className="banner banner-info tl-banner-row">
+                  <RefreshCw size={13} className="tl-banner-row__icon" />
                   <span>Connection lost — reconnecting in {retryIn}s…</span>
                 </div>
               )}
               {isRunActive && sseDown && (
-                <div className="banner banner-warning" style={{ margin: "10px 14px 0", display: "flex", alignItems: "center", gap: 8 }}>
-                  <RefreshCw size={13} className="spin" style={{ flexShrink: 0 }} />
+                <div className="banner banner-warning tl-banner-row">
+                  <RefreshCw size={13} className="spin tl-banner-row__icon" />
                   <span>Live updates unavailable — refreshing every 5s.</span>
                 </div>
               )}
@@ -1241,11 +1228,11 @@ export default function TestLab() {
               {/* Terminal banners — rendered at the top of the run view so the
                   pipeline / logs stay visible underneath for review. */}
               {isRunDone && (
-                <div className="banner banner-success" style={{ margin: "10px 14px 0" }}>
+                <div className="banner banner-success tl-banner-margin">
                   <CheckCircle2 size={16} />
-                  <div style={{ flex: 1 }}>
+                  <div className="tl-banner-body">
                     <strong>Generation complete</strong> — {runData?.testsGenerated ?? 0} test{(runData?.testsGenerated ?? 0) !== 1 ? "s" : ""} generated.
-                    <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <div className="tl-banner-actions">
                       {(runData?.testsGenerated ?? 0) > 0 && (
                         <button
                           className="btn btn-primary btn-xs"
@@ -1272,20 +1259,18 @@ export default function TestLab() {
               )}
 
               {isRunFailed && (
-                <div className="banner banner-error" style={{ margin: "10px 14px 0" }}>
+                <div className="banner banner-error tl-banner-margin">
                   <div>
                     <strong>{runStatus === "aborted" ? "Run aborted" : "Run failed"}</strong>
                     {runData?.error ? ` — ${runData.error}` : "."}
                     <button
-                      className="btn btn-ghost btn-xs"
-                      style={{ marginLeft: 10 }}
+                      className="btn btn-ghost btn-xs tl-banner-spaced-btn-l"
                       onClick={() => navigate(`/runs/${activeRun.runId}`)}
                     >
                       View run <ChevronRight size={12} />
                     </button>
                     <button
-                      className="btn btn-ghost btn-xs"
-                      style={{ marginLeft: 6 }}
+                      className="btn btn-ghost btn-xs tl-banner-spaced-btn-s"
                       onClick={handleReset}
                     >
                       Dismiss
@@ -1346,7 +1331,7 @@ export default function TestLab() {
                                 : "Starting…"}
                           </div>
                           {/* Progress bar */}
-                          <div className="progress-bar" style={{ margin: "6px 0 10px" }}>
+                          <div className="progress-bar tl-pipeline-progress-bar">
                             <div
                               className="progress-bar-fill"
                               style={{
@@ -1385,7 +1370,7 @@ export default function TestLab() {
                               <div className="tl-run-stat-lbl">Avg quality</div>
                             </div>
                             <div className="tl-run-stat">
-                              <div className="tl-run-stat-val" style={{ color: "var(--text)" }}>
+                              <div className="tl-run-stat-val tl-pipeline-stat-val--default">
                                 {ps.pagesFound ?? runData?.pagesFound ?? 0}
                               </div>
                               <div className="tl-run-stat-lbl">Pages crawled</div>
@@ -1394,8 +1379,7 @@ export default function TestLab() {
 
                           {isRunActive ? (
                             <button
-                              className="btn btn-ghost"
-                              style={{ width: "100%", justifyContent: "center", gap: 6, marginTop: 12 }}
+                              className="btn btn-ghost tl-pipeline-stat-btn"
                               onClick={handleStop}
                               disabled={stopLoading}
                             >
@@ -1404,8 +1388,7 @@ export default function TestLab() {
                             </button>
                           ) : !isRunDone && !isRunFailed ? null : (
                             <button
-                              className="btn btn-ghost"
-                              style={{ width: "100%", justifyContent: "center", gap: 6, marginTop: 12 }}
+                              className="btn btn-ghost tl-pipeline-stat-btn"
                               onClick={handleReset}
                             >
                               New run
@@ -1416,7 +1399,7 @@ export default function TestLab() {
                     )}
 
                     {innerTab === "sitegraph" && isCrawl && (
-                      <div style={{ flex: 1, overflow: "auto", padding: 14 }}>
+                      <div className="tl-sitegraph-pane">
                         <SiteGraph
                           pages={graphPages}
                           activePage={activePage}
@@ -1426,7 +1409,7 @@ export default function TestLab() {
                     )}
 
                     {innerTab === "logs" && (
-                      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                      <div className="tl-logs-pane">
                         <LiveLog lines={logLines} />
                       </div>
                     )}
@@ -1455,17 +1438,16 @@ export default function TestLab() {
                     <div className="tl-section">
                       <div className="tl-section-label">
                         Test Name
-                        <span style={{ marginLeft: 6, color: "var(--text3)", fontWeight: 400, textTransform: "none", letterSpacing: "normal" }}>
+                        <span className="tl-section-label-hint">
                           (optional — auto-derived from the requirement if blank)
                         </span>
                       </div>
                       <input
-                        className="tl-select"
+                        className="tl-select tl-name-input"
                         type="text"
                         value={testName}
                         onChange={e => setTestName(e.target.value)}
                         placeholder="e.g. Dashboard loads all employee charts"
-                        style={{ width: "100%", backgroundImage: "none", paddingRight: 10, height: 36 }}
                       />
                     </div>
 
@@ -1481,19 +1463,18 @@ export default function TestLab() {
 
                       {showImportIssue && (
                         <div className="tl-import-issue">
-                          <div style={{ fontSize: "0.78rem", color: "var(--text2)", fontWeight: 500 }}>
+                          <div className="tl-import-issue-label">
                             Paste a Jira issue (title on first line, description below)
                           </div>
                           <textarea
-                            className="tl-req-area"
+                            className="tl-req-area tl-import-issue-textarea"
                             value={importIssueText}
                             onChange={e => setImportIssueText(e.target.value)}
                             placeholder={"PROJ-123 Login fails for SSO users\nAs a user with SSO enabled I expect to be redirected to the IdP…"}
                             rows={4}
-                            style={{ minHeight: 88, marginBottom: 0 }}
                             autoFocus
                           />
-                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                          <div className="tl-import-issue-actions">
                             <button
                               className="btn btn-ghost btn-xs"
                               onClick={() => { setShowImportIssue(false); setImportIssueText(""); }}
@@ -1584,7 +1565,7 @@ export default function TestLab() {
                             accept={ACCEPTED_EXTENSIONS}
                             multiple
                             onChange={handleFileSelect}
-                            style={{ display: "none" }}
+                            className="tl-file-input-hidden"
                           />
                           <span className="tl-composer-hint">
                             <kbd>⌘ / Ctrl</kbd> + <kbd>Enter</kbd> to generate
@@ -1633,18 +1614,18 @@ export default function TestLab() {
                   <div className="tl-panel-section-label">
                     {isRunActive ? "Running" : isRunDone ? "Completed" : "Stopped"}
                   </div>
-                  <div className="tl-stat-cell" style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>
+                  <div className="tl-stat-cell tl-stat-cell--header">
+                    <div className="tl-stat-cell__title">
                       {selectedProject?.name ?? "—"}
                     </div>
-                    <div style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
+                    <div className="tl-stat-cell__sub">
                       {activeRun?.type === "crawl" ? "Crawl & Generate" : "From Requirement"}
                     </div>
                   </div>
 
                   {/* Final test count — shown when done */}
                   {(isRunDone || isRunFailed) && (
-                    <div className="tl-run-stats" style={{ marginBottom: 12 }}>
+                    <div className="tl-run-stats tl-run-stats--final">
                       <div className="tl-run-stat tl-run-stat--accent">
                         <div className="tl-run-stat-val">{runData?.testsGenerated ?? 0}</div>
                         <div className="tl-run-stat-lbl">Tests generated</div>
@@ -1662,8 +1643,7 @@ export default function TestLab() {
 
                   {isRunActive ? (
                     <button
-                      className="btn btn-ghost"
-                      style={{ width: "100%", justifyContent: "center", gap: 6 }}
+                      className="btn btn-ghost tl-full-btn"
                       onClick={handleStop}
                       disabled={stopLoading}
                     >
@@ -1671,26 +1651,23 @@ export default function TestLab() {
                       {stopLoading ? "Stopping…" : "Stop run"}
                     </button>
                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div className="tl-btn-stack">
                       {isRunDone && (runData?.testsGenerated ?? 0) > 0 && (
                         <button
-                          className="btn btn-primary"
-                          style={{ width: "100%", justifyContent: "center", gap: 6 }}
+                          className="btn btn-primary tl-full-btn"
                           onClick={() => navigate(`/review-queue?projectId=${activeRun.projectId}`)}
                         >
                           Review {runData.testsGenerated} draft{runData.testsGenerated !== 1 ? "s" : ""} <ChevronRight size={13} />
                         </button>
                       )}
                       <button
-                        className="btn btn-ghost"
-                        style={{ width: "100%", justifyContent: "center", gap: 6 }}
+                        className="btn btn-ghost tl-full-btn"
                         onClick={() => navigate(`/runs/${activeRun.runId}`)}
                       >
                         View run detail <ChevronRight size={13} />
                       </button>
                       <button
-                        className="btn btn-ghost"
-                        style={{ width: "100%", justifyContent: "center", gap: 6 }}
+                        className="btn btn-ghost tl-full-btn"
                         onClick={handleReset}
                       >
                         New run
@@ -1707,13 +1684,13 @@ export default function TestLab() {
                       <div className="tl-launch-stats">
                         <div className="tl-stat-cell">
                           <div className="tl-stat-val">
-                            {pagesFound != null ? pagesFound : <span style={{ color: "var(--text3)" }}>—</span>}
+                            {pagesFound != null ? pagesFound : <span className="tl-stat-placeholder">—</span>}
                           </div>
                           <div className="tl-stat-lbl">Pages found</div>
                         </div>
                         <div className="tl-stat-cell">
                           <div className="tl-stat-val">
-                            {existingTests != null ? existingTests : <span style={{ color: "var(--text3)" }}>—</span>}
+                            {existingTests != null ? existingTests : <span className="tl-stat-placeholder">—</span>}
                           </div>
                           <div className="tl-stat-lbl">Existing tests</div>
                         </div>
@@ -1733,13 +1710,13 @@ export default function TestLab() {
                       <div className="tl-launch-stats">
                         <div className="tl-stat-cell">
                           <div className="tl-stat-val">
-                            {existingTests != null ? existingTests : <span style={{ color: "var(--text3)" }}>—</span>}
+                            {existingTests != null ? existingTests : <span className="tl-stat-placeholder">—</span>}
                           </div>
                           <div className="tl-stat-lbl">Existing tests</div>
                         </div>
                         <div className="tl-stat-cell">
-                          <div className="tl-stat-val" style={{ fontSize: "1rem", paddingTop: 4 }}>
-                            {requirement.trim() ? "Ready" : <span style={{ color: "var(--text3)" }}>—</span>}
+                          <div className="tl-stat-val tl-stat-val--text">
+                            {requirement.trim() ? "Ready" : <span className="tl-stat-placeholder">—</span>}
                           </div>
                           <div className="tl-stat-lbl">Requirement</div>
                         </div>
@@ -1794,8 +1771,7 @@ export default function TestLab() {
 
                   {tab === "crawl" && (
                     <button
-                      className="btn btn-primary"
-                      style={{ width: "100%", justifyContent: "center", gap: 6, padding: "10px 16px" }}
+                      className="btn btn-primary tl-full-btn--padded"
                       disabled={!selectedProject || launching}
                       onClick={handleStartCrawl}
                     >
@@ -1809,8 +1785,7 @@ export default function TestLab() {
 
                   {tab === "requirement" && (
                     <button
-                      className="btn btn-primary"
-                      style={{ width: "100%", justifyContent: "center", gap: 6, padding: "10px 16px" }}
+                      className="btn btn-primary tl-full-btn--padded"
                       disabled={!selectedProject || !requirement.trim() || launching}
                       onClick={handleGenerateFromRequirement}
                     >
@@ -1837,20 +1812,14 @@ export default function TestLab() {
                         <button
                           key={run.id}
                           type="button"
-                          className="tl-active-run-card mb-sm"
+                          className="tl-active-run-card tl-active-run-card-btn mb-sm"
                           onClick={() => handleAttachRun(run)}
                           title="View live pipeline for this run"
-                          style={{
-                            display: "block", width: "100%", textAlign: "left",
-                            padding: 0, border: "1px solid var(--border)",
-                            background: "var(--surface)", cursor: "pointer",
-                            font: "inherit", color: "inherit",
-                          }}
                         >
                           <div className="tl-arc-header">
                             <ProjIcon project={proj} />
                             <span className="tl-arc-name">{proj?.name ?? "—"}</span>
-                            <span className="badge badge-blue" style={{ fontSize: "0.65rem", animation: "pulse 1.5s infinite" }}>live</span>
+                            <span className="badge badge-blue tl-arc-live-badge">live</span>
                           </div>
                           <div className="tl-arc-body">
                             <div className="tl-arc-step">
