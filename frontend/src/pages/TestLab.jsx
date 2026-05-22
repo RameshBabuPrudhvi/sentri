@@ -28,6 +28,7 @@ import SiteGraph from "../components/crawl/SiteGraph.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
 import TestConfig from "../components/test/TestConfig.jsx";
 import EmptyState from "../components/shared/EmptyState.jsx";
+import LLMContextRow from "../components/ai/LLMContextRow.jsx";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
 
 
@@ -43,6 +44,23 @@ const PIPELINE_STAGES = [
   { label: "Validate",             step: 7, key: "validationRejected",   unit: "rejected" },
   { label: "Done",                 step: 8, key: null,                   unit: null },
 ];
+
+// AI-004 (audit): map pipeline-step index → AI agent role. Mirrors the same
+// mapping in `frontend/src/components/generate/GenerateView.jsx` so the
+// TestLab pipeline view's LLMContextRow attributes streamed output to the
+// same role labels as the Generate flow. Stages 1-2 (Crawl, Filter) are
+// pre-LLM (Playwright crawl + heuristic filter) and intentionally omitted
+// — the context row hides itself when `agentRole` is null. Roles match
+// `backend/src/aiProvider/registry.js#resolveProvider` dispatch values, so
+// once `run.modelByStage` lands (GAP-005 backend work) the row will light
+// up with the actual per-stage model attribution without a frontend change.
+const STEP_TO_AGENT_ROLE = {
+  3: "planner",   // Classify Intent
+  4: "author",    // Generate Tests via AI — the heavy LLM stage
+  5: "author",    // Deduplicate (LLM-assisted dedup)
+  6: "author",    // Enhance Assertions
+  7: "author",    // Validate
+};
 
 // Coverage / perspective / quality / test-count / profile option lists used to
 // live here; they have moved to the shared <TestConfig /> component which
@@ -1348,6 +1366,27 @@ export default function TestLab() {
                         {/* Sub-col 2: live log */}
                         <div className="tl-pipeline-log-col">
                           <div className="tl-pipeline-col-label">Live Output</div>
+                          {/* AI-004 (audit): context row above the log so
+                              operators running generation from TestLab see
+                              the same "Author agent · generate tests via ai —
+                              Stage 4/8" attribution that GenerateView's
+                              LLMStreamPanel surfaces. Identical mapping +
+                              shared component means the two surfaces stay
+                              in sync. `runData.modelUsed` forward-compat
+                              with GAP-005 — the model fragment hides
+                              cleanly while the backend column is null. */}
+                          <LLMContextRow
+                            stageLabel={runData?.currentStep != null
+                              ? PIPELINE_STAGES[runData.currentStep - 1]?.label || null
+                              : null}
+                            stageIndex={Number.isFinite(runData?.currentStep) ? runData.currentStep : null}
+                            totalStages={PIPELINE_STAGES.length}
+                            agentRole={runData?.currentStep != null
+                              ? STEP_TO_AGENT_ROLE[runData.currentStep] || null
+                              : null}
+                            modelName={runData?.modelUsed || null}
+                            isRunning={isRunActive}
+                          />
                           <LiveLog lines={logLines} />
                         </div>
 

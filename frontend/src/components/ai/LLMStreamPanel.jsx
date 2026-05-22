@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Braces, AlignLeft } from "lucide-react";
+import LLMContextRow from "./LLMContextRow.jsx";
 
 // Try to parse partial JSON — returns the parsed object or null
 function tryParseJson(text) {
@@ -76,20 +77,13 @@ export default function LLMStreamPanel({
   const isEmpty = !tokens;
   const isTruncated = tokens.startsWith("⚠");
 
-  // AI-004 (audit): build the context line that sits under the panel's
-  // header. Surfaces the agent role (with the audit's recommended
-  // "<role> agent" phrasing — "Author agent generating test code with
-  // claude-sonnet-4"), the active stage label + "Stage N/M" progress
-  // indicator, and the model id. Each fragment is independently
-  // conditional so a partial-context call site (e.g. only `stageLabel`
-  // available) still renders something useful.
-  const roleLabel = agentRole
-    ? `${agentRole.charAt(0).toUpperCase()}${agentRole.slice(1)} agent`
-    : null;
-  const stageProgress = (stageIndex && totalStages)
-    ? `Stage ${stageIndex}/${totalStages}`
-    : null;
-  const hasContext = !!(roleLabel || stageLabel || modelName || stageProgress);
+  // AI-004 (audit): the context-row JSX + tier-resolution logic moved to
+  // the shared `<LLMContextRow>` so TestLab's pipeline view can render the
+  // same row above its `<LiveLog>` without duplicating the markup. The
+  // shared component also fixes the stage-0 truthiness bug flagged on this
+  // file (BUG-0001 active finding): `(stageIndex && totalStages)` here
+  // suppressed the progress chip for `stageIndex === 0`; the shared
+  // component uses `stageIndex != null && stageIndex > 0` instead.
 
   return (
     <div className="card llm-stream">
@@ -142,35 +136,22 @@ export default function LLMStreamPanel({
       </div>
 
       {/* ── Context row (AI-004, audit) ──
-          Renders below the title row when the consumer passed any of the
-          new context props. Stays out of the way (single line, muted
-          colour) so the streaming output is still the primary read but
-          users now know WHICH agent / WHICH stage / WHICH model is
-          producing the tokens. */}
-      {open && hasContext && (
-        <div className="llm-stream__context">
-          {roleLabel && (
-            <span>
-              <span className="llm-stream__context-role">{roleLabel}</span>
-              {stageLabel ? ` · ${stageLabel.toLowerCase()}` : isRunning ? " · generating" : ""}
-              {modelName ? <> with <span className="llm-stream__context-model">{modelName}</span></> : null}
-            </span>
-          )}
-          {!roleLabel && stageLabel && (
-            <span className="llm-stream__context-role">{stageLabel}</span>
-          )}
-          {!roleLabel && !stageLabel && modelName && (
-            <span className="llm-stream__context-model">{modelName}</span>
-          )}
-          {stageProgress && (
-            <span
-              className="llm-stream__context-progress"
-              title="Pipeline progress — which of the 8 stages is active"
-            >
-              {stageProgress}
-            </span>
-          )}
-        </div>
+          Delegated to the shared `<LLMContextRow>` so TestLab's pipeline
+          view can render the same line above its `<LiveLog>`. The shared
+          component renders nothing when none of the context props are
+          populated, so the conditional `open &&` guard is the only gate
+          here (we still want to hide the row when the user collapsed the
+          panel — the shared component itself doesn't know about open
+          state). */}
+      {open && (
+        <LLMContextRow
+          stageLabel={stageLabel}
+          stageIndex={stageIndex}
+          totalStages={totalStages}
+          agentRole={agentRole}
+          modelName={modelName}
+          isRunning={isRunning}
+        />
       )}
 
       {/* ── Body ── */}
