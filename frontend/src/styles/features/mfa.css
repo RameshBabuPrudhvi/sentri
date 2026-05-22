@@ -91,48 +91,16 @@
   font-size: 0.85rem;
 }
 
-/* ── Password confirmation modal ───────────────────────────────────────────── */
-.pwd-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: grid;
-  place-items: center;
-  z-index: 60;
-}
-
-.pwd-modal {
-  width: min(420px, 92vw);
-}
-
-.pwd-modal__title {
-  margin-top: 0;
-  margin-bottom: 6px;
-}
-
-.pwd-modal__desc {
-  margin-top: 0;
-}
-
-.pwd-modal__label {
-  display: block;
-  margin-top: 12px;
-}
-
-.pwd-modal__input {
-  margin-top: 6px;
-}
-
-.pwd-modal__error {
-  margin-top: 10px;
-}
-
-.pwd-modal__actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
+/* ── Password confirmation modal ─────────────────────────────────────────────
+   The `.pwd-modal*` rules below were duplicated by overriding rules in
+   `frontend/src/styles/pages/settings.css` (loaded after `features/` per
+   ITCSS layer order). After the PasswordConfirmModal refactor to
+   `<ModalShell>`, the page-level copy carries the canonical layout
+   (flex-column form, `gap: 12px` between rows, `margin: 0` on title/desc).
+   Removing the dead duplicates here so there's a single source of truth.
+   The component lives in `features/settings/`, so its CSS belongs in
+   `pages/settings.css` rather than `features/mfa.css` — the page-level
+   home matches the JSX home. */
 
 /* ── TOTP enrollment panel ─────────────────────────────────────────────────── */
 .totp-enroll {

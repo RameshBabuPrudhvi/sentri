@@ -906,7 +906,9 @@
 /* PasswordConfirmModal now wraps in `<ModalShell>`, which provides the
    backdrop, centering, and focus trap (A11Y-002, audit). The previous
    `.pwd-modal-overlay` div was replaced; only the inner form classes
-   below remain in use. */
+   below remain in use. (`.pwd-modal*` is also defined in
+   `features/mfa.css`; the rules below win via ITCSS layer order — pages
+   load after features — and are the production-canonical values.) */
 .pwd-modal { display: flex; flex-direction: column; gap: 12px; }
 .pwd-modal__title { margin: 0; font-size: 1rem; }
 .pwd-modal__desc { margin: 0; }

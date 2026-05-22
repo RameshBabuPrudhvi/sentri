@@ -1095,14 +1095,6 @@
 .td-runs-status-text { text-transform: capitalize; }
 .td-runs-empty-run-btn { margin-left: 4px; }
 
-/* ── Sidebar — quality score badge ─────────────────────────────────────────── */
-.td-quality-score {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  min-width: 32px;
-  justify-content: center;
-}
-
 /* ── Sidebar — source URL external icon ────────────────────────────────────── */
 .td-source-url-icon {
   margin-left: 4px;
