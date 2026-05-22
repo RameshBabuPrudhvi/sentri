@@ -127,15 +127,21 @@ router.get("/dashboard", async (req, res) => {
   const avgRunDurationMs = durations.length ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length) : null;
 
   // ── Defect / failure category breakdown (across all test run results) ───
-  const defectBreakdown = { SELECTOR_ISSUE: 0, NAVIGATION_FAIL: 0, TIMEOUT: 0, ASSERTION_FAIL: 0, UNKNOWN: 0 };
+  // BOT_BLOCK is surfaced as its own bucket so anti-bot interstitial failures
+  // (CAPTCHA / `/sorry/` / "unusual traffic") don't get folded into UNKNOWN
+  // and lose the honest "site refused automation" signal in the dashboard.
+  const defectBreakdown = { BOT_BLOCK: 0, SELECTOR_ISSUE: 0, NAVIGATION_FAIL: 0, TIMEOUT: 0, ASSERTION_FAIL: 0, UNKNOWN: 0 };
   const testResultStatuses = {};   // testId → Set<"passed"|"failed">
   const testRunResults = runs.filter((r) => (r.type === "test_run" || r.type === "run") && r.results?.length);
   for (const r of testRunResults) {
     for (const result of r.results) {
       if (!testResultStatuses[result.testId]) testResultStatuses[result.testId] = new Set();
       if (result.status) testResultStatuses[result.testId].add(result.status);
-      if (result.status === "failed" && result.error) {
-        const cat = classifyFailure(result.error);
+      if (result.status === "failed" && (result.error || result.url)) {
+        // Pass `result.url` so the classifier can match anti-bot URLs even
+        // when the error text is just a generic locator timeout. See
+        // `classifyFailure` jsdoc in `backend/src/pipeline/feedbackLoop.js`.
+        const cat = classifyFailure(result.error, { finalUrl: result.url });
         if (cat in defectBreakdown) defectBreakdown[cat]++;
         else defectBreakdown.UNKNOWN++;
       }

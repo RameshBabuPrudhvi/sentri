@@ -49,6 +49,29 @@ import { scoreTestWithFactors, normalizeQualityToConfidence } from "./deduplicat
 //      not already classified as a selector or navigation issue.
 
 const FAILURE_PATTERNS = [
+  // BOT_BLOCK — checked FIRST because anti-bot interstitials produce SECONDARY
+  // symptoms (locator timeout, navigation timeout) that would otherwise be
+  // misclassified as SELECTOR_ISSUE / TIMEOUT and trigger the misleading
+  // "AI is generating CSS selectors" insight. The runtime page URL ends up
+  // on `/sorry/`, `/captcha`, `/challenge`, `/blocked` (mirrors the same
+  // anti-bot list at `backend/src/pipeline/stateExplorer.js:51-52`), or the
+  // raw "Are you a robot" / CAPTCHA page-text leaks into the error message
+  // via the failure screenshot's adjacent log lines. Telling operators
+  // "this site blocks automation" is the only honest message — no amount of
+  // selector self-healing or assertion softening recovers from an
+  // interstitial that intentionally hides the real page.
+  ["BOT_BLOCK", [
+    /\/sorry\//i,
+    /\/captcha/i,
+    /\/challenge/i,
+    /recaptcha/i,
+    /unusual traffic/i,
+    /are you a robot/i,
+    /detected unusual traffic/i,
+    /access denied/i,
+    /verify you are human/i,
+    /cloudflare.*challenge/i,
+  ]],
   ["SELECTOR_ISSUE", [
     /locator.*not found/i,
     /element not visible/i,
@@ -102,10 +125,28 @@ const FAILURE_PATTERNS = [
   ]],
 ];
 
-export function classifyFailure(errorMessage) {
-  if (!errorMessage) return "UNKNOWN";
+/**
+ * Classify a test failure.
+ *
+ * @param {string}  errorMessage  Playwright error text (`result.error`).
+ * @param {Object}  [context]
+ * @param {string}  [context.finalUrl]    Last page URL recorded on the result
+ *   (`result.url`). When the SUT redirected the test onto an anti-bot
+ *   interstitial like `https://www.google.com/sorry/…`, the URL is the most
+ *   reliable signal — the error message itself usually just shows a generic
+ *   `waiting for locator('h3')` timeout (the bot wall hides the real page).
+ *   Checking the URL alongside the error text closes that gap and prevents
+ *   bot-blocked runs from being misclassified as SELECTOR_ISSUE, which
+ *   surfaces the misleading "AI is generating CSS selectors" insight.
+ * @returns {string} One of the FAILURE_PATTERNS keys, or "UNKNOWN".
+ */
+export function classifyFailure(errorMessage, context = {}) {
+  const finalUrl = typeof context?.finalUrl === "string" ? context.finalUrl : "";
+  if (!errorMessage && !finalUrl) return "UNKNOWN";
   for (const [category, patterns] of FAILURE_PATTERNS) {
-    if (patterns.some(p => p.test(errorMessage))) return category;
+    if (patterns.some(p => (errorMessage && p.test(errorMessage)) || (finalUrl && p.test(finalUrl)))) {
+      return category;
+    }
   }
   return "UNKNOWN";
 }
@@ -213,6 +254,16 @@ export function buildQualityAnalytics(improvements, testMap) {
 
   // Generate actionable insights
   const insights = [];
+  if (byCategory.BOT_BLOCK > 0) {
+    // Honest message — when the SUT redirects to an anti-bot interstitial
+    // (`/sorry/`, `/captcha`, "unusual traffic", etc.) the test code itself
+    // is fine. No selector self-heal or assertion rewrite recovers from a
+    // CAPTCHA. Surfacing the truth keeps operators from chasing the
+    // misleading "AI is generating CSS selectors" insight that would
+    // otherwise fire on the secondary `waiting for locator('h3') timeout`
+    // symptom.
+    insights.push(`${byCategory.BOT_BLOCK} test(s) were blocked by the site's bot-detection (CAPTCHA / "unusual traffic" / "are you a robot" interstitial). The generated test is fine — the target site refused automation. Try a test-friendly site (e.g. https://duckduckgo.com, https://demoqa.com, your own staging environment), or configure browser fingerprinting / proxy rotation if you must exercise this domain.`);
+  }
   if (byCategory.URL_MISMATCH > 0) {
     insights.push(`${byCategory.URL_MISMATCH} test(s) failed on URL assertions — consider switching to content-based assertions (toBeVisible, toContainText) instead of toHaveURL.`);
   }
@@ -357,6 +408,12 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
   // prompt-quality issues rather than real application bugs.
   // ASSERTION_FAIL is included because hard-coded crawl-time values (dates, IDs,
   // counts) are a prompt-quality issue, not a real application regression.
+  //
+  // BOT_BLOCK is intentionally EXCLUDED — when the target site redirects to a
+  // CAPTCHA / "unusual traffic" interstitial, no AI rewrite of the test code
+  // recovers (the bot wall hides the real page). Regenerating would waste an
+  // AI call and produce another test that fails the same way. The Quality
+  // Insights banner already surfaces the honest BOT_BLOCK message.
   const HIGH_PRIORITY_CATEGORIES = new Set([
     "SELECTOR_ISSUE",
     "URL_MISMATCH",
@@ -380,7 +437,13 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
       const test = testMap[result.testId];
       if (!test) continue;
 
-      const failureCategory = classifyFailure(result.error);
+      // Pass `result.url` (final page URL captured by `executeTest.js` in its
+      // `finally` block) so the classifier can catch bot-block interstitials
+      // — e.g. a test against google.com that lands on `/sorry/index` shows
+      // up as a generic "waiting for locator('h3') timeout" in `result.error`
+      // but the URL clearly identifies the anti-bot page. See classifyFailure
+      // jsdoc for the full rationale.
+      const failureCategory = classifyFailure(result.error, { finalUrl: result.url });
       const snapshot = snapshotsByUrl[test.sourceUrl];
 
       improvements.push({
