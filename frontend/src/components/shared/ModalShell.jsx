@@ -32,9 +32,17 @@ export default function ModalShell({
 }) {
   const panelRef = useRef(null);
   const lastFocusedRef = useRef(null);
+  // Stash `onClose` in a ref so the keydown handler always sees the latest
+  // callback without re-binding the effect. Most call sites pass an inline
+  // arrow function (e.g. `onClose={() => setBulkConfirm(null)}`), which
+  // changes identity every parent render — depending on `onClose` directly
+  // would tear down + re-set up the focus trap on every render, restoring
+  // focus mid-edit and disrupting screen-reader announcements.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
-  // Focus trap + Escape handling. One effect for both so the keydown
-  // listener and the focus-restore teardown share a single lifecycle.
+  // Focus trap + Escape handling. Mount-only (`[]` deps) so focus enters
+  // the modal exactly once on open and is restored exactly once on close.
   useEffect(() => {
     // Remember whatever the user was focused on before the modal opened so
     // we can return them there on close (WAI-ARIA APG dialog pattern).
@@ -56,7 +64,7 @@ export default function ModalShell({
     }
 
     function onKey(e) {
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") { onCloseRef.current?.(); return; }
       if (e.key !== "Tab") return;
       // Re-query on every Tab — focusables can change while the modal is
       // open (e.g. a button becoming enabled after async validation).
@@ -89,7 +97,8 @@ export default function ModalShell({
       // have been unmounted (e.g. modal opened from a now-deleted row).
       try { lastFocusedRef.current?.focus?.(); } catch { /* node gone */ }
     };
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const cls = scrollable ? "modal-panel modal-panel-scrollable" : "modal-panel";
 

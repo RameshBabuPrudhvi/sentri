@@ -1,6 +1,20 @@
 import React, { lazy, Suspense } from "react";
 import { Navigate, Route } from "react-router-dom";
 import PageSkeleton from "../../components/layout/PageSkeleton.jsx";
+import { useSettingsSections } from "./hooks/useSettingsSections.js";
+
+/**
+ * Index-route redirect for `/settings`. Resolves the role-aware fallback
+ * (admins → `providers`, non-admins → `execution`) at render time so admins
+ * don't transit through `execution` first and trigger a double navigation.
+ * Lives at the route layer rather than in `SettingsLayout`'s `useEffect` so
+ * the redirect fires synchronously on first paint, eliminating the
+ * empty-Outlet flash that prompted the original index-route addition.
+ */
+function SettingsIndexRedirect() {
+  const { fallback } = useSettingsSections();
+  return <Navigate to={fallback} replace />;
+}
 
 /**
  * Settings child routes (GAP-002). Each section is a lazy chunk so the
@@ -35,16 +49,14 @@ function withSuspense(Component) {
 
 /**
  * Child route definitions for the Settings parent route in App.jsx. Renders
- * inside SettingsLayout's `<Outlet />`. The index route redirects to the
- * `execution` section — the only section every role can view, so the
- * fallback never lands a non-admin on an admin-locked surface.
- * SettingsLayout still runs a role-aware redirect on top of this for admins
- * who should land on `providers`, but the index Navigate eliminates the
- * empty-Outlet flash on the first paint of `/settings`.
+ * inside SettingsLayout's `<Outlet />`. The index route delegates to
+ * `SettingsIndexRedirect` so the fallback section is role-aware: admins land
+ * on `providers`, non-admins on `execution`. Synchronous redirect on first
+ * paint — no empty-Outlet flash.
  */
 export const settingsRoutes = (
   <>
-    <Route index element={<Navigate to="execution" replace />} />
+    <Route index element={<SettingsIndexRedirect />} />
     <Route path="providers"       element={withSuspense(ProvidersSection)} />
     <Route path="provider_routes" element={withSuspense(ProviderRoutesSection)} />
     <Route path="agent_roles"     element={withSuspense(AgentRolesSection)} />

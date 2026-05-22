@@ -166,6 +166,11 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
     if (isOpen) {
       setQuery("");
       setSelectedIdx(0);
+      // Clear any stale search state from the previous session so reopening
+      // doesn't briefly flash old Projects / Tests / Runs results before the
+      // debounce-driven search effect re-runs against the empty query.
+      setSearchResults(null);
+      setSearchLoading(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
