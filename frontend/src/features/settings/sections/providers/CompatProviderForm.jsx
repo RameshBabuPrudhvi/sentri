@@ -131,17 +131,31 @@ export default function CompatProviderForm({ compatProviders, reload, onDelete }
           surface-coloured card). Without this wrapper the form inputs floated
           against the page background and the section read as a broken layout
           compared to GPT-4o-mini / Claude / Gemini cards. */}
-      <div className="card-padded st-compat-form-card">
+      {/* Add-provider form — `.card` supplies the surface/border/shadow,
+          `.card-padded` supplies the 24px inner padding. Without the leading
+          `.card` class the inputs floated against the page background with
+          no visible box (matched the legacy bug that shipped with the
+          extracted component). */}
+      <div className="card card-padded st-compat-form-card">
         <h3 className="st-compat-card__title">Add provider</h3>
-        <form onSubmit={handleSave} className="st-compat-form">
-          <input className="input" placeholder="Slot id (e.g. deepseek)" value={form.slotId}        onChange={(e) => setForm((s) => ({ ...s, slotId:      e.target.value }))} />
-          <input className="input" placeholder="Display name"             value={form.displayName}  onChange={(e) => setForm((s) => ({ ...s, displayName: e.target.value }))} />
-          <input className="input" placeholder="Base URL"                  value={form.baseUrl}      onChange={(e) => setForm((s) => ({ ...s, baseUrl:     e.target.value }))} list="compat-baseurl-hints" />
+        {/*
+          autoComplete="off" + non-credential `name` attributes on every input
+          prevent password managers (1Password, Chrome, Safari Keychain) from
+          misidentifying this as a login form and autofilling stored credentials
+          into the "Slot id" / "Display name" fields. The API-key field uses
+          autoComplete="new-password" which is the WHATWG-recommended value for
+          one-off secret entry (it suppresses the "Save password?" prompt that
+          fires on plain `autoComplete="off"` in Chrome).
+        */}
+        <form onSubmit={handleSave} className="st-compat-form" autoComplete="off">
+          <input className="input" name="compat-slot-id"      autoComplete="off" placeholder="Slot id (e.g. deepseek)" value={form.slotId}        onChange={(e) => setForm((s) => ({ ...s, slotId:      e.target.value }))} />
+          <input className="input" name="compat-display-name" autoComplete="off" placeholder="Display name"             value={form.displayName}  onChange={(e) => setForm((s) => ({ ...s, displayName: e.target.value }))} />
+          <input className="input" name="compat-base-url"     autoComplete="off" placeholder="Base URL"                  value={form.baseUrl}      onChange={(e) => setForm((s) => ({ ...s, baseUrl:     e.target.value }))} list="compat-baseurl-hints" />
           <datalist id="compat-baseurl-hints">
             {OPENAI_COMPAT_HINTS.map((url) => <option key={url} value={url} />)}
           </datalist>
-          <input className="input" placeholder="Model" value={form.model}  onChange={(e) => setForm((s) => ({ ...s, model:  e.target.value }))} />
-          <input className="input" type="password" autoComplete="off" placeholder="API key" value={form.apiKey} onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))} />
+          <input className="input" name="compat-model"        autoComplete="off" placeholder="Model" value={form.model}  onChange={(e) => setForm((s) => ({ ...s, model:  e.target.value }))} />
+          <input className="input" name="compat-api-key"      type="password" autoComplete="new-password" placeholder="API key" value={form.apiKey} onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))} />
           {error && <div className="text-sm st-compat-form__error">{error}</div>}
           <button className="btn btn-primary btn-sm" disabled={saving}>
             {saving ? "Saving..." : "Save compat provider"}
