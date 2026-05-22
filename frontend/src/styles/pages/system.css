@@ -1,0 +1,190 @@
+/**
+ * styles/pages/system.css
+ *
+ * `pages/Systems.jsx` — the System overview page (AI provider status,
+ * worker pool telemetry, application environments). DS-001 (audit): every
+ * inline `style={{}}` block on this page was migrated here. `.sys-*` BEM
+ * prefix scopes the rules so they don't bleed into other pages.
+ *
+ * The `.sys-section-header` + `.sys-info-row` rules also cover the two
+ * page-local sub-components (`<SectionHeader>` + `<InfoRow>`) — they were
+ * defined inline in Systems.jsx and only used here, so the styling lives
+ * with them.
+ *
+ * Layer: Pages (ITCSS).
+ */
+
+/* ── Page shell ──────────────────────────────────────────────────────────── */
+.sys-page {
+  max-width: 880px;
+}
+
+/* Loading state — skeleton heights are still data-driven inline (each
+   skeleton row's height varies), but the rest of the skeleton shape
+   lives here. */
+.sys-skeleton {
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+
+/* ── Section header (inline sub-component) ───────────────────────────────── */
+.sys-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.sys-section-header__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sys-section-header__title {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.sys-section-header__sub {
+  font-size: 0.73rem;
+  color: var(--text3);
+  margin-top: 1px;
+}
+
+/* ── Info row (key/value pairs inside the AI Provider card) ──────────────── */
+.sys-info-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sys-info-row__label {
+  font-size: 0.8rem;
+  color: var(--text3);
+  font-weight: 500;
+  min-width: 140px;
+}
+.sys-info-row__value {
+  font-size: 0.82rem;
+  color: var(--text);
+  text-align: right;
+  flex: 1;
+}
+.sys-info-row__provider {
+  font-weight: 500;
+}
+.sys-info-row__model {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+/* ── AI Provider section action row (Manage in Settings button anchor) ───── */
+.sys-provider-actions {
+  margin-top: 14px;
+}
+
+/* "Could not load provider config" fallback line. */
+.sys-load-error {
+  color: var(--text3);
+  font-size: 0.85rem;
+}
+
+/* ── Application Environments — empty state + project cards ──────────────── */
+/* `.empty-state` is the shared primitive in components.css; the
+   page-local override here only changes the border + background to match
+   the surrounding card surface. */
+.sys-empty {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.sys-empty__icon {
+  margin-bottom: 14px;
+}
+
+/* Vertical stack of project cards inside the Applications section. */
+.sys-app-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Per-project card — clickable, routes to /projects/:id. */
+.sys-app-card {
+  padding: 16px 18px;
+  background: var(--bg2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+/* Card header row: avatar + name/url on the left, ChevronRight on the right. */
+.sys-app-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.sys-app-card__head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sys-app-card__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--purple-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sys-app-card__name {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.sys-app-card__url {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+/* 4-column stat grid (Total Tests / Approved / Draft / Pages Found). */
+.sys-app-card__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.sys-app-card__stat-label {
+  margin-bottom: 2px;
+}
+.sys-app-card__stat-value {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+/* "Last crawl: ..." row at the bottom of each project card. */
+.sys-app-card__crawl {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sys-app-card__crawl-text {
+  font-size: 0.75rem;
+  color: var(--text3);
+}
+.sys-app-card__crawl-time {
+  color: var(--text2);
+}
+.sys-app-card__crawl-auth {
+  margin-left: auto;
+}
