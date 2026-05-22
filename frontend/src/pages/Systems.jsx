@@ -10,12 +10,14 @@ import { useNavigate } from "react-router-dom";
 import {
   Globe, Cpu, ChevronRight, CheckCircle2,
   XCircle, Settings as SettingsIcon,
-  RefreshCw, Shield,
+  RefreshCw, Shield, Server,
 } from "lucide-react";
 import { fmtRelativeDate } from "../utils/formatters";
 import useProjectData from "../hooks/useProjectData";
 import { useSettingsBundleQuery } from "../hooks/queries/useSettingsQueries.js";
+import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
 import usePageTitle from "../hooks/usePageTitle.js";
+import WorkerPoolPanel from "../components/shared/WorkerPoolPanel.jsx";
 
 function SectionHeader({ icon, title, sub }) {
   return (
@@ -49,6 +51,13 @@ export default function Systems() {
   const { projects, allTests, allRuns, loading } = useProjectData();
   const bundleQuery = useSettingsBundleQuery();
   const config = bundleQuery.data?.config ?? null;
+  // DASH-003 (audit): worker-pool telemetry moved off the dashboard onto
+  // this page. Reuses the dashboard query so a user navigating Dashboard
+  // → System gets the cached payload immediately (TanStack Query caches
+  // by query key — `useDashboardQuery` mounts in both surfaces share one
+  // cache entry).
+  const dashboardQuery = useDashboardQuery();
+  const workerPool = dashboardQuery.data?.workerPool ?? null;
   const navigate = useNavigate();
 
   // Build crawl summary per project from already-fetched allRuns and allTests
@@ -124,6 +133,34 @@ export default function Systems() {
           </div>
         ) : (
           <div style={{ color: "var(--text3)", fontSize: "0.85rem" }}>Could not load provider config.</div>
+        )}
+      </div>
+
+      {/* Worker pool telemetry (DASH-003, audit) — relocated from Dashboard.
+          The /dashboard page now shows a single Platform Health card; the
+          full 4-card breakdown lives here for operators who need the
+          actual queue depth / active worker count / failed job tally.
+          Uses the shared `.card-padded` + `.mb-md` utilities rather than
+          inline padding/margin (DS-001). The sibling AI-Provider and
+          Application-Environments sections in this file still use the
+          inline pattern — migrating them is tracked as a separate
+          page-level cleanup. */}
+      <div className="card card-padded mb-md">
+        <SectionHeader
+          icon={<Server size={15} color="var(--accent)" />}
+          title="Worker Pool"
+          sub={workerPool?.mode === "distributed"
+            ? "Distributed BullMQ runners — Redis queue active"
+            : workerPool
+            ? "Single-process mode — no Redis configured"
+            : "Telemetry unavailable"}
+        />
+        {workerPool ? (
+          <WorkerPoolPanel workerPool={workerPool} variant="full" />
+        ) : (
+          <div className="text-sm text-muted">
+            Worker pool telemetry will appear once the dashboard payload loads.
+          </div>
         )}
       </div>
 

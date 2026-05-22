@@ -26,6 +26,7 @@
 @import "./styles/features/mfa.css";
 @import "./styles/features/sidebar.css";
 @import "./styles/features/topbar.css";
+@import "./styles/features/llm-stream.css";
 @import "./styles/features/step-results-view.css";
 @import "./styles/features/vision-healing.css";
 @import "./styles/pages/new-project.css";

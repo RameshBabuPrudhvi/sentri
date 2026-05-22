@@ -11,6 +11,7 @@ import { fmtDurationMs } from "../utils/formatters.js";
 import { generateExecutivePDF } from "../utils/pdfReportGenerator.js";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import StatCard from "../components/shared/StatCard.jsx";
+import WorkerPoolPanel from "../components/shared/WorkerPoolPanel.jsx";
 import PassFailChart from "../components/charts/PassFailChart.jsx";
 import SparklineChart from "../components/charts/SparklineChart.jsx";
 import StackedBar from "../components/charts/StackedBar.jsx";
@@ -426,36 +427,21 @@ export default function Dashboard() {
 
 
 
-          {/* ── Row 2b: Distributed worker pool status (AUTO-008) ── */}
+          {/* ── Row 2b: Platform Health (DASH-003, audit) ──
+              The four BullMQ worker stat cards (Runner Mode / Queue Depth /
+              Active Workers / Completed Jobs) moved to `/system` per the
+              audit's recommendation — that's operator infrastructure data
+              that occupies dashboard real estate without serving the QA
+              persona. The single Platform Health card here collapses the
+              same signals into one green/amber/red indicator: green when
+              the queue is healthy, amber on backed-up queues or missing
+              workers, red on any failed job. Drill into /system for the
+              full breakdown.
+
+              `stat-grid` keeps the 4-column track even with one card so
+              the dashboard's row rhythm doesn't shift below it. */}
           <div className="stat-grid">
-            <StatCard
-              label="Runner Mode"
-              value={data?.workerPool?.mode === "distributed" ? "Distributed" : "Single-process"}
-              sub={data?.workerPool?.mode === "distributed" ? "Redis queue enabled" : "Redis not configured"}
-              color={data?.workerPool?.mode === "distributed" ? "var(--blue)" : "var(--text3)"}
-              icon={<Activity size={16} />}
-            />
-            <StatCard
-              label="Queue Depth"
-              value={data?.workerPool?.queue?.waiting ?? 0}
-              sub={`${data?.workerPool?.queue?.active ?? 0} active · ${data?.workerPool?.queue?.failed ?? 0} failed`}
-              color="var(--purple)"
-              icon={<FileText size={16} />}
-            />
-            <StatCard
-              label="Active Workers"
-              value={data?.workerPool?.activeWorkers ?? 0}
-              sub={`${data?.workerPool?.idleWorkers ?? 0} idle`}
-              color="var(--green)"
-              icon={<CheckCircle2 size={16} />}
-            />
-            <StatCard
-              label="Completed Jobs"
-              value={data?.workerPool?.queue?.completed ?? 0}
-              sub="BullMQ completions"
-              color="var(--accent)"
-              icon={<SquareCheckBig size={16} />}
-            />
+            <WorkerPoolPanel workerPool={data?.workerPool} variant="health" />
           </div>
 
           {/* ── Row 3: Flaky Tests + Defect Breakdown ── */}

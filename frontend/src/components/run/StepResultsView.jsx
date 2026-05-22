@@ -223,7 +223,22 @@ function VisualDiffPanel({ visualDiff, currentScreenshot, testId, runId, stepNum
 
       <div className="srv-vdiff-img-wrap">
         {shownSrc
-          ? <img src={shownSrc} alt={`Visual ${mode}`} className="srv-vdiff-img" />
+          // A11Y-006 (audit): per-mode descriptive alt text so screen-reader
+          // users know which comparison frame they're hearing (baseline vs.
+          // current vs. pixel-diff overlay). `stepNumber` is the 1-based
+          // index of the step that owns this diff, populated by the parent
+          // `<VisualDiffPanel stepNumber={...}>` from `stepCaptures[i].step`.
+          ? <img
+              src={shownSrc}
+              alt={
+                mode === "before"
+                  ? `Visual diff${stepNumber ? ` for step ${stepNumber}` : ""} — baseline (expected appearance)`
+                  : mode === "after"
+                  ? `Visual diff${stepNumber ? ` for step ${stepNumber}` : ""} — current run (actual appearance)`
+                  : `Visual diff${stepNumber ? ` for step ${stepNumber}` : ""} — pixel-difference overlay${percent != null ? ` (${percent}% of pixels changed)` : ""}`
+              }
+              className="srv-vdiff-img"
+            />
           : <div className="srv-vdiff-no-img">No image to display for "{mode}".</div>}
       </div>
 

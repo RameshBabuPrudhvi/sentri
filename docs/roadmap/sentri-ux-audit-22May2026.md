@@ -207,7 +207,7 @@ The four stat cards (using `StatCard.jsx`) show current counts but no trend. A p
 ---
 
 ### DASH-003 — Worker Pool Panel Is Too Technical for Default Dashboard
-**Severity: Low**
+**Severity: Low** · ✅ _Landed in PR #25 — new shared component at `frontend/src/components/shared/WorkerPoolPanel.jsx` exposes two variants: `variant="full"` (4-card breakdown — Runner Mode, Queue Depth, Active Workers, Completed Jobs) now lives on `/system` (`pages/Systems.jsx`), and `variant="health"` (single Platform Health StatCard with green/amber/red tier) replaces the old block on `/dashboard` (`pages/Dashboard.jsx`). Tier rules are shared between both variants so the dashboard health pill and the per-row red badges on the system page agree on what "unhealthy" means: red on any failed jobs, amber on backed-up queues (> 5 waiting) or distributed-mode-with-no-active-workers, green otherwise. Systems mounts `useDashboardQuery` so a user navigating Dashboard → System gets the cached payload immediately (TanStack Query cache key is shared across both surfaces — one fetch, two consumers)._
 
 The 4 BullMQ worker stat cards (Runner Mode, Queue Depth, Active Workers, Completed Jobs) added in AUTO-008 are infrastructure-level data that operators, not QA users, need. They occupy primary dashboard real estate with information that is only relevant when something is wrong.
 
@@ -245,7 +245,7 @@ The platform now has a full multi-agent dispatch layer (AI-005), with roles incl
 ---
 
 ### AI-004 — LLM Token Streaming Is Visible But Not Explained
-**Severity: Low**
+**Severity: Low** · ✅ _Landed in PR #25 — `LLMStreamPanel.jsx` gained four optional context props (`stageLabel`, `stageIndex`, `totalStages`, `agentRole`, `modelName`) that render a muted single-line context row beneath the existing "🧠 AI Thinking" header. `GenerateView.jsx` wires the props from `run.currentStep` (1-based pipeline-stage index already populated by the backend on every transition) and a per-step `STEP_TO_AGENT_ROLE` map (3 → planner, 4-7 → author) so the panel now reads `Author agent · generate tests via ai — Stage 4/8` instead of a context-free token stream. `modelName` is populated from `run.modelUsed` for forward-compatibility with the GAP-005 backend work that will persist per-run model attribution; until that lands the model fragment cleanly omits itself. Each context fragment is independently nullable — the panel renders gracefully on legacy runs / older backends with zero context props._
 
 The `LLMStreamPanel.jsx` shows raw streaming tokens from the AI during generation. For non-technical users, watching tokens stream is confusing — they see code being "typed" in real time without understanding why. For technical users, the panel does not show which model is generating or which stage of the pipeline this represents.
 
@@ -311,7 +311,7 @@ Adopt these tokens in `components.css` and all feature/page CSS. This is a one-t
 ---
 
 ### DS-004 — No Focus-Visible Styles in Design System
-**Severity: Medium** (Accessibility crossover — see section 7)
+**Severity: Medium** (Accessibility crossover — see section 7) · ✅ _Landed in PR #25 (resolved by A11Y-001's global `:focus-visible` rule at `frontend/src/styles/components.css:23-27`). The shared `2px solid var(--accent) + 2px offset + var(--radius)` ring is now applied to every interactive element when reached via keyboard navigation. `.input` and `.dial-textarea` opt out via `outline: none` and keep their inset accent box-shadow indicator (also WCAG-compliant). DS-004 is fully satisfied by A11Y-001's implementation — no separate work needed._
 
 The design system has hover states but no standardised `:focus-visible` ring definition. Keyboard users have inconsistent or invisible focus indicators across interactive elements.
 
@@ -385,7 +385,7 @@ When a run completes or a self-healing event fires, the UI updates via SSE but s
 ---
 
 ### A11Y-006 — Images Without Alt Text
-**Severity: Medium**
+**Severity: Medium** · ✅ _Landed in PR #25 — both meaningful test-result `<img>` tags now carry descriptive alt text. **`TestRunView.jsx`** test-level screenshot (`alt="Test screenshot"`) was upgraded to `Screenshot of test "{cleanTestName(...)}" — {status}` so screen-reader users hear the test name and pass/fail status they need to understand the evidence. **`StepResultsView.jsx`** visual-diff image (`alt="Visual {mode}"`) was upgraded to per-mode descriptive copy: baseline frames now announce `Visual diff for step N — baseline (expected appearance)`, current-run frames `— current run (actual appearance)`, and pixel-diff overlays `— pixel-difference overlay (X.XX% of pixels changed)`. The pixel-percentage is computed from `diffRatio` already on the visual-diff payload, so screen-reader users get the same actionable signal sighted users see in the banner above. The member-avatar `<img alt="">` in MembersSection is correctly empty-decorative (the user's name is adjacent text), and is unchanged._
 
 Step screenshots in `StepResultsView.jsx` are rendered as `<img>` elements. Visual diff images in the baseline viewer have no alt text describing the comparison. These are meaningful images (they show test failure evidence) and require descriptive alt text for screen reader users.
 

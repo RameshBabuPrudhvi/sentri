@@ -22,10 +22,39 @@ function countTokens(text) {
  * LLMStreamPanel
  *
  * Props:
- *   tokens     — string, accumulated LLM output so far
- *   isRunning  — bool, whether the run is still active
+ *   tokens       — string, accumulated LLM output so far
+ *   isRunning    — bool, whether the run is still active
+ *   stageLabel   — string, plain-English label for the active pipeline stage
+ *                  (e.g. "Generate Tests via AI"). AI-004 (audit): without
+ *                  this, the streaming panel shows raw tokens with zero
+ *                  context — users can't tell which stage of the 8-stage
+ *                  pipeline is producing output.
+ *   stageIndex   — number, 1-based index of the active stage (e.g. 4 for
+ *                  "Generate Tests via AI"). Combined with `totalStages`
+ *                  renders the "Stage 4/8" progress hint the audit
+ *                  recommends.
+ *   totalStages  — number, total number of pipeline stages (8 for the
+ *                  Generate flow; the consumer passes the count from its
+ *                  own `PIPELINE_STAGES` array).
+ *   agentRole    — string, the AI agent role driving this stage ("explorer",
+ *                  "planner", "author", "healer"). The audit's recommended
+ *                  copy is "Author agent generating test code with
+ *                  [model name]"; we render the role + a friendlier
+ *                  human-readable label.
+ *   modelName    — string, the model id the active agent is using
+ *                  (e.g. "claude-sonnet-4-20250514"). Surfaced inline so
+ *                  technical users can correlate output style to the
+ *                  underlying provider/model.
  */
-export default function LLMStreamPanel({ tokens = "", isRunning = false }) {
+export default function LLMStreamPanel({
+  tokens = "",
+  isRunning = false,
+  stageLabel = null,
+  stageIndex = null,
+  totalStages = null,
+  agentRole = null,
+  modelName = null,
+}) {
   const scrollRef = useRef(null);
   const [open, setOpen] = useState(true);
   const [mode, setMode] = useState("raw"); // "raw" | "json"
@@ -47,49 +76,53 @@ export default function LLMStreamPanel({ tokens = "", isRunning = false }) {
   const isEmpty = !tokens;
   const isTruncated = tokens.startsWith("⚠");
 
+  // AI-004 (audit): build the context line that sits under the panel's
+  // header. Surfaces the agent role (with the audit's recommended
+  // "<role> agent" phrasing — "Author agent generating test code with
+  // claude-sonnet-4"), the active stage label + "Stage N/M" progress
+  // indicator, and the model id. Each fragment is independently
+  // conditional so a partial-context call site (e.g. only `stageLabel`
+  // available) still renders something useful.
+  const roleLabel = agentRole
+    ? `${agentRole.charAt(0).toUpperCase()}${agentRole.slice(1)} agent`
+    : null;
+  const stageProgress = (stageIndex && totalStages)
+    ? `Stage ${stageIndex}/${totalStages}`
+    : null;
+  const hasContext = !!(roleLabel || stageLabel || modelName || stageProgress);
+
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden", marginTop: 12 }}>
+    <div className="card llm-stream">
       {/* ── Header ── */}
       <div
         onClick={() => setOpen((v) => !v)}
-        style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "11px 14px", cursor: "pointer",
-          borderBottom: open ? "1px solid var(--border)" : "none",
-          userSelect: "none",
-        }}
+        className={`llm-stream__header${open ? " llm-stream__header--open" : ""}`}
       >
         {/* Collapse toggle */}
-        <span style={{ color: "var(--text3)", display: "flex", flexShrink: 0 }}>
+        <span className="llm-stream__chevron">
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
 
-        <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+        <span className="llm-stream__title">
           🧠 AI Thinking
-          {isRunning && (
-            <span style={{
-              display: "inline-block", width: 7, height: 7, borderRadius: "50%",
-              background: "var(--blue)", animation: "pulse 1.4s ease-in-out infinite",
-              marginLeft: 2,
-            }} />
-          )}
+          {isRunning && <span className="llm-stream__title-dot" />}
         </span>
 
         {/* Token counter */}
         {tokenCount > 0 && (
-          <span style={{
-            fontSize: "0.67rem", color: "var(--text3)",
-            fontFamily: "var(--font-mono)", marginLeft: "auto",
-          }}>
+          <span className="llm-stream__token-count">
             ~{tokenCount.toLocaleString()} tokens
           </span>
         )}
 
-        {/* Mode toggle — only show when there's content */}
+        {/* Mode toggle — only show when there's content. When the token
+            counter is hidden, the mode toggle absorbs the right-edge
+            anchor via the `--no-count` modifier so the row layout
+            doesn't collapse into the title. */}
         {!isEmpty && open && (
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ display: "flex", gap: 2, marginLeft: tokenCount > 0 ? 10 : "auto" }}
+            className={`llm-stream__mode-toggle${tokenCount > 0 ? "" : " llm-stream__mode-toggle--no-count"}`}
           >
             {[
               { id: "raw",  Icon: AlignLeft, title: "Raw output" },
@@ -99,13 +132,7 @@ export default function LLMStreamPanel({ tokens = "", isRunning = false }) {
                 key={id}
                 title={title}
                 onClick={() => setMode(id)}
-                style={{
-                  width: 24, height: 24, borderRadius: 5, border: "1px solid var(--border)",
-                  background: mode === id ? "var(--accent-bg)" : "var(--bg)",
-                  color: mode === id ? "var(--accent)" : "var(--text3)",
-                  cursor: "pointer", display: "flex", alignItems: "center",
-                  justifyContent: "center", transition: "all 0.12s",
-                }}
+                className={`llm-stream__mode-btn${mode === id ? " llm-stream__mode-btn--active" : ""}`}
               >
                 <Icon size={11} />
               </button>
@@ -114,67 +141,70 @@ export default function LLMStreamPanel({ tokens = "", isRunning = false }) {
         )}
       </div>
 
+      {/* ── Context row (AI-004, audit) ──
+          Renders below the title row when the consumer passed any of the
+          new context props. Stays out of the way (single line, muted
+          colour) so the streaming output is still the primary read but
+          users now know WHICH agent / WHICH stage / WHICH model is
+          producing the tokens. */}
+      {open && hasContext && (
+        <div className="llm-stream__context">
+          {roleLabel && (
+            <span>
+              <span className="llm-stream__context-role">{roleLabel}</span>
+              {stageLabel ? ` · ${stageLabel.toLowerCase()}` : isRunning ? " · generating" : ""}
+              {modelName ? <> with <span className="llm-stream__context-model">{modelName}</span></> : null}
+            </span>
+          )}
+          {!roleLabel && stageLabel && (
+            <span className="llm-stream__context-role">{stageLabel}</span>
+          )}
+          {!roleLabel && !stageLabel && modelName && (
+            <span className="llm-stream__context-model">{modelName}</span>
+          )}
+          {stageProgress && (
+            <span
+              className="llm-stream__context-progress"
+              title="Pipeline progress — which of the 8 stages is active"
+            >
+              {stageProgress}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Body ── */}
       {open && (
         <div
           ref={scrollRef}
-          style={{
-            maxHeight: 280, overflowY: "auto",
-            fontFamily: "var(--font-mono)", fontSize: "0.71rem",
-            lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word",
-            padding: isEmpty ? 0 : "12px 14px",
-            background: "#0d1117", color: "#c9d1d9",
-          }}
+          className={`llm-stream__body${isEmpty ? "" : " llm-stream__body--padded"}`}
         >
           {isTruncated && (
-            <div style={{
-              padding: "6px 10px", marginBottom: 8,
-              background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.3)",
-              borderRadius: 6, fontSize: "0.68rem", color: "#f5a623",
-              display: "flex", alignItems: "center", gap: 6,
-            }}>
+            <div className="llm-stream__truncated">
               ⚠ Output exceeded {Math.round(50000 / 1000)}k characters — older content was trimmed. Showing most recent output only.
             </div>
           )}
           {isEmpty ? (
-            <div style={{
-              padding: "24px 14px", textAlign: "center",
-              color: "var(--text3)", fontSize: "0.78rem",
-              background: "transparent",
-            }}>
+            <div className="llm-stream__empty">
               {isRunning ? (
-                <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                  <span style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid var(--blue)", borderTopColor: "transparent", animation: "spin 0.9s linear infinite", display: "inline-block" }} />
+                <span className="llm-stream__empty-inner">
+                  <span className="llm-stream__empty-spinner" />
                   Waiting for AI response…
                 </span>
               ) : "No AI output yet"}
             </div>
           ) : mode === "json" && parsed ? (
-            <pre style={{ margin: 0, color: "#a5d6ff" }}>
+            <pre className="llm-stream__json">
               {JSON.stringify(parsed, null, 2)}
             </pre>
           ) : (
             <>
               {tokens}
-              {isRunning && (
-                <span style={{
-                  display: "inline-block", width: "0.5em", height: "1em",
-                  background: "#58a6ff", marginLeft: 1, verticalAlign: "text-bottom",
-                  animation: "cursor-blink 1s step-end infinite",
-                }} />
-              )}
+              {isRunning && <span className="llm-stream__cursor" />}
             </>
           )}
         </div>
       )}
-
-      {/* Inline keyframe for cursor blink — avoids global CSS dependency */}
-      <style>{`
-        @keyframes cursor-blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0; }
-        }
-      `}</style>
     </div>
   );
 }

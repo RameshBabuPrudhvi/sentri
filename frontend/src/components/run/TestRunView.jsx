@@ -299,7 +299,12 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
             ) : result.screenshot ? (
               <img
                 src={`data:image/png;base64,${result.screenshot}`}
-                alt="Test screenshot"
+                // A11Y-006 (audit): descriptive alt text so screen-reader
+                // users get the same evidence a sighted reviewer does.
+                // `result.testName || name` matches the heading visible
+                // above the image; status is the most actionable signal
+                // (passed vs failed evidence reads differently).
+                alt={`Screenshot of test "${cleanTestName(result.testName || result.name) || `case ${caseIndex + 1}`}" — ${result.status || "result pending"}`}
                 style={{ width: "100%", display: "block", cursor: "pointer" }}
                 onClick={onDrillDown}
               />
