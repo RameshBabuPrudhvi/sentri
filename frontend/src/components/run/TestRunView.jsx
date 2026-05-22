@@ -63,34 +63,28 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown, cov
     : (typeof coverageDelta === "number" ? { lines: coverageDelta } : null);
   const steps = result.steps || [];
 
+  // Data-driven border-left colour — the only legitimate inline style
+  // (status-to-colour is continuous across 5 values; a class per status
+  // would be cleaner but matches no other pattern in this codebase).
+  const borderLeft = isSelected ? `3px solid ${statusColor(result.status)}` : undefined;
+
   return (
     <div>
       <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "11px 14px",
-          cursor: "pointer",
-          borderBottom: "1px solid var(--border)",
-          background: isSelected ? "var(--bg2)" : "transparent",
-          borderLeft: `3px solid ${isSelected ? statusColor(result.status) : "transparent"}`,
-          transition: "all 0.12s",
-        }}
+        className={`trv-row${isSelected ? " trv-row--selected" : ""}`}
+        style={borderLeft ? { borderLeftColor: statusColor(result.status), borderLeftWidth: 3, borderLeftStyle: "solid" } : undefined}
         onClick={() => onSelect(caseIndex)}
       >
         <StatusIcon status={result.status} size={13} />
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div className="trv-row__body">
+          <div className="trv-row__name">
             {result.testId ? (
               <Link
                 to={`/tests/${result.testId}`}
                 onClick={(e) => e.stopPropagation()}
                 title="Open test detail"
-                style={{ color: "inherit", textDecoration: "none" }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = "inherit"; }}
+                className="trv-row__name-link"
               >
                 {cleanTestName(result.testName || result.name) || `Test Case ${caseIndex + 1}`}
               </Link>
@@ -99,22 +93,16 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown, cov
             )}
           </div>
           {steps.length > 0 && (
-            <div style={{ fontSize: "0.67rem", color: "var(--text3)", marginTop: 1 }}>
+            <div className="trv-row__steps">
               {steps.length} step{steps.length !== 1 ? "s" : ""}
             </div>
           )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-          <span className={`badge ${statusBadgeClass(result.status)}`} style={{ fontSize: "0.62rem" }}>
+        <div className="trv-row__right">
+          <span className={`badge ${statusBadgeClass(result.status)} trv-row__badge`}>
             {result.status}
           </span>
-          {/* AUTO-009 — per-test coverage delta: lines / statements / branches
-              / functions this test first exercised in the run. AUTO-009c
-              extends the badge to render `+47L · +12B · +3F` so reviewers
-              can spot tests that hit new branches even when line counts
-              barely move. Hidden when coverage capture is disabled
-              (`coverageDelta == null`) or every category contributed zero. */}
           {deltaShape && (deltaShape.lines > 0 || deltaShape.statements > 0 || deltaShape.branches > 0 || deltaShape.functions > 0) && (
             <span
               className="badge badge-blue badge-sm-inline"
@@ -131,36 +119,18 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown, cov
               {deltaShape.functions  > 0 && <span>·+{deltaShape.functions}F</span>}
             </span>
           )}
-          <span style={{ fontSize: "0.67rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
+          <span className="trv-row__duration">
             {fmtMs(result.durationMs)}
           </span>
           <button
             title="View step details"
             onClick={(e) => { e.stopPropagation(); onDrillDown(caseIndex); }}
-            style={{
-              width: 22, height: 22, borderRadius: 5,
-              border: "1px solid var(--border)", background: "var(--bg2)",
-              cursor: "pointer", display: "flex", alignItems: "center",
-              justifyContent: "center", color: "var(--text3)",
-              transition: "all 0.12s", flexShrink: 0,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--accent-bg)";
-              e.currentTarget.style.color = "var(--accent)";
-              e.currentTarget.style.borderColor = "var(--accent)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "var(--bg2)";
-              e.currentTarget.style.color = "var(--text3)";
-              e.currentTarget.style.borderColor = "var(--border)";
-            }}
+            className="trv-row__drill"
           >
             <ArrowRight size={11} />
           </button>
         </div>
       </div>
-
-
     </div>
   );
 }
