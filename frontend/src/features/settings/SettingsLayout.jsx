@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Compass, RefreshCw } from "lucide-react";
 import usePageTitle from "../../hooks/usePageTitle.js";
@@ -15,9 +15,10 @@ import { useAuth } from "../../context/AuthContext.jsx";
  * a bookmarkable URL, browser back/forward navigates between sections, and the
  * sidebar `<NavLink>` lights up via `aria-current="page"`.
  *
- * Legacy `?tab=<key>` URLs (MfaGraceBanner, GitHub App install callback) are
- * preserved as a one-shot redirect to the canonical `/settings/<key>` form so
- * existing deep links keep working without coordinated cross-file edits.
+ * Redirect logic (legacy `?tab=<key>` rewrite for MfaGraceBanner + GitHub App
+ * install callback, plus role-aware fallback for bare `/settings`) lives in
+ * `SettingsIndexRedirect` at the route layer (`routes.jsx`). Synchronous on
+ * first paint — no empty-Outlet flash, no race between competing effects.
  *
  * Per-section role gating runs here as a defence-in-depth UI gate; the backend
  * still enforces `requireRole()` on every mutation route.
@@ -42,26 +43,11 @@ export default function SettingsLayout() {
     : null;
   const blockedByRole = activeSection?.adminOnly && !isAdmin;
 
-  // Back-compat: `?tab=<key>` → `/settings/<key>`, preserving sibling query
-  // params (e.g. `github=installed` for the GitHub App install callback).
-  useEffect(() => {
-    const search = new URLSearchParams(location.search);
-    const legacyTab = search.get("tab");
-    if (!legacyTab) return;
-    if (!SETTINGS_SECTIONS.some((s) => s.key === legacyTab)) return;
-    search.delete("tab");
-    const qs = search.toString();
-    navigate(`/settings/${legacyTab}${qs ? `?${qs}` : ""}`, { replace: true });
-  }, [location.search, navigate]);
-
-  // Sidebar nav still points at `/settings` (no section). Redirect to the
-  // first visible section so the URL is always canonical.
-  useEffect(() => {
-    if (sectionParam) return;
-    if (!location.search.includes("tab=")) {
-      navigate(`/settings/${fallback}`, { replace: true });
-    }
-  }, [sectionParam, fallback, navigate, location.search]);
+  // Note: redirect logic (legacy `?tab=<key>` rewrite + bare-`/settings`
+  // → role-aware fallback) lives in `SettingsIndexRedirect` at the route
+  // layer (`routes.jsx`) — synchronous, no empty-Outlet flash, no race
+  // between two competing effects. The two `useEffect`s that previously
+  // lived here are intentionally gone; do not re-add them.
 
   return (
     <div className="fade-in page-container-md">

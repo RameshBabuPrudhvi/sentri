@@ -144,12 +144,18 @@ export function searchRuns(projectIds, query, maxResults) {
   const substringPattern = `%${escapeLike(query)}%`;
   const placeholders = projectIds.map(() => "?").join(", ");
 
+  // `startedAt IS NULL` first in the ORDER BY pushes queued / aborted runs
+  // (which have no start timestamp) to the bottom of the result set —
+  // SQLite's default `ORDER BY ... DESC` puts NULLs FIRST, which would
+  // otherwise surface unstarted runs above completed ones. Equivalent to
+  // `NULLS LAST` in PostgreSQL but portable to SQLite (which doesn't
+  // support the NULLS LAST syntax until 3.30).
   return db.prepare(
     `SELECT id, projectId, type, status, startedAt FROM runs
      WHERE projectId IN (${placeholders})
        AND deletedAt IS NULL
        AND id LIKE ?${LIKE_ESCAPE}
-     ORDER BY startedAt DESC
+     ORDER BY startedAt IS NULL, startedAt DESC
      LIMIT ?`
   ).all(...projectIds, substringPattern, maxResults);
 }

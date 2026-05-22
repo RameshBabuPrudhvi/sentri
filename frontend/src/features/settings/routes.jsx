@@ -1,19 +1,46 @@
 import React, { lazy, Suspense } from "react";
-import { Navigate, Route } from "react-router-dom";
+import { Navigate, Route, useLocation } from "react-router-dom";
 import PageSkeleton from "../../components/layout/PageSkeleton.jsx";
-import { useSettingsSections } from "./hooks/useSettingsSections.js";
+import { useSettingsSections, SETTINGS_SECTIONS } from "./hooks/useSettingsSections.js";
 
 /**
- * Index-route redirect for `/settings`. Resolves the role-aware fallback
- * (admins → `providers`, non-admins → `execution`) at render time so admins
- * don't transit through `execution` first and trigger a double navigation.
+ * Index-route redirect for `/settings`. The single canonical redirect surface
+ * for bare-settings navigation — handles both:
+ *
+ *   1. Legacy `/settings?tab=<key>` deep links (MfaGraceBanner, GitHub App
+ *      install callback) → rewrite to `/settings/<key>` while preserving
+ *      sibling query params (e.g. `?github=installed`).
+ *   2. Bare `/settings` (no tab, no section) → role-aware fallback section
+ *      (admins → `providers`, non-admins → `execution`).
+ *
  * Lives at the route layer rather than in `SettingsLayout`'s `useEffect` so
- * the redirect fires synchronously on first paint, eliminating the
- * empty-Outlet flash that prompted the original index-route addition.
+ * the redirect fires synchronously on first paint — no empty-Outlet flash,
+ * no race between two effects fighting over the same path. Replaces the two
+ * `useEffect`s previously in `SettingsLayout.jsx` (one for tab rewrite, one
+ * for fallback). Both effects had bugs: the fallback one dropped sibling
+ * query params, and the two could race on `/settings?foo=bar` where neither
+ * predicate matched cleanly.
  */
 function SettingsIndexRedirect() {
   const { fallback } = useSettingsSections();
-  return <Navigate to={fallback} replace />;
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  const legacyTab = search.get("tab");
+
+  // Branch 1: legacy `?tab=<key>` with a recognised section key. Strip the
+  // tab param and forward the rest so callers that pass `?tab=integrations&github=installed`
+  // keep their post-install signal.
+  if (legacyTab && SETTINGS_SECTIONS.some((s) => s.key === legacyTab)) {
+    search.delete("tab");
+    const qs = search.toString();
+    return <Navigate to={`/settings/${legacyTab}${qs ? `?${qs}` : ""}`} replace />;
+  }
+
+  // Branch 2: bare `/settings` (or `/settings?tab=garbage`) → role-aware
+  // fallback, preserving any sibling query params the caller threaded
+  // through (analytics tags, future state, etc.).
+  const qs = location.search;
+  return <Navigate to={`/settings/${fallback}${qs}`} replace />;
 }
 
 /**

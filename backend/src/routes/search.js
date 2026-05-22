@@ -40,6 +40,20 @@ const MAX_QUERY_LEN = 200;
 
 router.get("/search", (req, res) => {
   try {
+    // Defence-in-depth: `workspaceScope` middleware should have populated
+    // `req.workspaceId` before this handler runs. If a future refactor of
+    // `backend/src/index.js` ever drops the middleware from the mount chain,
+    // `projectRepo.getAll(undefined)` falls through to an unfiltered
+    // `SELECT * FROM projects WHERE deletedAt IS NULL` (see projectRepo.js:73-78)
+    // and returns every project across every workspace — a cross-tenant leak
+    // by silent scope-widening. Fail closed instead so the regression surfaces
+    // on the first request rather than as a slow data exfiltration.
+    if (!req.workspaceId) {
+      // eslint-disable-next-line no-console
+      console.error(formatLogLine("error", null, "[search] req.workspaceId missing — workspaceScope middleware likely not mounted"));
+      return res.status(500).json({ error: "Workspace context required." });
+    }
+
     const rawQuery = String(req.query.q || "").trim();
 
     // Too short → empty result (not an error). The palette renders a
