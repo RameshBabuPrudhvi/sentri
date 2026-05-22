@@ -69,6 +69,10 @@ const files = [
   // regression coverage. Pins the auto-derive from `meta.runId`, workspace
   // ACL on the runId scope, and the explicit-arg-wins precedence rule.
   "tests/activity-runid-filter.test.js",
+  // ENT-004 (audit, migration 054) — `tests.reviewComment` column + repo
+  // round-trip. Locks down the Lifeguard-flagged VALID_COLS regression so
+  // future refactors of testRepo.update can't silently drop the field.
+  "tests/test-review-comment.test.js",
   // SEC-007 Part C — SIEM forwarder (HMAC + retry + DLQ + config CRUD).
   "tests/audit-siem-forwarder.test.js",
   "tests/postgres-adapter.test.js",
