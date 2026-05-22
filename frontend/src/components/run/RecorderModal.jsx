@@ -255,17 +255,44 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       // already handles the recording-in-progress confirm prompt, which
       // is more nuanced than a raw close.
       if (e.key !== "Tab") return;
-      const focusables = stageRef.current?.querySelectorAll(FOCUSABLE_SELECTOR);
+
+      // A11Y-002 follow-up: when a nested sub-dialog is open (discard
+      // confirm, device-switch confirm), scope the focus cycle to that
+      // sub-dialog instead of the whole stage. The sub-dialogs are
+      // siblings inside `stageRef` rather than portaled overlays, so a
+      // naive whole-stage Tab walk would otherwise step through every
+      // disabled sidebar button behind the open dialog before reaching
+      // Cancel / Discard — the user perceives the trap as broken.
+      //
+      // Detection key: any descendant `[role="dialog"][aria-modal="true"]`
+      // that isn't the stage root itself. The two `.recorder-confirm`
+      // blocks below carry these attributes for exactly this purpose.
+      // When multiple sub-dialogs are open (shouldn't happen — they
+      // gate each other in state, but defence-in-depth), pick the LAST
+      // one in DOM order as the topmost.
+      const stage = stageRef.current;
+      if (!stage) return;
+      const subDialogs = stage.querySelectorAll(
+        '[role="dialog"][aria-modal="true"]'
+      );
+      // Filter out the stage itself (also marked role="dialog") so we
+      // only scope when a TRUE sub-dialog is open.
+      const innerDialogs = Array.from(subDialogs).filter((d) => d !== stage);
+      const scope = innerDialogs.length > 0
+        ? innerDialogs[innerDialogs.length - 1]
+        : stage;
+
+      const focusables = scope.querySelectorAll(FOCUSABLE_SELECTOR);
       if (!focusables || focusables.length === 0) {
         e.preventDefault();
-        stageRef.current?.focus();
+        scope.focus?.();
         return;
       }
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement;
-      const inStage = stageRef.current?.contains(active);
-      if (!inStage) {
+      const inScope = scope.contains(active);
+      if (!inScope) {
         e.preventDefault();
         (e.shiftKey ? last : first).focus();
         return;
@@ -1023,9 +1050,14 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
           reset before the rebuild fires. */}
       {pendingDeviceSwitch != null && (
         <div className="recorder-confirm">
-          <div className="recorder-confirm__dialog">
+          <div
+            className="recorder-confirm__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recorder-device-switch-title"
+          >
             <div className="recorder-confirm__head">
-              <div className="recorder-confirm__title">Switch device profile?</div>
+              <div id="recorder-device-switch-title" className="recorder-confirm__title">Switch device profile?</div>
             </div>
             <p className="recorder-confirm__body">
               Switching to <strong>{DEVICE_PRESETS.find((d) => d.value === pendingDeviceSwitch)?.label || pendingDeviceSwitch || "Desktop (default)"}</strong> rebuilds the browser context at the new viewport.
@@ -1047,14 +1079,19 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       {/* ── Discard confirmation dialog ── */}
       {confirmDiscard && (
         <div className="recorder-confirm">
-          <div className="recorder-confirm__dialog">
+          <div
+            className="recorder-confirm__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recorder-discard-title"
+          >
             <div className="recorder-confirm__head">
               <div className="recorder-confirm__icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
                 </svg>
               </div>
-              <div className="recorder-confirm__title">Discard recording?</div>
+              <div id="recorder-discard-title" className="recorder-confirm__title">Discard recording?</div>
             </div>
 
             <p className="recorder-confirm__body">
