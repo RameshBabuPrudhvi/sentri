@@ -85,9 +85,6 @@ export default function App() {
                 <Route path="/settings" element={<SettingsLayout />}>
                   {settingsRoutes}
                 </Route>
-                <Route path="/settings/:section" element={<SettingsLayout />}>
-                  {settingsRoutes}
-                </Route>
                 {/* SEC-007: compliance audit log — admin-gated at the route
                     layer (defence-in-depth; backend also enforces admin
                     via requireRole). Mounted at `/audit-log` only — the

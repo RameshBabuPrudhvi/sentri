@@ -27,12 +27,15 @@
   --border: #e5e8ef;
   --border2: #d0d5e0;
   --text: #111827;
-  --text2: #6b7280;
+  --text2: #4b5563;
   /* A11Y-004 (audit) — lifted from #9ca3af (2.8:1 on --bg, fails WCAG AA
      for normal text at 4.5:1) to #6b7280 (4.6:1, passes AA). Used widely
      as `text-muted` for timestamps, secondary labels, and metadata where
      the prior contrast made meaningful text illegible for low-vision
-     users. The legible large-text rule (3:1) at SC 1.4.3 is unaffected. */
+     users. The legible large-text rule (3:1) at SC 1.4.3 is unaffected.
+     `--text2` is darkened to #4b5563 (7.5:1) so the secondary/tertiary
+     hierarchy survives: .text-sub (var(--text2)) stays visibly darker
+     than .text-muted (var(--text3)). */
   --text3: #6b7280;
   --accent: #5b6ef5;
   --accent2: #4455e8;
@@ -140,7 +143,7 @@
   --border: #e5e8ef;
   --border2: #d0d5e0;
   --text: #111827;
-  --text2: #6b7280;
+  --text2: #4b5563;
   /* A11Y-004 (audit) — keep parity with the :root default. See note above. */
   --text3: #6b7280;
   --accent: #5b6ef5;
