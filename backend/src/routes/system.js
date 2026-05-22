@@ -96,6 +96,9 @@ router.get("/activities", (req, res) => {
     // bare `testId` filter would let any authenticated user read activity
     // for a test in any workspace.
     testId: req.query.testId || undefined,
+    // ENT-004 (migration 055) — per-run scoping for RunDetail's matching
+    // "View activity →" link. Same workspace-ACL guarantee as `testId`.
+    runId: req.query.runId || undefined,
     workspaceId: req.workspaceId,
     after: req.query.after || undefined,
     before: req.query.before || undefined,
@@ -257,6 +260,11 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), auditExpo
       // Workspace scope is still enforced by the leading `workspaceId = ?`
       // predicate in `getWorkspaceAuditLog`; the testId narrow is render-time.
       testId: req.query.testId || undefined,
+      // ENT-004 (migration 055) — matching per-run filter for RunDetail's
+      // "View activity →" deep link. Server-side filtered + indexed via
+      // `idx_activities_runId` so admins land on a tight per-run slice
+      // instead of the full project's feed.
+      runId: req.query.runId || undefined,
       types,
       excludeTypes,
       dateFrom: req.query.dateFrom || undefined,

@@ -533,6 +533,9 @@ export default function AuditLog() {
   // chip and the fetch narrows server-side via the new `testId` filter on
   // `getWorkspaceAuditLog`. `"all"` (or absent) means "no test filter".
   const testIdFilter = searchParams.get("testId") || "";
+  // ENT-004 (migration 055) — matching per-run slice. RunDetail's "View
+  // activity →" link uses `?runId=…`; same dismiss-chip pattern.
+  const runIdFilter = searchParams.get("runId") || "";
   // SEC-007 UX: meta-audit `audit.read` / `audit.export` rows are emitted
   // every time the Audit Log page loads (PCI-DSS 10.2.6 / SOC 2 CC7.2),
   // which on low-activity workspaces dominates the feed with the
@@ -694,6 +697,9 @@ export default function AuditLog() {
       // ENT-004 (audit) — forward the optional per-test filter from the URL
       // so `/audit-log?testId=TST-…` narrows the feed server-side.
       testId: testIdFilter || undefined,
+      // ENT-004 (migration 055) — matching per-run filter for RunDetail's
+      // deep-link case (`/audit-log?runId=RUN-…`).
+      runId: runIdFilter || undefined,
       type: filterTypes || undefined,
       // Forwarded to the backend's `excludeTypes` filter — see comment on
       // the URL-driven `includeAuditReads` flag above for the rationale.
@@ -734,7 +740,7 @@ export default function AuditLog() {
     // Including them here would trigger a server fetch (and a meta-audit
     // `audit.read` row) on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, typeKey, projectId, sortOrder, filterTypes, includeAuditReads, testIdFilter]);
+  }, [workspaceId, typeKey, projectId, sortOrder, filterTypes, includeAuditReads, testIdFilter, runIdFilter]);
 
   // ── Load more (cursor-paginated) ───────────────────────────────────────────
   async function loadMore() {
@@ -746,6 +752,8 @@ export default function AuditLog() {
         // ENT-004 — keep the test filter on every page of the cursor walk
         // so subsequent pages don't widen scope back to the full workspace.
         testId: testIdFilter || undefined,
+        // ENT-004 (migration 055) — same invariant for the per-run filter.
+        runId: runIdFilter || undefined,
         type: filterTypes || undefined,
         // Keep the same `includeAuditReads` shape on subsequent pages so
         // the cursor walk sees the same row set as the initial fetch.
@@ -1447,6 +1455,22 @@ export default function AuditLog() {
             title={`Filter scoped to ${testIdFilter} — click to clear`}
           >
             Test: <code className="al-toolbar__filter-chip-code">{testIdFilter}</code>
+            <span aria-hidden="true">×</span>
+          </button>
+        )}
+
+        {/* ENT-004 (migration 055) — matching runId filter chip. Same
+            shape as the testId chip above; RunDetail's "View activity →"
+            link deep-links here with `?runId=…` and admins clear back to
+            the workspace feed with one click. */}
+        {runIdFilter && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs al-toolbar__filter-chip"
+            onClick={() => setParam("runId", null)}
+            title={`Filter scoped to ${runIdFilter} — click to clear`}
+          >
+            Run: <code className="al-toolbar__filter-chip-code">{runIdFilter}</code>
             <span aria-hidden="true">×</span>
           </button>
         )}

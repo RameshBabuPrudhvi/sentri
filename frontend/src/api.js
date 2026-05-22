@@ -532,6 +532,10 @@ export const api = {
     // the same workspace-scoped activities endpoint without pulling the
     // whole project's feed and filtering client-side.
     if (filters.testId) params.set("testId", filters.testId);
+    // ENT-004 (migration 055) — matching per-run filter. RunDetail's
+    // "View activity →" deep-link uses `?runId=` for server-side
+    // filtering via the indexed `activities.runId` column.
+    if (filters.runId) params.set("runId", filters.runId);
     if (filters.after) params.set("after", filters.after);
     if (filters.before) params.set("before", filters.before);
     if (filters.limit != null) params.set("limit", String(filters.limit));

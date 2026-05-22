@@ -100,6 +100,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
 
   logActivity({ ...actor(req),
     type: "crawl.start", projectId: project.id, projectName: project.name,
+    runId, // ENT-004 (migration 055): indexed for /audit-log?runId=
     detail: `Crawl started for ${project.url}`, status: "running",
   });
 
@@ -134,10 +135,12 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "crawl.complete", projectId: project.id, projectName: project.name,
+          runId, // ENT-004 (migration 055)
           detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
         }),
         onFailActivity: (err) => ({
           type: "crawl.fail", projectId: project.id, projectName: project.name,
+          runId, // ENT-004 (migration 055)
           detail: `Crawl failed: ${classifyError(err, "crawl").message}`,
         }),
         actorInfo: actor(req),
@@ -265,6 +268,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
 
   logActivity({ ...actor(req),
     type: "test_run.start", projectId: project.id, projectName: project.name,
+    runId, // ENT-004 (migration 055): indexed for /audit-log?runId=
     detail: `Test run started — ${selectedTests.length} of ${tests.length} test${tests.length !== 1 ? "s" : ""}${budgetSkipped.length ? ` (${budgetSkipped.length} skipped over budget)` : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`, status: "running",
   });
 
@@ -337,10 +341,12 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,
+          runId, // ENT-004 (migration 055)
           detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
         }),
         onFailActivity: (err) => ({
           type: "test_run.fail", projectId: project.id, projectName: project.name,
+          runId, // ENT-004 (migration 055)
           detail: `Test run failed: ${classifyError(err, "run").message}`,
         }),
         actorInfo: actor(req),
@@ -604,6 +610,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     type: `${run.type === "test_run" || run.type === "run" ? "test_run" : run.type}.abort`,
     projectId: run.projectId,
     projectName: ownerProject.name,
+    runId: req.params.runId, // ENT-004 (migration 055): indexed for /audit-log?runId=
     detail: `Run aborted by user`,
     status: "aborted",
   });
