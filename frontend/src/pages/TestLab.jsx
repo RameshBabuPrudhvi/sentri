@@ -27,6 +27,7 @@ import { fmtRelativeDate } from "../utils/formatters.js";
 import SiteGraph from "../components/crawl/SiteGraph.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
 import TestConfig from "../components/test/TestConfig.jsx";
+import EmptyState from "../components/shared/EmptyState.jsx";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
 
 
@@ -1077,17 +1078,26 @@ export default function TestLab() {
             return (
               <>
                 {filteredActive.length === 0 && filteredRecent.length === 0 && (
-                  <div className="empty-state card">
-                    <div className="empty-state-icon">⏳</div>
-                    <div className="empty-state-title">
-                      {queueFilter === "all" ? "No runs yet" : "No runs for this project"}
-                    </div>
-                    <div className="empty-state-desc">
-                      {queueFilter === "all"
-                        ? "Start a crawl or generate tests from a requirement to see them here."
-                        : "Switch to a different project or start a new run."}
-                    </div>
-                  </div>
+                  // ONB-002 (audit): swap the bare emoji+text empty state for
+                  // the shared primitive so the Queue tab matches the icon +
+                  // title + description + CTA shape used on Tests, Projects,
+                  // Runs, HealingDashboard, and Dashboard. The CTA jumps the
+                  // user back to the Crawl & Generate tab — the action that
+                  // produces queue rows — instead of leaving them stuck on an
+                  // empty surface. When a project filter is active, we also
+                  // surface a "Clear filter" secondary action so the user has
+                  // an escape hatch without retyping the dropdown.
+                  <EmptyState
+                    icon={<Clock size={32} color="var(--accent)" />}
+                    title={queueFilter === "all" ? "No runs yet" : "No runs for this project"}
+                    description={queueFilter === "all"
+                      ? "Start a crawl or generate tests from a requirement to see them here."
+                      : "Switch to a different project or start a new run."}
+                    secondaryAction={queueFilter !== "all"
+                      ? { label: "Clear filter", onClick: () => setQueueFilter("all") }
+                      : null}
+                    action={{ label: "Start Crawl & Generate", onClick: () => setTab("crawl") }}
+                  />
                 )}
 
                 {filteredActive.length > 0 && (
