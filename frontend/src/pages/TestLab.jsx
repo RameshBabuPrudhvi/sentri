@@ -1438,35 +1438,38 @@ export default function TestLab() {
                               if (state === "pending") return null;
                               // AI-005: surface the agent role so operators see
                               // which agent handled each stage. Stages 1-2 are
-                              // pre-LLM (Playwright crawl + heuristic filter) so
-                              // they show "Sentri" instead of an AI agent name.
+                              // pre-LLM (Playwright crawl + heuristic filter) —
+                              // no AI agent involved.
                               const agentRole = STEP_TO_AGENT_ROLE[stage.step] || null;
                               const agentLabel = agentRole
                                 ? agentRole.charAt(0).toUpperCase() + agentRole.slice(1) + " agent"
                                 : null;
                               const model = runData?.modelUsed || null;
-                              // Human-readable messages with agent attribution.
-                              // Done states show the stat; active states show
-                              // what the agent is doing right now.
+                              // Outcome-oriented messages: tell the user what
+                              // was accomplished (done) or what's happening for
+                              // them right now (active). Agent names surface on
+                              // LLM stages; infrastructure stages stay neutral.
                               const doneMessages = {
-                                1: `Discovered ${statVal ?? 0} pages on your site`,
-                                2: `Kept ${statVal ?? 0} interactive elements`,
-                                3: `${agentLabel ?? "AI"} identified ${statVal ?? 0} user flows`,
-                                4: `${agentLabel ?? "AI"} generated ${statVal ?? 0} raw test cases`,
-                                5: `${agentLabel ?? "AI"} removed ${statVal ?? 0} duplicate tests`,
-                                6: `${agentLabel ?? "AI"} enhanced ${statVal ?? 0} assertions`,
-                                7: `${agentLabel ?? "AI"} rejected ${statVal ?? 0} invalid tests`,
-                                8: "All stages complete",
+                                1: `Found ${statVal ?? 0} testable page${(statVal ?? 0) !== 1 ? "s" : ""} with interactive elements`,
+                                2: `Filtered to ${statVal ?? 0} actionable element${(statVal ?? 0) !== 1 ? "s" : ""}`,
+                                3: `${agentLabel} mapped ${statVal ?? 0} user journey${(statVal ?? 0) !== 1 ? "s" : ""} from page flows`,
+                                4: `${agentLabel} wrote ${statVal ?? 0} Playwright test${(statVal ?? 0) !== 1 ? "s" : ""}`,
+                                5: `${agentLabel} removed ${statVal ?? 0} duplicate${(statVal ?? 0) !== 1 ? "s" : ""} — kept unique tests only`,
+                                6: `${agentLabel} added ${statVal ?? 0} stronger assertion${(statVal ?? 0) !== 1 ? "s" : ""}`,
+                                7: statVal > 0
+                                  ? `${agentLabel} rejected ${statVal} test${statVal !== 1 ? "s" : ""} that didn't meet quality standards`
+                                  : `${agentLabel} validated all tests — none rejected`,
+                                8: "All done — your tests are ready for review",
                               };
                               const activeMessages = {
-                                1: "Crawling your site…",
-                                2: "Filtering page elements…",
-                                3: `${agentLabel ?? "AI"} is classifying user intents…`,
-                                4: `${agentLabel ?? "AI"} is writing test cases${model ? ` with ${model}` : ""}…`,
-                                5: `${agentLabel ?? "AI"} is deduplicating tests…`,
-                                6: `${agentLabel ?? "AI"} is strengthening assertions…`,
-                                7: `${agentLabel ?? "AI"} is validating test quality…`,
-                                8: "Finalizing…",
+                                1: "Scanning your site for testable pages…",
+                                2: "Identifying interactive elements on each page…",
+                                3: `${agentLabel} is mapping user journeys from page flows…`,
+                                4: `${agentLabel} is generating Playwright tests${model ? ` using ${model}` : ""}…`,
+                                5: `${agentLabel} is checking for duplicate tests…`,
+                                6: `${agentLabel} is adding stronger assertions to each test…`,
+                                7: `${agentLabel} is validating each test meets quality standards…`,
+                                8: "Wrapping up…",
                               };
                               const msg = state === "done"
                                 ? doneMessages[stage.step]
@@ -1479,8 +1482,6 @@ export default function TestLab() {
                                   <span className="tl-progress-item__text">
                                     {msg}
                                   </span>
-                                  {/* Agent + model attribution on the active row
-                                      so operators know exactly which AI is working. */}
                                   {state === "active" && agentRole && (
                                     <span className="tl-progress-item__agent">
                                       🤖 {agentLabel}{model ? ` · ${model}` : ""}
@@ -1492,7 +1493,7 @@ export default function TestLab() {
                             {isRunActive && !runData?.currentStep && (
                               <div className="tl-progress-item tl-progress-item--active">
                                 <span className="tl-progress-item__icon">●</span>
-                                <span className="tl-progress-item__text">Starting pipeline…</span>
+                                <span className="tl-progress-item__text">Preparing pipeline — connecting to your site…</span>
                               </div>
                             )}
                           </div>
