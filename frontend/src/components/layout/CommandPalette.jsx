@@ -63,6 +63,7 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef(null);
   const listRef = useRef(null);
+  const navigate = useNavigate();
   const commands = useCommands();
 
   const forceCommand = query.startsWith(">");
@@ -257,7 +258,7 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
         </div>
 
         {/* Results */}
-        <div className="cmdp-results" ref={listRef}>
+        <div className="cmdp-results" ref={listRef} role="listbox" aria-label="Search results">
           {mode === "ai" ? (
             <div className="cmdp-group">
               <div
@@ -284,6 +285,8 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
                     return (
                       <div
                         key={item.id}
+                        role="option"
+                        aria-selected={item.flatIdx === selectedIdx}
                         className={`cmdp-item${item.flatIdx === selectedIdx ? " cmdp-item--selected" : ""}`}
                         data-idx={item.flatIdx}
                         onClick={() => executeItem(item.flatIdx)}
@@ -332,6 +335,8 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
                       {items.map((item) => (
                         <div
                           key={item.id}
+                          role="option"
+                          aria-selected={item.flatIdx === selectedIdx}
                           className={`cmdp-item${item.flatIdx === selectedIdx ? " cmdp-item--selected" : ""}`}
                           data-idx={item.flatIdx}
                           onClick={() => executeItem(item.flatIdx)}
@@ -350,10 +355,18 @@ export default function CommandPalette({ isOpen, onClose, onOpenAIChat }) {
                 });
               })()}
 
+              {searchResults?.truncated && searchCount > 0 && (
+                <div className="cmdp-empty">
+                  <div className="text-xs text-muted">Showing top results — use the full list pages for more.</div>
+                </div>
+              )}
+
               {showAIFallback && (
                 <div className="cmdp-group">
                   <div className="cmdp-group__label">AI Assistant</div>
                   <div
+                    role="option"
+                    aria-selected={aiRowIdx === selectedIdx}
                     className={`cmdp-item cmdp-item--ai${aiRowIdx === selectedIdx ? " cmdp-item--selected" : ""}`}
                     data-idx={aiRowIdx}
                     onClick={() => executeItem(aiRowIdx)}
