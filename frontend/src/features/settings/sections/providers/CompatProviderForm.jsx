@@ -1,20 +1,49 @@
 import React, { useState } from "react";
+import {
+  Check, ExternalLink, RefreshCw, Server, Trash2, Zap,
+} from "lucide-react";
 import { api } from "../../../../api.js";
 import { invalidateConfigCache } from "../../../../components/layout/ProviderBadge.jsx";
+import { useSettingsBundleQuery } from "../../../../hooks/queries/useSettingsQueries.js";
 import { OPENAI_COMPAT_HINTS } from "./providers.constants.js";
 
 /**
- * OpenAI-compatible provider config form (AI-001). Operators can wire any
- * OpenAI-API-compatible endpoint (DeepSeek, Groq, Mistral, xAI, LiteLLM, etc.)
- * as a custom provider slot. The slot id appears as `compat:<slot>` in the
- * provider registry. Existing slots can be edited via the per-slot edit
- * button; deletion is delegated to the parent so it can refresh the bundle.
- * Extracted from Settings.jsx (GAP-002).
+ * OpenAI-compatible provider config (AI-001).
+ *
+ * UX-AUDIT (May 2026): operators previously saw their DeepSeek / Groq /
+ * Mistral / vLLM / LiteLLM slots rendered as a bare `.card-padded-sm` row
+ * with three muted text spans — visually disconnected from the built-in
+ * `ProviderCard` list above, with no "Active" pill, no masked-key affordance,
+ * and no one-click activate button. This component now renders each existing
+ * compat slot as a full `.st-provider-card` mirroring `ProviderCard.jsx` so
+ * DeepSeek looks and behaves identically to GPT-4o-mini / Claude. Pattern
+ * mirrors Vercel AI Gateway, OpenRouter, Helicone, LangSmith, Braintrust —
+ * all render BYO providers using the same card shape as first-party ones.
+ *
+ * Brand palette uses the same purple tint as the local/Ollama card so the
+ * "self-hosted / custom" provider family reads as one visual group. Each
+ * slot is still keyed `compat:<slot>` in the provider registry.
  */
+
+// Shared compat palette — picked once so every compat card uses the same
+// tint. Mirrors the purple used by Ollama in providers.constants.js so the
+// "custom / self-hosted" provider family reads as one visual group.
+const COMPAT_COLOR = "#7c3aed";
+const COMPAT_BG = "rgba(124,58,237,0.06)";
+const COMPAT_BORDER = "rgba(124,58,237,0.3)";
+
 export default function CompatProviderForm({ compatProviders, reload, onDelete }) {
   const [form, setForm] = useState({ slotId: "", displayName: "", baseUrl: "", model: "", apiKey: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [activating, setActivating] = useState(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(null);
+
+  // Read active-provider so each compat card can render its own "Active"
+  // pill (parity with ProviderCard.jsx). Bundle is already cached by the
+  // parent ProvidersSection, so this is a free read.
+  const bundleQuery = useSettingsBundleQuery();
+  const activeProvider = bundleQuery.data?.settings?.activeProvider || null;
 
   async function handleSave(e) {
     e.preventDefault();
@@ -43,9 +72,61 @@ export default function CompatProviderForm({ compatProviders, reload, onDelete }
     }
   }
 
+  // One-click "Activate" without re-entering the API key. Uses the
+  // `__use_existing__` quick-switch path in `backend/src/routes/settings.js`
+  // so the saved key is reused server-side.
+  async function handleActivate(providerKey) {
+    setActivating(providerKey);
+    setError("");
+    try {
+      await api.saveApiKey(providerKey, "__use_existing__");
+      invalidateConfigCache();
+      await reload();
+    } catch (err) {
+      setError(err.message || "Failed to activate provider.");
+    } finally {
+      setActivating(null);
+    }
+  }
+
+  function startEdit(p) {
+    setForm({
+      slotId: p.provider.replace("compat:", ""),
+      displayName: p.displayName || "",
+      baseUrl: p.baseUrl || "",
+      model: p.model || "",
+      apiKey: "",
+    });
+  }
+
+  // Two-tap delete to prevent accidental key removal (matches the
+  // confirm-then-delete pattern from ProviderCard.jsx).
+  function handleDeleteClick(providerKey) {
+    if (confirmingDelete !== providerKey) {
+      setConfirmingDelete(providerKey);
+      setTimeout(() => {
+        setConfirmingDelete((curr) => (curr === providerKey ? null : curr));
+      }, 4000);
+      return;
+    }
+    setConfirmingDelete(null);
+    onDelete(providerKey);
+  }
+
   return (
-    <div className="card-padded st-compat-card">
-      <h3 className="st-compat-card__title">OpenAI-compatible providers</h3>
+    <div className="st-compat-card">
+      <div className="st-section-title">
+        <div className="st-section-icon">
+          <Server size={16} color={COMPAT_COLOR} />
+        </div>
+        <div>
+          <div className="font-bold st-section-title__heading">Custom OpenAI-compatible providers</div>
+          <div className="text-xs text-sub st-section-title__sub">
+            Any vendor that speaks the OpenAI Chat Completions wire format — DeepSeek, Groq, Mistral, xAI, Azure OpenAI, Together, Fireworks, vLLM, LM Studio, LiteLLM.
+          </div>
+        </div>
+      </div>
+      <h3 className="st-compat-card__title">Add provider</h3>
       <form onSubmit={handleSave} className="st-compat-form">
         <input className="input" placeholder="Slot id (e.g. deepseek)" value={form.slotId}        onChange={(e) => setForm((s) => ({ ...s, slotId:      e.target.value }))} />
         <input className="input" placeholder="Display name"             value={form.displayName}  onChange={(e) => setForm((s) => ({ ...s, displayName: e.target.value }))} />
@@ -60,30 +141,99 @@ export default function CompatProviderForm({ compatProviders, reload, onDelete }
           {saving ? "Saving..." : "Save compat provider"}
         </button>
       </form>
-      <div className="st-compat-list">
-        {(compatProviders || []).map((p) => (
-          <div key={p.provider} className="card-padded-sm st-compat-row">
-            <div>
-              <div className="font-semi">{p.displayName} <span className="text-mono text-sub">({p.provider})</span></div>
-              <div className="text-xs text-sub">{p.baseUrl} · {p.model} · {p.apiKey}</div>
+      {/* Existing compat slots as full provider cards (parity with the
+          built-in ProviderCard list above). Empty state is intentionally
+          silent — the "Add provider" form sits right above this block. */}
+      <div className="st-provider-cards">
+        {(compatProviders || []).map((p) => {
+          const isActive = activeProvider === p.provider;
+          const slotId = p.provider.replace("compat:", "");
+          const isActivating = activating === p.provider;
+          const isConfirmingDelete = confirmingDelete === p.provider;
+          const cardStyle = {
+            background: isActive ? COMPAT_BG : "var(--surface)",
+            border: `1px solid ${isActive ? COMPAT_BORDER : "var(--border)"}`,
+          };
+          const pillStyle = { background: COMPAT_BG, border: `1px solid ${COMPAT_BORDER}` };
+          const iconStyle = {
+            background: isActive ? COMPAT_BG : "var(--bg3)",
+            border: `1px solid ${isActive ? COMPAT_BORDER : "var(--border)"}`,
+          };
+          const badgeStyle = { color: COMPAT_COLOR, background: "rgba(124,58,237,0.12)" };
+          const docsStyle = { color: COMPAT_COLOR };
+          const activeTextStyle = { color: COMPAT_COLOR };
+          return (
+            <div key={p.provider} className="st-provider-card" style={cardStyle}>
+              {isActive && (
+                <div className="st-provider-active-pill" style={pillStyle}>
+                  <Zap size={11} color={COMPAT_COLOR} />
+                  <span className="st-provider-active-text" style={activeTextStyle}>Active</span>
+                </div>
+              )}
+
+              <div className="st-provider-header">
+                <div className="st-provider-icon st-provider-icon-emoji" style={iconStyle}>
+                  🔷
+                </div>
+                <div className="flex-1">
+                  <div className="st-provider-name-row">
+                    <span className="font-bold">{p.displayName || slotId}</span>
+                    <span className="st-provider-badge" style={badgeStyle}>Custom</span>
+                  </div>
+                  <div className="text-xs text-sub">
+                    OpenAI-compatible · <span className="text-mono">{p.model}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="st-provider-desc text-mono">{p.baseUrl}</div>
+
+              {/* Masked-key row — mirrors the cloud-provider branch of
+                  ProviderCard.jsx so the saved-key affordance is identical. */}
+              <div className="st-key-status">
+                <div className="st-key-status-inner">
+                  <Check size={13} color="var(--green)" />
+                  <span className="text-mono text-sm text-sub">{p.apiKey}</span>
+                </div>
+                <button
+                  className={`btn btn-sm ${isConfirmingDelete ? "btn-danger" : "btn-ghost"} st-key-remove-btn`}
+                  onClick={() => handleDeleteClick(p.provider)}
+                >
+                  <Trash2 size={11} />
+                  {isConfirmingDelete ? "Confirm remove?" : "Remove"}
+                </button>
+              </div>
+
+              <div className="st-provider-actions">
+                {!isActive && (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => handleActivate(p.provider)}
+                    disabled={!!isActivating}
+                  >
+                    {isActivating ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
+                    {isActivating ? "Activating…" : "Activate"}
+                  </button>
+                )}
+                <button className="btn btn-ghost btn-sm" onClick={() => startEdit(p)}>
+                  Edit
+                </button>
+              </div>
+
+              {p.baseUrl && (
+                <a
+                  href={p.baseUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="st-docs-link"
+                  style={docsStyle}
+                >
+                  Open endpoint <ExternalLink size={11} />
+                </a>
+              )}
             </div>
-            <div className="st-compat-row__actions">
-              <button
-                className="btn btn-ghost btn-xs"
-                onClick={() => setForm({
-                  slotId: p.provider.replace("compat:", ""),
-                  displayName: p.displayName || "",
-                  baseUrl: p.baseUrl || "",
-                  model: p.model || "",
-                  apiKey: "",
-                })}
-              >
-                Edit
-              </button>
-              <button className="btn btn-danger btn-xs" onClick={() => onDelete(p.provider)}>Delete</button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
