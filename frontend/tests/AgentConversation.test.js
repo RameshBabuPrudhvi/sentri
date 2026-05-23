@@ -323,7 +323,7 @@ test("multiple findings stack into the same open turn", () => {
     { step: 4, agent: "author", phase: "finding", message: "Skipped 2 covered pages." },
   ]);
   assert.equal(turns.length, 1);
-  assert.match(turns[0].text, /Writing tests.*Found 8 journeys.*Skipped 2 covered/);
+  assert.match(turns[0].text, /Writing tests[\s\S]*Found 8 journeys[\s\S]*Skipped 2 covered/);
 });
 
 test("`handoff` event emits a separate instant-render turn", () => {
