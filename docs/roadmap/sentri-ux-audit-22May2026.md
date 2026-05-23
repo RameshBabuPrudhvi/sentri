@@ -66,7 +66,7 @@ This also opens the door for a Settings sidebar (secondary navigation) that show
 ---
 
 ### GAP-003 — Dashboard Has No Prioritisation Layer
-**Severity: High**
+**Severity: High** · ⚠️ _Banner half landed in PR #26 — new `frontend/src/components/dashboard/HealthBanner.jsx` renders above the stat grid with three alert kinds (failing projects today / pending review / runs in progress), each tone-tinted and click-through to the relevant filtered view. Computes client-side from the existing `/api/v1/dashboard` payload — no backend changes, no extra round-trip. Hidden when no alerts. Closes the audit's most-cited gap ("Users cannot identify what matters on a failing morning"). **Primary-KPI row** (tier 2) was already in place as the existing 4-card Pass Rate / Failures Today / Total Tests / Total Runs grid. **Supporting-detail accordion** (tier 3) is the unfinished half — collapsing 8+ existing panels into expandable sections is a UX-risky behavior change for existing users and warrants its own QA cycle, tracked as a separate PR. The server-side `activeAlerts[]` shape the audit recommends for spend-cap + quality-gate signals is also a future enhancement (current banner derives from `recentRuns` + `runsByStatus` + `useReviewQueueCounts` only)._
 
 `Dashboard.jsx` renders approximately 12 independent panels in a vertically stacked layout: stat cards, a recent-runs table, a pass/fail trend chart, coverage panel, environment pass rates, worker pool stats, eval quality panel, healing stats, top-project breakdown, and more. All panels have identical visual weight. There is no distinction between "primary KPIs" and "supporting detail."
 

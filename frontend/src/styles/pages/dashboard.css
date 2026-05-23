@@ -14,6 +14,67 @@
   font-size: 0.72rem; color: var(--text3);
 }
 
+/* ── GAP-003 (audit): Workspace health banner ──────────────────────────────
+   Renders above the stat grid when there are actionable alerts (failing
+   projects today, pending review, running). Each row is a button that
+   navigates to the relevant filtered view. The banner is intentionally
+   compact — one row per alert, tone-tinted (red / amber / blue) so the
+   user can scan severity at a glance without reading every label. */
+.dash-health-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.dash-health-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.08s;
+}
+.dash-health-row:hover { background: var(--bg2); }
+.dash-health-row:active { transform: translateY(1px); }
+
+.dash-health-row__icon { flex-shrink: 0; }
+.dash-health-row__label { flex: 1; min-width: 0; font-weight: 500; color: var(--text); }
+.dash-health-row__chevron { flex-shrink: 0; color: var(--text3); }
+
+/* Tone variants — left-edge accent stripe + icon colour. Subtle bg tint
+   on hover only, so the banner doesn't dominate the dashboard on calm
+   days (a single amber pending-review row should read as a nudge, not
+   an alarm). */
+.dash-health-row--red {
+  border-left: 3px solid var(--red);
+}
+.dash-health-row--red .dash-health-row__icon { color: var(--red); }
+.dash-health-row--red:hover { background: var(--red-bg); }
+
+.dash-health-row--amber {
+  border-left: 3px solid var(--amber);
+}
+.dash-health-row--amber .dash-health-row__icon { color: var(--amber); }
+.dash-health-row--amber:hover { background: var(--amber-bg); }
+
+.dash-health-row--blue {
+  border-left: 3px solid var(--blue);
+}
+.dash-health-row--blue .dash-health-row__icon { color: var(--blue); }
+.dash-health-row--blue:hover { background: var(--blue-bg); }
+
+/* MOB-001 follow-up — tighter padding + smaller font on phones so a
+   3-alert banner stays usable inside the 16px page gutter. */
+@media (max-width: 480px) {
+  .dash-health-row { padding: 8px 12px; font-size: 0.82rem; }
+}
+
 /* Defect breakdown row — 1:2 split grid */
 .dash-defect-row {
   display: grid; grid-template-columns: 1fr 2fr;

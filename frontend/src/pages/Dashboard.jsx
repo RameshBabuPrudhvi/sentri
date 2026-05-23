@@ -6,7 +6,9 @@ import {
   Download, RefreshCw, Rocket, CloudOff,
 } from "lucide-react";
 import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
+import { useReviewQueueCounts } from "../hooks/queries/useReviewQueueQuery.js";
 import EmptyState from "../components/shared/EmptyState.jsx";
+import HealthBanner from "../components/dashboard/HealthBanner.jsx";
 import { fmtDurationMs } from "../utils/formatters.js";
 import { generateExecutivePDF } from "../utils/pdfReportGenerator.js";
 import AgentTag from "../components/shared/AgentTag.jsx";
@@ -310,6 +312,12 @@ export default function Dashboard() {
   usePageTitle("Dashboard");
 
   const dashboardQuery = useDashboardQuery();
+  // GAP-003 (audit) — workspace-wide draft count feeds the HealthBanner
+  // "N tests awaiting review" row. Reuses the same TanStack Query cache
+  // as the sidebar pending-pill (GAP-004) so the badge + banner + Review
+  // Queue page all stay in sync from one fetch.
+  const reviewCounts = useReviewQueueCounts({ projectId: "all" });
+  const pendingReviewCount = reviewCounts.draft || 0;
 
   const data = dashboardQuery.data || null;
   const runs = (data?.recentRuns || []).slice(0, 8);
@@ -399,6 +407,15 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
+          {/* ── GAP-003 (audit): Workspace Health Banner ──
+              Surfaces actionable alerts above the stat grid so a failing-
+              morning is visible at first glance. Renders nothing when there
+              are no alerts (zero noise on healthy days). The component
+              derives its own alert list from `data` + `pendingReviewCount`
+              — no extra round-trip, reuses the dashboard payload already
+              fetched above. */}
+          <HealthBanner data={data} pendingReviewCount={pendingReviewCount} />
+
           {/* ── Row 1: Core Health KPIs ── */}
           <div className="stat-grid">
             <StatCard
