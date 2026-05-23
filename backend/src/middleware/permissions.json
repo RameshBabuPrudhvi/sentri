@@ -80,6 +80,11 @@
       "role": "admin",
       "source": "backend/src/routes/runs.js:411"
     },
+    "GET /api/v1/runs/:runId/ai-requests": {
+      "role": "admin",
+      "source": "backend/src/routes/runs.js:735",
+      "$comment": "GAP-005 (migration 056) — per-run AI request log for the RunDetail Agent Call Timeline. Workspace ACL enforced inside aiRequestLogRepo.listByRun via the leading workspaceId = ? predicate; runId guesses for runs in another workspace return [] rather than 403."
+    },
     "POST /api/v1/projects/:id/tests": {
       "role": "qa_lead",
       "source": "backend/src/routes/tests.js:318"
