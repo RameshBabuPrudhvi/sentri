@@ -29,6 +29,7 @@ import { resetDb } from "./helpers/test-base.js";
 import * as activityRepo from "../src/database/repositories/activityRepo.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import { getDatabase } from "../src/database/sqlite.js";
+import { generateActivityId } from "../src/utils/idGenerator.js";
 import { logActivity } from "../src/utils/activityLogger.js";
 
 // FK setup — the `activities` table carries TWO foreign keys that fire
@@ -69,12 +70,14 @@ function seedFkParents() {
   }
 }
 
-let activityCounter = 0;
+// Use the SAME counter-backed id generator the production `logActivity` path
+// uses (`generateActivityId` → `counters.activity++` → `ACT-N`). A local
+// counter in the test would collide with `logActivity`'s own writes because
+// both would start at `ACT-1` after `resetDb()`, tripping
+// `SQLITE_CONSTRAINT_PRIMARYKEY` the first time the test interleaves a
+// direct `activityRepo.create()` with a `logActivity()` call.
 function makeId() {
-  // ACT-N shape so the dedup matcher / hash-chain ordering code (which
-  // CASTs SUBSTR(id, 5) AS INTEGER) treats the row as a real activity row
-  // rather than a malformed test fixture.
-  return `ACT-${++activityCounter}`;
+  return generateActivityId();
 }
 
 function makeActivity(overrides = {}) {
