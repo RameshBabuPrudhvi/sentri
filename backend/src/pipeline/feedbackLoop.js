@@ -73,6 +73,12 @@ const FAILURE_PATTERNS = [
     /\/sorry\//i,
     /\/captcha/i,
     /\/challenge/i,
+    // `/blocked` mirrors the `stateExplorer.js` anti-bot URL list referenced
+    // in the comment block above. Without it a SUT that redirects to
+    // `/blocked` (Cloudflare's "you have been blocked" page, custom WAF
+    // landing pages) falls through to SELECTOR_ISSUE on the secondary
+    // locator timeout — defeating the entire reason this category exists.
+    /\/blocked/i,
     /recaptcha/i,
     /unusual traffic/i,
     /are you a robot/i,
