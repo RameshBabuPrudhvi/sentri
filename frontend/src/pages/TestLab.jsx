@@ -21,6 +21,12 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
+// G9 — parallel runs. Today only mounts the drawer + maintains a parallel
+// state shape; the single-run `useRunSSE` above still drives the live SSE
+// connection. Follow-up PR migrates the SSE driver itself to
+// `useMultiRunSSE` and deletes the single-run state.
+import { useMultiRunSSE } from "../hooks/useMultiRunSSE.js";
+import RunDrawer from "../components/test-lab/RunDrawer.jsx";
 import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { fmtRelativeDate } from "../utils/formatters.js";
@@ -28,14 +34,36 @@ import SiteGraph from "../components/crawl/SiteGraph.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
 import TestConfig from "../components/test/TestConfig.jsx";
 import EmptyState from "../components/shared/EmptyState.jsx";
-import LLMContextRow from "../components/ai/LLMContextRow.jsx";
+// Task 3 — multi-agent chat transcript replaces the prior single-narrator
+// `NarrativeFeed` (which lived inline in this file). `AgentConversation`
+// owns its own `getStageAgentRoles` import from `frontend/src/config.js`,
+// so step → role attribution stays anchored to the canonical map without
+// prop-drilling through TestLab.
+import AgentConversation from "../components/ai/AgentConversation.jsx";
+// `stageStatus` extracted to a shared util so AgentConversation and any
+// future stage-aware view derive state from the same single source. See
+// `frontend/src/utils/pipelineState.js` for status semantics.
+import { stageStatus } from "../utils/pipelineState.js";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
-// GAP-005 (audit, fix) — shared step → agent role(s) helper. The legacy
-// `STEP_TO_AGENT_ROLE` constant declared below was a hardcoded incomplete
-// duplicate (only `planner` + `author`, missing `explorer` on step 3).
-// Now sourced from `frontend/src/config.js#getStageAgentRoles` next to the
-// canonical AGENT_ROLES list that mirrors the backend.
-import { getStageAgentRoles } from "../config.js";
+// AGENT.md §40 — helpers used by ≥2 call sites live in `utils/`, not inline.
+// `TestLabTabs` + `RetryButton` extracted from the inline IIFE + duplicated
+// banner/panel JSX that previously lived in this file.
+import TestLabTabs from "../components/test-lab/TestLabTabs.jsx";
+import RetryButton from "../components/test-lab/RetryButton.jsx";
+// QueueTab extraction (AGENT.md §40) — the ~96-line inline Queue block
+// previously lived in this file; now owned by its own component. Reads
+// the same `activeQueueRuns` / `recentQueueRuns` / `queueFilter` props
+// the parent already computes, so the swap is a render-time refactor
+// only (no state shape changes).
+import QueueTab from "../components/test-lab/QueueTab.jsx";
+import { buildRetryPayload, resolveGenerateRetryFields } from "../utils/runRetry.js";
+// Run-center terminal banners (Done / Failed). Extracted so TestLab.jsx
+// stops growing every time we tweak the action-stack copy.
+import { RunDoneBanner, RunFailedBanner } from "../components/test-lab/RunBanners.jsx";
+// Config-panel scaffold — currently exports only `RequirementComposer`.
+// Subsequent PRs fold the dialsConfig section, environments dropdown,
+// launch stats, and Start/Generate buttons into the same module.
+import { RequirementComposer } from "../components/test-lab/TestLabConfigPanel.jsx";
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -148,25 +176,9 @@ function clearPersistedRun() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Derive stage state for a pipeline step given the run's currentStep. */
-function stageStatus(step, currentStep, status) {
-  if (status === "completed" || status === "completed_empty") {
-    return "done";
-  }
-  // For failed/aborted runs, freeze the pipeline at the step where it died
-  // rather than leaving it pulsing as if still running. The step the run
-  // stopped on is marked "done" (we reached it) but no step is "active".
-  if (status === "failed" || status === "aborted") {
-    if (currentStep == null) return "pending";
-    if (step <= currentStep) return "done";
-    return "pending";
-  }
-  if (currentStep == null) return "pending";
-  if (step < currentStep) return "done";
-  if (step === currentStep) return "active";
-  return "pending";
-}
+// `stageStatus` previously lived inline here; it's now imported from
+// `frontend/src/utils/pipelineState.js` so AgentConversation (and any
+// future stage-aware surface) shares the single source of truth.
 
 /** Build a project avatar colour from its initial letter (deterministic). */
 function avatarStyle(initial) {
@@ -396,6 +408,20 @@ function QueueRow({ run, project, onStop, onAttach }) {
   );
 }
 
+// ── (NarrativeFeed removed — see `frontend/src/components/ai/AgentConversation.jsx`)
+//
+// Task 3 replaced the inline single-narrator NarrativeFeed with the
+// multi-agent AgentConversation transcript. The supporting NARRATIVE_STAGES
+// array (per-stage line scripts) + the resolveNarrativeLine helper + the
+// `tl-nf-*` CSS in `pages/test-lab.css` are all dead code now and removed.
+// AgentConversation is imported above and rendered below in place of
+// `<NarrativeFeed>`.
+
+// (NARRATIVE_STAGES + resolveNarrativeLine removed — superseded by
+// AgentConversation's per-agent TURN_TEMPLATES.)
+
+// (NarrativeFeed body removed — replaced by AgentConversation.)
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function TestLab() {
@@ -449,6 +475,58 @@ export default function TestLab() {
   const [innerTab, setInnerTab]     = useState("pipeline");
   const [stopLoading, setStopLoading] = useState(false);
   const [error, setError]           = useState(null);
+
+  // G9 — parallel-runs state. Lives ALONGSIDE the single-run state above
+  // during the migration window. Every launch / attach / dismiss handler
+  // mirrors writes into both shapes so render paths can be migrated
+  // incrementally without breaking the single-run consumers. The next
+  // PR deletes the single-run state and reads only from these Maps.
+  //
+  // Maps preserve insertion order — cards in `<RunDrawer>` render
+  // oldest-first, which matches user expectation ("I started A first,
+  // then B").
+  //
+  //   activeRuns:        Map<runId, { runId, projectId, type }>
+  //   runDataByRunId:    Map<runId, RunData>            // SSE snapshot for each
+  //   logLinesByRunId:   Map<runId, string[]>           // tail-capped at LOG_CAP
+  //   focusedRunId:      string | null                  // which card is selected
+  //
+  // `focusedRunId` mirrors `activeRun.runId` today (single-run mode).
+  // When the drawer's "+ New run" UX lands, focusing null means "show
+  // the config panel"; the middle column reads `focusedRunId` instead
+  // of `activeRun` so an unfocused-but-active run still ticks in the
+  // background without dominating the view.
+  const [activeRuns, setActiveRuns] = useState(() => {
+    const m = new Map();
+    if (persisted?.activeRun?.runId) {
+      m.set(persisted.activeRun.runId, persisted.activeRun);
+    }
+    return m;
+  });
+  const [runDataByRunId, setRunDataByRunId] = useState(() => {
+    const m = new Map();
+    if (persisted?.activeRun?.runId && persisted?.runData) {
+      m.set(persisted.activeRun.runId, persisted.runData);
+    }
+    return m;
+  });
+  const [logLinesByRunId, setLogLinesByRunId] = useState(() => {
+    const m = new Map();
+    if (persisted?.activeRun?.runId) {
+      m.set(persisted.activeRun.runId, persisted.logLines ?? []);
+    }
+    return m;
+  });
+  const [focusedRunId, setFocusedRunId] = useState(persisted?.activeRun?.runId ?? null);
+
+  // G9 — multi-run SSE pool. Today this hook is mounted but NOT used as
+  // the SSE driver for the focused run (the single-run `useRunSSE` call
+  // below still owns that). The pool's `activeRunIds` is informational
+  // for the next-PR migration; subscribing additional runs through it
+  // would race against the single-run driver if they shared a runId.
+  // Once the migration completes, the single-run hook is removed and
+  // every active run subscribes through this pool.
+  const multiSse = useMultiRunSSE();
 
   // ── Queue state ──
   const [queueFilter, setQueueFilter]   = useState("all");
@@ -607,12 +685,37 @@ export default function TestLab() {
   }
 
   // ── SSE handler for active run ──
+  // G9 — every state write here mirrors into the parallel-runs Maps so the
+  // drawer card for `activeRun.runId` ticks in real time. The single-run
+  // `setRunData` / `setLogLines` calls remain in place during the
+  // migration window. The mirror is guarded by `activeRun?.runId` — if
+  // the user dismisses the run mid-event the mirror no-ops rather than
+  // writing to a stale key.
   const handleSSEEvent = useCallback((event) => {
+    const mirrorRunId = activeRun?.runId;
     if (event.type === "snapshot" && event.run) {
+      // Snapshot carries the full `agentEvents[]` history hydrated by the
+      // backend (see `backend/src/routes/sse.js#L170-L182`). Spread first
+      // so the snapshot's array becomes the authoritative seed for the
+      // local buffer — subsequent live `agent_event` pushes append below.
       setRunData(prev => ({ ...prev, ...event.run }));
+      if (mirrorRunId) {
+        setRunDataByRunId(prev => {
+          const next = new Map(prev);
+          next.set(mirrorRunId, { ...(prev.get(mirrorRunId) || {}), ...event.run });
+          return next;
+        });
+      }
     }
     if (event.type === "run_update" || event.type === "update") {
       setRunData(prev => ({ ...prev, ...event.run }));
+      if (mirrorRunId) {
+        setRunDataByRunId(prev => {
+          const next = new Map(prev);
+          next.set(mirrorRunId, { ...(prev.get(mirrorRunId) || {}), ...event.run });
+          return next;
+        });
+      }
     }
     if (event.type === "log" && event.message) {
       // Cap in-memory log buffer to bound memory + avoid O(n²) re-allocation
@@ -621,6 +724,32 @@ export default function TestLab() {
       setLogLines(prev => {
         const next = [...prev, event.message];
         return next.length > LOG_CAP ? next.slice(-LOG_CAP) : next;
+      });
+      if (mirrorRunId) {
+        setLogLinesByRunId(prev => {
+          const next = new Map(prev);
+          const cur = prev.get(mirrorRunId) || [];
+          const appended = [...cur, event.message];
+          next.set(mirrorRunId, appended.length > LOG_CAP ? appended.slice(-LOG_CAP) : appended);
+          return next;
+        });
+      }
+    }
+    // Task 2 — per-agent SSE event. The backend emits one of these per LLM
+    // call-site lifecycle phase (start | progress | finding | handoff | done)
+    // via `emitAgentEvent` in `backend/src/aiProvider/agentEventEmitter.js`.
+    // We append to the local `runData.agentEvents` buffer (seeded from the
+    // snapshot above) so consumers — today the `<AgentConversation>` synth
+    // adapter, tomorrow a real-event renderer — can read the full per-agent
+    // narrative without a separate REST round-trip. Each push carries
+    // `{ step, agent, phase, message, data, nextAgent, model, createdAt }`;
+    // `data` is already a structured object on the wire (the emitter
+    // unifies the shape between persist + broadcast).
+    if (event.type === "agent_event") {
+      const { type: _type, ...evt } = event;
+      setRunData(prev => {
+        const prevEvents = Array.isArray(prev?.agentEvents) ? prev.agentEvents : [];
+        return { ...prev, agentEvents: [...prevEvents, evt] };
       });
     }
     // The hook fires its own `type: "done"` event when SSE closes, with
@@ -633,11 +762,42 @@ export default function TestLab() {
         : null;
     if (terminalStatus) {
       setRunData(prev => ({ ...prev, ...(event.run || {}), status: terminalStatus }));
+      if (mirrorRunId) {
+        setRunDataByRunId(prev => {
+          const next = new Map(prev);
+          next.set(mirrorRunId, { ...(prev.get(mirrorRunId) || {}), ...(event.run || {}), status: terminalStatus });
+          return next;
+        });
+      }
       // Bust the shared cache so the Queue tab and Active-Runs panel pick up
       // the final test count / failure state without waiting for staleTime.
       invalidateProjectDataCache();
     }
-  }, []);
+    // G9 — agent_event mirror. Same pattern as snapshot/update above.
+    if (event.type === "agent_event" && mirrorRunId) {
+      const { type: _t, ...evt } = event;
+      setRunDataByRunId(prev => {
+        const next = new Map(prev);
+        const cur = prev.get(mirrorRunId) || {};
+        const curEvents = Array.isArray(cur.agentEvents) ? cur.agentEvents : [];
+        next.set(mirrorRunId, { ...cur, agentEvents: [...curEvents, evt] });
+        return next;
+      });
+    }
+    // G9 — `activeRun?.runId` is read above as `mirrorRunId`. Adding
+    // `activeRun` to the dep array would invalidate the SSE handler on
+    // every launch — `useRunSSE` re-subscribes when its handler ref
+    // changes, which means every new run would tear down + recreate the
+    // SSE connection of the previous run. Instead we accept a one-
+    // event-window staleness: when the user dismisses a run and
+    // launches another within the same React frame, the first SSE
+    // event for the new run still mirrors to the OLD `mirrorRunId`.
+    // The next handler render fixes it. In practice the launch path
+    // calls `setActiveRun` synchronously which forces a render before
+    // the first SSE event can arrive (network round-trip > React
+    // render), so the window is empty under normal latency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRun?.runId]);
 
   // Drive the SSE connection with the live run status so the hook auto-closes
   // when the run finishes (`done` event) and *stays* closed on subsequent
@@ -680,6 +840,20 @@ export default function TestLab() {
   // prevents the effect from re-firing every time `allRuns` refreshes.
   const attachedFromQueueRef = useRef(false);
   useEffect(() => {
+    // G10 — the auto-attach effect runs only when NOTHING is attached.
+    // Pre-fix it re-fired on every `selectedId` change too, which after
+    // the project-switch decoupling above would silently swap the live
+    // view between projects: user starts crawl on A, clicks B in the
+    // sidebar, and if B happens to have a running run the effect
+    // overwrites A's `activeRun` with B's. The user loses A's live view
+    // without any action that intended to drop it.
+    //
+    // The fix is conservative — auto-attach only when `activeRun` is
+    // null. If the user wants to switch to a sibling project's running
+    // run, they use the right-rail "Active runs" list which goes
+    // through `handleAttachRun` explicitly. The effect's `selectedId`
+    // dep is preserved so a future project change on an idle view
+    // still discovers running runs.
     if (activeRun) { attachedFromQueueRef.current = false; return; }
     if (attachedFromQueueRef.current) return;
     if (!selectedId) return;
@@ -813,8 +987,18 @@ export default function TestLab() {
       const body = { dialsConfig };
       if (environmentId) body.environmentId = environmentId;
       const { runId } = await api.crawl(selectedId, body);
-      setActiveRun({ runId, projectId: selectedId, type: "crawl" });
+      const entry = { runId, projectId: selectedId, type: "crawl" };
+      setActiveRun(entry);
       setInnerTab("pipeline");
+      // G9 — register in the parallel-runs Map + focus this run so the
+      // drawer card appears immediately. Subsequent SSE snapshots
+      // populate `runDataByRunId` via the handler's mirror.
+      setActiveRuns(prev => {
+        const next = new Map(prev);
+        next.set(runId, entry);
+        return next;
+      });
+      setFocusedRunId(runId);
     } catch (err) {
       setError(err.message || "Failed to start crawl.");
     } finally {
@@ -862,8 +1046,16 @@ export default function TestLab() {
       // Use backend's canonical type name (`"generate"`) so
       // `activeRun.type` matches `run.type` on re-attach and any future
       // strict equality checks don't silently fork.
-      setActiveRun({ runId, projectId: selectedId, type: "generate" });
+      const entry = { runId, projectId: selectedId, type: "generate" };
+      setActiveRun(entry);
       setInnerTab("pipeline");
+      // G9 — see handleStartCrawl mirror block.
+      setActiveRuns(prev => {
+        const next = new Map(prev);
+        next.set(runId, entry);
+        return next;
+      });
+      setFocusedRunId(runId);
     } catch (err) {
       setError(err.message || "Failed to generate tests.");
     } finally {
@@ -897,6 +1089,13 @@ export default function TestLab() {
   }
 
   function handleReset() {
+    // G9 — `handleReset` is the "Dismiss" / "New run" path. Today it
+    // mirrors into the Maps too, removing the previously-focused run
+    // entirely. Once a user has multiple runs, the drawer's per-card
+    // X-button (`handleDismissRun` below) is the per-run path; this
+    // function stays as the "blow everything away" reset for the
+    // single-run UX surface (banner Dismiss + right-rail New run).
+    const dismissedId = activeRun?.runId;
     setActiveRun(null);
     setRunData(null);
     setLogLines([]);
@@ -904,6 +1103,145 @@ export default function TestLab() {
     // Explicit clear in addition to the write-through effect — avoids a stale
     // read if the user immediately navigates away before the effect flushes.
     clearPersistedRun();
+    if (dismissedId) {
+      setActiveRuns(prev => {
+        const next = new Map(prev);
+        next.delete(dismissedId);
+        return next;
+      });
+      setRunDataByRunId(prev => {
+        const next = new Map(prev);
+        next.delete(dismissedId);
+        return next;
+      });
+      setLogLinesByRunId(prev => {
+        const next = new Map(prev);
+        next.delete(dismissedId);
+        return next;
+      });
+    }
+    setFocusedRunId(null);
+  }
+
+  // G9 — Per-card dismiss from the drawer X-button. Removes ONE run from
+  // the parallel-runs Maps without touching the single-run state unless
+  // the dismissed run happens to be the currently-focused one (in which
+  // case we fall through to `handleReset` so the middle column flips
+  // back to the config panel).
+  //
+  // Server-side: the run keeps executing. Dismiss is a view-only
+  // detach — the user can re-attach via the Queue tab. Mirrors the
+  // existing `handleReset` contract that backs the banner Dismiss
+  // button.
+  function handleDismissRun(runId) {
+    if (!runId) return;
+    if (runId === activeRun?.runId) {
+      // Dismissing the focused run — fall through to full reset so the
+      // single-run consumers (banners, right-rail stats) clear too.
+      handleReset();
+      return;
+    }
+    setActiveRuns(prev => {
+      const next = new Map(prev);
+      next.delete(runId);
+      return next;
+    });
+    setRunDataByRunId(prev => {
+      const next = new Map(prev);
+      next.delete(runId);
+      return next;
+    });
+    setLogLinesByRunId(prev => {
+      const next = new Map(prev);
+      next.delete(runId);
+      return next;
+    });
+    if (focusedRunId === runId) {
+      // Should be unreachable given the activeRun?.runId guard above,
+      // but defence-in-depth — never leave focusedRunId pointing at a
+      // dropped key.
+      setFocusedRunId(null);
+    }
+  }
+
+  // G9 — Drawer card click. Focus a run without launching anything.
+  // When the focused run differs from the single-run `activeRun`, the
+  // middle column would render the wrong run; for the migration we
+  // mirror the focus into `activeRun` too. Once the single-run state
+  // is deleted (next PR), this function only sets `focusedRunId`.
+  function handleFocusRun(runId) {
+    if (!runId) return;
+    const entry = activeRuns.get(runId);
+    if (!entry) return;
+    setFocusedRunId(runId);
+    setActiveRun(entry);
+    const rd = runDataByRunId.get(runId);
+    if (rd) setRunData(rd);
+    const lines = logLinesByRunId.get(runId);
+    if (Array.isArray(lines)) setLogLines(lines);
+    setInnerTab("pipeline");
+  }
+
+  /**
+   * G11 — Retry a failed/aborted run using the same configuration that
+   * produced the original run. The backend persists `dialsConfig` inside
+   * `run.generateInput` (see `backend/src/routes/runs.js:95` for crawl and
+   * `backend/src/routes/tests.js:735` for generate), and `environmentId`
+   * lives on the run row directly (`runRepo.js` INSERT_COLS), so a retry
+   * is a stateless re-launch — no UI re-config required.
+   *
+   * Industry pattern: matches GitHub Actions' "Re-run failed jobs" and
+   * Vercel's "Retry deployment" — the user expects the same inputs to
+   * produce a fresh attempt without re-entering the form.
+   *
+   * Crawl runs reuse the project URL as the start page (no per-run URL
+   * override exists); requirement runs reuse `generateInput.name` +
+   * `generateInput.description` so the same prompt gets re-run.
+   * Attachments are NOT preserved — they were folded into `description`
+   * at launch time (`handleGenerateFromRequirement`), so retrying re-uses
+   * the folded prompt verbatim. The user can edit + relaunch from the
+   * config panel if they want a different prompt.
+   */
+  async function handleRetry() {
+    if (!activeRun?.projectId || !runData) return;
+    const runType = activeRun.type;
+    if (runType !== "crawl" && runType !== "generate") {
+      setError("Only crawl and generate runs can be retried.");
+      return;
+    }
+    // Payload-shaping logic lives in `utils/runRetry.js` so this handler
+    // stays focused on React side-effects (state writes + ensureAiProvider
+    // pre-flight + SSE reconnect-race guard). See that module for the
+    // legacy-run fallback contract.
+    const { body } = buildRetryPayload(runData, dialsConfig);
+    setError(null);
+    if (!(await ensureAiProvider())) return;
+    setLaunching(true);
+    // Detach from the failed run BEFORE launching the new one. Same SSE
+    // reconnect-race rationale as handleStartCrawl / handleGenerateFromRequirement.
+    setActiveRun(null);
+    setLogLines([]);
+    setRunData(null);
+    clearPersistedRun();
+    try {
+      if (runType === "crawl") {
+        const { runId } = await api.crawl(activeRun.projectId, body);
+        setActiveRun({ runId, projectId: activeRun.projectId, type: "crawl" });
+      } else {
+        // Generate retry — `name` + `description` come from the persisted
+        // run via `resolveGenerateRetryFields` (defence-in-depth fallback
+        // when `generateInput` is missing on legacy/interrupted rows).
+        const { name, description } = resolveGenerateRetryFields(runData);
+        const genBody = { ...body, name, description };
+        const { runId } = await api.generateTest(activeRun.projectId, genBody);
+        setActiveRun({ runId, projectId: activeRun.projectId, type: "generate" });
+      }
+      setInnerTab("pipeline");
+    } catch (err) {
+      setError(err.message || "Failed to retry run.");
+    } finally {
+      setLaunching(false);
+    }
   }
 
   /**
@@ -924,13 +1262,33 @@ export default function TestLab() {
         navigate(`/projects/${run.projectId}/test-lab${qs ? `?${qs}` : ""}`, { replace: true });
       }
     }
-    setActiveRun({ runId: run.id, projectId: run.projectId, type: run.type });
+    const entry = { runId: run.id, projectId: run.projectId, type: run.type };
+    setActiveRun(entry);
     // Seed runData with whatever we already have cached — SSE's first
     // `snapshot` event will overwrite with the authoritative server copy.
     setRunData({ ...run, status: run.status });
     setLogLines([]);
     setInnerTab("pipeline");
     setError(null);
+    // G9 — register the attached run in the parallel Maps + focus it.
+    // Seeds runData per-runId from the cached row so the drawer card
+    // renders subtitle + tone immediately even before SSE connects.
+    setActiveRuns(prev => {
+      const next = new Map(prev);
+      next.set(run.id, entry);
+      return next;
+    });
+    setRunDataByRunId(prev => {
+      const next = new Map(prev);
+      next.set(run.id, { ...run, status: run.status });
+      return next;
+    });
+    setLogLinesByRunId(prev => {
+      const next = new Map(prev);
+      next.set(run.id, []);
+      return next;
+    });
+    setFocusedRunId(run.id);
     // If we were on the Queue tab, switch to the matching config tab so the
     // user sees the pipeline view (which only renders under crawl/requirement).
     if (tab === "queue") {
@@ -951,16 +1309,34 @@ export default function TestLab() {
    */
   function handleSelectProject(nextProjectId) {
     if (nextProjectId === selectedId) return;
-    if (isRunActive) {
-      const ok = window.confirm(
-        "A generation run is in progress for the current project. " +
-        "Switching projects will close this live view — the run keeps executing " +
-        "and stays visible in the Queue tab. Continue?",
-      );
-      if (!ok) return;
-    }
+    // G10 — the live run view no longer follows the project selector.
+    // Before this fix, switching projects called `handleReset()`, which
+    // tore down the SSE connection + cleared `runData` / `logLines` /
+    // `activeRun`. The run kept executing server-side but the user lost
+    // all visibility into it from the page they were on — the only
+    // recovery was clicking through the Queue tab. That broke the
+    // legitimate workflow of "kick off a long crawl, then browse other
+    // projects' tests while it runs."
+    //
+    // The fix: keep `activeRun` + `runData` + `logLines` + the SSE
+    // connection intact when `selectedId` changes. The middle column's
+    // attached-run view (`activeRun ? <run-center> : <config>`) stays
+    // visible because `activeRun` is unchanged; the run-center label
+    // shows the ORIGINAL project's name (resolved via
+    // `runProjectForLabel` below) rather than the newly-selected one,
+    // so the user can see "MYPROJ-A · LINK CRAWL" while the sidebar
+    // highlights MYPROJ-B and the right rail shows MYPROJ-B's config.
+    //
+    // Mental model: project sidebar = "which project's config am I
+    // looking at" (cheap, frequent). Run view = "which run am I
+    // monitoring" (expensive, sticky). Decoupling the two lets the
+    // user do both at once without losing either context.
+    //
+    // The right rail's "Active runs" list already provided a re-attach
+    // path via `handleAttachRun`, but it only listed running runs and
+    // discarded view state on every switch — keeping the live view
+    // pinned is strictly better for the operator-flow case.
     setSelectedId(nextProjectId);
-    handleReset();
     if (routeProjectId) {
       const qs = searchParams.toString();
       navigate(`/projects/${nextProjectId}/test-lab${qs ? `?${qs}` : ""}`, { replace: true });
@@ -1029,29 +1405,13 @@ export default function TestLab() {
           <span className="tl-topbar__brand-tagline">AI test generation workspace</span>
         </div>
 
-        <button
-          className={`tl-tab-btn${tab === "crawl" ? " tl-tab-btn--active" : ""}`}
-          onClick={() => setTab("crawl")}
-        >
-          <Link2 size={14} />
-          Crawl &amp; Generate
-        </button>
-        <button
-          className={`tl-tab-btn${tab === "requirement" ? " tl-tab-btn--active" : ""}`}
-          onClick={() => setTab("requirement")}
-        >
-          <Zap size={14} />
-          Generate from Requirement
-        </button>
-        <button
-          className={`tl-tab-btn${tab === "queue" ? " tl-tab-btn--active" : ""}`}
-          onClick={() => setTab("queue")}
-        >
-          Queue
-          {activeQueueRuns.length > 0 && (
-            <span className="tl-tab-badge">{activeQueueRuns.length}</span>
-          )}
-        </button>
+        {/* G15 (a11y) — WAI-ARIA APG tablist. Implementation + comments
+            live in `frontend/src/components/test-lab/TestLabTabs.jsx`. */}
+        <TestLabTabs
+          tab={tab}
+          onChange={setTab}
+          activeQueueCount={activeQueueRuns.length}
+        />
 
         {/* Record action — right-aligned, styled as a primary CTA so it
             reads as a peer to the tabs rather than disappearing as a ghost
@@ -1073,106 +1433,45 @@ export default function TestLab() {
       </div>
 
       {/* ── Queue tab ── */}
+      {/* Extracted to `frontend/src/components/test-lab/QueueTab.jsx`.
+          `<QueueRow>`, `<EmptyState>`, and the `Clock` lucide icon are
+          injected so the extracted file doesn't have to reimport them —
+          `<QueueRow>` is a page-local component that closes over
+          `<ProjIcon>` + `PIPELINE_STAGES`, and the dependency injection
+          keeps that coupling explicit. */}
       {tab === "queue" && (
-        <div className="tl-queue-wrap fade-in">
-          <div className="tl-queue-header">
-            <div>
-              <h2 className="page-title tl-queue-title">Queue</h2>
-              <p className="page-subtitle">All active and recent generation runs across projects</p>
-            </div>
-            <div className="flex-between gap-sm tl-queue-actions">
-              <span className="badge badge-blue">{activeQueueRuns.length} active</span>
-              {activeQueueRuns.length > 0 && (
-                <span className="badge badge-green tl-queue-pulse-badge">running</span>
-              )}
-              {/* Project filter — shown when there are multiple projects */}
-              {projects.length > 1 && (
-                <select
-                  className="tl-select tl-queue-filter-select"
-                  value={queueFilter}
-                  onChange={e => setQueueFilter(e.target.value)}
-                >
-                  <option value="all">All projects</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </div>
-
-          {/* Apply project filter */}
-          {(() => {
-            const filteredActive = queueFilter === "all"
-              ? activeQueueRuns
-              : activeQueueRuns.filter(r => r.projectId === queueFilter);
-            const filteredRecent = queueFilter === "all"
-              ? recentQueueRuns
-              : recentQueueRuns.filter(r => r.projectId === queueFilter);
-            return (
-              <>
-                {filteredActive.length === 0 && filteredRecent.length === 0 && (
-                  // ONB-002 (audit): swap the bare emoji+text empty state for
-                  // the shared primitive so the Queue tab matches the icon +
-                  // title + description + CTA shape used on Tests, Projects,
-                  // Runs, HealingDashboard, and Dashboard. The CTA jumps the
-                  // user back to the Crawl & Generate tab — the action that
-                  // produces queue rows — instead of leaving them stuck on an
-                  // empty surface. When a project filter is active, we also
-                  // surface a "Clear filter" secondary action so the user has
-                  // an escape hatch without retyping the dropdown.
-                  <EmptyState
-                    icon={<Clock size={32} color="var(--accent)" />}
-                    title={queueFilter === "all" ? "No runs yet" : "No runs for this project"}
-                    description={queueFilter === "all"
-                      ? "Start a crawl or generate tests from a requirement to see them here."
-                      : "Switch to a different project or start a new run."}
-                    secondaryAction={queueFilter !== "all"
-                      ? { label: "Clear filter", onClick: () => setQueueFilter("all") }
-                      : null}
-                    action={{ label: "Start Crawl & Generate", onClick: () => setTab("crawl") }}
-                  />
-                )}
-
-                {filteredActive.length > 0 && (
-                  <>
-                    <div className="section-label mb-sm">Active</div>
-                    {filteredActive.map(run => (
-                      <QueueRow
-                        key={run.id}
-                        run={run}
-                        project={projects.find(p => p.id === run.projectId)}
-                        onStop={handleQueueStop}
-                        onAttach={handleAttachRun}
-                      />
-                    ))}
-                  </>
-                )}
-
-                {filteredRecent.length > 0 && (
-                  <>
-                    <div className="section-label mb-sm tl-queue-recent-label">Recent</div>
-                    {filteredRecent.map(run => (
-                      <QueueRow
-                        key={run.id}
-                        run={run}
-                        project={projects.find(p => p.id === run.projectId)}
-                        onStop={handleQueueStop}
-                        onAttach={handleAttachRun}
-                      />
-                    ))}
-                  </>
-                )}
-              </>
-            );
-          })()}
-        </div>
+        <QueueTab
+          activeQueueRuns={activeQueueRuns}
+          recentQueueRuns={recentQueueRuns}
+          projects={projects}
+          queueFilter={queueFilter}
+          onQueueFilterChange={setQueueFilter}
+          onStop={handleQueueStop}
+          onAttach={handleAttachRun}
+          onSwitchToCrawl={() => setTab("crawl")}
+          QueueRow={QueueRow}
+          EmptyState={EmptyState}
+          ClockIcon={Clock}
+        />
       )}
 
       {/* Recorder modal — launched from the topbar Record button. On save we
           bust the project cache (so the new draft test shows up in the Tests
           page and the launch panel's "Existing tests" stat) and navigate the
           user to the test detail view, mirroring Tests.jsx's onSaved flow. */}
+      {/* G9 — parallel-runs drawer. Renders a bottom-anchored strip of
+          cards, one per active run. Clicking a card focuses that run in
+          the middle column. X-button dismisses (detaches SSE, removes
+          from Maps). Hidden when no runs are attached. */}
+      <RunDrawer
+        activeRuns={activeRuns}
+        runDataByRunId={runDataByRunId}
+        focusedRunId={focusedRunId}
+        projects={projects}
+        onFocus={handleFocusRun}
+        onDismiss={handleDismissRun}
+      />
+
       {showRecorder && selectedProject && (
         <RecorderModal
           open={showRecorder}
@@ -1200,18 +1499,51 @@ export default function TestLab() {
         <div className="tl-grid fade-in">
 
           {/* ── Left: Project sidebar ── */}
-          <div className="tl-projects">
-            <div className="tl-col-header">Projects</div>
-            <div className="tl-proj-list">
+          {/* G15 (a11y) — sidebar wrapped as `role="navigation"` with an
+              `aria-label` so screen readers announce "Projects navigation"
+              when the user tabs into the rail. Inner list uses semantic
+              defaults (the per-item `role="button"` already gives screen
+              readers the actionable shape); a literal `role="listbox"`
+              would imply single-select with arrow-key navigation, which
+              we don't yet implement and would mislead AT users. Revisit
+              this once arrow-key list nav lands. */}
+          <nav className="tl-projects" aria-label="Projects">
+            <div className="tl-col-header" id="tl-projects-heading">Projects</div>
+            <div className="tl-proj-list" aria-labelledby="tl-projects-heading">
               {loadingProjects
                 ? [1, 2].map(i => (
                     <div key={i} className="skeleton tl-proj-skeleton" />
                   ))
                 : projects.map(p => (
+                    // G15 (a11y) — project sidebar items were `<div onClick>`
+                    // with no keyboard affordance. WCAG 2.1.1 (Keyboard, Level
+                    // A) requires every interactive element be operable via
+                    // keyboard. Promoted to `role="button"` + `tabIndex={0}`
+                    // + Enter/Space activation. `aria-pressed` reflects the
+                    // selected state so screen-reader users hear "selected"
+                    // / "not selected" alongside the visible active styling.
+                    // Kept as a `<div>` (not a `<button>`) because the inner
+                    // markup is two block-level rows (name + url) and a
+                    // native `<button>` requires `display: flex` overrides
+                    // that fight with the existing `.tl-proj-item` flex rule.
                     <div
                       key={p.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={p.id === selectedId}
+                      aria-label={`Select project ${p.name}`}
                       className={`tl-proj-item${p.id === selectedId ? " tl-proj-item--active" : ""}`}
                       onClick={() => handleSelectProject(p.id)}
+                      onKeyDown={(e) => {
+                        // Enter + Space activate, matching native <button>
+                        // behaviour. preventDefault on Space stops the page
+                        // scroll. Other keys pass through (Tab navigates,
+                        // arrow keys reserved for future list-nav follow-up).
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleSelectProject(p.id);
+                        }
+                      }}
                     >
                       <ProjIcon project={p} />
                       <div className="tl-proj-info">
@@ -1235,7 +1567,7 @@ export default function TestLab() {
                 </div>
               </div>
             )}
-          </div>
+          </nav>
 
           {/* ── Middle: Configuration / Running / Completed view ── */}
           {/* Show the run view (pipeline / sitegraph / logs) whenever a run is
@@ -1246,8 +1578,20 @@ export default function TestLab() {
           {activeRun ? (
             // ── Attached run: pipeline + site graph + live log ──
             <div className="tl-run-center">
+              {/* G10 — the run-center label shows the RUN's project, not
+                  the sidebar's `selectedProject`. After the project-
+                  switch decoupling above, those can diverge: the user
+                  starts a crawl on MYPROJ-A, then clicks MYPROJ-B in
+                  the sidebar to browse its tests. The middle column
+                  must still show "MYPROJ-A · LINK CRAWL" because that's
+                  the run we're monitoring. Resolved by id from the
+                  shared `projects` cache (`useProjectData`) — falls
+                  back to the bare project id when the cache hasn't
+                  populated yet (rare; defence-in-depth). */}
               <div className="tl-run-label">
-                {selectedProject?.name?.toUpperCase()} · {activeRun?.type === "crawl" ? "LINK CRAWL" : "REQUIREMENT"}
+                {(projects.find(p => p.id === activeRun.projectId)?.name
+                  || activeRun.projectId
+                  || "—").toUpperCase()} · {activeRun?.type === "crawl" ? "LINK CRAWL" : "REQUIREMENT"}
                 {isRunDone && <span className="tl-run-status-suffix tl-run-status-suffix--done">· COMPLETED</span>}
                 {isRunFailed && (
                   <span className="tl-run-status-suffix tl-run-status-suffix--failed">
@@ -1273,64 +1617,25 @@ export default function TestLab() {
               )}
 
               {/* Terminal banners — rendered at the top of the run view so the
-                  pipeline / logs stay visible underneath for review. */}
+                  pipeline / logs stay visible underneath for review. Both
+                  banner implementations live in `RunBanners.jsx`. */}
               {isRunDone && (
-                <div className="banner banner-success tl-banner-margin">
-                  <CheckCircle2 size={16} />
-                  <div className="tl-banner-body">
-                    <strong>Generation complete</strong> — {generatedOutcome.total} test{generatedOutcome.total !== 1 ? "s" : ""} generated
-                    {generatedOutcome.autoApproved > 0 && (
-                      <> · <span className="text-green">{generatedOutcome.autoApproved} auto-approved</span></>
-                    )}
-                    {generatedOutcome.drafts > 0 && (
-                      <> · {generatedOutcome.drafts} awaiting review</>
-                    )}
-                    .
-                    <div className="tl-banner-actions">
-                      {generatedOutcome.drafts > 0 && (
-                        <button
-                          className="btn btn-primary btn-xs"
-                          onClick={() => navigate(`/review-queue?projectId=${activeRun.projectId}`)}
-                        >
-                          Review {generatedOutcome.drafts} draft{generatedOutcome.drafts !== 1 ? "s" : ""} <ChevronRight size={12} />
-                        </button>
-                      )}
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => navigate(`/runs/${activeRun.runId}`)}
-                      >
-                        View run <ChevronRight size={12} />
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={handleReset}
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <RunDoneBanner
+                  activeRun={activeRun}
+                  generatedOutcome={generatedOutcome}
+                  onReset={handleReset}
+                />
               )}
 
               {isRunFailed && (
-                <div className="banner banner-error tl-banner-margin">
-                  <div>
-                    <strong>{runStatus === "aborted" ? "Run aborted" : "Run failed"}</strong>
-                    {runData?.error ? ` — ${runData.error}` : "."}
-                    <button
-                      className="btn btn-ghost btn-xs tl-banner-spaced-btn-l"
-                      onClick={() => navigate(`/runs/${activeRun.runId}`)}
-                    >
-                      View run <ChevronRight size={12} />
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-xs tl-banner-spaced-btn-s"
-                      onClick={handleReset}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
+                <RunFailedBanner
+                  activeRun={activeRun}
+                  runData={runData}
+                  runStatus={runStatus}
+                  launching={launching}
+                  onRetry={handleRetry}
+                  onReset={handleReset}
+                />
               )}
 
               {(() => {
@@ -1350,6 +1655,9 @@ export default function TestLab() {
                   const m = logLines[i].match(/https?:\/\/[^\s)]+/);
                   if (m) { activePage = m[0]; break; }
                 }
+                // "logs" tab kept for crawl runs only — the narrative feed is
+                // the primary view; raw log is accessible via the Logs tab for
+                // debugging. Requirement runs don't crawl so no sitegraph.
                 const innerTabs = isCrawl
                   ? ["pipeline", "sitegraph", "logs"]
                   : ["pipeline", "logs"];
@@ -1399,116 +1707,21 @@ export default function TestLab() {
                           <PipelinePanel run={runData} />
                         </div>
 
-                        {/* Sub-col 2: progress narrative (not raw logs).
-                            Industry standard (Vercel, GitHub Actions, Cypress
-                            Cloud): the primary view shows human-readable
-                            stage summaries; the raw terminal lives in the
-                            dedicated Logs tab. This works for ALL providers
-                            (GPT-4o streaming, Gemini non-streaming, Ollama)
-                            because it reads from `runData` snapshots delivered
-                            via SSE, not from streamed tokens. */}
+                        {/* Sub-col 2: multi-agent chat transcript.
+                            Task 3 — replaces NarrativeFeed (single narrator)
+                            with `<AgentConversation>` (chat transcript with
+                            per-agent avatars + handoff turns). Reads from the
+                            same `runData` shape; no SSE wiring changes.
+                            Backend Task 2 `agent_event` SSE stream will swap
+                            the client-side synthesizer for real events in a
+                            follow-up PR. */}
                         <div className="tl-pipeline-log-col">
-                          <div className="tl-pipeline-col-label">Progress</div>
-                          <LLMContextRow
-                            stageLabel={runData?.currentStep != null
-                              ? PIPELINE_STAGES[runData.currentStep - 1]?.label || null
-                              : null}
-                            stageIndex={Number.isFinite(runData?.currentStep) ? runData.currentStep : null}
-                            totalStages={PIPELINE_STAGES.length}
-                            /* GAP-005 (audit, fix): primary agent for the
-                               currently-streaming step. Multi-role stages
-                               (step 3 = explorer + planner) report exactly
-                               one in-flight LLM call at any given instant —
-                               surface the first role from the shared helper.
-                               The full multi-role list shows on the per-stage
-                               trace via PipelineCard / progress feed below. */
-                            agentRole={runData?.currentStep != null
-                              ? getStageAgentRoles(runData.currentStep)[0] || null
-                              : null}
-                            modelName={runData?.modelUsed || null}
-                            isRunning={isRunActive}
+                          <div className="tl-pipeline-col-label">What&rsquo;s happening</div>
+                          <AgentConversation
+                            run={runData}
+                            isRunActive={isRunActive}
+                            allTests={allTests}
                           />
-                          {/* Stage-aware progress feed — each completed stage
-                              renders a one-line summary with its stat value.
-                              The active stage pulses. Works identically for
-                              streaming and non-streaming providers because
-                              it reads `runData.pipelineStats` (populated by
-                              SSE `snapshot` events), not `logLines`. */}
-                          <div className="tl-progress-feed">
-                            {PIPELINE_STAGES.map((stage) => {
-                              const state = stageStatus(stage.step, runData?.currentStep ?? null, runData?.status ?? "running");
-                              const statVal = stage.key ? (ps[stage.key] ?? null) : null;
-                              if (state === "pending") return null;
-                              // GAP-005 (audit, fix): surface ALL agent roles
-                              // that run during this stage. Pre-fix this was
-                              // a hardcoded single-role lookup that mis-
-                              // attributed step 3 (real call site uses
-                              // `explorer`, not `planner`, plus `planner`
-                              // adds a second pass for journey decomposition).
-                              // Multi-role stages combine with " + " so
-                              // step 3 reads "Explorer + Planner agent
-                              // mapped 8 user journeys…". Stages 1-2
-                              // (Crawl, Filter) and step 8 (Done) return
-                              // [] from the shared helper and produce no
-                              // agent label.
-                              const roles = getStageAgentRoles(stage.step);
-                              const agentRole = roles[0] || null;
-                              const agentLabel = roles.length > 0
-                                ? roles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(" + ") + " agent"
-                                : null;
-                              const model = runData?.modelUsed || null;
-                              // Outcome-oriented messages: tell the user what
-                              // was accomplished (done) or what's happening for
-                              // them right now (active). Agent names surface on
-                              // LLM stages; infrastructure stages stay neutral.
-                              const doneMessages = {
-                                1: `Found ${statVal ?? 0} testable page${(statVal ?? 0) !== 1 ? "s" : ""} with interactive elements`,
-                                2: `Filtered to ${statVal ?? 0} actionable element${(statVal ?? 0) !== 1 ? "s" : ""}`,
-                                3: `${agentLabel} mapped ${statVal ?? 0} user journey${(statVal ?? 0) !== 1 ? "s" : ""} from page flows`,
-                                4: `${agentLabel} wrote ${statVal ?? 0} Playwright test${(statVal ?? 0) !== 1 ? "s" : ""}`,
-                                5: `${agentLabel} removed ${statVal ?? 0} duplicate${(statVal ?? 0) !== 1 ? "s" : ""} — kept unique tests only`,
-                                6: `${agentLabel} added ${statVal ?? 0} stronger assertion${(statVal ?? 0) !== 1 ? "s" : ""}`,
-                                7: statVal > 0
-                                  ? `${agentLabel} rejected ${statVal} test${statVal !== 1 ? "s" : ""} that didn't meet quality standards`
-                                  : `${agentLabel} validated all tests — none rejected`,
-                                8: "All done — your tests are ready for review",
-                              };
-                              const activeMessages = {
-                                1: "Scanning your site for testable pages…",
-                                2: "Identifying interactive elements on each page…",
-                                3: `${agentLabel} is mapping user journeys from page flows…`,
-                                4: `${agentLabel} is generating Playwright tests${model ? ` using ${model}` : ""}…`,
-                                5: `${agentLabel} is checking for duplicate tests…`,
-                                6: `${agentLabel} is adding stronger assertions to each test…`,
-                                7: `${agentLabel} is validating each test meets quality standards…`,
-                                8: "Wrapping up…",
-                              };
-                              const msg = state === "done"
-                                ? doneMessages[stage.step]
-                                : activeMessages[stage.step];
-                              return (
-                                <div key={stage.step} className={`tl-progress-item tl-progress-item--${state}`}>
-                                  <span className="tl-progress-item__icon">
-                                    {state === "done" ? "✓" : "●"}
-                                  </span>
-                                  <span className="tl-progress-item__text">
-                                    {msg}
-                                  </span>
-                                  {state === "active" && agentRole && (
-                                    <span className="tl-progress-item__agent">
-                                      🤖 {agentLabel}{model ? ` · ${model}` : ""}
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {isRunActive && !runData?.currentStep && (
-                              <div className="tl-progress-item tl-progress-item--active">
-                                <span className="tl-progress-item__icon">●</span>
-                                <span className="tl-progress-item__text">Preparing pipeline — connecting to your site…</span>
-                              </div>
-                            )}
-                          </div>
                         </div>
 
                         {/* Sub-col 3: so far stats + stop button */}
@@ -1826,6 +2039,25 @@ export default function TestLab() {
                           onClick={() => navigate(`/projects/${activeRun.projectId}?tab=tests`)}
                         >
                           View {generatedOutcome.autoApproved} auto-approved <ChevronRight size={13} />
+                        </button>
+                      )}
+                      {/* G11 — Retry shows on failed/aborted runs (not on
+                          completed runs — there's nothing to retry when the
+                          pipeline succeeded). Same handler the banner uses;
+                          the panel button is a redundant entry point for
+                          users who've scrolled past the top-of-page banner. */}
+                      {isRunFailed && (
+                        <button
+                          className="btn btn-primary tl-full-btn"
+                          onClick={handleRetry}
+                          disabled={launching}
+                          title="Re-run with the same configuration"
+                        >
+                          {launching ? (
+                            <><span className="spin"><RotateCcw size={13} /></span> Retrying…</>
+                          ) : (
+                            <><RotateCcw size={13} /> Retry run</>
+                          )}
                         </button>
                       )}
                       <button

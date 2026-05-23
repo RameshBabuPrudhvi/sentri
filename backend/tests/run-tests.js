@@ -48,6 +48,10 @@ const files = [
   "tests/review-queue-filters.test.js",
   "tests/recycle-bin.test.js",
   "tests/run-logs.test.js",
+  // Task 2 — per-agent SSE events (migration 057). Pins persistence,
+  // createdAt ordering, runRepo.getById hydration, cascade-delete, and the
+  // emitAgentEvent broadcast contract (persists + delivers to runListeners).
+  "tests/agentEvents.test.js",
   "tests/webhook-token.test.js",
   "tests/scheduler.test.js",
   "tests/trigger-api.test.js",

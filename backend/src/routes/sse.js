@@ -16,6 +16,10 @@ import { Router } from "express";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runLogRepo from "../database/repositories/runLogRepo.js";
+// Task 2 — per-agent SSE event history is hydrated by `runRepo.getById`
+// (see `run.agentEvents` below). No separate repo import needed here —
+// reusing the hydrated array avoids a redundant DB round-trip and keeps
+// the `data`-parse contract in one place (`runRepo.parseAgentEventRow`).
 import { signRunArtifacts, signArtifactUrl } from "../middleware/appSetup.js";
 import { redis, redisSub, isRedisAvailable } from "../utils/redisClient.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -164,6 +168,11 @@ router.get("/runs/:runId/events", (req, res) => {
   // legacy runs.logs JSON column — getById() already does this, but we
   // re-fetch here to ensure we have the latest rows even if the run object
   // was cached before recent appends.
+  //
+  // Task 2 — per-agent `agentEvents[]` is already hydrated on `run` by
+  // `runRepo.getById` (line 152) with `data` parsed via the shared
+  // `parseAgentEventRow` helper. Reuse it verbatim instead of re-fetching
+  // + re-parsing — one DB query per SSE connect, one parse contract.
   const signedRun = signRunArtifacts({
     ...run,
     logs: runLogRepo.getMessagesByRunId(run.id),

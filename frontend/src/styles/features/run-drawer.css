@@ -1,0 +1,217 @@
+/**
+ * @module styles/features/run-drawer
+ * @description Test Lab parallel-run drawer (G9).
+ *
+ * Bottom-anchored strip of cards, one per active run. Hidden when no
+ * runs are attached. Compact (~88px tall) so it doesn't dominate the
+ * page; cards scroll horizontally if N > visible width.
+ *
+ * Visual style mirrors the rest of Test Lab: same surface tokens, same
+ * border radius, same shadow rhythm. Per-tone variants (running /
+ * connecting / done / failed / aborted / queued) use the existing
+ * status palette so the drawer reads as a Test Lab native, not a bolted-on
+ * widget.
+ */
+.rd-drawer {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  padding: 8px 14px 10px;
+  /* Soft drop shadow upward so the drawer reads as floating above the
+     page footer. Matches the elevation of the topbar dropdown. */
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.06);
+}
+.rd-drawer__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.rd-drawer__title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+.rd-drawer__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 99px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+/* List — horizontal scrolling row of cards. Reset <ol> defaults. */
+.rd-drawer__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  /* Hide the scrollbar by default but keep scroll behaviour. Firefox
+     uses scrollbar-width, WebKit uses ::-webkit-scrollbar. The list
+     stays keyboard-scrollable via the cards' native focus + Tab. */
+  scrollbar-width: thin;
+}
+.rd-drawer__list::-webkit-scrollbar { height: 4px; }
+.rd-drawer__list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+.rd-drawer__item {
+  flex: 0 0 auto;
+}
+/* ── Card ─────────────────────────────────────────────────────────────── */
+.rd-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 220px;
+  padding: 8px 28px 8px 10px; /* right padding makes room for absolute .rd-card__dismiss */
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.rd-card:hover { border-color: var(--border2); box-shadow: var(--shadow-sm); }
+.rd-card--focused {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  /* Subtle outer ring instead of a thick border so the focused card
+     stands out without shifting layout (a thicker border would resize
+     the card by 1px). */
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* Tone variants. The accent stripe at the left edge gives the user a
+   peripheral signal of which run is in which state — useful when N
+   cards are visible at once. */
+.rd-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: transparent;
+}
+.rd-card--running::before    { background: var(--accent); }
+.rd-card--queued::before     { background: var(--text3); }
+.rd-card--connecting::before { background: var(--text3); }
+.rd-card--done::before       { background: var(--green); }
+.rd-card--failed::before     { background: var(--red); }
+.rd-card--aborted::before    { background: var(--amber); }
+/* ── Card head: project name + run type ─────────────────────────────── */
+.rd-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+.rd-card__name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rd-card__type {
+  font-size: 0.65rem;
+  color: var(--text3);
+  font-weight: 500;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+/* ── Card sub: status text + spinner ────────────────────────────────── */
+.rd-card__sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  color: var(--text2);
+  min-width: 0;
+}
+.rd-card__sub-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rd-card__spinner {
+  flex: 0 0 auto;
+  color: var(--accent);
+  animation: rd-spin 1.2s linear infinite;
+}
+.rd-card--failed   .rd-card__sub-text { color: var(--red); }
+.rd-card--aborted  .rd-card__sub-text { color: var(--amber); }
+.rd-card--done     .rd-card__sub-text { color: var(--green); }
+@keyframes rd-spin {
+  to { transform: rotate(360deg); }
+}
+/* ── Card progress bar ──────────────────────────────────────────────── */
+.rd-card__progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg2);
+  overflow: hidden;
+  margin-top: 2px;
+}
+.rd-card__progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+.rd-card--done    .rd-card__progress-fill { background: var(--green); }
+.rd-card--failed  .rd-card__progress-fill { background: var(--red); }
+.rd-card--aborted .rd-card__progress-fill { background: var(--amber); }
+/* ── Dismiss control ────────────────────────────────────────────────── */
+.rd-card__dismiss {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text3);
+  cursor: pointer;
+  /* Slightly recessed background on hover so the X target reads as
+     interactive without breaking the card's surface treatment. */
+  transition: background 0.12s, color 0.12s;
+}
+.rd-card__dismiss:hover {
+  background: var(--bg3);
+  color: var(--text);
+}
+.rd-card__dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* ── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .rd-drawer { padding: 6px 10px 8px; }
+  .rd-card   { width: 180px; padding: 6px 26px 6px 8px; }
+  .rd-card__name { font-size: 0.78rem; }
+  .rd-card__sub  { font-size: 0.68rem; }
+}

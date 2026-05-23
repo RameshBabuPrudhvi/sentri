@@ -1,0 +1,253 @@
+/**
+ * Multi-agent conversation feed — Test Lab pipeline middle column.
+ *
+ * BEM-style `.ac-*` namespace. Replaces the legacy `.tl-narrative-feed` /
+ * `.tl-nf-*` rules under `pages/test-lab.css` which served the prior
+ * single-narrator NarrativeFeed component.
+ *
+ * Layout:
+ *
+ *   .ac-feed (scroll container, role=log)
+ *     .ac-thinking      (only when displayed.length === 0)
+ *     .ac-turn          (role=article)
+ *       .ac-avatar      (left, agent icon + color)
+ *       .ac-bubble      (right, agent label + model + text)
+ *         .ac-meta      (label · model)
+ *         .ac-text      (bubble body + cursor)
+ *
+ * Per-agent palette resolves from CSS custom properties so adding a new
+ * agent (e.g. Oracle / Reviewer after AUTO-023) is a one-rule extension
+ * — no new component file needed.
+ */
+
+/* ─── Scroll container ─────────────────────────────────────────────────── */
+
+.ac-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 100%;
+}
+
+/* ─── Per-agent palette ────────────────────────────────────────────────────
+ *
+ * Each agent gets a CSS custom property pair: --ac-<color>-bg + --ac-<color>-fg.
+ * The bubble + avatar use these via the `.ac-turn--<color>` / `.ac-avatar--<color>`
+ * modifiers. Defining them as variables (not direct rules) means a future
+ * "high-contrast" or "color-blind" theme can override the palette at the
+ * `.ac-feed` level without per-modifier rewrites.
+ */
+.ac-feed {
+  --ac-explorer-bg:     rgba(168, 85, 247, 0.10);
+  --ac-explorer-fg:     #9333ea;
+  --ac-explorer-border: rgba(168, 85, 247, 0.25);
+
+  --ac-planner-bg:     rgba(20, 184, 166, 0.10);
+  --ac-planner-fg:     #0d9488;
+  --ac-planner-border: rgba(20, 184, 166, 0.25);
+
+  --ac-author-bg:     rgba(91, 110, 245, 0.10);
+  --ac-author-fg:     var(--accent);
+  --ac-author-border: rgba(91, 110, 245, 0.25);
+
+  --ac-oracle-bg:     rgba(245, 158, 11, 0.10);
+  --ac-oracle-fg:     #d97706;
+  --ac-oracle-border: rgba(245, 158, 11, 0.25);
+
+  --ac-reviewer-bg:     rgba(74, 222, 128, 0.10);
+  --ac-reviewer-fg:     var(--green);
+  --ac-reviewer-border: rgba(74, 222, 128, 0.25);
+}
+
+/* ─── Turn (article) ──────────────────────────────────────────────────────── */
+
+.ac-turn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  animation: ac-turn-in 0.22s ease;
+}
+@keyframes ac-turn-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ─── Avatar ──────────────────────────────────────────────────────────────── */
+
+.ac-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  border: 1.5px solid transparent;
+}
+.ac-avatar--explorer { background: var(--ac-explorer-bg); border-color: var(--ac-explorer-border); }
+.ac-avatar--planner  { background: var(--ac-planner-bg);  border-color: var(--ac-planner-border); }
+.ac-avatar--author   { background: var(--ac-author-bg);   border-color: var(--ac-author-border); }
+.ac-avatar--oracle   { background: var(--ac-oracle-bg);   border-color: var(--ac-oracle-border); }
+.ac-avatar--reviewer { background: var(--ac-reviewer-bg); border-color: var(--ac-reviewer-border); }
+
+/* ─── Bubble ──────────────────────────────────────────────────────────────── */
+
+.ac-bubble {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ac-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-bottom: 3px;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.ac-agent-label {
+  font-weight: 600;
+}
+.ac-turn--explorer .ac-agent-label { color: var(--ac-explorer-fg); }
+.ac-turn--planner  .ac-agent-label { color: var(--ac-planner-fg); }
+.ac-turn--author   .ac-agent-label { color: var(--ac-author-fg); }
+.ac-turn--oracle   .ac-agent-label { color: var(--ac-oracle-fg); }
+.ac-turn--reviewer .ac-agent-label { color: var(--ac-reviewer-fg); }
+
+.ac-model {
+  color: var(--text3);
+  font-weight: 500;
+  font-size: 0.68rem;
+}
+
+.ac-text {
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  /* `eventsToTurns` joins doing + finding text with `\n` so the finding
+     reads as a visually separate paragraph. `pre-line` collapses runs of
+     spaces (unlike `pre-wrap`) but honours explicit newlines. */
+  white-space: pre-line;
+}
+.ac-turn--explorer .ac-text { background: var(--ac-explorer-bg); border-color: var(--ac-explorer-border); }
+.ac-turn--planner  .ac-text { background: var(--ac-planner-bg);  border-color: var(--ac-planner-border); }
+.ac-turn--author   .ac-text { background: var(--ac-author-bg);   border-color: var(--ac-author-border); }
+.ac-turn--oracle   .ac-text { background: var(--ac-oracle-bg);   border-color: var(--ac-oracle-border); }
+.ac-turn--reviewer .ac-text { background: var(--ac-reviewer-bg); border-color: var(--ac-reviewer-border); }
+
+/* ─── Handoff variant ─────────────────────────────────────────────────────────
+ * Handoff turns are visually slimmer than findings/doing turns — the
+ * conversation reads as a beat, not a paragraph. No bubble background, no
+ * meta line, italic muted text. The avatar still shows so the user can see
+ * who is making the handoff. */
+
+.ac-turn--handoff .ac-text {
+  background: transparent;
+  border-color: transparent;
+  padding: 4px 0;
+  color: var(--text2);
+  font-style: italic;
+  font-size: 0.78rem;
+}
+.ac-turn--handoff .ac-avatar {
+  /* Shrink to indicate this is a transitional turn, not the agent's primary
+     contribution. Keeps the visual rhythm continuous without conflating
+     handoffs with full doing/finding turns. */
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+/* ─── Stat chip (finding turns) ─────────────────────────────────────────────
+ * Scannable summary pill on completed finding turns — "47 pages found",
+ * "12 tests written". Mirrors the old NarrativeFeed's `.tl-nf-stat` green
+ * pill. Only rendered when the turn is done streaming AND the synthesizer
+ * populated `_stat`. */
+
+.ac-stat {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--green-bg);
+  border: 1px solid var(--green);
+  font-size: 0.72rem;
+  color: var(--green);
+  font-weight: 500;
+}
+.ac-stat strong { font-weight: 700; margin-right: 3px; }
+
+/* ─── Streaming cursor ──────────────────────────────────────────────────────
+ * Renders ONLY while a turn's `status === "streaming"`. By construction
+ * (component logic), the thinking-dots indicator and this cursor can never
+ * both be on screen at the same time. */
+
+.ac-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.9em;
+  background: currentColor;
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: ac-blink 0.85s step-start infinite;
+}
+@keyframes ac-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+/* ─── Thinking indicator (empty-state) ───────────────────────────────────────
+ * Mutually exclusive with `.ac-cursor` by component construction (renders
+ * only when `displayed.length === 0`). */
+
+.ac-thinking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 4px;
+  color: var(--text2);
+}
+
+.ac-thinking-text {
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.ac-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.ac-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: ac-bounce 1.2s ease-in-out infinite;
+}
+.ac-dots span:nth-child(2) { animation-delay: 0.16s; }
+.ac-dots span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes ac-bounce {
+  0%, 70%, 100% { opacity: 0.25; transform: translateY(0); }
+  35%           { opacity: 1;    transform: translateY(-3px); }
+}
+
+/* ─── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .ac-feed { padding: 12px 12px; gap: 12px; }
+  .ac-avatar { width: 28px; height: 28px; font-size: 14px; }
+  .ac-text { padding: 7px 10px; font-size: 0.82rem; }
+}
