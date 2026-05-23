@@ -690,6 +690,9 @@ export const api = {
     req("GET", `/projects/${id}/runs?page=${page}&pageSize=${pageSize}`),
   /** @param {string} runId - Get full run detail with per-test results. */
   getRun:    (runId) => req("GET", `/runs/${runId}`),
+  /** GAP-005 (migration 056): per-run AI request log for the Agent Call Timeline.
+   *  Admin-gated — returns [] for non-admin callers (backend returns 403). */
+  getRunAIRequests: (runId) => req("GET", `/runs/${runId}/ai-requests`),
   getRunCompare: (runId, otherRunId) => req("GET", `/runs/${runId}/compare/${otherRunId}`),
   /** @param {string} runId - Abort a running crawl or test run. */
   abortRun:  (runId) => req("POST", `/runs/${runId}/abort`),

@@ -512,7 +512,9 @@ export async function regenerateFailingTest(improvement, signal) {
       try { workspaceId = projectRepo.getById(test.projectId)?.workspaceId || null; }
       catch { /* DB unavailable — fall back to env-default routing */ }
     }
-    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId });
+    // GAP-005 (migration 056): thread `run.id` so the AI request log row
+    // is correlated to the run that triggered the regeneration.
+    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: run?.id || null });
     const improved = parseJSON(text);
 
     // Only pick safe fields from the AI response — never let the LLM

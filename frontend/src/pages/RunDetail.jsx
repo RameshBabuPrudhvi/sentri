@@ -31,6 +31,7 @@ import AgentTag from "../components/shared/AgentTag.jsx";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import GateBadge from "../components/shared/GateBadge.jsx";
 import Breadcrumb from "../components/shared/Breadcrumb.jsx";
+import AgentCallTimeline from "../components/run/AgentCallTimeline.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { countNonExecutedSkips } from "../utils/skipReasons.js";
 
@@ -991,6 +992,15 @@ export default function RunDetail() {
         <GenerateView run={run} isRunning={isRunning} llmTokens={llmTokens} />
       ) : (
         <TestRunView run={run} frames={frames} />
+      )}
+
+      {/* ── GAP-005 (audit, Path B): Agent Call Timeline ─────────────────
+          Per-run AI call drill-down. Renders a collapsible card that lazy-
+          fetches `GET /runs/:runId/ai-requests` on click. Admin-gated on the
+          backend; non-admin users see an empty state. Only shown for crawl
+          and generate runs (test_run doesn't make AI calls). */}
+      {(isCrawl || isGenerate) && !isRunning && (
+        <AgentCallTimeline runId={runId} />
       )}
 
       {/* ── Quality Analytics (shown when run has analytics data) ──────── */}

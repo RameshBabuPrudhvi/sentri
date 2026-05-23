@@ -39,6 +39,7 @@ import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js"
 import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
+import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
 import { trackTelemetry } from "../utils/telemetry.js";
 import { runQueue, isQueueAvailable } from "../queue.js";
 import { fireNotifications } from "../utils/notifications.js";
@@ -717,6 +718,28 @@ router.delete("/projects/:id/trigger-tokens/:tid", requireRole("admin"), (req, r
   });
 
   res.json({ ok: true });
+});
+
+// ─── Per-run AI request log (GAP-005, migration 056) ──────────────────────────
+//
+// Admin-gated endpoint that returns every `ai_request_log` row correlated to
+// a specific run. Enables the RunDetail "Agent Call Timeline" component to
+// show per-call latency, tokens, cost, model, and (when `aiRequestLogMode`
+// is "redacted" or "full") the prompt/response text.
+//
+// Workspace ACL is enforced by the `workspaceId` predicate inside
+// `aiRequestLogRepo.listByRun` — a runId that belongs to a different
+// workspace returns zero rows, not a 403, so runId guessing doesn't leak
+// cross-workspace data.
+
+router.get("/runs/:runId/ai-requests", requireRole("admin"), (req, res) => {
+  const run = runRepo.getById(req.params.runId);
+  if (!run) return res.status(404).json({ error: "not found" });
+  const project = projectRepo.getByIdInWorkspace(run.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+
+  const rows = aiRequestLogRepo.listByRun(req.workspaceId, req.params.runId);
+  res.json(rows);
 });
 
 export default router;
