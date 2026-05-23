@@ -480,13 +480,18 @@ const NARRATIVE_STAGES = [
     step: 4,
     label: "Writing tests",
     lines: [
-      "Starting to write Playwright tests — one journey at a time.",
-      "Using stable selectors: data-testid where available, then ARIA roles.",
-      "Adding wait conditions so tests don't flake on slow page loads.",
+      // Wording stays format-agnostic — every generated test carries both
+      // manual `steps[]` (readable by humans / Zephyr / TestRail) and
+      // `playwrightCode` (runnable). Saying "Playwright" here would imply
+      // the output is automation-only and would also break once the planned
+      // BDD/Gherkin export (ROADMAP MNT-005) lands.
+      "Starting to write tests — one journey at a time.",
+      "Picking stable selectors and adding wait conditions so the tests don't flake.",
+      "Capturing each step in plain English alongside the runnable code.",
       (v) => {
         if (!v || v <= 0) return "No tests were generated — there were no viable journeys to encode.";
-        if (v === 1)      return "Generated 1 Playwright test targeting a real user action end-to-end.";
-        return `Generated ${v} Playwright tests, each targeting a real user action end-to-end.`;
+        if (v === 1)      return "Generated 1 test targeting a real user action end-to-end.";
+        return `Generated ${v} tests, each targeting a real user action end-to-end.`;
       },
     ],
     // Real test filenames pulled from `run.tests × allTests` — same join the
