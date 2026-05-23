@@ -507,6 +507,37 @@
     max-height: calc(100vh - 24px);
   }
 
+  /* MOB-001 follow-up: side-by-side selects inside modal forms (e.g.
+     Locale + Timezone in RunRegressionModal) overflow on phones because
+     the parent `.modal-panel` is already at `100vw - 24px`. Stack them so
+     each field has the full panel width and the labels stay readable. */
+  .modal-form-row--inline {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* MOB-001 follow-up: modal action footer — right-aligned button row
+     wraps when both Cancel + Save outgrow the narrow panel. Letting it
+     stretch full-width prevents the buttons from being cropped by the
+     panel's overflow:hidden. */
+  .modal-form-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .modal-form-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* MOB-001 follow-up: tighten the form header padding so the title +
+     close-button row doesn't dominate the panel on phones. */
+  .modal-form-header {
+    padding: 14px 16px 12px;
+  }
+  .modal-form-body {
+    padding: 16px;
+  }
+
   /* Banners: stack icon + text vertically when text is long */
   .banner {
     flex-wrap: wrap;

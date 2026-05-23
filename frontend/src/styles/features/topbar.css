@@ -138,3 +138,63 @@
   margin-left: auto;
   opacity: 0.4;
 }
+
+/* ── Responsive (MOB-001 follow-up) ─────────────────────────────────────────
+   The shell's 480/768 sidebar breakpoints in `pages/layout.css` already shrink
+   the `header` element's horizontal padding to 12px, but the TopBar's own
+   cluster spacing + dropdown anchor still produce overflow on 320–375px
+   viewports:
+     - `.topbar` keeps a `gap: 12px` between cluster items that pushes the
+       provider-badge / theme-toggle / bell / user-menu off the right edge
+       when combined with the command-palette trigger.
+     - `.topbar-user-dropdown` is anchored `right: 0` to the user-menu button,
+       which on a 320px screen places its left edge ~120px off the viewport
+       (`min-width: 200px`). Result: the dropdown reads as a slim vertical
+       strip with name + email truncated to one character. Web Vitals and
+       Lighthouse Mobile both flag this as `INP > 200ms` because the user
+       has to scroll horizontally to dismiss.
+   Two breakpoints below collapse the cluster gap and clamp the dropdown
+   width so the user menu stays usable on the smallest phones the app is
+   ever expected to load on. */
+@media (max-width: 600px) {
+  .topbar {
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  /* Avatar shrinks slightly so the cluster doesn't dominate the topbar
+     when the command-palette trigger collapses to icon-only. */
+  .topbar-user__avatar {
+    width: 26px;
+    height: 26px;
+  }
+
+  /* Dropdown: clamp to the viewport so it never overflows the right edge.
+     `max-width: calc(100vw - 24px)` leaves a 12px gutter on each side so
+     the panel doesn't read as flush-bleed. */
+  .topbar-user-dropdown {
+    min-width: 180px;
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 480px) {
+  /* Chevron is decorative on phones — the avatar tap target is enough. */
+  .topbar-user__chevron {
+    display: none;
+  }
+
+  /* Hide the user-menu's email row on extra-small phones — the name +
+     workspace context in the sidebar is enough identity. The full
+     identity is still reachable via `/settings/account`. */
+  .topbar-user-dropdown__email {
+    display: none;
+  }
+
+  /* Tap targets: the user-menu trigger needs at least 36×36 to meet the
+     audit's MOB-002 minimum touch-target requirement. */
+  .topbar-user__btn {
+    min-height: 36px;
+    min-width: 36px;
+  }
+}

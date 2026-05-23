@@ -1120,4 +1120,70 @@
     gap: 4px;
     padding: 10px 16px;
   }
+
+  /* MOB-001 follow-up: members section — invite form and per-member rows.
+     The invite form already wraps via `flex-wrap: wrap`, but on a 375px
+     viewport the role select (130px) + submit button (auto) sit beside
+     each other and the email field above stretches edge-to-edge, leaving
+     awkward horizontal slack. Force a single column so each field claims
+     the full width and the submit CTA reads as a primary action. */
+  .members-invite-form {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .members-invite__email,
+  .members-invite__role {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .members-invite__submit {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Member row: avatar + body + role-select + remove button. The role
+     select keeps its 110px on tablets but at 375px the row overflows
+     because email truncation + select + button competes for space.
+     Allow wrapping and let the role-select / remove sit on a second
+     line beneath the identity block. */
+  .members-row {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .members-row__body {
+    flex: 1 1 100%;
+  }
+  .members-row__role-select {
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  /* MOB-001 follow-up: integrations row is a fixed 5-column grid
+     (`1.2fr 1fr 1fr auto auto`) that crushes inputs to ~60px each on a
+     375px viewport. Stack on phones so each field stays usable. */
+  .integrations-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  /* MOB-001 follow-up: MFA factor row — the row already uses flex-wrap,
+     but the `.factor-row__info` block keeps a `min-width: 200px` that
+     overflows. Drop the min-width on phones so the description + button
+     stack cleanly. */
+  .factor-row__info {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  /* MOB-001 follow-up: recovery panel actions / TOTP enroll actions —
+     same flex-wrap rule as `.modal-form-actions`, applied here so MFA
+     setup remains operable on phones (the enroll flow is a critical
+     first-run gate). */
+  .recovery-panel__actions .btn,
+  .totp-enroll__actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }

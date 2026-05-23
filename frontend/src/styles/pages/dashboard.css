@@ -242,4 +242,34 @@
   .list-row .dash-hero-date {
     display: none;
   }
+
+  /* MOB-001 follow-up: coverage panel — the Browser/Server/Combined and
+     Lines/Branches/Functions segmented controls render inline with the
+     panel title via `.dash-cov-header-right`. On a 375px viewport the
+     two tablists + title compete for ~340px of content width and the
+     metric labels truncate to a single character. Wrap the header so
+     the tablists drop to a second row beneath the title. */
+  .dash-cov-header,
+  .dash-cov-header-left,
+  .dash-cov-header-right {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .dash-cov-header-right {
+    width: 100%;
+  }
+  .dash-cov-tab {
+    font-size: 0.66rem;
+    padding: 3px 7px;
+  }
+
+  /* MOB-001 follow-up: Web Vitals trend grid — already responsive via
+     `auto-fit, minmax(260px, 1fr)`, but the 260px floor keeps a single
+     card edge-to-edge at 375px with no inner padding for the chart
+     itself. Drop the floor so the cards can squeeze to ~92% viewport
+     width with the standard 16px page padding visible on both sides. */
+  .aap-webvitals-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
 }
