@@ -45,6 +45,12 @@ import AgentConversation from "../components/ai/AgentConversation.jsx";
 // `frontend/src/utils/pipelineState.js` for status semantics.
 import { stageStatus } from "../utils/pipelineState.js";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
+// AGENT.md §40 — helpers used by ≥2 call sites live in `utils/`, not inline.
+// `TestLabTabs` + `RetryButton` extracted from the inline IIFE + duplicated
+// banner/panel JSX that previously lived in this file.
+import TestLabTabs from "../components/test-lab/TestLabTabs.jsx";
+import RetryButton from "../components/test-lab/RetryButton.jsx";
+import { buildRetryPayload, resolveGenerateRetryFields } from "../utils/runRetry.js";
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1190,12 +1196,11 @@ export default function TestLab() {
       setError("Only crawl and generate runs can be retried.");
       return;
     }
-    // Pull config from the failed run's persisted shape. Fall back to the
-    // current `dialsConfig` state when `generateInput` is absent (legacy
-    // runs from before the field was persisted, or interrupted runs that
-    // never wrote the column).
-    const persistedDials = runData?.generateInput?.dialsConfig || dialsConfig;
-    const persistedEnv = runData?.environmentId || "";
+    // Payload-shaping logic lives in `utils/runRetry.js` so this handler
+    // stays focused on React side-effects (state writes + ensureAiProvider
+    // pre-flight + SSE reconnect-race guard). See that module for the
+    // legacy-run fallback contract.
+    const { body } = buildRetryPayload(runData, dialsConfig);
     setError(null);
     if (!(await ensureAiProvider())) return;
     setLaunching(true);
@@ -1207,20 +1212,14 @@ export default function TestLab() {
     clearPersistedRun();
     try {
       if (runType === "crawl") {
-        const body = { dialsConfig: persistedDials };
-        if (persistedEnv) body.environmentId = persistedEnv;
         const { runId } = await api.crawl(activeRun.projectId, body);
         setActiveRun({ runId, projectId: activeRun.projectId, type: "crawl" });
       } else {
-        // Generate retry — preserve the original name + description verbatim.
-        // The backend requires `name`, so we fall back to a derived label
-        // when the failed run's input is somehow missing (defence-in-depth;
-        // the column has been written since the feature shipped).
-        const input = runData?.generateInput || {};
-        const name = input.name || "Retry";
-        const description = input.description || "";
-        const genBody = { name, description, dialsConfig: persistedDials };
-        if (persistedEnv) genBody.environmentId = persistedEnv;
+        // Generate retry — `name` + `description` come from the persisted
+        // run via `resolveGenerateRetryFields` (defence-in-depth fallback
+        // when `generateInput` is missing on legacy/interrupted rows).
+        const { name, description } = resolveGenerateRetryFields(runData);
+        const genBody = { ...body, name, description };
         const { runId } = await api.generateTest(activeRun.projectId, genBody);
         setActiveRun({ runId, projectId: activeRun.projectId, type: "generate" });
       }
@@ -1393,74 +1392,13 @@ export default function TestLab() {
           <span className="tl-topbar__brand-tagline">AI test generation workspace</span>
         </div>
 
-        {/* G15 (a11y) — tab bar follows the WAI-ARIA APG tablist pattern.
-            Pre-fix: bare <button>s with no `role`, no `aria-selected`, no
-            arrow-key navigation. Post-fix: container is `role="tablist"`
-            (rendered as a fragment-wrapping comment because the parent
-            `.tl-topbar` already serves as the tablist surface — adding a
-            wrapper would require restyling), each tab is `role="tab"` +
-            `aria-selected`, and ←/→ arrow keys cycle through the three
-            tabs. Mirrors GitHub Settings / Linear / Vercel tab patterns.
-            The brand cluster + Record button stay inside `.tl-topbar` but
-            outside the logical tablist (they're `role="presentation"` by
-            virtue of being non-tab children — screen readers skip them
-            in tab navigation). */}
-        {(() => {
-          const TABS = ["crawl", "requirement", "queue"];
-          const onTabKeyDown = (e) => {
-            if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-            e.preventDefault();
-            const i = TABS.indexOf(tab);
-            const next = e.key === "ArrowRight"
-              ? TABS[(i + 1) % TABS.length]
-              : TABS[(i - 1 + TABS.length) % TABS.length];
-            setTab(next);
-          };
-          return (
-            <>
-              <button
-                role="tab"
-                aria-selected={tab === "crawl"}
-                aria-controls="tl-tab-panel-crawl"
-                tabIndex={tab === "crawl" ? 0 : -1}
-                className={`tl-tab-btn${tab === "crawl" ? " tl-tab-btn--active" : ""}`}
-                onClick={() => setTab("crawl")}
-                onKeyDown={onTabKeyDown}
-              >
-                <Link2 size={14} />
-                Crawl &amp; Generate
-              </button>
-              <button
-                role="tab"
-                aria-selected={tab === "requirement"}
-                aria-controls="tl-tab-panel-requirement"
-                tabIndex={tab === "requirement" ? 0 : -1}
-                className={`tl-tab-btn${tab === "requirement" ? " tl-tab-btn--active" : ""}`}
-                onClick={() => setTab("requirement")}
-                onKeyDown={onTabKeyDown}
-              >
-                <Zap size={14} />
-                Generate from Requirement
-              </button>
-              <button
-                role="tab"
-                aria-selected={tab === "queue"}
-                aria-controls="tl-tab-panel-queue"
-                tabIndex={tab === "queue" ? 0 : -1}
-                className={`tl-tab-btn${tab === "queue" ? " tl-tab-btn--active" : ""}`}
-                onClick={() => setTab("queue")}
-                onKeyDown={onTabKeyDown}
-              >
-                Queue
-                {activeQueueRuns.length > 0 && (
-                  <span className="tl-tab-badge" aria-label={`${activeQueueRuns.length} active`}>
-                    {activeQueueRuns.length}
-                  </span>
-                )}
-              </button>
-            </>
-          );
-        })()}
+        {/* G15 (a11y) — WAI-ARIA APG tablist. Implementation + comments
+            live in `frontend/src/components/test-lab/TestLabTabs.jsx`. */}
+        <TestLabTabs
+          tab={tab}
+          onChange={setTab}
+          activeQueueCount={activeQueueRuns.length}
+        />
 
         {/* Record action — right-aligned, styled as a primary CTA so it
             reads as a peer to the tabs rather than disappearing as a ghost
@@ -1785,23 +1723,16 @@ export default function TestLab() {
                     <strong>{runStatus === "aborted" ? "Run aborted" : "Run failed"}</strong>
                     {runData?.error ? ` — ${runData.error}` : "."}
                     {/* G11 — Retry uses the same dialsConfig + environmentId
-                        from the failed run. Disabled while a re-launch is
-                        in flight (`launching` from handleRetry) so a double-
-                        click can't fire two crawl requests. Rendered as
-                        primary so the recovery action stands out from the
-                        secondary View / Dismiss controls. */}
-                    <button
-                      className="btn btn-primary btn-xs tl-banner-spaced-btn-l"
-                      onClick={handleRetry}
-                      disabled={launching}
-                      title="Re-run with the same configuration"
-                    >
-                      {launching ? (
-                        <><span className="spin"><RotateCcw size={12} /></span> Retrying…</>
-                      ) : (
-                        <><RotateCcw size={12} /> Retry</>
-                      )}
-                    </button>
+                        from the failed run. Implementation in `RetryButton`;
+                        `launching` is shared with the page's other launch
+                        handlers so a concurrent crawl/generate also disables
+                        retry. */}
+                    <RetryButton
+                      onRetry={handleRetry}
+                      launching={launching}
+                      size="sm"
+                      className="tl-banner-spaced-btn-l"
+                    />
                     <button
                       className="btn btn-ghost btn-xs tl-banner-spaced-btn-s"
                       onClick={() => navigate(`/runs/${activeRun.runId}`)}
