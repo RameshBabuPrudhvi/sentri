@@ -22,6 +22,10 @@
 import { getDatabase, getDatabaseDialect } from "../sqlite.js";
 import { parsePagination } from "../../utils/pagination.js";
 import * as runLogRepo from "./runLogRepo.js";
+// Task 2 — per-agent SSE events. Hydrated alongside `logs` on `getById` so
+// a reconnecting SSE client receives the full per-agent narrative replay
+// on the initial snapshot, not just events that arrived post-connect.
+import * as runAgentEventRepo from "./runAgentEventRepo.js";
 import { filterShardRetrySurvivors, countShardRetrySurvivors } from "../../utils/shardRetryFilter.js";
 import { runsTotal as metricsRunsTotal } from "../../utils/metrics.js"; // INF-007 — bump on every run-row creation.
 
@@ -379,7 +383,28 @@ export function getById(id) {
   } else if (row.logs) {
     try { run.logs = JSON.parse(row.logs); } catch { /* keep [] from rowToRun */ }
   }
+  // Task 2 — hydrate per-agent SSE event history. `data` lands as a JSON
+  // string in the DB; parse here so SSE-snapshot consumers don't have to
+  // care about the storage shape. Missing/malformed rows degrade to null,
+  // matching the JSON_FIELDS pattern used above for rowToRun.
+  run.agentEvents = runAgentEventRepo.getByRunId(id).map(parseAgentEventRow);
   return run;
+}
+
+/**
+ * Parse the `data` JSON column on a single agent-event row. Hoisted to
+ * module scope so both `getById` + `getByIdIncludeDeleted` share one
+ * implementation and the SSE snapshot builder can call it directly.
+ *
+ * @param {Object} row
+ * @returns {Object}
+ */
+function parseAgentEventRow(row) {
+  if (row.data) {
+    try { row.data = JSON.parse(row.data); }
+    catch { row.data = null; }
+  }
+  return row;
 }
 
 /**
@@ -400,6 +425,9 @@ export function getByIdIncludeDeleted(id) {
   } else if (row.logs) {
     try { run.logs = JSON.parse(row.logs); } catch { /* keep [] from rowToRun */ }
   }
+  // Task 2 — mirror the agent-event hydration from getById so restore /
+  // abort paths surface the same per-agent narrative replay.
+  run.agentEvents = runAgentEventRepo.getByRunId(id).map(parseAgentEventRow);
   return run;
 }
 
@@ -1168,6 +1196,9 @@ export function hardDeleteByProjectId(projectId) {
   const ids = db.prepare("SELECT id FROM runs WHERE projectId = ?").all(projectId).map(r => r.id);
   if (ids.length > 0) {
     runLogRepo.deleteByRunIds(ids);
+    // Task 2 — cascade into run_agent_events on project-level purge
+    // (mirrors the run_logs batch cascade so storage stays consistent).
+    runAgentEventRepo.deleteByRunIds(ids);
     db.prepare("DELETE FROM runs WHERE projectId = ?").run(projectId);
   }
   return ids;
@@ -1249,6 +1280,9 @@ export function getDeletedAll() {
 export function hardDeleteById(id) {
   const db = getDatabase();
   runLogRepo.deleteByRunId(id);
+  // Task 2 — cascade into run_agent_events so a purge removes the per-agent
+  // narrative replay alongside the run + log rows.
+  runAgentEventRepo.deleteByRunId(id);
   db.prepare("DELETE FROM runs WHERE id = ?").run(id);
 }
 

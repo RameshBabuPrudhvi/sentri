@@ -14,6 +14,11 @@
  */
 
 import { generateText, parseJSON, hasProvider } from "../aiProvider.js";
+// Task 2 — per-agent SSE events. `aiClassifyPage` is currently dead-code
+// (the `classifyPageWithAI` fallback early-returns above the AI call to
+// conserve provider quota), but the wrapping stays in place so the moment
+// the early-return is removed the NarrativeFeed lights up automatically.
+import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
 
 // ── Intent patterns ───────────────────────────────────────────────────────────
 
@@ -122,7 +127,7 @@ export function classifyElement(element) {
 
 const AI_THRESHOLD = parseInt(process.env.AI_CLASSIFY_THRESHOLD, 10) || 40;
 
-async function aiClassifyPage(snapshot, signal, workspaceId = null) {
+async function aiClassifyPage(snapshot, signal, workspaceId = null, runId = null) {
   const elements = (snapshot.elements || []).slice(0, 15).map(e => ({
     tag: e.tag, text: (e.text || "").slice(0, 40), role: e.role, type: e.type,
   }));
@@ -155,7 +160,17 @@ Return ONLY valid JSON (no markdown):
   "reason": "one-sentence explanation"
 }`;
 
-  const text = await generateText(prompt, { maxTokens: 256, signal, agentRole: "explorer", workspaceId });
+  // Step 3 — Classify. `explorer` reads page structure to identify intent.
+  // Co-stage with `planner` (journeyGenerator.generateJourneyTest) — the
+  // NarrativeFeed renders both badges side-by-side for step 3.
+  emitAgentEvent(runId, { step: 3, agent: "explorer", phase: "start",
+    message: `Classifying intent for ${snapshot?.url || "page"}` });
+  let text;
+  try {
+    text = await generateText(prompt, { maxTokens: 256, signal, agentRole: "explorer", workspaceId, runId });
+  } finally {
+    emitAgentEvent(runId, { step: 3, agent: "explorer", phase: "done" });
+  }
   const result = parseJSON(text);
   const intent = (result.intent || "").toUpperCase();
   const validIntents = ["AUTH", "CHECKOUT", "SEARCH", "FORM_SUBMISSION", "CRUD", "NAVIGATION", "CONTENT"];

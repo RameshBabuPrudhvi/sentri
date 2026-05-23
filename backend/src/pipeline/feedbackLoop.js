@@ -19,6 +19,11 @@
 
 import { generateText, parseJSON } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
+// Task 2 — per-agent SSE events. `regenerateFailingTest` is the post-run
+// quality-fix LLM call (the only AI call left in the feedback-loop stage),
+// so we emit start/done on step 7 — the "Validate / quality check" stage
+// users see in the NarrativeFeed.
+import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
@@ -535,7 +540,18 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     // ReferenceError on every regeneration, which the surrounding
     // try/catch swallowed and returned `null`, silently breaking the
     // feedback loop's auto-fix path on this PR.
-    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: options.runId || null });
+    // Step 7 — Quality check. `author` rewrites a test that failed validation
+    // (selector brittleness, weak assertions, etc.) so the post-run feedback
+    // loop has signal to surface in the NarrativeFeed's quality-review entry.
+    const _runId = options.runId || null;
+    emitAgentEvent(_runId, { step: 7, agent: "author", phase: "start",
+      message: `Repairing ${test?.name || "failing test"} (${failureCategory})` });
+    let text;
+    try {
+      text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: _runId });
+    } finally {
+      emitAgentEvent(_runId, { step: 7, agent: "author", phase: "done" });
+    }
     const improved = parseJSON(text);
 
     // Only pick safe fields from the AI response — never let the LLM

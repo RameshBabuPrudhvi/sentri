@@ -16,6 +16,9 @@ import { Router } from "express";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runLogRepo from "../database/repositories/runLogRepo.js";
+// Task 2 — per-agent SSE event history is hydrated alongside logs so a
+// reconnecting client gets the full replay on first byte.
+import * as runAgentEventRepo from "../database/repositories/runAgentEventRepo.js";
 import { signRunArtifacts, signArtifactUrl } from "../middleware/appSetup.js";
 import { redis, redisSub, isRedisAvailable } from "../utils/redisClient.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -164,9 +167,19 @@ router.get("/runs/:runId/events", (req, res) => {
   // legacy runs.logs JSON column — getById() already does this, but we
   // re-fetch here to ensure we have the latest rows even if the run object
   // was cached before recent appends.
+  // Task 2 — agent_event hydration: include the full per-agent narrative
+  // replay on the snapshot so a reconnecting client picks up where it left
+  // off without needing a separate REST round-trip. `data` is parsed into
+  // its structured shape here (the repo returns it as a TEXT JSON column)
+  // so consumers see the same shape on snapshot + live events.
+  const agentEvents = runAgentEventRepo.getByRunId(run.id).map(evt => ({
+    ...evt,
+    data: evt.data ? (() => { try { return JSON.parse(evt.data); } catch { return null; } })() : null,
+  }));
   const signedRun = signRunArtifacts({
     ...run,
     logs: runLogRepo.getMessagesByRunId(run.id),
+    agentEvents,
   });
   res.write(`data: ${JSON.stringify({ type: "snapshot", run: signedRun })}\n\n`);
 
