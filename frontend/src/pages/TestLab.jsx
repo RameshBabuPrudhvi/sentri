@@ -57,6 +57,9 @@ import RetryButton from "../components/test-lab/RetryButton.jsx";
 // only (no state shape changes).
 import QueueTab from "../components/test-lab/QueueTab.jsx";
 import { buildRetryPayload, resolveGenerateRetryFields } from "../utils/runRetry.js";
+// Run-center terminal banners (Done / Failed). Extracted so TestLab.jsx
+// stops growing every time we tweak the action-stack copy.
+import { RunDoneBanner, RunFailedBanner } from "../components/test-lab/RunBanners.jsx";
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1610,75 +1613,25 @@ export default function TestLab() {
               )}
 
               {/* Terminal banners — rendered at the top of the run view so the
-                  pipeline / logs stay visible underneath for review. */}
+                  pipeline / logs stay visible underneath for review. Both
+                  banner implementations live in `RunBanners.jsx`. */}
               {isRunDone && (
-                <div className="banner banner-success tl-banner-margin">
-                  <CheckCircle2 size={16} />
-                  <div className="tl-banner-body">
-                    <strong>Generation complete</strong> — {generatedOutcome.total} test{generatedOutcome.total !== 1 ? "s" : ""} generated
-                    {generatedOutcome.autoApproved > 0 && (
-                      <> · <span className="text-green">{generatedOutcome.autoApproved} auto-approved</span></>
-                    )}
-                    {generatedOutcome.drafts > 0 && (
-                      <> · {generatedOutcome.drafts} awaiting review</>
-                    )}
-                    .
-                    <div className="tl-banner-actions">
-                      {generatedOutcome.drafts > 0 && (
-                        <button
-                          className="btn btn-primary btn-xs"
-                          onClick={() => navigate(`/review-queue?projectId=${activeRun.projectId}`)}
-                        >
-                          Review {generatedOutcome.drafts} draft{generatedOutcome.drafts !== 1 ? "s" : ""} <ChevronRight size={12} />
-                        </button>
-                      )}
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => navigate(`/runs/${activeRun.runId}`)}
-                      >
-                        View run <ChevronRight size={12} />
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={handleReset}
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <RunDoneBanner
+                  activeRun={activeRun}
+                  generatedOutcome={generatedOutcome}
+                  onReset={handleReset}
+                />
               )}
 
               {isRunFailed && (
-                <div className="banner banner-error tl-banner-margin">
-                  <div>
-                    <strong>{runStatus === "aborted" ? "Run aborted" : "Run failed"}</strong>
-                    {runData?.error ? ` — ${runData.error}` : "."}
-                    {/* G11 — Retry uses the same dialsConfig + environmentId
-                        from the failed run. Implementation in `RetryButton`;
-                        `launching` is shared with the page's other launch
-                        handlers so a concurrent crawl/generate also disables
-                        retry. */}
-                    <RetryButton
-                      onRetry={handleRetry}
-                      launching={launching}
-                      size="sm"
-                      className="tl-banner-spaced-btn-l"
-                    />
-                    <button
-                      className="btn btn-ghost btn-xs tl-banner-spaced-btn-s"
-                      onClick={() => navigate(`/runs/${activeRun.runId}`)}
-                    >
-                      View run <ChevronRight size={12} />
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-xs tl-banner-spaced-btn-s"
-                      onClick={handleReset}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
+                <RunFailedBanner
+                  activeRun={activeRun}
+                  runData={runData}
+                  runStatus={runStatus}
+                  launching={launching}
+                  onRetry={handleRetry}
+                  onReset={handleReset}
+                />
               )}
 
               {(() => {
