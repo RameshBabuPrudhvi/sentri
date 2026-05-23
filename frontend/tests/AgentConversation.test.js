@@ -139,11 +139,17 @@ test("step 3 multi-agent: explorer handoff to planner (intra-step), planner hand
   assert.ok(ids.includes("3-planner-handoff"),   "planner → author handoff at end of step 3");
 });
 
-test("author 4 → 5 → 6 → 7 same-agent step transitions suppress redundant `accept` turns", () => {
-  // Author is the only multi-step agent. Step 4 opens with `accept` (a
-  // handoff arrived from Planner). Steps 5/6/7 are same-agent continuations
-  // and must NOT emit `accept` — the conversation reads as one person
-  // continuing, not formally accepting a handoff from themselves.
+test("author 4 → 5 → 6 → 7 — onboard at step 4, no redundant `accept` on 5/6/7", () => {
+  // Author is the only multi-step agent that arrives via handoff. Step 4
+  // is Author's FIRST appearance in the conversation, so the opening turn
+  // is `onboard` ("Author here. Writing tests…") — same convention as
+  // Explorer at step 1 and Planner at step 3. The "Thanks Planner" handoff
+  // is already rendered as Planner's `3-planner-handoff` turn the moment
+  // before, so Author's first turn doesn't need to repeat it.
+  //
+  // Steps 5/6/7 are same-agent continuations and must NOT emit `accept`
+  // OR `onboard` — the conversation reads as one person continuing, not
+  // formally accepting a handoff from themselves or re-introducing.
   const run = {
     runId: "RUN-1", currentStep: 8, status: "completed",
     pagesFound: 5, testsGenerated: 12, tests: [],
@@ -157,7 +163,9 @@ test("author 4 → 5 → 6 → 7 same-agent step transitions suppress redundant 
     allTests: [],
   });
   const ids = turns.map(t => t.id);
-  assert.ok(ids.includes("4-author-accept"),   "step 4: accept (Planner handed off)");
+  assert.ok(ids.includes("4-author-onboard"),  "step 4: onboard (first appearance)");
+  assert.ok(!ids.includes("4-author-accept"),  "step 4: NO accept (first appearance uses onboard, not accept)");
+  assert.ok(!ids.includes("5-author-onboard"), "step 5: NO re-onboard");
   assert.ok(!ids.includes("5-author-accept"),  "step 5: NO accept (same agent)");
   assert.ok(!ids.includes("6-author-accept"),  "step 6: NO accept");
   assert.ok(!ids.includes("7-author-accept"),  "step 7: NO accept");
