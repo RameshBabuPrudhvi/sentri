@@ -575,6 +575,35 @@ test("BOT_BLOCK: 'cloudflare challenge'", () => {
   assert.equal(classifyFailure("Stopped at cloudflare challenge page during navigation"), "BOT_BLOCK");
 });
 
+test("BOT_BLOCK: '/blocked' canonical path matches", () => {
+  // Cloudflare / WAF anti-bot landing page is at exactly `/blocked`. The
+  // path-segment anchor (`/blocked` followed by `/`, `?`, `#`, or EOL)
+  // must still match the canonical case.
+  assert.equal(classifyFailure("Navigation failed", { finalUrl: "https://example.com/blocked" }), "BOT_BLOCK");
+  assert.equal(classifyFailure("Navigation failed", { finalUrl: "https://example.com/blocked/" }), "BOT_BLOCK");
+  assert.equal(classifyFailure("Navigation failed", { finalUrl: "https://example.com/blocked?reason=bot" }), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: legitimate /blocked-* paths are NOT misclassified (BUG-0003 fix)", () => {
+  // Apps with admin features under `/blocked-users`, `/blocked-list`,
+  // `/blocked-accounts` must NOT trip BOT_BLOCK on the secondary
+  // locator-timeout error. Per the path-segment anchor.
+  const finalUrls = [
+    "https://app.example.com/users/blocked-users",
+    "https://app.example.com/admin/blocked-accounts",
+    "https://app.example.com/content/blocked-items",
+    "https://app.example.com/blocked-list",
+  ];
+  for (const finalUrl of finalUrls) {
+    const category = classifyFailure(
+      "waiting for locator('h3') timeout 15000ms exceeded",
+      { finalUrl },
+    );
+    assert.notEqual(category, "BOT_BLOCK",
+      `legitimate /blocked-* path ${finalUrl} must not be classified as BOT_BLOCK`);
+  }
+});
+
 test("BOT_BLOCK detected via finalUrl (when error message has no signal)", () => {
   // The dominant real-world case: the error text is just a generic
   // `waiting for locator('h3') timeout 15000ms exceeded` — but

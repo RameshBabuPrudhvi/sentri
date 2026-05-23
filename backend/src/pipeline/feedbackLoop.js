@@ -78,7 +78,15 @@ const FAILURE_PATTERNS = [
     // `/blocked` (Cloudflare's "you have been blocked" page, custom WAF
     // landing pages) falls through to SELECTOR_ISSUE on the secondary
     // locator timeout — defeating the entire reason this category exists.
-    /\/blocked/i,
+    //
+    // Anchored to a path-segment boundary (`/blocked` followed by `/`,
+    // `?`, `#`, or end-of-string) so legitimate application paths like
+    // `/users/blocked-list`, `/content/blocked-items`, or
+    // `/admin/blocked-accounts` are NOT misclassified as bot-blocks. The
+    // canonical anti-bot landing page is exactly `/blocked` (Cloudflare,
+    // most WAF vendors); apps that nest functionality under `/blocked-*`
+    // are a real-world false-positive risk per Lifeguard BUG-0003.
+    /\/blocked(?:[/?#]|$)/i,
     /recaptcha/i,
     /unusual traffic/i,
     /are you a robot/i,
@@ -488,12 +496,20 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
 }
 
 /**
- * regenerateFailingTest(improvement, signal) → improved test or null
+ * regenerateFailingTest(improvement, signal, options) → improved test or null
  *
  * Calls the AI to produce a fixed version of a failing test.
  * Accepts an optional AbortSignal so the operation can be cancelled.
+ *
+ * @param {Object} improvement       - From `analyzeRunResults`.
+ * @param {AbortSignal} [signal]     - Forwarded to the AI provider call.
+ * @param {Object} [options]
+ * @param {string} [options.runId]   - GAP-005 (migration 056): correlate
+ *   the AI request log row to the originating run. The caller
+ *   (`applyFeedbackLoop` below) passes `run.id`; standalone callers may
+ *   omit it and the column simply stays NULL.
  */
-export async function regenerateFailingTest(improvement, signal) {
+export async function regenerateFailingTest(improvement, signal, options = {}) {
   const { test, failureCategory, errorMessage, snapshot } = improvement;
 
   try {
@@ -512,9 +528,14 @@ export async function regenerateFailingTest(improvement, signal) {
       try { workspaceId = projectRepo.getById(test.projectId)?.workspaceId || null; }
       catch { /* DB unavailable — fall back to env-default routing */ }
     }
-    // GAP-005 (migration 056): thread `run.id` so the AI request log row
-    // is correlated to the run that triggered the regeneration.
-    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: run?.id || null });
+    // GAP-005 (migration 056): thread the originating runId (from
+    // `options.runId`) so the AI request log row is correlated to the
+    // run that triggered the regeneration. Was previously written as
+    // `run?.id` referencing an undefined `run` variable — that threw a
+    // ReferenceError on every regeneration, which the surrounding
+    // try/catch swallowed and returned `null`, silently breaking the
+    // feedback loop's auto-fix path on this PR.
+    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: options.runId || null });
     const improved = parseJSON(text);
 
     // Only pick safe fields from the AI response — never let the LLM
@@ -580,7 +601,7 @@ export async function applyFeedbackLoop(run, { signal } = {}) {
   for (const improvement of improvements) {
     if (improvement.priority !== "high") continue; // Only auto-fix high priority failures
     if (signal?.aborted) break; // Respect abort signal between AI calls
-    const regenerated = await regenerateFailingTest(improvement, signal);
+    const regenerated = await regenerateFailingTest(improvement, signal, { runId: run.id });
     if (regenerated) {
       // Route regenerated tests back through human review instead of
       // auto-approving. This preserves the "nothing executes until a
@@ -649,6 +670,13 @@ export async function applyFeedbackLoop(run, { signal } = {}) {
           workspaceId: project?.workspaceId || null,
           testId: improvement.testId,
           testName: improvement.test.name,
+          // ENT-004 (migration 055) — pass `runId` as a first-class arg
+          // for consistency with every other PR-modified `logActivity`
+          // call site (routes/runs.js, routes/tests.js). The legacy
+          // `meta.runId` fallback in `activityLogger.js` still works,
+          // but explicit-arg is the canonical shape and won't break if
+          // the auto-derive fallback is ever removed.
+          runId: run.id,
           userId: "system",
           userName: "auto-feedback-loop",
           detail: wasApproved

@@ -263,6 +263,7 @@ async function processJob(job) {
           type: "crawl.complete",
           projectId: project.id,
           projectName: project.name,
+          runId, // ENT-004 (migration 055): per-run audit deep-link
           detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
         });
       }
@@ -310,6 +311,7 @@ async function processJob(job) {
           type: "test_run.complete",
           projectId: project.id,
           projectName: project.name,
+          runId, // ENT-004 (migration 055): per-run audit deep-link
           detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
         });
       }
@@ -468,6 +470,7 @@ async function processJob(job) {
           type: `${runType === "crawl" ? "crawl" : "test_run"}.fail`,
           projectId: project.id,
           projectName: project.name,
+          runId, // ENT-004 (migration 055): per-run audit deep-link
           detail: `${runType === "crawl" ? "Crawl" : "Test run"} failed: ${classified.message}`,
           status: "failed",
         });
@@ -1045,6 +1048,7 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     type: "test_run.complete",
     projectId: project.id,
     projectName: project.name,
+    runId, // ENT-004 (migration 055): per-run audit deep-link (sharded path)
     detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed (${run.shardCount}× shards)`,
   });
   emitRunEvent(runId, "done", {

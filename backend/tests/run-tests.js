@@ -73,6 +73,10 @@ const files = [
   // round-trip. Locks down the Lifeguard-flagged VALID_COLS regression so
   // future refactors of testRepo.update can't silently drop the field.
   "tests/test-review-comment.test.js",
+  // GAP-005 (audit, migration 056) — `aiRequestLogRepo.listByRun` regression
+  // coverage. Pins workspace ACL, chronological ordering, null-runId
+  // exclusion, and limit clamping for the new exported repo method.
+  "tests/ai-request-log-list-by-run.test.js",
   // SEC-007 Part C — SIEM forwarder (HMAC + retry + DLQ + config CRUD).
   "tests/audit-siem-forwarder.test.js",
   "tests/postgres-adapter.test.js",
