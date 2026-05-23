@@ -81,10 +81,32 @@ function saveToStorage(notifications) {
 export function NotificationProvider({ children }) {
   const [notifications, setNotifications] = useState(loadFromStorage);
 
-  // Sync to localStorage whenever notifications change
+  // Sync to localStorage whenever notifications change.
+  //
+  // On the FIRST render we still write back — but only if `loadFromStorage`
+  // actually sanitized something (legacy `[object Object]` entries from
+  // pre-fix callsites). Without this, the sanitized array lives only in
+  // React state and the bad localStorage payload persists across reloads
+  // until a notification mutation triggers a save. The acceptance criterion
+  // at `docs/roadmap/sentri-ux-audit-22May2026.md` requires durable cleanup
+  // on next page load. Detecting "sanitization occurred" up-front avoids
+  // an unnecessary write on the happy path (clean storage → no-op).
   const isFirstRender = useRef(true);
+  const needsRehydrate = useRef(false);
+  if (isFirstRender.current && typeof window !== "undefined") {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw && raw !== JSON.stringify(notifications.slice(0, MAX_NOTIFICATIONS))) {
+        needsRehydrate.current = true;
+      }
+    } catch { /* localStorage unavailable */ }
+  }
   useEffect(() => {
-    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      if (needsRehydrate.current) saveToStorage(notifications);
+      return;
+    }
     saveToStorage(notifications);
   }, [notifications]);
 

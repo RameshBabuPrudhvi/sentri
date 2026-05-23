@@ -62,6 +62,13 @@ const FAILURE_PATTERNS = [
   // "this site blocks automation" is the only honest message — no amount of
   // selector self-healing or assertion softening recovers from an
   // interstitial that intentionally hides the real page.
+  // NOTE: `/access denied/i` is intentionally OMITTED — it matches generic
+  // HTTP 403 authorization failures (e.g. `"Error: Access denied — insufficient
+  // permissions for /admin"`), which are NOT bot-block interstitials. Classifying
+  // them as BOT_BLOCK would skip auto-regeneration on legitimate auth-needed
+  // tests. Bot-detection pages reliably surface one of the URL/text patterns
+  // below; falling back to UNKNOWN for naked "access denied" preserves the
+  // feedback loop's chance to repair an auth-flow test.
   ["BOT_BLOCK", [
     /\/sorry\//i,
     /\/captcha/i,
@@ -70,7 +77,6 @@ const FAILURE_PATTERNS = [
     /unusual traffic/i,
     /are you a robot/i,
     /detected unusual traffic/i,
-    /access denied/i,
     /verify you are human/i,
     /cloudflare.*challenge/i,
   ]],
@@ -146,7 +152,18 @@ export function classifyFailure(errorMessage, context = {}) {
   const finalUrl = typeof context?.finalUrl === "string" ? context.finalUrl : "";
   if (!errorMessage && !finalUrl) return "UNKNOWN";
   for (const [category, patterns] of FAILURE_PATTERNS) {
-    if (patterns.some(p => (errorMessage && p.test(errorMessage)) || (finalUrl && p.test(finalUrl)))) {
+    // `finalUrl` is ONLY consulted for BOT_BLOCK. The other categories'
+    // patterns are tuned for Playwright error text — letting them match
+    // arbitrary URL substrings (e.g. `executeTest.js` falls back to
+    // `test.sourceUrl` when the live page URL is blank, so a test sourced
+    // from `https://example.com/expect/received` could spuriously trigger
+    // ASSERTION_FAIL's `/expect.*received/i`) misclassifies failures and
+    // distorts the dashboard's defect breakdown.
+    const allowUrlMatch = category === "BOT_BLOCK";
+    if (patterns.some(p =>
+      (errorMessage && p.test(errorMessage)) ||
+      (allowUrlMatch && finalUrl && p.test(finalUrl))
+    )) {
       return category;
     }
   }

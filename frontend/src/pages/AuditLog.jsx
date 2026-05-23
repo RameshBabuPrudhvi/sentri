@@ -625,9 +625,15 @@ export default function AuditLog() {
     today.setHours(0, 0, 0, 0);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
+    // ENT-004: include `audit.read` / `audit.export` meta-audit rows in
+    // the stats batch so "Events today" reflects workspace-wide volume,
+    // not just the filtered feed shape. Without `includeAuditReads`, the
+    // backend's new default `excludeTypes = ["audit.read","audit.export"]`
+    // silently drops those rows from the count — contradicting the comment
+    // above that promised workspace-wide totals independent of UI filters.
     Promise.all([
-      api.getWorkspaceAuditLog(workspaceId, { dateFrom: today.toISOString(),       limit: 500 }),
-      api.getWorkspaceAuditLog(workspaceId, { dateFrom: sevenDaysAgo.toISOString(), limit: 1000 }),
+      api.getWorkspaceAuditLog(workspaceId, { dateFrom: today.toISOString(),       limit: 500,  includeAuditReads: "true" }),
+      api.getWorkspaceAuditLog(workspaceId, { dateFrom: sevenDaysAgo.toISOString(), limit: 1000, includeAuditReads: "true" }),
     ])
       .then(([todayRes, weekRes]) => {
         const todayArr  = Array.isArray(todayRes?.rows) ? todayRes.rows : [];
@@ -821,6 +827,13 @@ export default function AuditLog() {
     params.set("format", format);
     if (projectId !== "all") params.set("projectId", projectId);
     if (filterTypes) filterTypes.forEach((t) => params.append("type", t));
+    // ENT-004: forward the URL-driven entity + meta-audit filters so the
+    // exported file matches the row set the admin sees on screen. Without
+    // these, deep-linking to `/audit-log?testId=…` and clicking Export CSV
+    // dumps the entire workspace's audit log, defeating the filter chip.
+    if (testIdFilter) params.set("testId", testIdFilter);
+    if (runIdFilter) params.set("runId", runIdFilter);
+    if (includeAuditReads) params.set("includeAuditReads", "true");
     if (debouncedQ) {
       // The server has no `q` param yet; document the limitation in the
       // notification so an evidence-pulling admin knows the file matches

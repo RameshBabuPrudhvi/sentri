@@ -27,7 +27,27 @@
 import assert from "node:assert/strict";
 import { resetDb } from "./helpers/test-base.js";
 import * as activityRepo from "../src/database/repositories/activityRepo.js";
+import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import { logActivity } from "../src/utils/activityLogger.js";
+
+// FK setup — `activities.projectId` references `projects.id` ON DELETE
+// CASCADE (`001_initial_schema.sql`). Without the parent project rows the
+// `activityRepo.create()` INSERT trips `SQLITE_CONSTRAINT_FOREIGNKEY`.
+// Inserting once at module load is sufficient because `resetDb()` (called
+// in `main()`) drops and re-creates the schema — we then re-create the
+// projects right after the reset.
+function seedProjects() {
+  const now = new Date().toISOString();
+  for (const id of ["PRJ-test", "PRJ-other"]) {
+    projectRepo.create({
+      id,
+      name: id,
+      url: "https://example.com",
+      workspaceId: null, // workspaces FK skipped for unit scope (see test-review-comment.test.js)
+      createdAt: now,
+    });
+  }
+}
 
 let activityCounter = 0;
 function makeId() {
@@ -62,6 +82,7 @@ function makeActivity(overrides = {}) {
 
 async function main() {
   resetDb();
+  seedProjects();
 
   // ── 1. Persist via explicit `runId` field ─────────────────────────────────
   {
