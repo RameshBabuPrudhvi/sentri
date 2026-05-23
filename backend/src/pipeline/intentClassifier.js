@@ -233,7 +233,7 @@ export function classifyPage(snapshot, filteredElements) {
  *
  * @param {AbortSignal} [signal] — forwarded to AI calls so abort stops classification
  */
-export async function classifyPageWithAI(snapshot, filteredElements, { signal, workspaceId } = {}) {
+export async function classifyPageWithAI(snapshot, filteredElements, { signal, workspaceId, runId } = {}) {
   // AI fallback disabled to conserve LLM API quota (Gemini free tier: 20 calls/day).
   // The heuristic classifier has been improved with better keyword scoring and
   // element-type weighting, so AI assistance is not needed for typical pages.
@@ -246,7 +246,11 @@ export async function classifyPageWithAI(snapshot, filteredElements, { signal, w
   try {
     if (!hasProvider()) return heuristic;
     if (signal?.aborted) return heuristic;
-    const aiResult = await aiClassifyPage(snapshot, signal, workspaceId || null);
+    // Task 2 — thread `runId` so the `emitAgentEvent` start/done bracketing
+    // inside `aiClassifyPage` actually fires when the AI fallback is
+    // re-enabled. A null runId silent-no-ops the emitter, so eval-harness /
+    // CLI callers stay safe.
+    const aiResult = await aiClassifyPage(snapshot, signal, workspaceId || null, runId || null);
     if (!aiResult) return heuristic;
     const isHighPriority = HIGH_PRIORITY_INTENTS.has(aiResult.intent);
     return {

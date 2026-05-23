@@ -199,7 +199,7 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
   const classifiedPages = [];
   for (const snap of filteredSnapshots) {
     throwIfAborted(signal);
-    const classified = await classifyPageWithAI(snap, snap.elements, { signal, workspaceId: project.workspaceId || null });
+    const classified = await classifyPageWithAI(snap, snap.elements, { signal, workspaceId: project.workspaceId || null, runId: run.id });
     if (classified._aiAssisted) {
       log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
     }

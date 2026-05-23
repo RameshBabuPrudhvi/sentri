@@ -95,14 +95,25 @@ export function emitAgentEvent(runId, { step, agent, phase, message, data, nextA
   // Broadcast carries the structured `data` so live consumers and snapshot
   // consumers see the identical shape. Matches the parsed-back form
   // `routes/sse.js` builds for the snapshot's `agentEvents[]` hydration.
-  emitRunEvent(runId, "agent_event", {
-    step,
-    agent,
-    phase,
-    message: message ?? null,
-    data: dataForBroadcast,
-    nextAgent: nextAgent ?? null,
-    model: model ?? null,
-    createdAt,
-  });
+  //
+  // Wrapped in try/catch for the same reason persistence is — the docblock
+  // contract promises this helper "must NEVER break the originating LLM
+  // call". `emitRunEvent` is unlikely to throw (JSON.stringify on this
+  // shape always succeeds, Redis publish has `.catch(() => {})`, and the
+  // local-fanout wraps each `res.write` in try/catch), but a single
+  // unexpected error here would propagate up to call sites like
+  // `journeyGenerator.generateFromDescription` which has no outer
+  // try/catch — crashing the whole user-initiated run.
+  try {
+    emitRunEvent(runId, "agent_event", {
+      step,
+      agent,
+      phase,
+      message: message ?? null,
+      data: dataForBroadcast,
+      nextAgent: nextAgent ?? null,
+      model: model ?? null,
+      createdAt,
+    });
+  } catch { /* non-fatal — broadcast failure must never break the LLM call */ }
 }

@@ -26,6 +26,10 @@ import { classifyError } from "../utils/errorClassifier.js";
 import { emitRunEvent } from "../routes/sse.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as runLogRepo from "../database/repositories/runLogRepo.js";
+// Task 2 — per-agent SSE events. Cleared on retry alongside run_logs so a
+// retried run doesn't replay a doubled narrative (failed-attempt events +
+// successful-attempt events) on SSE reconnect.
+import * as runAgentEventRepo from "../database/repositories/runAgentEventRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
@@ -614,6 +618,16 @@ async function processJob(job) {
         // run.logs from run_logs, so without this the retry would see the
         // old logs concatenated with new ones.
         runLogRepo.deleteByRunId(runId);
+        // Task 2 — also clear run_agent_events for the same reason. The
+        // SSE snapshot hydrates `run.agentEvents` from this table, so a
+        // retry left behind the failed-attempt events would surface a
+        // doubled narrative ("Scout started → Scout done → … → Scout
+        // started → Scout done" for the same logical step) to any client
+        // that reconnects post-retry. Matches the run_logs cascade above.
+        // Shard-mode path intentionally skipped — same reasoning as the
+        // run_logs comment above: parent-scoped DELETE would wipe sibling
+        // shards' events.
+        runAgentEventRepo.deleteByRunId(runId);
         runRepo.save(run);
       }
     }

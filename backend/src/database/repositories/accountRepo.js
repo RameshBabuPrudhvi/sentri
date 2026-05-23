@@ -10,6 +10,11 @@
 import { getDatabase } from "../sqlite.js";
 import * as userRepo from "./userRepo.js";
 import * as runLogRepo from "./runLogRepo.js";
+// Task 2 — per-agent SSE events. Same cascade contract as `run_logs`:
+// no FK constraint at the DB layer, so the deletion path must purge
+// `run_agent_events` explicitly to avoid orphan rows surviving an
+// account-level GDPR erasure.
+import * as runAgentEventRepo from "./runAgentEventRepo.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -194,6 +199,12 @@ export function deleteAccount(userId) {
       const runIds = runRows.map((r) => r.id);
       if (runIds.length > 0) {
         runLogRepo.deleteByRunIds(runIds);
+        // Task 2 — cascade into `run_agent_events` so the per-agent SSE
+        // event history is purged alongside the logs. Mirrors the cascade
+        // wired in runRepo.hardDeleteByProjectId; without it the GDPR
+        // erasure path leaves orphan agent-event rows that reference a
+        // deleted runId forever.
+        runAgentEventRepo.deleteByRunIds(runIds);
       }
 
       db.prepare(`DELETE FROM activities WHERE workspaceId IN (${wsph})`).run(...ownedWorkspaceIds);
