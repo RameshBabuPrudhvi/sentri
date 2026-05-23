@@ -662,6 +662,22 @@
 
 .td-info-text { font-size: 0.82rem; color: var(--text2); }
 
+/* ENT-004 (audit) — review-note callout. Surfaces the `reviewComment`
+   column (migration 054) on TestDetail so the feedback-loop's
+   "Auto-regenerated after failure (REASON)…" explanation is visible
+   inline. Renders inside the existing `.td-info-row-inner` so the
+   sidebar rhythm stays consistent; the amber tint marks it as
+   advisory/system-emitted rather than primary status. */
+.td-review-comment {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius);
+  padding: 6px 9px;
+}
+
 .td-sidebar-divider {
   border: none;
   border-top: 1px solid var(--border);

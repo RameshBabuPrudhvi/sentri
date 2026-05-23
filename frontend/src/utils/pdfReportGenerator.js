@@ -115,12 +115,25 @@ function aggregateMetrics({ dashboard, projects, allTests, allRuns, config, sysI
   });
 
   const dfb = dashboard?.defectBreakdown || {};
+  // Mirror the Dashboard's defect-segment aggregation (Dashboard.jsx) so the
+  // PDF report and the on-screen chart never disagree on totals. BOT_BLOCK
+  // gets its own row so executive reports can distinguish "site refused
+  // automation" from real defects; unknown categories returned by future
+  // backend versions are folded into "Other" so the total stays honest.
+  const NAMED_DEFECT_KEYS = new Set([
+    "BOT_BLOCK", "SELECTOR_ISSUE", "NAVIGATION_FAIL", "TIMEOUT", "ASSERTION_FAIL",
+  ]);
+  let otherDefectCount = dfb.UNKNOWN || 0;
+  for (const [key, value] of Object.entries(dfb)) {
+    if (!NAMED_DEFECT_KEYS.has(key) && key !== "UNKNOWN") otherDefectCount += Number(value) || 0;
+  }
   const defects = [
+    { label: "Bot-blocked / CAPTCHA", count: dfb.BOT_BLOCK || 0 },
     { label: "Selector Issues", count: dfb.SELECTOR_ISSUE || 0 },
     { label: "Navigation Failures", count: dfb.NAVIGATION_FAIL || 0 },
     { label: "Timeouts", count: dfb.TIMEOUT || 0 },
     { label: "Assertion Failures", count: dfb.ASSERTION_FAIL || 0 },
-    { label: "Other", count: dfb.UNKNOWN || 0 },
+    { label: "Other", count: otherDefectCount },
   ].filter(d => d.count > 0);
   const totalDefects = defects.reduce((s, d) => s + d.count, 0);
   const approvedTests = allTests.filter(t => t.reviewStatus === "approved").length;

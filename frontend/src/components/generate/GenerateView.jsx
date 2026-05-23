@@ -6,6 +6,15 @@ import GenerationSuccessBanner from "./GenerationSuccessBanner.jsx";
 import ActivityLogCard from "../run/ActivityLogCard.jsx";
 import RunSidebar from "../run/RunSidebar.jsx";
 import { cleanTestName } from "../../utils/formatTestName.js";
+// GAP-005 (audit, fix) — single source of truth for the pipeline-step →
+// agent role(s) mapping. Replaces the locally-hardcoded `STEP_TO_AGENT_ROLE`
+// that was both incomplete (only `planner` + `author`) and wrong on step 3
+// (the real call site is `intentClassifier.js:158` with `explorer`, plus
+// `journeyGenerator.js:218` with `planner` — multi-agent stage). The shared
+// helper at `frontend/src/config.js` lives next to AGENT_ROLES (which
+// already mirrors `backend/src/aiProvider/agentHealthCheck.js`), so frontend
+// attribution can't drift from the backend canonical role list.
+import { getStageAgentRoles } from "../../config.js";
 
 // Pipeline stages for AI Generate flow.
 // Steps 1 & 2 (Crawl & Filter) are skipped — user provides requirement directly.
@@ -19,21 +28,6 @@ const PIPELINE_STAGES = [
   { label: "Validate",            icon: "✅", step: 7 },
   { label: "Done",                icon: "🎉", step: 8 },
 ];
-
-// AI-004 (audit): map each generate-flow pipeline step to the AI agent role
-// that owns it. The roles match the dispatch values in
-// `backend/src/aiProvider/registry.js#resolveProvider` so when the backend
-// later wires `run.modelByStage` per stage (B2.5), we can correlate the
-// streaming output to a specific (role, model) pair without a schema change.
-// Stages 1-2 (Crawl, Filter) are skipped in Generate flow — they belong to
-// the crawl pipeline and never produce LLM tokens here.
-const STEP_TO_AGENT_ROLE = {
-  3: "planner",   // Classify Intent
-  4: "author",    // Generate Tests via AI — the heavy LLM stage
-  5: "author",    // Deduplicate (LLM-assisted dedup)
-  6: "author",    // Enhance Assertions
-  7: "author",    // Validate
-};
 
 export default function GenerateView({ run, isRunning, llmTokens = "" }) {
   const logs = useLogBuffer(run);
@@ -59,6 +53,29 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
           currentStep={run?.currentStep ?? 0}
           status={run?.status}
           isRunning={isRunning}
+          /* GAP-005 (audit, fix): per-stage agent attribution via shared
+             config helper. Returns an array — step 3 is multi-agent today
+             (explorer + planner) so PipelineCard renders one badge per role.
+             Single source of truth at `config.js#getStageAgentRoles`. */
+          agentRoleFor={getStageAgentRoles}
+          /* GAP-005 (audit): per-stage outcome chip. Reads from the same
+             `pipelineStats` object the RunSidebar's stat strip uses, so the
+             counts agree between the trace view and the summary. Stages
+             without a meaningful count (Classify Intent, terminal Done) get
+             null and PipelineCard skips the row. Step 4 (Generate Tests)
+             prefers `run.testsGenerated` (post-validate count) over
+             `rawTestsGenerated` so users see the finished number, not the
+             pre-dedup count. */
+          outcomeFor={(step) => {
+            if (step === 4) {
+              const v = run?.testsGenerated ?? ps.rawTestsGenerated;
+              return v != null ? { label: "tests generated", value: v } : null;
+            }
+            if (step === 5 && ps.duplicatesRemoved != null) return { label: "duplicates removed", value: ps.duplicatesRemoved };
+            if (step === 6 && ps.assertionsEnhanced != null) return { label: "assertions enhanced", value: ps.assertionsEnhanced };
+            if (step === 7 && ps.validationRejected != null) return { label: "validation rejected", value: ps.validationRejected };
+            return null;
+          }}
         />
 
         {/* Skipped-steps info banner */}
@@ -101,7 +118,18 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
           // Only stages that have an active LLM agent get a roleLabel —
           // skipped stages (Crawl, Filter) and the "Done" terminal step
           // would otherwise mis-attribute streaming output.
-          const agentRole = currentStep != null ? STEP_TO_AGENT_ROLE[currentStep] || null : null;
+          //
+          // GAP-005 (audit, fix): the streaming panel context line shows
+          // one active agent; multi-role stages (step 3 = explorer +
+          // planner) surface the **first** role here because at any given
+          // streaming instant exactly one LLM call is in flight — the
+          // accurate per-call attribution lives in `ai_request_log` (which
+          // future PR will correlate to runId). For the stage *list*
+          // (PipelineCard above), all roles render as separate badges
+          // because the user reads the list as "which agents ran here
+          // across the whole stage", not "which one is streaming right now".
+          const stageRoles = currentStep != null ? getStageAgentRoles(currentStep) : [];
+          const agentRole = stageRoles[0] || null;
           return (
             <LLMStreamPanel
               tokens={llmTokens}

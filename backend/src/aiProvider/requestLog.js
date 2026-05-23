@@ -58,19 +58,27 @@ export function logRequest(entry = {}) {
       const customRules = Array.isArray(entry.customRedactionRules) ? entry.customRedactionRules : [];
       const promptRedacted = mode === "full" ? prompt : mode === "redacted" ? redactText(prompt, customRules) : null;
       const responseRedacted = mode === "full" ? response : mode === "redacted" ? redactText(response, customRules) : null;
+      // GAP-005 (migration 056): `runId` is a first-class column so RunDetail
+      // can render a per-call agent timeline correlated to a specific run.
+      // Pre-migration rows have `runId = NULL` and remain reachable via the
+      // existing `workspaceId` / `traceId` filters — no backfill required.
+      // Calls outside any run context (chat, healthchecks, replay endpoint)
+      // legitimately write `runId = NULL` and are naturally excluded from
+      // `WHERE runId = ?` queries.
       getDatabase().prepare(`
         INSERT INTO ai_request_log (
-          id, workspaceId, routeId, agentRole, userId,
+          id, workspaceId, routeId, agentRole, userId, runId,
           promptHash, promptRedacted, responseRedacted,
           inputTokens, outputTokens, costUsd, latencyMs,
           outcome, errorReason, traceId, createdAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         entry.id || `air-${crypto.randomUUID()}`,
         entry.workspaceId,
         entry.routeId || null,
         entry.agentRole || null,
         entry.userId || null,
+        entry.runId || null,
         hashPrompt(prompt),
         promptRedacted,
         responseRedacted,

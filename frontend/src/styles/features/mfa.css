@@ -279,3 +279,56 @@
 .passkey-item__meta {
   margin-top: 2px;
 }
+
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   MFA enrollment + login challenge surfaces are critical first-run paths
+   on every workspace with `mfaRequired=true`. They must stay operable on
+   phones — a user locked out at login on their iPhone can't get into the
+   app any other way. The `.mfa-modal` and `.mfa-blocked` panels already
+   clamp via `min(440px, 92vw)` so the panel itself fits; what breaks on
+   narrow viewports is the 2-column recovery-code grid (16 codes × 9
+   chars each in `repeat(2, minmax(0, 1fr))` overflows at 360px wide) and
+   the grace banner's flex row (gap: 12px + 10/16px padding + body +
+   button competes for ~340px of content width on 375px). */
+@media (max-width: 600px) {
+  /* Recovery code grid: 2-col → 1-col on phones. Each code is a 9-char
+     mono string with `letter-spacing: 0.04em`; at 360px viewport the
+     2-col layout truncates the trailing chars. Stacking shows every
+     code in full. */
+  .recovery-panel__grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  /* Grace banner: stack vertically so the body text gets full width
+     and the action button (e.g. "Enroll now") drops below at full
+     width — same pattern used by `.banner` in components.css. */
+  .grace-banner {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 14px;
+  }
+
+  /* MFA tablist (Passkey / Authenticator / Recovery code picker on
+     login): three buttons each declared `flex: 1` — at 375px each
+     button is ~110px which truncates "Authenticator" + "Recovery code".
+     Stack vertically so each picker label stays full. */
+  .mfa-tablist {
+    flex-direction: column;
+  }
+  .mfa-tablist .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* TOTP enrollment + recovery action footers — same flex-wrap rule
+     as the page-level `.recovery-panel__actions` / `.totp-enroll__actions`
+     fix in `pages/settings.css`, applied at the features layer so the
+     standalone MFA-modal call sites also benefit (mfa.css loads BEFORE
+     settings.css per index.css, so this is the canonical place). */
+  .totp-enroll__actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .totp-enroll__actions .btn { flex: 1 1 auto; justify-content: center; }
+}

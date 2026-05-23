@@ -1,166 +1,134 @@
 /**
- * Onboarding Tour — feature-specific styles
+ * Onboarding — feature-specific styles
  *
- * Spotlight overlay, tooltip card, step dots, and tour buttons.
- * Scoped by `.tour-*` prefix.
+ * ONB-001 (audit) — the wizard renders inside `<ModalShell>` so it inherits
+ * the backdrop + centred panel + focus trap from `components.css#.modal-*`.
+ * Rules below style only the wizard's INTERNAL chrome (progress bar,
+ * header, step body, provider grid, footer). The legacy `.tour-*` spotlight-
+ * tooltip styles are removed — the wizard is a centred dialog, not a
+ * tooltip overlay anchored to page elements.
+ *
+ * Scoped by `.wiz*` BEM prefix.
  */
 
-/* ── Overlay ────────────────────────────────────────────────────────────────── */
-.tour-overlay {
-  position: fixed; inset: 0; z-index: 10000;
-  pointer-events: auto;
-  transition: opacity 250ms ease;
-}
-.tour-overlay--transitioning { opacity: 0; }
+/* ── Wizard structure ────────────────────────────────────────────────────── */
+.wiz { display: flex; flex-direction: column; min-height: 320px; }
 
-/* ── Spotlight ring ─────────────────────────────────────────────────────────── */
-.tour-spotlight-ring {
-  position: absolute;
-  border-radius: 12px;
-  border: 2px solid rgba(99, 102, 241, 0.6);
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15), 0 0 20px rgba(99, 102, 241, 0.2);
-  pointer-events: none;
-  transition: all 250ms ease;
+/* Top progress bar — width data-driven inline from `progressPct`. */
+.wiz__progress {
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), #8b5cf6);
+  transition: width 0.3s ease;
 }
 
-/* ── Tooltip card ───────────────────────────────────────────────────────────── */
-.tour-tooltip {
-  position: fixed; width: 360px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(99, 102, 241, 0.1);
-  overflow: hidden;
-  transition: all 250ms ease;
-}
-
-.tour-progress-bar {
-  height: 4px;
-  transition: background 0.3s ease;
-}
-
-/* ── Tooltip header ─────────────────────────────────────────────────────────── */
-.tour-header {
-  padding: 18px 20px 0;
-  display: flex; align-items: flex-start; gap: 12px;
-}
-
-.tour-icon-box {
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.wiz__header { padding: 20px 24px 8px; display: flex; align-items: flex-start; gap: 12px; }
+.wiz__icon {
   width: 36px; height: 36px; border-radius: 10px;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+  color: #fff;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
+.wiz__heading { flex: 1; min-width: 0; }
+.wiz__title {
+  font-weight: 700; font-size: 1rem;
+  color: var(--text); margin: 0 0 2px; line-height: 1.3;
+}
+.wiz__step-label { font-size: 0.72rem; color: var(--text3); font-weight: 500; }
 
-.tour-title {
-  font-weight: 700; font-size: 0.95rem;
-  color: var(--text); line-height: 1.3; margin-bottom: 2px;
+/* ── Body ────────────────────────────────────────────────────────────────── */
+.wiz__body {
+  padding: 8px 24px 16px;
+  display: flex; flex-direction: column; gap: 14px;
+  flex: 1;
 }
+.wiz__desc { font-size: 0.86rem; color: var(--text2); line-height: 1.6; margin: 0; }
 
-.tour-step-label {
-  font-size: 0.72rem; color: var(--text3); font-weight: 500;
+/* ── Welcome checklist ───────────────────────────────────────────────────── */
+.wiz__checklist {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 0.83rem; color: var(--text);
 }
+.wiz__checklist li { display: flex; align-items: center; gap: 8px; }
+.wiz__checklist svg { color: var(--accent); flex-shrink: 0; }
 
-/* ── Tooltip body ───────────────────────────────────────────────────────────── */
-.tour-body {
-  padding: 12px 20px 16px;
-  font-size: 0.84rem; color: var(--text2); line-height: 1.7;
+/* ── Provider grid (step 1) ──────────────────────────────────────────────── */
+.wiz__provider-block { display: flex; flex-direction: column; gap: 12px; }
+.wiz__provider-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.wiz__provider-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  padding: 10px 12px; text-align: left;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
 }
+.wiz__provider-card:hover:not(:disabled) { border-color: var(--border2); background: var(--bg2); }
+.wiz__provider-card--active { border-color: var(--accent); background: var(--accent-bg); }
+.wiz__provider-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.wiz__provider-card-label { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+.wiz__provider-card-hint { font-size: 0.7rem; color: var(--text3); line-height: 1.4; }
 
-/* ── Step dots ──────────────────────────────────────────────────────────────── */
-.tour-dots {
-  display: flex; justify-content: center; gap: 6px;
-  padding: 0 20px 14px;
-}
-.tour-dot {
-  height: 7px; border-radius: 4px;
-  transition: all 0.25s ease;
-  background: var(--border);
-}
-.tour-dot--active {
-  width: 20px;
-  background: linear-gradient(90deg, #6366f1, #8b5cf6);
-}
-.tour-dot--done {
-  width: 7px;
-  background: rgba(99, 102, 241, 0.4);
-}
-.tour-dot--pending {
-  width: 7px;
-}
+/* ── Project step ────────────────────────────────────────────────────────── */
+.wiz__project-block { display: flex; flex-direction: column; gap: 12px; }
 
-/* ── Actions bar ────────────────────────────────────────────────────────────── */
-.tour-actions {
-  padding: 0 20px 18px;
-  display: flex; align-items: center; gap: 8;
-}
-
-/* ── Buttons ────────────────────────────────────────────────────────────────── */
-.tour-btn-next {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 8px 18px; border-radius: var(--radius); border: none;
-  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
-  color: #fff; font-size: 0.82rem; font-weight: 600;
-  cursor: pointer; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-.tour-btn-next:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.45);
-}
-
-.tour-btn-back {
+/* ── Shared field wrapper ────────────────────────────────────────────────── */
+.wiz__field { display: flex; flex-direction: column; gap: 6px; }
+.wiz__field-label { font-size: 0.78rem; font-weight: 600; color: var(--text2); }
+.wiz__field-hint {
+  font-size: 0.72rem; color: var(--text3); line-height: 1.5;
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 8px 14px; border-radius: var(--radius);
-  border: 1px solid var(--border); background: var(--surface);
-  color: var(--text2); font-size: 0.8rem; font-weight: 600;
-  cursor: pointer; transition: background 0.15s;
 }
-.tour-btn-back:hover { background: var(--bg3); }
 
-.tour-btn-skip {
-  padding: 8px 14px; border-radius: var(--radius);
-  border: none; background: transparent;
-  color: var(--text3); font-size: 0.78rem; font-weight: 500;
-  cursor: pointer; transition: color 0.15s;
+/* ── Crawl step ──────────────────────────────────────────────────────────── */
+.wiz__crawl { display: flex; flex-direction: column; gap: 10px; }
+.wiz__crawl-running {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  background: var(--accent-bg);
+  border: 1px solid rgba(91, 110, 245, 0.25);
+  border-radius: var(--radius);
+  color: var(--accent);
+  font-size: 0.8rem;
 }
-.tour-btn-skip:hover { color: var(--text2); }
 
-.tour-close {
-  background: none; border: none; cursor: pointer;
-  color: var(--text3); padding: 4px; border-radius: 6px;
-  display: flex; align-items: center; flex-shrink: 0;
-  transition: color 0.15s;
+/* ── Done step ───────────────────────────────────────────────────────────── */
+.wiz__done {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px;
+  background: var(--green-bg);
+  border: 1px solid #86efac;
+  border-radius: var(--radius);
+  font-size: 0.83rem;
+  color: var(--text);
 }
-.tour-close:hover { color: var(--text); }
+.wiz__done-check { color: var(--green); flex-shrink: 0; }
 
-/* ── Mobile responsive ──────────────────────────────────────────────────────── */
-@media (max-width: 480px) {
-  .tour-tooltip {
-    width: calc(100vw - 24px);
-    left: 12px !important;
-    right: 12px;
-    border-radius: var(--radius);
-  }
+/* ── Error banner ────────────────────────────────────────────────────────── */
+.wiz__error {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  background: var(--red-bg);
+  border: 1px solid #fca5a5;
+  border-radius: var(--radius);
+  color: var(--red);
+  font-size: 0.8rem;
+}
 
-  .tour-icon-box {
-    width: 30px; height: 30px; border-radius: 8px;
-  }
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.wiz__footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.wiz__footer-spacer { flex: 1; }
 
-  .tour-title { font-size: 0.88rem; }
-  .tour-step-label { font-size: 0.68rem; }
-
-  .tour-body {
-    padding: 10px 16px 14px;
-    font-size: 0.8rem;
-  }
-
-  .tour-dots { padding: 0 16px 12px; }
-
-  .tour-header { padding: 14px 16px 0; gap: 10px; }
-  .tour-actions { padding: 0 16px 14px; gap: 6px; }
-
-  .tour-btn-next { padding: 7px 14px; font-size: 0.78rem; }
-  .tour-btn-back { padding: 7px 12px; font-size: 0.76rem; }
-  .tour-btn-skip { padding: 7px 10px; font-size: 0.74rem; }
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .wiz__header { padding: 16px 16px 6px; }
+  .wiz__body { padding: 6px 16px 12px; gap: 10px; }
+  .wiz__footer { padding: 10px 14px 14px; flex-wrap: wrap; }
+  .wiz__footer .btn { flex: 1 1 auto; justify-content: center; }
+  .wiz__provider-grid { grid-template-columns: 1fr; }
 }

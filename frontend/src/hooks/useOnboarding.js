@@ -40,65 +40,63 @@ export function emitTourEvent(action) {
 }
 
 /**
- * Ordered tour steps. Each step targets a DOM element via `data-tour` attribute
- * or a CSS selector fallback, and provides copy + CTA for the tooltip.
+ * ONB-001 (audit) — Ordered "First Run" wizard steps. The legacy `TOUR_STEPS`
+ * shape (target + placement, anchored to `data-tour` attrs on existing pages)
+ * was the audit's named anti-pattern — a passive tooltip walkthrough that
+ * showed users where elements were but did not help them accomplish their
+ * first valuable action. A user who completed the old tour still had an
+ * empty workspace and no clear next step.
+ *
+ * The new wizard is **active**: each step performs a real action against the
+ * backend (save provider → create project → kick off crawl → review tests →
+ * approve & run), and the wizard's deliverable is a real project with real
+ * generated tests. Steps no longer carry `target` / `placement` / `route` —
+ * the wizard renders as a centred modal via `<ModalShell>` so it works
+ * regardless of which route the user is on.
+ *
+ * The `advanceOn` mechanism is kept so that operators who close the wizard
+ * and complete the matching action manually (e.g. saving a provider via
+ * `/settings/providers`) still progress the wizard cleanly on next open.
  *
  * @typedef {Object} TourStep
- * @property {string}  id          - Unique step identifier.
- * @property {string}  target      - Value of `data-tour` attribute on the anchor element.
- * @property {string}  title       - Tooltip heading.
- * @property {string}  description - Tooltip body text.
- * @property {string}  cta         - Call-to-action button label.
- * @property {string}  [route]     - If set, navigate here before showing the step.
- * @property {string}  [advanceOn] - Action string (from emitTourEvent) that auto-advances past this step.
- * @property {"top"|"bottom"|"left"|"right"} [placement] - Tooltip placement relative to target.
+ * @property {string} id          - Stable identifier (used by JSX switch + tests).
+ * @property {string} title       - Step heading shown in the wizard header.
+ * @property {string} description - Short body copy under the heading.
+ * @property {string} [advanceOn] - emitTourEvent action that auto-advances past this step.
  */
 export const TOUR_STEPS = [
   {
     id: "welcome",
-    target: "tour-welcome",
-    title: "Welcome to Sentri! 👋",
-    description: "Let's get you set up in under 2 minutes. We'll walk you through configuring your AI provider, creating your first project, and generating tests.",
-    cta: "Let's go",
-    placement: "bottom",
+    title: "Welcome to Sentri",
+    description: "Let's get you from zero to your first running test. This takes about 2 minutes — we'll save your AI provider, create your first project, crawl it for testable pages, and generate tests you can review and approve.",
   },
   {
-    id: "settings",
-    target: "tour-settings",
-    title: "Step 1: Configure AI Provider",
-    description: "Sentri uses AI to generate and maintain tests. Add an API key for Claude, GPT-4, Gemini, or use Ollama for free local inference.",
-    cta: "Go to Settings",
-    route: "/settings",
-    placement: "right",
+    id: "provider",
+    title: "Step 1 of 5 — Pick an AI provider",
+    description: "Sentri uses AI to generate and maintain tests. Paste an API key from Anthropic, OpenAI, or Google — or pick Ollama if you've installed it locally for free offline inference.",
     advanceOn: "provider-saved",
   },
   {
-    id: "create-project",
-    target: "tour-projects",
-    title: "Step 2: Create a Project",
-    description: "A project represents your web application. Enter your app's URL and optional login credentials so Sentri knows what to test.",
-    cta: "Go to Projects",
-    route: "/projects",
-    placement: "right",
+    id: "project",
+    title: "Step 2 of 5 — Add your first project",
+    description: "A project represents one web application. We'll start with the URL — credentials and other settings can be added later from the project page.",
     advanceOn: "project-created",
   },
   {
-    id: "crawl-or-test",
-    target: "tour-tests",
-    title: "Step 3: Generate Tests",
-    description: "The Tests page is your command centre. Crawl your app to auto-discover pages, generate tests from a user story, run regression, or review drafts — all from one place.",
-    cta: "Go to Tests",
-    route: "/tests",
-    placement: "right",
+    id: "crawl",
+    title: "Step 3 of 5 — Crawl your site",
+    description: "Sentri visits your app, maps the interactive elements on each page, and writes Playwright tests for the user journeys it finds. You can stop the crawl at any point.",
+    advanceOn: "crawl-complete",
+  },
+  {
+    id: "review",
+    title: "Step 4 of 5 — Review generated tests",
+    description: "Each generated test gets a quality score. High-quality tests can be auto-approved; others land in the Review Queue. We'll jump you there to see what was generated.",
   },
   {
     id: "done",
-    target: "tour-dashboard",
-    title: "You're all set! 🎉",
-    description: "Your dashboard will show pass rates, trends, and recent activity once tests start running. Happy testing!",
-    cta: "Start using Sentri",
-    route: "/dashboard",
-    placement: "right",
+    title: "Step 5 of 5 — You're set up",
+    description: "Your dashboard will show pass rates, trends, and self-healing activity as tests run. You can rerun this setup any time from Account settings.",
   },
 ];
 

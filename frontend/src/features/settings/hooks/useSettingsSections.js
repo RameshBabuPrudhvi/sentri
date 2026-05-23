@@ -22,7 +22,14 @@ export const SETTINGS_SECTIONS = [
   { key: "providers",       label: "AI Providers",    icon: "Zap",          adminOnly: true,  group: "workspace" },
   { key: "provider_routes", label: "Provider Routes", icon: "Route",        adminOnly: true,  group: "workspace" },
   { key: "agent_roles",     label: "Agent Roles",     icon: "Bot",          adminOnly: true,  group: "workspace" },
-  { key: "members",         label: "Members",         icon: "Users",        adminOnly: true,  group: "workspace" },
+  // UX-AUDIT (May 2026): Members is VISIBLE to every workspace member but
+  // mutations (invite / role-change / remove) are gated to admin inside
+  // `MembersSection.jsx`. Industry standard — GitHub, Linear, Vercel, Mabl,
+  // Testim, and Datadog Synthetic all show the member roster to every
+  // authenticated member. Hiding it is suspicious and breaks the social
+  // contract of "who else is in my workspace?". Backend still enforces
+  // admin-only on mutation routes via `requireRole()`.
+  { key: "members",         label: "Members",         icon: "Users",        adminOnly: false, group: "workspace" },
   { key: "data",            label: "Data",            icon: "Database",     adminOnly: true,  group: "workspace" },
 
   // ── Account group (visible to every member) ─────────────────────────────

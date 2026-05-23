@@ -102,8 +102,11 @@ test("API_ASSERTION_FAIL: request.newContext response status mismatch", () => {
 test("URL_MISMATCH: 'url mismatch'", () => {
   assert.equal(classifyFailure("url mismatch: expected '/dashboard' received '/login'"), "URL_MISMATCH");
 });
-test("URL_MISMATCH: 'redirected to unexpected url'", () => {
-  assert.equal(classifyFailure("redirected to unexpected url: https://myapp.com/captcha"), "URL_MISMATCH");
+test("URL_MISMATCH: 'redirected to unexpected url' (non-bot URL)", () => {
+  // Use a non-bot-block URL — `/captcha` would now correctly win as BOT_BLOCK
+  // since the regex is ordered first. The fixture for this test is the
+  // generic "redirected to unexpected url" phrasing, not the captcha case.
+  assert.equal(classifyFailure("redirected to unexpected url: https://myapp.com/welcome"), "URL_MISMATCH");
 });
 test("URL_MISMATCH: 'page.url()...not...match'", () => {
   assert.equal(classifyFailure("page.url() did not match expected /dashboard/i"), "URL_MISMATCH");
@@ -536,6 +539,145 @@ test("'warning' status alone → not flaky (no pass+fail combination)", () => {
 test("'warning' with 'passed' but no 'failed' → not flaky", () => {
   // detectFlakiness checks for both "passed" AND "failed" in the Set
   assert.equal(detectFlakiness(["passed","warning"]), false);
+});
+
+// ── 4b. BOT_BLOCK — anti-bot interstitial detection ──────────────────────────
+
+console.log("\n🤖  BOT_BLOCK — anti-bot interstitial detection");
+
+test("BOT_BLOCK: '/sorry/' in error message", () => {
+  // Google's anti-bot wall: when a test against google.com hits the
+  // "unusual traffic" interstitial, the URL contains /sorry/index.
+  assert.equal(classifyFailure("Navigation to https://www.google.com/sorry/index failed"), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: '/captcha' in error message", () => {
+  assert.equal(classifyFailure("page.goto: https://example.com/captcha returned 200"), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: '/challenge' in error message", () => {
+  assert.equal(classifyFailure("Redirected to /challenge before content loaded"), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: 'recaptcha' in error message", () => {
+  assert.equal(classifyFailure("recaptcha iframe blocked test progress"), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: 'unusual traffic' page", () => {
+  assert.equal(classifyFailure("Our systems have detected unusual traffic from your network."), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: 'are you a robot' page", () => {
+  assert.equal(classifyFailure("Verification: are you a robot? Click the box to continue."), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: 'cloudflare challenge'", () => {
+  assert.equal(classifyFailure("Stopped at cloudflare challenge page during navigation"), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: '/blocked' canonical path matches", () => {
+  // Cloudflare / WAF anti-bot landing page is at exactly `/blocked`. The
+  // path-segment anchor (`/blocked` followed by `/`, `?`, `#`, or EOL)
+  // must still match the canonical case.
+  assert.equal(classifyFailure("Navigation failed", { finalUrl: "https://example.com/blocked" }), "BOT_BLOCK");
+  assert.equal(classifyFailure("Navigation failed", { finalUrl: "https://example.com/blocked/" }), "BOT_BLOCK");
+  assert.equal(classifyFailure("Navigation failed", { finalUrl: "https://example.com/blocked?reason=bot" }), "BOT_BLOCK");
+});
+
+test("BOT_BLOCK: legitimate /blocked-* paths are NOT misclassified (BUG-0003 fix)", () => {
+  // Apps with admin features under `/blocked-users`, `/blocked-list`,
+  // `/blocked-accounts` must NOT trip BOT_BLOCK on the secondary
+  // locator-timeout error. Per the path-segment anchor.
+  const finalUrls = [
+    "https://app.example.com/users/blocked-users",
+    "https://app.example.com/admin/blocked-accounts",
+    "https://app.example.com/content/blocked-items",
+    "https://app.example.com/blocked-list",
+  ];
+  for (const finalUrl of finalUrls) {
+    const category = classifyFailure(
+      "waiting for locator('h3') timeout 15000ms exceeded",
+      { finalUrl },
+    );
+    assert.notEqual(category, "BOT_BLOCK",
+      `legitimate /blocked-* path ${finalUrl} must not be classified as BOT_BLOCK`);
+  }
+});
+
+test("BOT_BLOCK detected via finalUrl (when error message has no signal)", () => {
+  // The dominant real-world case: the error text is just a generic
+  // `waiting for locator('h3') timeout 15000ms exceeded` — but
+  // `result.url` shows `https://www.google.com/sorry/index?continue=…`.
+  // Without the `finalUrl` arg, this would misclassify as SELECTOR_ISSUE
+  // and surface the misleading "AI is generating CSS selectors" insight.
+  const category = classifyFailure(
+    "page.waitForSelector: Timeout 15000ms exceeded. Call log: - waiting for locator('h3') to be visible",
+    { finalUrl: "https://www.google.com/sorry/index?continue=https://www.google.com/search%3Fq%3Dplaywright" },
+  );
+  assert.equal(category, "BOT_BLOCK");
+});
+
+test("BOT_BLOCK beats SELECTOR_ISSUE when both signals present", () => {
+  // Anti-bot interstitial is the ROOT cause; the secondary locator
+  // timeout is the symptom. BOT_BLOCK must win because of regex ordering.
+  const error = "waiting for locator('h3') to be visible: timeout 15000ms exceeded";
+  const category = classifyFailure(error, { finalUrl: "https://example.com/sorry/index" });
+  assert.equal(category, "BOT_BLOCK");
+});
+
+test("BOT_BLOCK passes finalUrl through analyzeRunResults via result.url", () => {
+  // Integration check: the wiring in `analyzeRunResults` must forward
+  // `result.url` into the classifier so the dashboard / Quality Insights
+  // pipeline sees BOT_BLOCK on URL-only signals.
+  const results = [{
+    testId: "t1",
+    status: "failed",
+    error: "waiting for locator('h3') timeout 15000ms exceeded",
+    url: "https://www.google.com/sorry/index?continue=foo",
+  }];
+  const testMap = { t1: makeTest("t1") };
+  const { improvements } = analyzeRunResults(results, testMap, {});
+  assert.equal(improvements[0].failureCategory, "BOT_BLOCK");
+});
+
+test("BOT_BLOCK is NOT high-priority (no AI regeneration)", () => {
+  // The whole point of detecting BOT_BLOCK is to NOT waste AI calls
+  // trying to "fix" a CAPTCHA-blocked test. Verify HIGH_PRIORITY_CATEGORIES
+  // exclusion is honoured.
+  const results = [{
+    testId: "t1",
+    status: "failed",
+    error: "waiting for locator timeout",
+    url: "https://example.com/sorry/",
+  }];
+  const testMap = { t1: makeTest("t1") };
+  const { improvements } = analyzeRunResults(results, testMap, {});
+  assert.equal(improvements[0].failureCategory, "BOT_BLOCK");
+  assert.equal(improvements[0].priority, "medium",
+    `BOT_BLOCK must be medium-priority (not high) so the feedback loop skips it — got ${improvements[0].priority}`);
+});
+
+test("BOT_BLOCK surfaces honest insight in buildQualityAnalytics", () => {
+  // The misleading "AI is generating CSS selectors" insight must NOT fire
+  // on a bot-blocked failure. Instead the BOT_BLOCK-specific message
+  // tells operators the SUT refused automation.
+  const improvements = [{
+    testId: "t1",
+    test: makeTest("t1"),
+    failureCategory: "BOT_BLOCK",
+    errorMessage: "waiting for locator timeout",
+    priority: "medium",
+    assertionMethod: null,
+    snapshot: null,
+  }];
+  const analytics = buildQualityAnalytics(improvements, {});
+  assert.equal(analytics.byCategory.BOT_BLOCK, 1);
+  const botInsight = analytics.insights.find(i => /bot-detection|CAPTCHA|automation/i.test(i));
+  assert.ok(botInsight, `Expected BOT_BLOCK insight: ${JSON.stringify(analytics.insights)}`);
+  // And the misleading selector message must NOT fire on this input.
+  const selectorInsight = analytics.insights.find(i => /AI may be generating CSS selectors/.test(i));
+  assert.equal(selectorInsight, undefined,
+    `Misleading selector insight should NOT fire on BOT_BLOCK-only input: got "${selectorInsight}"`);
 });
 
 // ── 5. FAILURE_PATTERNS priority ordering (array refactor) ───────────────────

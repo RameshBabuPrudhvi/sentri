@@ -38,9 +38,9 @@ const NAV_GROUPS = [
   {
     label: "Core",
     items: [
-      { to: "/dashboard",     icon: Home,          label: "Dashboard",     tour: "tour-dashboard" },
-      { to: "/projects",      icon: FolderKanban,  label: "Projects",      tour: "tour-projects"  },
-      { to: "/tests",         icon: SquareCheckBig,label: "Tests",         tour: "tour-tests"     },
+      { to: "/dashboard",     icon: Home,          label: "Dashboard"     },
+      { to: "/projects",      icon: FolderKanban,  label: "Projects"      },
+      { to: "/tests",         icon: SquareCheckBig,label: "Tests"         },
     ],
   },
   {
@@ -213,7 +213,6 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
                 key={item.to}
                 to={item.to}
                 className="nav-link sidebar-rail__nav-item"
-                data-tour={item.tour || undefined}
                 title={tooltip}
               >
                 {({ isActive }) => (
@@ -245,7 +244,6 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
             <NavLink
               to="/settings"
               className="nav-link sidebar-rail__footer-link"
-              data-tour="tour-settings"
               title="Settings"
             >
               <Settings size={16} strokeWidth={1.8} />
@@ -350,7 +348,6 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
                     key={item.to}
                     to={item.to}
                     className="nav-link sidebar-nav__item"
-                    data-tour={item.tour || undefined}
                   >
                     {({ isActive }) => (
                       <>
@@ -401,7 +398,6 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
           <NavLink
             to="/settings"
             className="nav-link sidebar-footer__link"
-            data-tour="tour-settings"
           >
             <Settings size={15} strokeWidth={1.8} />
             <span>Settings</span>

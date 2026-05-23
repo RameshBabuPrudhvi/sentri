@@ -507,6 +507,37 @@
     max-height: calc(100vh - 24px);
   }
 
+  /* MOB-001 follow-up: side-by-side selects inside modal forms (e.g.
+     Locale + Timezone in RunRegressionModal) overflow on phones because
+     the parent `.modal-panel` is already at `100vw - 24px`. Stack them so
+     each field has the full panel width and the labels stay readable. */
+  .modal-form-row--inline {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* MOB-001 follow-up: modal action footer — right-aligned button row
+     wraps when both Cancel + Save outgrow the narrow panel. Letting it
+     stretch full-width prevents the buttons from being cropped by the
+     panel's overflow:hidden. */
+  .modal-form-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .modal-form-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* MOB-001 follow-up: tighten the form header padding so the title +
+     close-button row doesn't dominate the panel on phones. */
+  .modal-form-header {
+    padding: 14px 16px 12px;
+  }
+  .modal-form-body {
+    padding: 16px;
+  }
+
   /* Banners: stack icon + text vertically when text is long */
   .banner {
     flex-wrap: wrap;
@@ -579,6 +610,95 @@
     width: 36px;
     height: 36px;
     border-radius: 8px;
+  }
+}
+
+/* ── MOB-002 (audit): minimum touch targets ────────────────────────────────
+   Apple HIG (44×44pt) + Material Design 3 (48×48dp) require interactive
+   elements to be at least 44×44 CSS pixels when reached by a touch
+   pointer. The audit names: **sidebar collapse button**, **nav item
+   chevrons**, **badge chips**, **ProviderBadge** in the TopBar.
+
+   Scoped to `@media (pointer: coarse)` — touch devices only. Desktop
+   keeps pixel-tight icon buttons (24-28px) because:
+     - 44×44 on every icon button at desktop density wastes horizontal
+       space in dense surfaces like the sidebar rail and TopBar
+       cluster, where the audit elsewhere asks for COMPACT layout.
+     - WCAG 2.5.5 (Target Size, Level AAA) only applies as Level AAA
+       and explicitly exempts mouse-pointer contexts.
+     - The pointer-coarse media query is the W3C-recommended hook
+       (CSS Media Queries Level 4) for distinguishing touch from
+       mouse intent — matches Linear / Vercel / GitHub's approach.
+
+   `min-width` + `min-height` (not `width`/`height`) so existing visual
+   size from padding-driven layout stays unchanged when content already
+   exceeds 44px; the rules only inflate the click box when the rendered
+   element is smaller than the target. */
+@media (pointer: coarse) {
+  /* Sidebar collapse toggle — 26×26 visual, needs hit-box expansion. */
+  .sidebar-header__collapse-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Notification bell — `notif-bell-btn` is `padding: 6px` around an
+     18px icon = ~30px total. Inflate the hit box without growing the
+     icon. */
+  .notif-bell-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Modal close button — `.modal-close` is a bare icon button with no
+     baseline size. Same hit-box rule. */
+  .modal-close {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  /* Badge chips that are clickable. The base `.badge` is purely
+     decorative (whitespace 2/8 padding); only badges wired to onClick
+     handlers need the hit-box. We target the two cases that exist
+     today: AuditLog filter chips (`.al-toolbar__filter-chip`) and the
+     sidebar pending-pill nav badges (`.sidebar-nav__auto-badge`).
+     Bare `.badge` stays unchanged because growing a decorative chip
+     to 44px would balloon the layout. */
+  .al-toolbar__filter-chip,
+  .sidebar-nav__auto-badge {
+    min-height: 32px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  /* The chip itself stays compact (32px) but its tap target is
+     extended via a transparent ::after overlay that grows the
+     pointer-hit region to 44px without affecting layout. Pattern
+     mirrors the Material 3 "expanded touch target" guidance. */
+  .al-toolbar__filter-chip,
+  .sidebar-nav__auto-badge,
+  .sidebar-rail__nav-dot,
+  .sidebar-rail__nav-item {
+    position: relative;
+  }
+  .sidebar-rail__nav-item::after,
+  .sidebar-nav__item::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    /* Transparent — invisible to sight, but reachable by touch
+       pointer because the parent is `position: relative`. */
+  }
+
+  /* Provider badge in the TopBar (`.provider-badge` or `.st-provider-badge`).
+     The audit names it as below 44×44. Same inflation rule — only
+     active when the badge is reachable as a touch target (i.e. it's
+     a button or has a click handler). The `.provider-badge` selector
+     in the topbar is the click-through to /settings/providers. */
+  .provider-badge,
+  .st-provider-badge {
+    min-height: 32px;
+    padding-top: 4px;
+    padding-bottom: 4px;
   }
 }
 

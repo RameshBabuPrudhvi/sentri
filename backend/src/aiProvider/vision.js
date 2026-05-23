@@ -341,8 +341,20 @@ ${String(contextHtml).slice(0, 800)}` : "");
   // metric here because recordAiTokens skipped it (cost source was
   // "none"). On every other path the cost metric is already counted by
   // recordAiTokens — no double-counting.
+  //
+  // Pass `dispatchRoute` (NOT `resolvedRoute`) so catalog-pricing
+  // lookup keys on the actually-dispatched vision model — `dispatchRoute.
+  // model` is `model = resolveVisionModel(...)`, which honours the
+  // `VISION_MODEL` env override and the catalog floor. With
+  // `resolvedRoute` we'd look up pricing for the healer's *text* model
+  // (e.g. `claude-3-5-haiku`) instead of the vision model that
+  // actually billed (e.g. `claude-3-5-sonnet`), misattributing cost in
+  // both `aiProviderCostUsdTotal` and the MNT-001 per-project budget
+  // cap. The explicit-pricing branch (`route.pricing`) is unaffected
+  // — `dispatchRoute` inherits `resolvedRoute.pricing` via the spread
+  // on line 285, so operator-set pricing still wins.
   const tokenResult = usage
-    ? recordAiTokens(provider, usage, "vision_heal", agentRole, routeName, resolvedRoute)
+    ? recordAiTokens(provider, usage, "vision_heal", agentRole, routeName, dispatchRoute)
     : { costUsd: null, source: "none" };
   let parsed;
   try { parsed = parseJSON(raw); } catch { return null; }

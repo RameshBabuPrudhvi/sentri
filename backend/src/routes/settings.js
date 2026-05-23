@@ -712,6 +712,16 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
       // at the prior `lastFour` — operators see the full
       // rotate→rollback sequence in the audit log, which is the
       // desired forensic shape.
+      //
+      // ALSO restore `capabilities` — `probeAndPersist` just wrote the
+      // FAILED probe result for the new key into the row, but after
+      // rollback the row's stored key is the old known-good one whose
+      // last successful probe lives on `existing.capabilities`. Without
+      // this restore, every Settings UI badge + system component reading
+      // `route.capabilities.reachable` (vision-heal resolver in
+      // `aiProvider/vision.js`, health-check probes) sees the stale
+      // failed-probe payload for a route that actually dispatches fine,
+      // potentially leading operators to delete a working route.
       providerRouteRepo.upsert({
         id: existing.id,
         workspaceId: req.workspaceId,
@@ -719,12 +729,19 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
         apiKeyEncrypted: priorSecret?.apiKeyEncrypted ?? null,
         apiKeyNonce: priorSecret?.apiKeyNonce ?? null,
         apiKeyLastFour: priorSecret?.apiKeyLastFour ?? null,
+        // Snapshot was taken via `getById` at the top of the handler —
+        // before `probeAndPersist` clobbered the column with the failed
+        // probe payload, so this is the LAST KNOWN-GOOD capabilities
+        // shape (or `null` if the route had never been probed). The
+        // diff-aware upsert detects the change and writes back; the
+        // resulting `action: "update"` audit row with `changed:
+        // ["capabilities"]` is desired forensic context.
+        capabilities: existing.capabilities ?? null,
         // B2.2 — suppress auto-probe on the rollback write. The prior
         // key was already known-good (it was working before this
         // attempt); re-probing it on rollback would waste an API call
-        // confirming what we already know. The operator sees the
-        // failed-rotation probe result in `capabilities` via the
-        // synchronous `probeAndPersist` above.
+        // confirming what we already know AND would re-clobber the
+        // capabilities we just restored.
         skipAutoProbe: true,
       });
       return res.status(400).json({

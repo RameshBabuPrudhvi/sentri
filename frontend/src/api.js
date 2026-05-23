@@ -502,10 +502,10 @@ export const api = {
   deleteTest:   (projectId, testId) => req("DELETE", `/projects/${projectId}/tests/${testId}`),
 
   // ── Test review actions ─────────────────────────────────────────────────────
-  /** @param {string} projectId @param {string} testId - Promote Draft → Approved. */
-  approveTest:     (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/approve`),
-  /** @param {string} projectId @param {string} testId - Mark as Rejected. */
-  rejectTest:      (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/reject`),
+  /** @param {string} projectId @param {string} testId @param {Object} [body] - `{ reviewComment?: string }` */
+  approveTest:     (projectId, testId, body) => req("PATCH", `/projects/${projectId}/tests/${testId}/approve`, body || undefined),
+  /** @param {string} projectId @param {string} testId @param {Object} [body] - `{ reviewComment?: string }` */
+  rejectTest:      (projectId, testId, body) => req("PATCH", `/projects/${projectId}/tests/${testId}/reject`, body || undefined),
   /** @param {string} projectId @param {string} testId - Restore to Draft. */
   restoreTest:     (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/restore`),
   /**
@@ -527,6 +527,15 @@ export const api = {
     const params = new URLSearchParams();
     if (filters.type) params.set("type", filters.type);
     if (filters.projectId) params.set("projectId", filters.projectId);
+    // ENT-004 (audit) — per-entity scoping. Pass-through to the route's
+    // `testId = ?` filter so TestDetail's "View activity" link can hit
+    // the same workspace-scoped activities endpoint without pulling the
+    // whole project's feed and filtering client-side.
+    if (filters.testId) params.set("testId", filters.testId);
+    // ENT-004 (migration 055) — matching per-run filter. RunDetail's
+    // "View activity →" deep-link uses `?runId=` for server-side
+    // filtering via the indexed `activities.runId` column.
+    if (filters.runId) params.set("runId", filters.runId);
     if (filters.after) params.set("after", filters.after);
     if (filters.before) params.set("before", filters.before);
     if (filters.limit != null) params.set("limit", String(filters.limit));
@@ -681,6 +690,9 @@ export const api = {
     req("GET", `/projects/${id}/runs?page=${page}&pageSize=${pageSize}`),
   /** @param {string} runId - Get full run detail with per-test results. */
   getRun:    (runId) => req("GET", `/runs/${runId}`),
+  /** GAP-005 (migration 056): per-run AI request log for the Agent Call Timeline.
+   *  Admin-gated — returns [] for non-admin callers (backend returns 403). */
+  getRunAIRequests: (runId) => req("GET", `/runs/${runId}/ai-requests`),
   getRunCompare: (runId, otherRunId) => req("GET", `/runs/${runId}/compare/${otherRunId}`),
   /** @param {string} runId - Abort a running crawl or test run. */
   abortRun:  (runId) => req("POST", `/runs/${runId}/abort`),

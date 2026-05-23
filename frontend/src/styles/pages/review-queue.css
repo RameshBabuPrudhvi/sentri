@@ -1093,6 +1093,16 @@
   margin-bottom: 20px;
 }
 
+/* ENT-004: review-comment textarea inside the reject/approve modal.
+   Matches the `.input` base but adds vertical rhythm so it sits between
+   the body copy and the action buttons without extra margin hacks. */
+.rq-confirm__comment {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  resize: vertical;
+  min-height: 60px;
+}
+
 .rq-confirm__actions {
   display: flex;
   gap: 8px;
