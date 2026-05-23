@@ -603,12 +603,13 @@ function resolveNarrativeLine(line, statVal) {
  * `requestAnimationFrame`-backed timer. Done stages collapse to their final
  * sentence + pill chips. Pending stages are hidden until they activate.
  *
- * @param {{ run: Object|null, logLines: string[], isRunActive: boolean, allTests: Object[] }} props
+ * @param {{ run: Object|null, isRunActive: boolean, allTests: Object[] }} props
  *   `allTests` is forwarded to per-stage `pills()` helpers so step 4 can join
  *   `run.tests` × the project's test inventory and surface real filenames
- *   instead of hardcoded placeholders.
+ *   instead of hardcoded placeholders. `logLines` was intentionally dropped —
+ *   the narrative is `runData`-driven and never reads from raw log text.
  */
-function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
+function NarrativeFeed({ run, isRunActive, allTests }) {
   const currentStep = run?.currentStep ?? null;
   const status      = run?.status ?? "running";
   const ps          = run?.pipelineStats || {};
@@ -624,8 +625,17 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
   const [streamKey,     setStreamKey]     = useState("");
   const [activeLine,    setActiveLine]    = useState(0);  // which line within the stage
   const [revealedPills, setRevealedPills] = useState(0);  // pills shown so far
-  const streamTimerRef = useRef(null);
-  const feedEndRef     = useRef(null);
+  const streamTimerRef  = useRef(null);
+  // Separate ref for the inter-line pause timeout — the char ticker uses
+  // `streamTimerRef`, but the advance-line effect's pause must be tracked
+  // separately so a stage transition can cancel it. Pre-fix the advance
+  // timeout was stored in a local `const t` and only cleared by the effect's
+  // own cleanup, NOT by `startStream`. On fast stage transitions the new
+  // stage's `startStream` call would not clear the previous stage's pause
+  // timer, which then fired ~900 ms later with the stale `activeLine` from
+  // the previous stage and corrupted streaming on the new stage.
+  const advanceTimerRef = useRef(null);
+  const feedEndRef      = useRef(null);
   const CHAR_MS = 22; // ~45 chars/sec — fast enough to feel live, slow enough to read
 
   // ── Derive stage state (same helper used by PipelinePanel) ──
@@ -667,7 +677,12 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
 
   // ── Start streaming a new line ──
   const startStream = useCallback((fullText, key) => {
+    // Cancel BOTH timers — the char ticker and the inter-line pause.
+    // Without clearing `advanceTimerRef`, a pending pause from the previous
+    // stage could fire after the new stage's stream has started, mutating
+    // `activeLine` against the wrong stage's `lines[]`.
     clearTimeout(streamTimerRef.current);
+    clearTimeout(advanceTimerRef.current);
     setStreamTarget(fullText);
     setStreamedText("");
     setStreamKey(key);
@@ -717,14 +732,14 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
     // the render swaps to the resolved final summary with the real stat.
     if (activeLine < totalLines - 2) {
       const pauseMs = 900; // pause between sentences
-      const t = setTimeout(() => {
+      advanceTimerRef.current = setTimeout(() => {
         const nextLine = activeLine + 1;
         setActiveLine(nextLine);
         setRevealedPills(p => p + 1);
         const nextText = resolveNarrativeLine(activeStage.lines[nextLine], statVal);
         startStream(nextText, `${currentStep}-${nextLine}`);
       }, pauseMs);
-      return () => clearTimeout(t);
+      return () => clearTimeout(advanceTimerRef.current);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamedText, streamTarget, currentStep, activeLine]);
@@ -752,12 +767,14 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
   }, [currentStep]);
 
   // ── Auto-scroll to keep the active entry in view ──
+  // Deps intentionally exclude `streamedText` — depending on it fires
+  // `scrollIntoView({ behavior: "smooth" })` ~45×/sec during streaming, which
+  // is wasteful and janky on low-end devices. Scrolling on stage + line
+  // transitions is enough: each new line creates one append, so the user's
+  // view follows the conversation without per-character thrash.
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [streamedText, currentStep]);
-
-  const isTerminal = status === "completed" || status === "completed_empty"
-    || status === "failed" || status === "aborted";
+  }, [currentStep, activeLine]);
 
   return (
     <div className="tl-narrative-feed">
@@ -795,9 +812,32 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
             <div className={`tl-nf-dot tl-nf-dot--${state}`} />
 
             <div className="tl-nf-body">
-              {/* Stage label */}
+              {/* Stage label + agent attribution.
+                  GAP-005 (audit, fix) — surface the AI agent(s) that run
+                  during this stage alongside the stage label so operators
+                  can see WHICH agent is doing the work and what model is
+                  driving it. The mapping is sourced from
+                  `frontend/src/config.js#getStageAgentRoles` (single source
+                  of truth, mirrors the backend `agentRole:` argument at each
+                  `generateText` call site). Multi-agent stages (step 3 =
+                  explorer + planner) render both roles joined with " + ".
+                  Stages 1, 2, 8 return `[]` from the helper (pre-LLM crawl,
+                  heuristic filter, and terminal marker) and produce no badge. */}
               <div className={`tl-nf-label tl-nf-label--${state}`}>
                 {stage.label}
+                {(() => {
+                  const roles = getStageAgentRoles(stage.step);
+                  if (!roles.length) return null;
+                  const agentLabel = roles
+                    .map(r => r.charAt(0).toUpperCase() + r.slice(1))
+                    .join(" + ");
+                  return (
+                    <span className="tl-nf-agent">
+                      🤖 {agentLabel} agent
+                      {run?.modelUsed ? ` · ${run.modelUsed}` : ""}
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* Narrative text with streaming cursor */}
@@ -854,7 +894,13 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
         </div>
       )}
 
-      <div ref={feedEndRef} />
+      {/* Sentinel for auto-scroll. Rendered as a <span> (not a <div>) so the
+          `.tl-nf-entry:last-of-type::before { display: none }` rule in CSS
+          can still match the visually-last entry — pre-fix this sentinel
+          was a <div>, which made every `.tl-nf-entry`'s `:last-of-type`
+          selector miss and left a dangling connector line below the last
+          stage. */}
+      <span ref={feedEndRef} aria-hidden="true" />
     </div>
   );
 }
@@ -1877,7 +1923,6 @@ export default function TestLab() {
                           <div className="tl-pipeline-col-label">What&rsquo;s happening</div>
                           <NarrativeFeed
                             run={runData}
-                            logLines={logLines}
                             isRunActive={isRunActive}
                             allTests={allTests}
                           />

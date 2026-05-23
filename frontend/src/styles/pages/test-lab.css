@@ -1423,7 +1423,11 @@
   width: 1px;
   background: var(--border);
 }
-.tl-nf-entry:last-child::before { display: none; }
+/* `:last-of-type` (not `:last-child`) because the feed renders a
+   `<span ref={feedEndRef}>` sentinel after the last entry for auto-scroll —
+   `:last-child` would never match any `.tl-nf-entry` div. The sentinel is
+   intentionally a different element type so this selector still discriminates. */
+.tl-nf-entry:last-of-type::before { display: none; }
 
 .tl-nf-dot {
   width: 15px;
@@ -1475,6 +1479,33 @@
 }
 .tl-nf-label--done   { color: var(--green); }
 .tl-nf-label--active { color: var(--accent); }
+
+/* GAP-005 (audit, fix) — inline agent + model attribution badge next to the
+   stage label. Restores the agent attribution surface that the old
+   `tl-progress-item__agent` badge provided before NarrativeFeed replaced the
+   progress feed. Smaller font + lighter weight than the label so the badge
+   reads as metadata, not a peer heading. Wraps to the next line on narrow
+   columns instead of overflowing the entry. */
+.tl-nf-agent {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--accent-bg);
+  border: 1px solid rgba(91, 110, 245, 0.2);
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--font-sans);
+  vertical-align: middle;
+}
+.tl-nf-label--done .tl-nf-agent {
+  background: var(--green-bg);
+  border-color: rgba(74, 222, 128, 0.25);
+  color: var(--green);
+}
 
 .tl-nf-text {
   font-size: 0.84rem;
