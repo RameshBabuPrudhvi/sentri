@@ -60,6 +60,10 @@ import { buildRetryPayload, resolveGenerateRetryFields } from "../utils/runRetry
 // Run-center terminal banners (Done / Failed). Extracted so TestLab.jsx
 // stops growing every time we tweak the action-stack copy.
 import { RunDoneBanner, RunFailedBanner } from "../components/test-lab/RunBanners.jsx";
+// Config-panel scaffold — currently exports only `RequirementComposer`.
+// Subsequent PRs fold the dialsConfig section, environments dropdown,
+// launch stats, and Start/Generate buttons into the same module.
+import { RequirementComposer } from "../components/test-lab/TestLabConfigPanel.jsx";
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
