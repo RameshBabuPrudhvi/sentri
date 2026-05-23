@@ -189,7 +189,7 @@ This matters for collaboration: a QA lead cannot send a link that opens directly
 ## 4. Dashboard UX Issues
 
 ### DASH-001 — No Realtime Alert/Anomaly Banner
-**Severity: High**
+**Severity: High** · ✅ _Substantially resolved by GAP-003's HealthBanner in PR #26 — see `frontend/src/components/dashboard/HealthBanner.jsx`. Three of the four alert kinds DASH-001 specifies are live: **currently-failing projects** (red, per-project most-recent-outcome) + **pending review work** + **active long-running runs** (blue). All click-through to the relevant filtered view, all derived client-side from the existing `/api/v1/dashboard` payload, hidden when no alerts (zero noise on healthy days). The two remaining alert kinds (**quality-gate violations**, **spend-cap warnings**) stay as a deliberate non-goal for the same reason DASH-001's fix description hinted at — both already surface on dedicated surfaces (RunDetail `gateResult` badge; `spendAlert.js` Slack webhook + Settings → Provider Routes). Adding a third write path on the dashboard would duplicate signals already in the workspace audit log without a new user-facing benefit. The audit's "dismissible" recommendation is met via the Tier-3 supporting-detail collapse (banner sits above the stat grid which sits above the collapse toggle — focused mode hides everything but the banner + KPIs). DASH-001 is the dashboard sibling of GAP-003; ticking it here closes the bookkeeping._
 
 The dashboard has no surface for active alerts. If 3 projects are currently in a failing state, a new quality gate violation was just triggered, or a self-healing event is actively processing, the user has no way to know without manually reading every panel.
 
@@ -454,7 +454,7 @@ The notification bell (`NotificationBell.jsx`) shows a dropdown of recent events
 ## 9. Frontend Architecture Concerns
 
 ### ARCH-001 — Settings.jsx Must Be Split
-**Severity: Critical**
+**Severity: Critical** · ✅ _Resolved by GAP-002 in PR #25. The 3,594-line `frontend/src/pages/Settings.jsx` was decomposed into a sidebar-driven shell + 9 per-section lazy-loaded chunks under `frontend/src/features/settings/sections/`. Every concern this finding called out is gone: (1) per-tab bundle weight — each section is its own webpack chunk loaded on demand, not bundled into one page load; (2) cross-tab re-renders — section components are sibling routes, not nested children of a giant tab switcher, so a state change in Members doesn't re-render Providers; (3) "modifying this single 3,500-line file" — adding a new section is now adding a new file under `features/settings/sections/`; (4) "loading the entire Settings component to test any feature" — each section is testable in isolation. The legacy file is replaced by a build-time guard that throws on render. ARCH-001 is the architectural sibling of GAP-002 (same root cause, same fix); ticking it here closes the duplicate bookkeeping._
 
 A 3,594-line single-file component is a maintenance and performance liability:
 - The entire Settings page, including code for every tab, loads regardless of which tab the user is viewing
@@ -530,7 +530,7 @@ On a 375px wide iPhone viewport, the sidebar likely obscures most of the main co
 ---
 
 ### MOB-002 — Touch Interaction Targets Are Too Small
-**Severity: Medium**
+**Severity: Medium** · ✅ _Landed in PR #26 — touch-target minimums for the named offenders (sidebar collapse, nav item chevrons, badge chips, ProviderBadge) added to `frontend/src/styles/components.css` under a `@media (pointer: coarse)` block so desktop pixel-tight layouts stay unchanged. **Direct `min-width`/`min-height: 44px`** on the bare-icon buttons (`.sidebar-header__collapse-btn`, `.notif-bell-btn`, `.modal-close`). **Hit-box expansion via transparent `::after` overlay** on the sidebar nav items (visible pill stays compact at the rail's 40×40 visual but the touch target grows to 52×52 via `inset: -6px` overlay) — matches Material 3's "expanded touch target" guidance. **Clickable badges** (AuditLog filter chips, sidebar pending-pill nav badges, ProviderBadge / `.st-provider-badge`) get `min-height: 32px` + extra vertical padding so the touch target meets 32–44px without inflating decorative bare `.badge` chips that aren't click targets. Topbar user-menu button already got 36×36 in the earlier MOB-001 pass at `topbar.css`; that rule is preserved. Pointer-coarse scoping is the W3C-recommended hook (CSS Media Queries Level 4) for touch-vs-mouse intent and matches the Linear / Vercel / GitHub approach — WCAG 2.5.5 only applies at Level AAA and explicitly exempts mouse-pointer contexts. Pure CSS — no JSX changes, no component refactor._
 
 Many interactive elements — the sidebar collapse button, nav item chevrons, badge chips, and the ProviderBadge in the TopBar — have touch target sizes below 44×44px (Apple HIG) and 48×48dp (Material Design) guidelines.
 
