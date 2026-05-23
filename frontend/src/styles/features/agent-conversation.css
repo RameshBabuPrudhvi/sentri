@@ -42,10 +42,6 @@
  * `.ac-feed` level without per-modifier rewrites.
  */
 .ac-feed {
-  --ac-scout-bg:     rgba(56, 189, 248, 0.10);
-  --ac-scout-fg:     #0284c7;
-  --ac-scout-border: rgba(56, 189, 248, 0.25);
-
   --ac-explorer-bg:     rgba(168, 85, 247, 0.10);
   --ac-explorer-fg:     #9333ea;
   --ac-explorer-border: rgba(168, 85, 247, 0.25);
@@ -94,7 +90,6 @@
   line-height: 1;
   border: 1.5px solid transparent;
 }
-.ac-avatar--scout    { background: var(--ac-scout-bg);    border-color: var(--ac-scout-border); }
 .ac-avatar--explorer { background: var(--ac-explorer-bg); border-color: var(--ac-explorer-border); }
 .ac-avatar--planner  { background: var(--ac-planner-bg);  border-color: var(--ac-planner-border); }
 .ac-avatar--author   { background: var(--ac-author-bg);   border-color: var(--ac-author-border); }
@@ -120,7 +115,6 @@
 .ac-agent-label {
   font-weight: 600;
 }
-.ac-turn--scout    .ac-agent-label { color: var(--ac-scout-fg); }
 .ac-turn--explorer .ac-agent-label { color: var(--ac-explorer-fg); }
 .ac-turn--planner  .ac-agent-label { color: var(--ac-planner-fg); }
 .ac-turn--author   .ac-agent-label { color: var(--ac-author-fg); }
@@ -141,7 +135,6 @@
   border-radius: 12px;
   border: 1px solid transparent;
 }
-.ac-turn--scout    .ac-text { background: var(--ac-scout-bg);    border-color: var(--ac-scout-border); }
 .ac-turn--explorer .ac-text { background: var(--ac-explorer-bg); border-color: var(--ac-explorer-border); }
 .ac-turn--planner  .ac-text { background: var(--ac-planner-bg);  border-color: var(--ac-planner-border); }
 .ac-turn--author   .ac-text { background: var(--ac-author-bg);   border-color: var(--ac-author-border); }

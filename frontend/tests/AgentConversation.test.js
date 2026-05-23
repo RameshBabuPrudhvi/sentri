@@ -42,9 +42,14 @@ function test(name, fn) {
 
 console.log("\n── getStepAgentSequence ──");
 
-test("steps 1+2 use the frontend-only `scout` persona", () => {
-  assert.deepEqual(getStepAgentSequence(1), ["scout"]);
-  assert.deepEqual(getStepAgentSequence(2), ["scout"]);
+test("steps 1+2 fold under Explorer (no separate frontend-only persona)", () => {
+  // Steps 1+2 are pre-LLM (crawl + filter) but conceptually structural-
+  // discovery work, owned by the same Explorer agent that classifies
+  // intents at step 3. Keeping the persona key inside the canonical
+  // `AGENT_ROLES` list means a future `agent_event` SSE adapter will
+  // never see a foreign agent name.
+  assert.deepEqual(getStepAgentSequence(1), ["explorer"]);
+  assert.deepEqual(getStepAgentSequence(2), ["explorer"]);
 });
 
 test("step 3 is the multi-agent stage (explorer + planner)", () => {
@@ -74,57 +79,64 @@ test("returns empty array when run is null/undefined", () => {
   assert.deepEqual(synthesizeTurns(undefined, { ps: {}, allTests: [] }), []);
 });
 
-test("active step 1 emits Scout onboard + doing (no finding pre-stat)", () => {
+test("active step 1 emits Explorer onboard + doing (no finding pre-stat)", () => {
   const run = { runId: "RUN-1", currentStep: 1, status: "running" };
   const turns = synthesizeTurns(run, { ps: {}, allTests: [] });
   const ids = turns.map(t => t.id);
-  assert.ok(ids.includes("1-scout-onboard"), "expected onboard");
-  assert.ok(ids.includes("1-scout-doing"),   "expected doing");
+  assert.ok(ids.includes("1-explorer-onboard"), "expected onboard");
+  assert.ok(ids.includes("1-explorer-doing"),   "expected doing");
   // Finding suppressed — `pagesFound` is null so the template returns null
   // and `pushTurn` skips the entry (honesty guard).
-  assert.ok(!ids.includes("1-scout-finding"), "finding should be suppressed pre-stat");
+  assert.ok(!ids.includes("1-explorer-finding"), "finding should be suppressed pre-stat");
   // No handoff yet — step 1 isn't done.
-  assert.ok(!ids.includes("1-scout-handoff"), "handoff should be suppressed pre-done");
+  assert.ok(!ids.includes("1-explorer-handoff"), "handoff should be suppressed pre-done");
 });
 
-test("scout finding line includes pages + interactive-element count once both land", () => {
+test("explorer step-1 finding renders the pages count once pagesFound lands", () => {
   const run = { runId: "RUN-1", currentStep: 3, status: "running", pagesFound: 7 };
   const turns = synthesizeTurns(run, { ps: { elementsKept: 24 }, allTests: [] });
-  const finding = turns.find(t => t.id === "1-scout-finding");
+  const finding = turns.find(t => t.id === "1-explorer-finding");
   assert.ok(finding, "expected a finding turn for step 1");
-  assert.match(finding.text, /Mapped 7 pages with 24 interactive elements\./);
+  // Step 1 reports pages only (interactive elements live on step 2's finding).
+  assert.match(finding.text, /Mapped 7 pages\./);
 });
 
-test("scout(1) → scout(2) same-agent transition does NOT emit a handoff turn", () => {
-  // Both step 1 and step 2 use the `scout` persona. When step 1 completes,
-  // the conversation continues naturally — there's no "Scout handing off to
-  // Scout" beat. Pre-fix, the synthesizer would have fired one; this case
-  // pins the same-agent suppression.
-  const run = { runId: "RUN-1", currentStep: 3, status: "running", pagesFound: 7 };
-  const turns = synthesizeTurns(run, { ps: { elementsKept: 24 }, allTests: [] });
-  const ids = turns.map(t => t.id);
-  assert.ok(!ids.includes("1-scout-handoff"), "no same-agent handoff at step 1");
-});
-
-test("step 2 done → scout hands off to Explorer (first agent of step 3)", () => {
-  const run = { runId: "RUN-1", currentStep: 3, status: "running", pagesFound: 5 };
-  const turns = synthesizeTurns(run, { ps: { elementsKept: 12 }, allTests: [] });
-  const handoff = turns.find(t => t.id === "2-scout-handoff");
-  assert.ok(handoff, "expected handoff turn");
-  assert.equal(handoff.text, "Handing off to Explorer.");
-});
-
-test("step 3 multi-agent: explorer + planner both appear with intra-step handoff", () => {
+test("explorer continues across steps 1+2+3 without re-introducing itself", () => {
+  // Explorer is a multi-step agent (parallel to Author at 4-7). The
+  // onboard turn fires ONCE at step 1; steps 2 and 3 must NOT emit
+  // a fresh `onboard` (Explorer is continuing, not arriving fresh) and
+  // must NOT emit an `accept` turn (same-agent step transition — there's
+  // no prior agent handing off to Explorer at steps 2/3).
   const run = { runId: "RUN-1", currentStep: 4, status: "running", pagesFound: 5 };
   const turns = synthesizeTurns(run, {
     ps: { elementsKept: 12, intentsClassified: 8, journeysDetected: 3 },
     allTests: [],
   });
   const ids = turns.map(t => t.id);
-  assert.ok(ids.includes("3-explorer-onboard"),  "explorer onboard");
-  assert.ok(ids.includes("3-explorer-handoff"),  "explorer → planner handoff");
-  assert.ok(ids.includes("3-planner-onboard"),   "planner onboard");
-  assert.ok(ids.includes("3-planner-handoff"),   "planner → author handoff");
+  assert.ok(ids.includes("1-explorer-onboard"),  "step 1 onboard fires once");
+  assert.ok(!ids.includes("2-explorer-onboard"), "step 2 must NOT re-onboard");
+  assert.ok(!ids.includes("3-explorer-onboard"), "step 3 must NOT re-onboard");
+  assert.ok(!ids.includes("1-explorer-accept"),  "step 1 has no prior agent");
+  assert.ok(!ids.includes("2-explorer-accept"),  "step 2 same-agent, no accept");
+  assert.ok(!ids.includes("3-explorer-accept"),  "step 3 same-agent, no accept");
+});
+
+test("step 3 multi-agent: explorer handoff to planner (intra-step), planner handoff to author", () => {
+  // Explorer's onboard fires at step 1 (first appearance), NOT at step 3.
+  // At step 3, Explorer is continuing — no re-onboard, no accept — and the
+  // intra-step handoff to Planner fires when step 3 is done. Planner's
+  // onboard fires at step 3 (its first appearance) and then hands off to
+  // Author at step 4.
+  const run = { runId: "RUN-1", currentStep: 4, status: "running", pagesFound: 5 };
+  const turns = synthesizeTurns(run, {
+    ps: { elementsKept: 12, intentsClassified: 8, journeysDetected: 3 },
+    allTests: [],
+  });
+  const ids = turns.map(t => t.id);
+  assert.ok(!ids.includes("3-explorer-onboard"), "explorer onboarded at step 1, not step 3");
+  assert.ok(ids.includes("3-explorer-handoff"),  "explorer → planner handoff at end of step 3");
+  assert.ok(ids.includes("3-planner-onboard"),   "planner onboards at step 3 (first appearance)");
+  assert.ok(ids.includes("3-planner-handoff"),   "planner → author handoff at end of step 3");
 });
 
 test("author 4 → 5 → 6 → 7 same-agent step transitions suppress redundant `accept` turns", () => {
@@ -195,9 +207,10 @@ test("step 8 wrapup fires only on `completed`, not on failed/aborted", () => {
 });
 
 test("failed mid-step-3 run freezes the transcript at step 3 — no later turns", () => {
-  // Run died while step 3 was active. We expect steps 1-2 turns + step 3
-  // onboard/doing, but ZERO content from step 4 onwards (no Author appears,
-  // no handoff to Author lands).
+  // Run died while step 3 was active. We expect steps 1-2 turns (Explorer
+  // crawl + filter, both done) + step 3 doing (Explorer mid-classify), but
+  // ZERO content from step 4 onwards (no Planner handoff completes, no
+  // Author appears, no wrapup fires).
   const run = { runId: "RUN-1", currentStep: 3, status: "failed", pagesFound: 5 };
   const turns = synthesizeTurns(run, {
     ps: { elementsKept: 12 },
@@ -206,7 +219,7 @@ test("failed mid-step-3 run freezes the transcript at step 3 — no later turns"
   const steps = new Set(turns.map(t => t.step));
   assert.ok(steps.has(1), "step 1 turns should be present");
   assert.ok(steps.has(2), "step 2 turns should be present");
-  assert.ok(steps.has(3), "step 3 onboard should be present");
+  assert.ok(steps.has(3), "step 3 should have at least Explorer's doing turn");
   assert.ok(!steps.has(4), "no step 4 turns after failure");
   assert.ok(!steps.has(8), "no wrapup after failure");
 });

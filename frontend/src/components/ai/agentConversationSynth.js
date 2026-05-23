@@ -20,9 +20,23 @@ import { stageStatus } from "../../utils/pipelineState.js";
 import { getStageAgentRoles } from "../../config.js";
 
 // ── Agent personas ───────────────────────────────────────────────────────────
-
+//
+// Personas are keyed by the canonical `AGENT_ROLES` values from
+// `frontend/src/config.js#AGENT_ROLES` (mirrored from backend
+// `agentHealthCheck.js#AGENT_ROLES`). Every key here MUST exist in the
+// canonical list so a future Task 2 follow-up that swaps the synthesizer
+// for real `agent_event` SSE payloads sees only registered agent names.
+//
+// Explorer covers steps 1-3: pre-LLM site crawl + DOM-element filter
+// (steps 1+2, no LLM calls backend-side) AND LLM-driven intent
+// classification (step 3, `agentRole: "explorer"` at
+// `backend/src/pipeline/intentClassifier.js#aiClassifyPage`). The pre-LLM
+// stages don't emit `agent_event` rows today, but conceptually it's the
+// same agent doing structural discovery throughout — telling the user
+// "Explorer is mapping → filtering → classifying" reads honestly. When
+// `agent_event` SSE lands, steps 1+2 stay synthesized client-side and
+// step 3 onwards swaps to real events.
 export const AGENT_PERSONAS = {
-  scout:    { icon: "🕷️", label: "Scout",    color: "scout",    scope: "I map the site." },
   explorer: { icon: "🔍", label: "Explorer", color: "explorer", scope: "I find what users can do." },
   planner:  { icon: "🧭", label: "Planner",  color: "planner",  scope: "I group actions into journeys." },
   author:   { icon: "✍️", label: "Author",   color: "author",   scope: "I write the tests." },
@@ -33,14 +47,22 @@ export const AGENT_PERSONAS = {
 // ── Per-step agent sequence ──────────────────────────────────────────────────
 
 /**
- * Steps 1+2 inject the frontend-only `scout` persona (no `agentRole` LLM
- * call backend-side). Steps 3-7 delegate to `getStageAgentRoles` from
- * `config.js` — the canonical map mirrored from the backend `agentRole:`
- * argument. When AUTO-023 wires Oracle / Reviewer backend-side, updating
+ * Steps 1+2 fold under `explorer` — the pre-LLM crawl + filter are
+ * structural-discovery work conceptually owned by the same agent that
+ * later runs LLM-driven intent classification at step 3. Using `explorer`
+ * here (instead of inventing a frontend-only "scout") keeps every persona
+ * key inside the canonical `AGENT_ROLES` list, which matters when Task 2
+ * `agent_event` SSE payloads start arriving and the synthesizer is
+ * swapped for an event adapter — no foreign agent name will ever appear
+ * in a real event stream.
+ *
+ * Steps 3-7 delegate to `getStageAgentRoles` from `config.js` — the
+ * canonical map mirrored from the backend `agentRole:` argument. When
+ * AUTO-023 wires Oracle / Reviewer backend-side, updating
  * `PIPELINE_STEP_ROLES` flows through here automatically.
  */
 export function getStepAgentSequence(step) {
-  if (step === 1 || step === 2) return ["scout"];
+  if (step === 1 || step === 2) return ["explorer"];
   if (step === 8) return []; // terminal — Author speaks via wrapup
   const roles = getStageAgentRoles(step);
   return roles.length > 0 ? roles : ["author"]; // defensive fallback
@@ -50,43 +72,55 @@ export function getStepAgentSequence(step) {
 // Phase contract: see AgentConversation.jsx docblock.
 
 export const TURN_TEMPLATES = {
-  // ── Scout (steps 1+2) ──
-  "scout.onboard":  () => "Scout here. I'll open a browser and map your site.",
-  "scout.doing":    (r) => {
+  // ── Explorer (steps 1-3) ──
+  // Explorer is a multi-step agent (parallel to Author at 4-7). The
+  // `.doing.N` / `.finding.N` keys disambiguate per step so each stage's
+  // wording stays specific:
+  //   step 1 — crawl pages (no LLM call backend-side)
+  //   step 2 — filter interactive elements (no LLM call backend-side)
+  //   step 3 — classify user intents per page (LLM call:
+  //            `agentRole: "explorer"` at intentClassifier.aiClassifyPage)
+  //
+  // `resolveTemplate` falls back to the un-suffixed key — used by
+  // `explorer.onboard` (Explorer's first turn ever, fires once at step 1)
+  // and `explorer.handoff` (one-time handoff to Planner at end of step 3).
+  // The synthesizer's same-agent-step guard suppresses redundant `accept`
+  // turns on steps 2 + 3 — Explorer is continuing, not formally accepting
+  // a handoff from themselves.
+  "explorer.onboard":   () => "Explorer here. I'll discover what's on your site.",
+  "explorer.doing.1":   (r) => {
     const url = r?.projectUrl || r?.project?.url;
     return url
       ? `Opening ${url} and following every link I can reach…`
       : "Opening your homepage and following every link I can reach…";
   },
-  "scout.finding":  (r, { ps }) => {
+  "explorer.finding.1": (r, { ps }) => {
     // `pagesFound` has a live top-level mirror (incremented per page
     // snapshot at `crawlBrowser.js:338`), so prefer it over
     // `pipelineStats.pagesFound` which only materialises at step 8.
     const pages = r?.pagesFound ?? ps?.pagesFound;
-    const kept  = ps?.elementsKept;
     if (pages == null) return null;
     if (pages <= 0)    return "No reachable pages found on this site.";
-    const elemFrag = kept != null && kept > 0
-      ? ` with ${kept} interactive element${kept !== 1 ? "s" : ""}`
-      : "";
-    return `Mapped ${pages} page${pages !== 1 ? "s" : ""}${elemFrag}.`;
+    return `Mapped ${pages} page${pages !== 1 ? "s" : ""}.`;
   },
-  "scout.handoff":  () => "Handing off to Explorer.",
-
-  // ── Explorer (step 3a) ──
-  "explorer.onboard": () => "Explorer here. I'll look at what users can actually do on these pages.",
-  "explorer.accept":  () => "Thanks Scout. Looking at what users can actually do on these pages.",
-  "explorer.doing":   () => "Scanning the DOM for buttons, forms, inputs — anything a user can act on.",
-  "explorer.finding": (r, { ps }) => {
+  "explorer.doing.2":   () => "Scanning each page for buttons, inputs, forms — anything a user can act on. Skipping decorative content.",
+  "explorer.finding.2": (r, { ps }) => {
+    const kept = ps?.elementsKept;
+    if (kept == null) return null;
+    if (kept <= 0)    return "No interactive elements found — the crawled pages have nothing to act on.";
+    return `Kept ${kept} interactive element${kept !== 1 ? "s" : ""}.`;
+  },
+  "explorer.doing.3":   () => "Reading the page structure to classify what each user action does — sign-up, search, checkout, navigation.",
+  "explorer.finding.3": (r, { ps }) => {
     // Suppressed mid-run — `pipelineStats.intentsClassified` is only set at
     // step-3 completion. Returning null keeps the conversation honest
     // instead of fabricating a "0 actions" finding before the stat arrives.
     const intents = ps?.intentsClassified;
     if (intents == null) return null;
-    if (intents <= 0)    return "Couldn't identify any user actions on the crawled pages.";
-    return `Identified ${intents} distinct user action${intents !== 1 ? "s" : ""}.`;
+    if (intents <= 0)    return "Couldn't identify any user intents on the crawled pages.";
+    return `Identified ${intents} distinct user intent${intents !== 1 ? "s" : ""}.`;
   },
-  "explorer.handoff": () => "Handing off to Planner.",
+  "explorer.handoff":   () => "Handing off to Planner.",
 
   // ── Planner (step 3b) ──
   "planner.onboard": () => "Planner here. Grouping these into end-to-end journeys.",
