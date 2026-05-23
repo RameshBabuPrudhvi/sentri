@@ -1120,29 +1120,74 @@ export default function TestLab() {
           <span className="tl-topbar__brand-tagline">AI test generation workspace</span>
         </div>
 
-        <button
-          className={`tl-tab-btn${tab === "crawl" ? " tl-tab-btn--active" : ""}`}
-          onClick={() => setTab("crawl")}
-        >
-          <Link2 size={14} />
-          Crawl &amp; Generate
-        </button>
-        <button
-          className={`tl-tab-btn${tab === "requirement" ? " tl-tab-btn--active" : ""}`}
-          onClick={() => setTab("requirement")}
-        >
-          <Zap size={14} />
-          Generate from Requirement
-        </button>
-        <button
-          className={`tl-tab-btn${tab === "queue" ? " tl-tab-btn--active" : ""}`}
-          onClick={() => setTab("queue")}
-        >
-          Queue
-          {activeQueueRuns.length > 0 && (
-            <span className="tl-tab-badge">{activeQueueRuns.length}</span>
-          )}
-        </button>
+        {/* G15 (a11y) — tab bar follows the WAI-ARIA APG tablist pattern.
+            Pre-fix: bare <button>s with no `role`, no `aria-selected`, no
+            arrow-key navigation. Post-fix: container is `role="tablist"`
+            (rendered as a fragment-wrapping comment because the parent
+            `.tl-topbar` already serves as the tablist surface — adding a
+            wrapper would require restyling), each tab is `role="tab"` +
+            `aria-selected`, and ←/→ arrow keys cycle through the three
+            tabs. Mirrors GitHub Settings / Linear / Vercel tab patterns.
+            The brand cluster + Record button stay inside `.tl-topbar` but
+            outside the logical tablist (they're `role="presentation"` by
+            virtue of being non-tab children — screen readers skip them
+            in tab navigation). */}
+        {(() => {
+          const TABS = ["crawl", "requirement", "queue"];
+          const onTabKeyDown = (e) => {
+            if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+            e.preventDefault();
+            const i = TABS.indexOf(tab);
+            const next = e.key === "ArrowRight"
+              ? TABS[(i + 1) % TABS.length]
+              : TABS[(i - 1 + TABS.length) % TABS.length];
+            setTab(next);
+          };
+          return (
+            <>
+              <button
+                role="tab"
+                aria-selected={tab === "crawl"}
+                aria-controls="tl-tab-panel-crawl"
+                tabIndex={tab === "crawl" ? 0 : -1}
+                className={`tl-tab-btn${tab === "crawl" ? " tl-tab-btn--active" : ""}`}
+                onClick={() => setTab("crawl")}
+                onKeyDown={onTabKeyDown}
+              >
+                <Link2 size={14} />
+                Crawl &amp; Generate
+              </button>
+              <button
+                role="tab"
+                aria-selected={tab === "requirement"}
+                aria-controls="tl-tab-panel-requirement"
+                tabIndex={tab === "requirement" ? 0 : -1}
+                className={`tl-tab-btn${tab === "requirement" ? " tl-tab-btn--active" : ""}`}
+                onClick={() => setTab("requirement")}
+                onKeyDown={onTabKeyDown}
+              >
+                <Zap size={14} />
+                Generate from Requirement
+              </button>
+              <button
+                role="tab"
+                aria-selected={tab === "queue"}
+                aria-controls="tl-tab-panel-queue"
+                tabIndex={tab === "queue" ? 0 : -1}
+                className={`tl-tab-btn${tab === "queue" ? " tl-tab-btn--active" : ""}`}
+                onClick={() => setTab("queue")}
+                onKeyDown={onTabKeyDown}
+              >
+                Queue
+                {activeQueueRuns.length > 0 && (
+                  <span className="tl-tab-badge" aria-label={`${activeQueueRuns.length} active`}>
+                    {activeQueueRuns.length}
+                  </span>
+                )}
+              </button>
+            </>
+          );
+        })()}
 
         {/* Record action — right-aligned, styled as a primary CTA so it
             reads as a peer to the tabs rather than disappearing as a ghost
@@ -1291,18 +1336,51 @@ export default function TestLab() {
         <div className="tl-grid fade-in">
 
           {/* ── Left: Project sidebar ── */}
-          <div className="tl-projects">
-            <div className="tl-col-header">Projects</div>
-            <div className="tl-proj-list">
+          {/* G15 (a11y) — sidebar wrapped as `role="navigation"` with an
+              `aria-label` so screen readers announce "Projects navigation"
+              when the user tabs into the rail. Inner list uses semantic
+              defaults (the per-item `role="button"` already gives screen
+              readers the actionable shape); a literal `role="listbox"`
+              would imply single-select with arrow-key navigation, which
+              we don't yet implement and would mislead AT users. Revisit
+              this once arrow-key list nav lands. */}
+          <nav className="tl-projects" aria-label="Projects">
+            <div className="tl-col-header" id="tl-projects-heading">Projects</div>
+            <div className="tl-proj-list" aria-labelledby="tl-projects-heading">
               {loadingProjects
                 ? [1, 2].map(i => (
                     <div key={i} className="skeleton tl-proj-skeleton" />
                   ))
                 : projects.map(p => (
+                    // G15 (a11y) — project sidebar items were `<div onClick>`
+                    // with no keyboard affordance. WCAG 2.1.1 (Keyboard, Level
+                    // A) requires every interactive element be operable via
+                    // keyboard. Promoted to `role="button"` + `tabIndex={0}`
+                    // + Enter/Space activation. `aria-pressed` reflects the
+                    // selected state so screen-reader users hear "selected"
+                    // / "not selected" alongside the visible active styling.
+                    // Kept as a `<div>` (not a `<button>`) because the inner
+                    // markup is two block-level rows (name + url) and a
+                    // native `<button>` requires `display: flex` overrides
+                    // that fight with the existing `.tl-proj-item` flex rule.
                     <div
                       key={p.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={p.id === selectedId}
+                      aria-label={`Select project ${p.name}`}
                       className={`tl-proj-item${p.id === selectedId ? " tl-proj-item--active" : ""}`}
                       onClick={() => handleSelectProject(p.id)}
+                      onKeyDown={(e) => {
+                        // Enter + Space activate, matching native <button>
+                        // behaviour. preventDefault on Space stops the page
+                        // scroll. Other keys pass through (Tab navigates,
+                        // arrow keys reserved for future list-nav follow-up).
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleSelectProject(p.id);
+                        }
+                      }}
                     >
                       <ProjIcon project={p} />
                       <div className="tl-proj-info">
@@ -1326,7 +1404,7 @@ export default function TestLab() {
                 </div>
               </div>
             )}
-          </div>
+          </nav>
 
           {/* ── Middle: Configuration / Running / Completed view ── */}
           {/* Show the run view (pipeline / sitegraph / logs) whenever a run is
