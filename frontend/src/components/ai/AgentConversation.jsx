@@ -227,14 +227,75 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
   // `runId` only exists on the separate `activeRun` state object. Pre-fix
   // this ref compared `run?.runId` which was always `undefined`, so the
   // transcript never cleared between runs.
+  //
+  // ### Rehydration UX (page reload / sessionStorage restore)
+  //
+  // Plain `setDisplayed([])` on a runId change is correct for the "user
+  // launched a new run" path, but it has a regression for the "user
+  // reloaded the page on a finished run" path: the reset fires once on
+  // mount when `runIdRef.current` (initial `useRef(run?.id)` from the
+  // first render) is compared against `run?.id` from the SAME first
+  // render — they're equal, so the reset body is skipped. Good.
+  //
+  // The actual hazard is when a different mount path (e.g. attach-to-
+  // existing-run via `handleAttachRun`) flips `run?.id` from `null` to a
+  // terminal run's id in a second render. The runId-changed branch
+  // wipes `displayed`, the diff effect above re-runs from
+  // `targetTurns`, and every turn re-enters as `streaming` — meaning a
+  // completed 30-turn transcript would type itself out character-by-
+  // character (~30 × ~50 chars × 22 ms ≈ 33 seconds of stale-ticker
+  // theatre) before the user sees the finished state. Worse, the
+  // "Agents are coming online…" indicator flashes for the first frame
+  // because `displayed.length === 0 && isRunActive` is briefly true
+  // when `isRunActive` lags one render behind the snapshot.
+  //
+  // Fix: when the runId changes AND the new run is already terminal,
+  // seed `displayed` directly from `targetTurns` with every turn
+  // pre-marked `done` + `renderedText: text`. The streamer effect's
+  // `findIndex(t => t.status === "streaming")` returns -1 so it never
+  // ticks. The diff effect sees identical IDs so it no-ops. The
+  // thinking indicator is suppressed because `displayed.length > 0`.
+  // The transcript renders instantly in its completed shape — exactly
+  // what an operator reopening a finished run expects.
+  //
+  // Active runs keep the prior wipe-and-stream behaviour: their
+  // `targetTurns` is incomplete on mount (events still arriving), so
+  // seeding from it would render a half-baked transcript that grew
+  // mid-frame as the SSE snapshot arrived.
   const runIdRef = useRef(run?.id);
   useEffect(() => {
     if (runIdRef.current !== run?.id) {
       runIdRef.current = run?.id;
-      setDisplayed([]);
       lastLenRef.current = 0;
       clearTimeout(streamTimerRef.current);
+      const isTerminal =
+        run?.status === "completed" ||
+        run?.status === "completed_empty" ||
+        run?.status === "failed" ||
+        run?.status === "aborted" ||
+        run?.status === "interrupted";
+      if (isTerminal && targetTurns.length > 0) {
+        // Pre-rendered seed: every turn lands as `done` with full text
+        // visible. Handoffs already render their text instantly, so
+        // they don't need special-casing here.
+        setDisplayed(targetTurns.map(t => ({
+          ...t,
+          status: "done",
+          renderedText: t.text,
+        })));
+        lastLenRef.current = targetTurns.length;
+      } else {
+        setDisplayed([]);
+      }
     }
+    // `targetTurns` intentionally NOT in the dep list — the effect must
+    // only fire when the runId itself changes, not on every snapshot
+    // update that mutates targetTurns. The functional updater pattern
+    // used inside is stale-closure-safe, but the gate (`runIdRef`
+    // comparison) IS the dep semantic. If we add `targetTurns` to the
+    // deps, every SSE update would re-trigger this effect and wipe the
+    // user's incrementally-built transcript on every event.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run?.id]);
 
   // ── Render ──
