@@ -24,7 +24,34 @@ import { coerceText as coerceTextPure, isBadStringified } from "../utils/notific
 const NotificationContext = createContext();
 
 const STORAGE_KEY = "app_notifications";
+// ENT-005: snooze state lives in its own localStorage key so it survives
+// `clearAll()` (which only wipes the notifications array) and so an
+// accidental schema bump on the notifications payload can't lose the
+// active snooze window. The value is an ISO timestamp string or null.
+const SNOOZE_STORAGE_KEY = "app_notifications_snoozed_until";
 const MAX_NOTIFICATIONS = 50;
+
+/** Read a persisted snooze-until ISO string from localStorage, or null. */
+function loadSnoozeFromStorage() {
+  try {
+    const raw = localStorage.getItem(SNOOZE_STORAGE_KEY);
+    if (!raw) return null;
+    // Validate it's a parseable timestamp and still in the future. Past
+    // values are stale (snooze already expired) — treat as null so the
+    // bell doesn't render a "Snoozed until <yesterday>" footer.
+    const t = new Date(raw).getTime();
+    if (!Number.isFinite(t) || t <= Date.now()) return null;
+    return raw;
+  } catch { return null; }
+}
+
+/** Persist or clear the snooze-until ISO string. */
+function saveSnoozeToStorage(isoOrNull) {
+  try {
+    if (isoOrNull) localStorage.setItem(SNOOZE_STORAGE_KEY, isoOrNull);
+    else localStorage.removeItem(SNOOZE_STORAGE_KEY);
+  } catch { /* localStorage unavailable / quota — non-fatal */ }
+}
 
 /**
  * Coerce arbitrary input to a readable string for notification title/body.
@@ -80,6 +107,36 @@ function saveToStorage(notifications) {
  */
 export function NotificationProvider({ children }) {
   const [notifications, setNotifications] = useState(loadFromStorage);
+  // ENT-005: `snoozedUntil` is an ISO timestamp (or null) indicating
+  // "suppress new notifications until this moment". When non-null + in the
+  // future, `addNotification` still PERSISTS the row so the audit trail is
+  // intact, but the bell badge (`unreadCount`) collapses to 0 and the
+  // dropdown header surfaces a "Snoozed until <time>" affordance with a
+  // one-click resume. Industry-standard pattern: Slack, GitHub, Linear all
+  // expose snooze as a top-level bell affordance.
+  const [snoozedUntil, setSnoozedUntilState] = useState(loadSnoozeFromStorage);
+
+  // Auto-expire the snooze when its window passes. Without this, an
+  // open tab whose snooze window elapses while the user is away (laptop
+  // suspended overnight, tab in background) would stay snoozed until the
+  // next page reload — counterintuitive vs Slack's behaviour where the
+  // bell wakes itself up the moment "Until tomorrow" elapses. A single
+  // setTimeout scheduled at the exact expiry instant covers this without
+  // a polling loop.
+  useEffect(() => {
+    if (!snoozedUntil) return;
+    const remaining = new Date(snoozedUntil).getTime() - Date.now();
+    if (remaining <= 0) {
+      setSnoozedUntilState(null);
+      saveSnoozeToStorage(null);
+      return;
+    }
+    const t = setTimeout(() => {
+      setSnoozedUntilState(null);
+      saveSnoozeToStorage(null);
+    }, remaining);
+    return () => clearTimeout(t);
+  }, [snoozedUntil]);
 
   // Sync to localStorage whenever notifications change.
   //
@@ -110,7 +167,14 @@ export function NotificationProvider({ children }) {
     saveToStorage(notifications);
   }, [notifications]);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  // ENT-005: when snoozed, the bell badge MUST read 0 — that's the entire
+  // point of the snooze. Notifications keep being persisted (audit trail
+  // intact, user can still expand the dropdown and read them) but the
+  // user explicitly asked not to be nagged with a badge during this window.
+  // Slack / Linear / GitHub all behave this way.
+  const isSnoozed = !!snoozedUntil && new Date(snoozedUntil).getTime() > Date.now();
+  const rawUnreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = isSnoozed ? 0 : rawUnreadCount;
 
   /**
    * Add a new notification.
@@ -141,8 +205,54 @@ export function NotificationProvider({ children }) {
     setNotifications([]);
   }, []);
 
+  /**
+   * ENT-005: snooze the bell until a given moment.
+   *
+   * @param {Date|string|number|null} until - When to wake. Accepts a Date,
+   *   an ISO timestamp string, an epoch-millis number, or `null` to clear
+   *   the snooze immediately. Past values are coerced to `null` (no-op).
+   */
+  const setSnoozedUntil = useCallback((until) => {
+    if (until == null) {
+      setSnoozedUntilState(null);
+      saveSnoozeToStorage(null);
+      return;
+    }
+    const t = until instanceof Date ? until.getTime()
+      : typeof until === "number" ? until
+      : new Date(until).getTime();
+    if (!Number.isFinite(t) || t <= Date.now()) {
+      setSnoozedUntilState(null);
+      saveSnoozeToStorage(null);
+      return;
+    }
+    const iso = new Date(t).toISOString();
+    setSnoozedUntilState(iso);
+    saveSnoozeToStorage(iso);
+  }, []);
+
+  /** Convenience clearer — same as `setSnoozedUntil(null)`. */
+  const clearSnooze = useCallback(() => {
+    setSnoozedUntilState(null);
+    saveSnoozeToStorage(null);
+  }, []);
+
   return (
-    <NotificationContext.Provider value={{ notifications, unreadCount, addNotification, markRead, markAllRead, clearAll }}>
+    <NotificationContext.Provider value={{
+      notifications,
+      unreadCount,
+      addNotification,
+      markRead,
+      markAllRead,
+      clearAll,
+      // ENT-005 — snooze surface. `isSnoozed` is the derived boolean the
+      // bell checks for badge suppression + dropdown footer rendering;
+      // `snoozedUntil` is the exact instant for the "Snoozed until X" copy.
+      isSnoozed,
+      snoozedUntil,
+      setSnoozedUntil,
+      clearSnooze,
+    }}>
       {children}
     </NotificationContext.Provider>
   );
@@ -150,7 +260,7 @@ export function NotificationProvider({ children }) {
 
 /**
  * Hook to access the notification center.
- * @returns {{ notifications: object[], unreadCount: number, addNotification: Function, markRead: Function, markAllRead: Function, clearAll: Function }}
+ * @returns {{ notifications: object[], unreadCount: number, addNotification: Function, markRead: Function, markAllRead: Function, clearAll: Function, isSnoozed: boolean, snoozedUntil: string|null, setSnoozedUntil: Function, clearSnooze: Function }}
  */
 export function useNotifications() {
   const ctx = useContext(NotificationContext);
