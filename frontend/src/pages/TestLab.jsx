@@ -610,6 +610,10 @@ export default function TestLab() {
   // ── SSE handler for active run ──
   const handleSSEEvent = useCallback((event) => {
     if (event.type === "snapshot" && event.run) {
+      // Snapshot carries the full `agentEvents[]` history hydrated by the
+      // backend (see `backend/src/routes/sse.js#L170-L182`). Spread first
+      // so the snapshot's array becomes the authoritative seed for the
+      // local buffer — subsequent live `agent_event` pushes append below.
       setRunData(prev => ({ ...prev, ...event.run }));
     }
     if (event.type === "run_update" || event.type === "update") {
@@ -622,6 +626,23 @@ export default function TestLab() {
       setLogLines(prev => {
         const next = [...prev, event.message];
         return next.length > LOG_CAP ? next.slice(-LOG_CAP) : next;
+      });
+    }
+    // Task 2 — per-agent SSE event. The backend emits one of these per LLM
+    // call-site lifecycle phase (start | progress | finding | handoff | done)
+    // via `emitAgentEvent` in `backend/src/aiProvider/agentEventEmitter.js`.
+    // We append to the local `runData.agentEvents` buffer (seeded from the
+    // snapshot above) so consumers — today the `<AgentConversation>` synth
+    // adapter, tomorrow a real-event renderer — can read the full per-agent
+    // narrative without a separate REST round-trip. Each push carries
+    // `{ step, agent, phase, message, data, nextAgent, model, createdAt }`;
+    // `data` is already a structured object on the wire (the emitter
+    // unifies the shape between persist + broadcast).
+    if (event.type === "agent_event") {
+      const { type: _type, ...evt } = event;
+      setRunData(prev => {
+        const prevEvents = Array.isArray(prev?.agentEvents) ? prev.agentEvents : [];
+        return { ...prev, agentEvents: [...prevEvents, evt] };
       });
     }
     // The hook fires its own `type: "done"` event when SSE closes, with
