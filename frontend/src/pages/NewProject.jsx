@@ -7,6 +7,12 @@ import {
 import { api } from "../api.js";
 import { emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
+// Bust the shared project/run cache after create + edit so pages reading
+// from `useProjectData` (Test Lab, Projects list, Dashboard, …) pick up the
+// new / renamed project on next mount without a hard refresh. Mirrors the
+// pattern used by Tests.jsx, ReviewQueue.jsx, and ConfigurablePanel.jsx
+// after their respective mutations (see REFERENCE.md:105).
+import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 
 function validateForm(form, { isEdit = false, hasExistingCreds = false } = {}) {
   const errors = {};
@@ -157,9 +163,18 @@ export default function NewProject() {
       };
       if (isEdit) {
         await api.updateProject(editId, payload);
+        // Bust the cache so name/URL changes show up immediately on the
+        // Projects list, Dashboard, and Test Lab without a hard refresh.
+        invalidateProjectDataCache();
         navigate(`/projects/${editId}`);
       } else {
         const project = await api.createProject(payload);
+        // Bust the cache so the brand-new project appears in
+        // `useProjectData` consumers (Test Lab's project sidebar, Projects
+        // list, Dashboard) immediately. Without this, Test Lab's selector
+        // reads stale data and the new project is invisible until the user
+        // hard-refreshes.
+        invalidateProjectDataCache();
         emitTourEvent("project-created");
         navigate(`/projects/${project.id}`);
       }
