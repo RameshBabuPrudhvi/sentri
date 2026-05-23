@@ -75,6 +75,50 @@
   .dash-health-row { padding: 8px 12px; font-size: 0.82rem; }
 }
 
+/* ── GAP-003 (audit, tier 3): Supporting-detail toggle + wrapper ───────────
+   Single inline button that hides/reveals rows 2–8 of the dashboard. The
+   wrapper uses the native `hidden` attribute (set from JSX) for the
+   actual show/hide — the `--hidden` modifier class is only here so a
+   future visual transition (e.g. height fade) can hook on without
+   restructuring JSX. The toggle button mimics the existing `.btn .btn-
+   ghost .btn-sm` style and adds a chevron that rotates when collapsed
+   (matches the `.workspace-switcher__chevron` pattern in sidebar.css). */
+.dash-supporting-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 4px 0 16px;
+}
+
+.dash-supporting-toggle {
+  /* `.btn .btn-ghost .btn-sm` supplies the base shape — only need the
+     chevron-specific helpers here. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-supporting-toggle__chevron {
+  transition: transform 0.18s ease;
+}
+
+/* Rotate -90° (chevron points right) when collapsed so the affordance
+   reads as "open this drawer" instead of "this drawer is open". */
+.dash-supporting-toggle__chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.dash-supporting {
+  /* Wrapper is just a semantic group — no visual chrome of its own;
+     each child panel keeps its own card styling. The `[hidden]` attr
+     set in JSX is what actually hides the section. */
+}
+
+/* No-op modifier class — reserved for a future fade transition. Keeping
+   the selector in CSS means consumers (e.g. a future Storybook entry,
+   a feature flag toggling enter/exit animation) can hook on without
+   re-touching the JSX. */
+.dash-supporting--hidden { /* intentionally empty */ }
+
 /* Defect breakdown row — 1:2 split grid */
 .dash-defect-row {
   display: grid; grid-template-columns: 1fr 2fr;

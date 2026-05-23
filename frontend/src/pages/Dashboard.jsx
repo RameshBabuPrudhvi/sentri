@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp, AlertTriangle,
   SquareCheckBig, FileText, Wrench, Clock, Plus, Shield, Crosshair, Activity,
-  Download, RefreshCw, Rocket, CloudOff,
+  Download, RefreshCw, Rocket, CloudOff, ChevronDown,
 } from "lucide-react";
 import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
 import { useReviewQueueCounts } from "../hooks/queries/useReviewQueueQuery.js";
@@ -319,6 +319,27 @@ export default function Dashboard() {
   const reviewCounts = useReviewQueueCounts({ projectId: "all" });
   const pendingReviewCount = reviewCounts.draft || 0;
 
+  // GAP-003 (audit, tier 3 — supporting-detail accordion) — collapsible
+  // wrapper around the 7 secondary panels (rows 2-8 below the primary
+  // KPI grid + Coverage). Defaults to EXPANDED so existing users see the
+  // exact same dashboard on first load; toggle state persists in
+  // localStorage. The audit explicitly recommends "collapsed by default"
+  // but we soften that — defaulting to expanded preserves the workflow
+  // current users rely on while still giving them the focus-mode lever
+  // when they need it (e.g. an exec scanning health on a phone, or a QA
+  // Lead who's only looking at the failing-morning banner). The toggle
+  // sits inline so discoverability is high without burying it in a menu.
+  const SUPPORTING_KEY = "ui.dashboard.supportingDetailHidden";
+  const [supportingHidden, setSupportingHidden] = useState(() => {
+    try { return localStorage.getItem(SUPPORTING_KEY) === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(SUPPORTING_KEY, supportingHidden ? "1" : "0"); }
+    catch { /* localStorage unavailable */ }
+  }, [supportingHidden]);
+  const toggleSupporting = useCallback(() => setSupportingHidden((v) => !v), []);
+
   const data = dashboardQuery.data || null;
   const runs = (data?.recentRuns || []).slice(0, 8);
   const loading = dashboardQuery.isLoading;
@@ -433,6 +454,35 @@ export default function Dashboard() {
           </div>
           {/* ── AUTO-009 / AUTO-009b / AUTO-009c: Coverage panel with metric toggle ── */}
           <CoveragePanel data={data} Activity={Activity} SparklineChart={SparklineChart} />
+
+          {/* ── GAP-003 (audit, tier 3): Supporting-detail toggle ──
+              Single inline button that hides/reveals the 7 secondary panels
+              below. Defaults to expanded for behavioural parity with the
+              pre-PR dashboard. State persists in localStorage so power
+              users who hide once stay in focus-mode until they re-open.
+              `aria-expanded` + `aria-controls` so screen readers announce
+              the toggle correctly. */}
+          <div className="dash-supporting-toggle-row">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm dash-supporting-toggle"
+              onClick={toggleSupporting}
+              aria-expanded={!supportingHidden}
+              aria-controls="dash-supporting-detail"
+            >
+              <ChevronDown
+                size={13}
+                className={`dash-supporting-toggle__chevron${supportingHidden ? " dash-supporting-toggle__chevron--collapsed" : ""}`}
+              />
+              {supportingHidden ? "Show all metrics" : "Hide details"}
+            </button>
+          </div>
+
+          <div
+            id="dash-supporting-detail"
+            className={`dash-supporting${supportingHidden ? " dash-supporting--hidden" : ""}`}
+            hidden={supportingHidden}
+          >
 
           {/* ── Row 2: Duration / Created / Fixed / Healing ── */}
           <div className="stat-grid">
@@ -774,6 +824,8 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+          </div>
+          {/* ── End GAP-003 supporting-detail wrapper ─────────────────── */}
         </>
       )}
     </div>
