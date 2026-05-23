@@ -1582,6 +1582,19 @@ export default function TestLab() {
           bust the project cache (so the new draft test shows up in the Tests
           page and the launch panel's "Existing tests" stat) and navigate the
           user to the test detail view, mirroring Tests.jsx's onSaved flow. */}
+      {/* G9 — parallel-runs drawer. Renders a bottom-anchored strip of
+          cards, one per active run. Clicking a card focuses that run in
+          the middle column. X-button dismisses (detaches SSE, removes
+          from Maps). Hidden when no runs are attached. */}
+      <RunDrawer
+        activeRuns={activeRuns}
+        runDataByRunId={runDataByRunId}
+        focusedRunId={focusedRunId}
+        projects={projects}
+        onFocus={handleFocusRun}
+        onDismiss={handleDismissRun}
+      />
+
       {showRecorder && selectedProject && (
         <RecorderModal
           open={showRecorder}
