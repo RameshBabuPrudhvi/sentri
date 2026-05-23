@@ -396,10 +396,15 @@ export function getById(id) {
  * module scope so both `getById` + `getByIdIncludeDeleted` share one
  * implementation and the SSE snapshot builder can call it directly.
  *
+ * Exported so `backend/src/routes/sse.js` can reuse the same parser when
+ * building its snapshot payload — keeps the parse-and-degrade contract
+ * (malformed JSON → `data: null`) in a single place so a future change
+ * (e.g. structured logging on bad rows) lands once, not twice.
+ *
  * @param {Object} row
  * @returns {Object}
  */
-function parseAgentEventRow(row) {
+export function parseAgentEventRow(row) {
   if (row.data) {
     try { row.data = JSON.parse(row.data); }
     catch { row.data = null; }

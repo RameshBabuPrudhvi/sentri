@@ -27,10 +27,14 @@
  * ### Status semantics
  *
  * - `completed` / `completed_empty` — every stage reads "done".
- * - `failed` / `aborted` — the stage we stopped on reads "done" (we reached
- *   it), every later stage reads "pending". Nothing pulses — freezing the
- *   visualisation at the failure point reads more honestly than leaving the
- *   spinner running on a stage that's never going to make progress.
+ * - `failed` / `aborted` / `interrupted` — the stage we stopped on reads
+ *   "done" (we reached it), every later stage reads "pending". Nothing
+ *   pulses — freezing the visualisation at the stop point reads more
+ *   honestly than leaving the spinner running on a stage that's never
+ *   going to make progress. `interrupted` is the orphan-recovery status
+ *   set by `backend/src/database/repositories/runRepo.js#markOrphansInterrupted`
+ *   on server restart; it's a terminal state from the UI's perspective
+ *   so it shares the freeze semantics with `failed` / `aborted`.
  * - `running` (or status unset) — stages before `currentStep` are "done",
  *   `currentStep` itself is "active", everything after is "pending". When
  *   `currentStep` is null (run just started, no step set yet) every stage
@@ -40,17 +44,20 @@
  * @param {number}      step         - 1-based pipeline step (1..8).
  * @param {number|null} currentStep  - `run.currentStep` (1..8 or null).
  * @param {string}      status       - `run.status` (`running` | `completed` |
- *   `completed_empty` | `failed` | `aborted`).
+ *   `completed_empty` | `failed` | `aborted` | `interrupted`).
  * @returns {"done"|"active"|"pending"}
  */
 export function stageStatus(step, currentStep, status) {
   if (status === "completed" || status === "completed_empty") {
     return "done";
   }
-  // For failed/aborted runs, freeze the pipeline at the step where it died
-  // rather than leaving it pulsing as if still running. The step the run
-  // stopped on is marked "done" (we reached it) but no step is "active".
-  if (status === "failed" || status === "aborted") {
+  // For failed/aborted/interrupted runs, freeze the pipeline at the step
+  // where it stopped rather than leaving it pulsing as if still running.
+  // The step the run stopped on is marked "done" (we reached it) but no
+  // step is "active". `interrupted` is included so server-restart orphan
+  // runs (set by `runRepo.markOrphansInterrupted`) don't render with a
+  // spinner stuck mid-pipeline forever.
+  if (status === "failed" || status === "aborted" || status === "interrupted") {
     if (currentStep == null) return "pending";
     if (step <= currentStep) return "done";
     return "pending";

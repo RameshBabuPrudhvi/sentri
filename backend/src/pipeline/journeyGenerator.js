@@ -190,7 +190,10 @@ export async function generateFromDescription(name, description, appUrl, onToken
   // Step 4 — Generate. The `author` agent writes one or more tests from the
   // user-supplied requirement. Start/done bracket the LLM call so the
   // NarrativeFeed can pulse the author chip in real time.
-  emitAgentEvent(runId, { step: 4, agent: "author", phase: "start",
+  // `workspaceId` is forwarded so `emitAgentEvent` can resolve the same
+  // route/model `generateText` will dispatch against — populates the
+  // per-event `model` column for operator attribution.
+  emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
     message: apiIntent ? "Generating API tests from requirement" : "Generating UI tests from requirement" });
   let text;
   try {
@@ -198,7 +201,7 @@ export async function generateFromDescription(name, description, appUrl, onToken
       ? await streamText(prompt, onToken, { signal, agentRole: "author", workspaceId, runId })
       : await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
   } finally {
-    emitAgentEvent(runId, { step: 4, agent: "author", phase: "done" });
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
   }
   const parsed = parseJSON(text);
   const tests = extractTestsArray(parsed);
@@ -234,13 +237,13 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
     // (start page → expected outcome) into the test scaffolding the
     // author agent later fleshes out. Step-3 is the multi-agent stage —
     // intentClassifier.aiClassifyPage emits `explorer` on the same step.
-    emitAgentEvent(runId, { step: 3, agent: "planner", phase: "start",
+    emitAgentEvent(runId, { step: 3, agent: "planner", phase: "start", workspaceId,
       message: `Planning journey: ${journey?.name || "unnamed"}` });
     let text;
     try {
       text = await generateText(prompt, { signal, agentRole: "planner", workspaceId, runId });
     } finally {
-      emitAgentEvent(runId, { step: 3, agent: "planner", phase: "done" });
+      emitAgentEvent(runId, { step: 3, agent: "planner", phase: "done", workspaceId });
     }
     const result = parseJSON(text);
     const tests = extractTestsArray(result);
@@ -267,13 +270,13 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
     const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot, { testCount }), dialsPrompt);
     // Step 4 — Generate. `author` writes per-page intent tests for each
     // high-priority classified page.
-    emitAgentEvent(runId, { step: 4, agent: "author", phase: "start",
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
       message: `Writing tests for ${classifiedPage?.url || "page"}` });
     let text;
     try {
       text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
     } finally {
-      emitAgentEvent(runId, { step: 4, agent: "author", phase: "done" });
+      emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
     }
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);
@@ -491,13 +494,13 @@ export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "",
     const prompt = withDials(buildApiTestPrompt(apiEndpoints, appUrl, { testCount }), dialsPrompt);
     // Step 4 — Generate. `author` writes Playwright `request` API tests from
     // HAR-captured endpoint summaries (mirrors the UI test path).
-    emitAgentEvent(runId, { step: 4, agent: "author", phase: "start",
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
       message: `Writing API tests for ${apiEndpoints.length} endpoint${apiEndpoints.length !== 1 ? "s" : ""}` });
     let text;
     try {
       text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
     } finally {
-      emitAgentEvent(runId, { step: 4, agent: "author", phase: "done" });
+      emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
     }
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);

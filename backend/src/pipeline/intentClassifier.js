@@ -163,13 +163,13 @@ Return ONLY valid JSON (no markdown):
   // Step 3 — Classify. `explorer` reads page structure to identify intent.
   // Co-stage with `planner` (journeyGenerator.generateJourneyTest) — the
   // NarrativeFeed renders both badges side-by-side for step 3.
-  emitAgentEvent(runId, { step: 3, agent: "explorer", phase: "start",
+  emitAgentEvent(runId, { step: 3, agent: "explorer", phase: "start", workspaceId,
     message: `Classifying intent for ${snapshot?.url || "page"}` });
   let text;
   try {
     text = await generateText(prompt, { maxTokens: 256, signal, agentRole: "explorer", workspaceId, runId });
   } finally {
-    emitAgentEvent(runId, { step: 3, agent: "explorer", phase: "done" });
+    emitAgentEvent(runId, { step: 3, agent: "explorer", phase: "done", workspaceId });
   }
   const result = parseJSON(text);
   const intent = (result.intent || "").toUpperCase();

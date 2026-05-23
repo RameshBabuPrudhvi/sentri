@@ -10,8 +10,14 @@
  *                              → broadcast via emitRunEvent → "agent_event"
  *
  * Persistence is best-effort — a DB failure must never break the originating
- * LLM call. The pattern mirrors `runLogger.log()` which also swallows
- * `appendLog` failures so a broken logs table can't take down a run.
+ * LLM call. We're MORE defensive than `runLogger.log()` (which calls
+ * `runLogRepo.appendLog` directly without a try/catch and would propagate
+ * a DB outage up to every pipeline `log(...)` call site) because the
+ * agent-event surface is decorative — silently degraded narrative replay
+ * is the correct fallback, whereas log-write failures arguably should
+ * surface. Errors are caught + logged to stdout via `formatLogLine` so a
+ * sustained DB outage is observable in ops dashboards without breaking
+ * the run.
  *
  * ### Event shape
  *
@@ -32,6 +38,16 @@
 
 import * as repo from "../database/repositories/runAgentEventRepo.js";
 import { emitRunEvent } from "../routes/sse.js";
+import { formatLogLine } from "../utils/logFormatter.js";
+// Task 2 — `model` resolution. `resolveRoute({ agentRole, workspaceId })`
+// returns the same route the pipeline's `generateText(...)` call will use
+// at dispatch time, so reading `route.model` here gives the operator
+// per-event attribution that matches what actually ran. Resolution is
+// best-effort + lazy: callers pass `workspaceId` (no extra field added at
+// every emit site) and we only invoke the resolver when both `workspaceId`
+// + `agent` are known. Mirrors the resolution path
+// `agentHealthCheck.js#probeRole` uses for its provider-id surfacing.
+import { resolveRoute } from "./registry.js";
 
 /**
  * Persist + broadcast one per-agent event.
@@ -48,10 +64,41 @@ import { emitRunEvent } from "../routes/sse.js";
  * @param {string|null} [event.message]
  * @param {Object|string|null} [event.data]    - Structured payload (serialised before persist).
  * @param {string|null} [event.nextAgent]
- * @param {string|null} [event.model]
+ * @param {string|null} [event.model]      - Explicit override; if omitted and
+ *   `workspaceId` is provided, the emitter resolves the model via
+ *   `resolveRoute({ agentRole: agent, workspaceId })` so the persisted +
+ *   broadcast event carries the same model id that `generateText` will
+ *   actually dispatch against. Pass `null` to suppress resolution.
+ * @param {string|null} [event.workspaceId] - Used for `model` resolution
+ *   when `event.model` is not explicitly set. Same workspace scope the
+ *   pipeline call site already passes to `generateText` — no extra plumbing
+ *   needed at the emit site.
  */
-export function emitAgentEvent(runId, { step, agent, phase, message, data, nextAgent, model } = {}) {
+export function emitAgentEvent(runId, { step, agent, phase, message, data, nextAgent, model, workspaceId } = {}) {
   if (!runId) return;
+
+  // ── `model` resolution ──────────────────────────────────────────────────
+  // Operator attribution surface: every persisted + broadcast event carries
+  // the model that the matching `generateText` call will actually dispatch
+  // against. Pre-fix the column was always null because no call site passed
+  // `model` explicitly. Resolving here (rather than at every call site)
+  // keeps the emit invocation lean — call sites just add `workspaceId` to
+  // the event payload, mirroring the `workspaceId` they already thread
+  // through `generateText`. Best-effort: resolver failures degrade to null
+  // (the column is nullable) and are logged the same way as persist
+  // failures so a sustained registry outage is observable.
+  let resolvedModel = model ?? null;
+  if (resolvedModel == null && workspaceId && agent) {
+    try {
+      const { route } = resolveRoute({ agentRole: agent, workspaceId });
+      resolvedModel = route?.model || null;
+    } catch (err) {
+      // Same observability contract as the persist + broadcast paths
+      // below — log once, degrade to null, don't break the LLM call.
+      console.warn(formatLogLine("warn", runId,
+        `[agentEventEmitter] model resolution failed (${agent}): ${err?.message || err}`));
+    }
+  }
 
   // ── `data` shape on the wire ─────────────────────────────────────────────
   // Live SSE pushes AND the snapshot hydration MUST deliver `data` in the
@@ -80,17 +127,24 @@ export function emitAgentEvent(runId, { step, agent, phase, message, data, nextA
 
   // Persistence is best-effort. A failure here must NEVER break the
   // originating LLM call — the run continues and the operator just
-  // misses a narrative line in the replay.
+  // misses a narrative line in the replay. We log the error to stdout
+  // via `formatLogLine` so a sustained DB outage (disk full, WAL
+  // corruption, CHECK-constraint typo) shows up in ops dashboards —
+  // pre-fix the empty catch silently dropped every event, leaving
+  // operators to wonder why the NarrativeFeed went blank.
   try {
     repo.append(runId, {
       step, agent, phase,
       message: message ?? null,
       data: dataForPersist,
       nextAgent: nextAgent ?? null,
-      model: model ?? null,
+      model: resolvedModel,
       createdAt,
     });
-  } catch { /* non-fatal */ }
+  } catch (err) {
+    console.warn(formatLogLine("warn", runId,
+      `[agentEventEmitter] persist failed (${agent}/${phase}): ${err?.message || err}`));
+  }
 
   // Broadcast carries the structured `data` so live consumers and snapshot
   // consumers see the identical shape. Matches the parsed-back form
@@ -112,8 +166,14 @@ export function emitAgentEvent(runId, { step, agent, phase, message, data, nextA
       message: message ?? null,
       data: dataForBroadcast,
       nextAgent: nextAgent ?? null,
-      model: model ?? null,
+      model: resolvedModel,
       createdAt,
     });
-  } catch { /* non-fatal — broadcast failure must never break the LLM call */ }
+  } catch (err) {
+    // Non-fatal — broadcast failure must never break the LLM call. Logged
+    // so a misbehaving SSE layer (e.g. JSON.stringify reject on a cyclic
+    // `data` payload from a future caller) is observable in ops dashboards.
+    console.warn(formatLogLine("warn", runId,
+      `[agentEventEmitter] broadcast failed (${agent}/${phase}): ${err?.message || err}`));
+  }
 }

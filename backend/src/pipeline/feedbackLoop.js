@@ -544,13 +544,13 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     // (selector brittleness, weak assertions, etc.) so the post-run feedback
     // loop has signal to surface in the NarrativeFeed's quality-review entry.
     const _runId = options.runId || null;
-    emitAgentEvent(_runId, { step: 7, agent: "author", phase: "start",
+    emitAgentEvent(_runId, { step: 7, agent: "author", phase: "start", workspaceId,
       message: `Repairing ${test?.name || "failing test"} (${failureCategory})` });
     let text;
     try {
       text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: _runId });
     } finally {
-      emitAgentEvent(_runId, { step: 7, agent: "author", phase: "done" });
+      emitAgentEvent(_runId, { step: 7, agent: "author", phase: "done", workspaceId });
     }
     const improved = parseJSON(text);
 
