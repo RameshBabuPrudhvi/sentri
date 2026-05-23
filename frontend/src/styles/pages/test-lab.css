@@ -1405,8 +1405,12 @@
   display: flex;
   gap: 12px;
   position: relative;
-  padding-bottom: 2px;
-  min-height: 36px;
+  /* No `min-height` — let the body's intrinsic content (label + text +
+     optional pills + optional stat chip) size each row. The old 36px floor
+     interacted badly with the body's `padding-bottom`: when a done entry
+     gained a stat chip the chip's box (margin-top 6px + ~22px height) plus
+     the 14px body padding bled into the next entry's label area, visually
+     overlapping "5 pages found" with "Filtering elements". */
 }
 
 /* Vertical connector line between entries */
@@ -1448,8 +1452,19 @@
 .tl-nf-body {
   flex: 1;
   min-width: 0;
-  padding-bottom: 14px;
+  /* Bottom padding governs the gap between consecutive entries. The feed
+     container uses `gap: 0` (so the connector line stays continuous), so
+     this is the only spacer between an entry's last visible chip (pill
+     row or stat chip) and the next entry's label. 22px gives every chip
+     variant — including the green stat pill at the bottom of done stages —
+     clear breathing room from the next stage's label. */
+  padding-bottom: 22px;
 }
+
+/* The last entry doesn't need bottom padding — there's no following label
+   to push away from, and trimming it keeps the feed visually tight when
+   the run completes. */
+.tl-nf-entry:last-of-type .tl-nf-body { padding-bottom: 4px; }
 
 .tl-nf-label {
   font-size: 0.68rem;
