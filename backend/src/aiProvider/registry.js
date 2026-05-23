@@ -439,6 +439,21 @@ export function isProviderUsable(provider) {
  * @returns {{ route: Object|null, config: Object|null, effectiveAgentRole: string|null }}
  */
 export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
+  // Look up `agent_configs` BEFORE the sticky-fallback check so any
+  // per-role overrides (`systemPromptOverride`, `maxTokens`, etc.) thread
+  // through every return path — including the sticky-fallback branch.
+  // Without this, a rate-limit fallback would silently drop the admin's
+  // configured prompt + token cap for the entire 10-minute sticky TTL
+  // (the downstream `buildEffectivePrompt(prompt, config)` in
+  // `dispatcher.js` returns the raw prompt unchanged when `config` is
+  // null). Mirrors the same fix applied to `resolveProvider` — cfg
+  // resolution must happen up-front, not after the sticky branch.
+  let cfg = null;
+  if (agentRole && workspaceId) {
+    try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole) || null; }
+    catch (err) { logUnexpectedAgentConfigError(err, "resolveRoute"); }
+  }
+
   // (1) Sticky-fallback wins. The sticky map stores `{ provider, expiry }`
   // keyed by either a provider id or a route id — the value's `provider`
   // field is "the discriminator to dispatch against", interpreted by the
@@ -453,14 +468,15 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
       if (Date.now() < entry.expiry) {
         // Sticky entries from `generateText`'s fallback path carry a
         // `provider` (not a route id). Synthesise a transient route
-        // from it so callers see a uniform shape.
+        // from it so callers see a uniform shape. Thread `cfg` so
+        // per-role overrides survive the fallback window.
         if (entry.route) {
-          return { route: entry.route, config: null, effectiveAgentRole: agentRole };
+          return { route: entry.route, config: cfg, effectiveAgentRole: agentRole };
         }
         if (entry.provider && isProviderUsable(entry.provider)) {
           return {
             route: synthesiseTransientRoute({ provider: entry.provider, workspaceId }),
-            config: null,
+            config: cfg,
             effectiveAgentRole: agentRole,
           };
         }
@@ -468,11 +484,9 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
     }
   }
 
-  // (2) Consult agent_configs for this (workspaceId, role).
+  // (2) Consult agent_configs for this (workspaceId, role) — we already
+  // resolved `cfg` above; just branch on whether the admin configured a row.
   if (agentRole && workspaceId) {
-    let cfg;
-    try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole); }
-    catch (err) { logUnexpectedAgentConfigError(err, "resolveRoute"); }
     if (cfg) {
       // Explicit route assignment. The route row carries everything
       // dispatch needs (protocol + baseUrl + model + encrypted secret).
