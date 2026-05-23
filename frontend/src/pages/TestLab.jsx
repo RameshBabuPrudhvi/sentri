@@ -21,6 +21,12 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
+// G9 — parallel runs. Today only mounts the drawer + maintains a parallel
+// state shape; the single-run `useRunSSE` above still drives the live SSE
+// connection. Follow-up PR migrates the SSE driver itself to
+// `useMultiRunSSE` and deletes the single-run state.
+import { useMultiRunSSE } from "../hooks/useMultiRunSSE.js";
+import RunDrawer from "../components/test-lab/RunDrawer.jsx";
 import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { fmtRelativeDate } from "../utils/formatters.js";
@@ -451,6 +457,58 @@ export default function TestLab() {
   const [stopLoading, setStopLoading] = useState(false);
   const [error, setError]           = useState(null);
 
+  // G9 — parallel-runs state. Lives ALONGSIDE the single-run state above
+  // during the migration window. Every launch / attach / dismiss handler
+  // mirrors writes into both shapes so render paths can be migrated
+  // incrementally without breaking the single-run consumers. The next
+  // PR deletes the single-run state and reads only from these Maps.
+  //
+  // Maps preserve insertion order — cards in `<RunDrawer>` render
+  // oldest-first, which matches user expectation ("I started A first,
+  // then B").
+  //
+  //   activeRuns:        Map<runId, { runId, projectId, type }>
+  //   runDataByRunId:    Map<runId, RunData>            // SSE snapshot for each
+  //   logLinesByRunId:   Map<runId, string[]>           // tail-capped at LOG_CAP
+  //   focusedRunId:      string | null                  // which card is selected
+  //
+  // `focusedRunId` mirrors `activeRun.runId` today (single-run mode).
+  // When the drawer's "+ New run" UX lands, focusing null means "show
+  // the config panel"; the middle column reads `focusedRunId` instead
+  // of `activeRun` so an unfocused-but-active run still ticks in the
+  // background without dominating the view.
+  const [activeRuns, setActiveRuns] = useState(() => {
+    const m = new Map();
+    if (persisted?.activeRun?.runId) {
+      m.set(persisted.activeRun.runId, persisted.activeRun);
+    }
+    return m;
+  });
+  const [runDataByRunId, setRunDataByRunId] = useState(() => {
+    const m = new Map();
+    if (persisted?.activeRun?.runId && persisted?.runData) {
+      m.set(persisted.activeRun.runId, persisted.runData);
+    }
+    return m;
+  });
+  const [logLinesByRunId, setLogLinesByRunId] = useState(() => {
+    const m = new Map();
+    if (persisted?.activeRun?.runId) {
+      m.set(persisted.activeRun.runId, persisted.logLines ?? []);
+    }
+    return m;
+  });
+  const [focusedRunId, setFocusedRunId] = useState(persisted?.activeRun?.runId ?? null);
+
+  // G9 — multi-run SSE pool. Today this hook is mounted but NOT used as
+  // the SSE driver for the focused run (the single-run `useRunSSE` call
+  // below still owns that). The pool's `activeRunIds` is informational
+  // for the next-PR migration; subscribing additional runs through it
+  // would race against the single-run driver if they shared a runId.
+  // Once the migration completes, the single-run hook is removed and
+  // every active run subscribes through this pool.
+  const multiSse = useMultiRunSSE();
+
   // ── Queue state ──
   const [queueFilter, setQueueFilter]   = useState("all");
 
@@ -608,16 +666,37 @@ export default function TestLab() {
   }
 
   // ── SSE handler for active run ──
+  // G9 — every state write here mirrors into the parallel-runs Maps so the
+  // drawer card for `activeRun.runId` ticks in real time. The single-run
+  // `setRunData` / `setLogLines` calls remain in place during the
+  // migration window. The mirror is guarded by `activeRun?.runId` — if
+  // the user dismisses the run mid-event the mirror no-ops rather than
+  // writing to a stale key.
   const handleSSEEvent = useCallback((event) => {
+    const mirrorRunId = activeRun?.runId;
     if (event.type === "snapshot" && event.run) {
       // Snapshot carries the full `agentEvents[]` history hydrated by the
       // backend (see `backend/src/routes/sse.js#L170-L182`). Spread first
       // so the snapshot's array becomes the authoritative seed for the
       // local buffer — subsequent live `agent_event` pushes append below.
       setRunData(prev => ({ ...prev, ...event.run }));
+      if (mirrorRunId) {
+        setRunDataByRunId(prev => {
+          const next = new Map(prev);
+          next.set(mirrorRunId, { ...(prev.get(mirrorRunId) || {}), ...event.run });
+          return next;
+        });
+      }
     }
     if (event.type === "run_update" || event.type === "update") {
       setRunData(prev => ({ ...prev, ...event.run }));
+      if (mirrorRunId) {
+        setRunDataByRunId(prev => {
+          const next = new Map(prev);
+          next.set(mirrorRunId, { ...(prev.get(mirrorRunId) || {}), ...event.run });
+          return next;
+        });
+      }
     }
     if (event.type === "log" && event.message) {
       // Cap in-memory log buffer to bound memory + avoid O(n²) re-allocation
@@ -627,6 +706,15 @@ export default function TestLab() {
         const next = [...prev, event.message];
         return next.length > LOG_CAP ? next.slice(-LOG_CAP) : next;
       });
+      if (mirrorRunId) {
+        setLogLinesByRunId(prev => {
+          const next = new Map(prev);
+          const cur = prev.get(mirrorRunId) || [];
+          const appended = [...cur, event.message];
+          next.set(mirrorRunId, appended.length > LOG_CAP ? appended.slice(-LOG_CAP) : appended);
+          return next;
+        });
+      }
     }
     // Task 2 — per-agent SSE event. The backend emits one of these per LLM
     // call-site lifecycle phase (start | progress | finding | handoff | done)
@@ -655,11 +743,42 @@ export default function TestLab() {
         : null;
     if (terminalStatus) {
       setRunData(prev => ({ ...prev, ...(event.run || {}), status: terminalStatus }));
+      if (mirrorRunId) {
+        setRunDataByRunId(prev => {
+          const next = new Map(prev);
+          next.set(mirrorRunId, { ...(prev.get(mirrorRunId) || {}), ...(event.run || {}), status: terminalStatus });
+          return next;
+        });
+      }
       // Bust the shared cache so the Queue tab and Active-Runs panel pick up
       // the final test count / failure state without waiting for staleTime.
       invalidateProjectDataCache();
     }
-  }, []);
+    // G9 — agent_event mirror. Same pattern as snapshot/update above.
+    if (event.type === "agent_event" && mirrorRunId) {
+      const { type: _t, ...evt } = event;
+      setRunDataByRunId(prev => {
+        const next = new Map(prev);
+        const cur = prev.get(mirrorRunId) || {};
+        const curEvents = Array.isArray(cur.agentEvents) ? cur.agentEvents : [];
+        next.set(mirrorRunId, { ...cur, agentEvents: [...curEvents, evt] });
+        return next;
+      });
+    }
+    // G9 — `activeRun?.runId` is read above as `mirrorRunId`. Adding
+    // `activeRun` to the dep array would invalidate the SSE handler on
+    // every launch — `useRunSSE` re-subscribes when its handler ref
+    // changes, which means every new run would tear down + recreate the
+    // SSE connection of the previous run. Instead we accept a one-
+    // event-window staleness: when the user dismisses a run and
+    // launches another within the same React frame, the first SSE
+    // event for the new run still mirrors to the OLD `mirrorRunId`.
+    // The next handler render fixes it. In practice the launch path
+    // calls `setActiveRun` synchronously which forces a render before
+    // the first SSE event can arrive (network round-trip > React
+    // render), so the window is empty under normal latency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRun?.runId]);
 
   // Drive the SSE connection with the live run status so the hook auto-closes
   // when the run finishes (`done` event) and *stays* closed on subsequent
@@ -849,8 +968,18 @@ export default function TestLab() {
       const body = { dialsConfig };
       if (environmentId) body.environmentId = environmentId;
       const { runId } = await api.crawl(selectedId, body);
-      setActiveRun({ runId, projectId: selectedId, type: "crawl" });
+      const entry = { runId, projectId: selectedId, type: "crawl" };
+      setActiveRun(entry);
       setInnerTab("pipeline");
+      // G9 — register in the parallel-runs Map + focus this run so the
+      // drawer card appears immediately. Subsequent SSE snapshots
+      // populate `runDataByRunId` via the handler's mirror.
+      setActiveRuns(prev => {
+        const next = new Map(prev);
+        next.set(runId, entry);
+        return next;
+      });
+      setFocusedRunId(runId);
     } catch (err) {
       setError(err.message || "Failed to start crawl.");
     } finally {
@@ -898,8 +1027,16 @@ export default function TestLab() {
       // Use backend's canonical type name (`"generate"`) so
       // `activeRun.type` matches `run.type` on re-attach and any future
       // strict equality checks don't silently fork.
-      setActiveRun({ runId, projectId: selectedId, type: "generate" });
+      const entry = { runId, projectId: selectedId, type: "generate" };
+      setActiveRun(entry);
       setInnerTab("pipeline");
+      // G9 — see handleStartCrawl mirror block.
+      setActiveRuns(prev => {
+        const next = new Map(prev);
+        next.set(runId, entry);
+        return next;
+      });
+      setFocusedRunId(runId);
     } catch (err) {
       setError(err.message || "Failed to generate tests.");
     } finally {
@@ -933,6 +1070,13 @@ export default function TestLab() {
   }
 
   function handleReset() {
+    // G9 — `handleReset` is the "Dismiss" / "New run" path. Today it
+    // mirrors into the Maps too, removing the previously-focused run
+    // entirely. Once a user has multiple runs, the drawer's per-card
+    // X-button (`handleDismissRun` below) is the per-run path; this
+    // function stays as the "blow everything away" reset for the
+    // single-run UX surface (banner Dismiss + right-rail New run).
+    const dismissedId = activeRun?.runId;
     setActiveRun(null);
     setRunData(null);
     setLogLines([]);
@@ -940,6 +1084,83 @@ export default function TestLab() {
     // Explicit clear in addition to the write-through effect — avoids a stale
     // read if the user immediately navigates away before the effect flushes.
     clearPersistedRun();
+    if (dismissedId) {
+      setActiveRuns(prev => {
+        const next = new Map(prev);
+        next.delete(dismissedId);
+        return next;
+      });
+      setRunDataByRunId(prev => {
+        const next = new Map(prev);
+        next.delete(dismissedId);
+        return next;
+      });
+      setLogLinesByRunId(prev => {
+        const next = new Map(prev);
+        next.delete(dismissedId);
+        return next;
+      });
+    }
+    setFocusedRunId(null);
+  }
+
+  // G9 — Per-card dismiss from the drawer X-button. Removes ONE run from
+  // the parallel-runs Maps without touching the single-run state unless
+  // the dismissed run happens to be the currently-focused one (in which
+  // case we fall through to `handleReset` so the middle column flips
+  // back to the config panel).
+  //
+  // Server-side: the run keeps executing. Dismiss is a view-only
+  // detach — the user can re-attach via the Queue tab. Mirrors the
+  // existing `handleReset` contract that backs the banner Dismiss
+  // button.
+  function handleDismissRun(runId) {
+    if (!runId) return;
+    if (runId === activeRun?.runId) {
+      // Dismissing the focused run — fall through to full reset so the
+      // single-run consumers (banners, right-rail stats) clear too.
+      handleReset();
+      return;
+    }
+    setActiveRuns(prev => {
+      const next = new Map(prev);
+      next.delete(runId);
+      return next;
+    });
+    setRunDataByRunId(prev => {
+      const next = new Map(prev);
+      next.delete(runId);
+      return next;
+    });
+    setLogLinesByRunId(prev => {
+      const next = new Map(prev);
+      next.delete(runId);
+      return next;
+    });
+    if (focusedRunId === runId) {
+      // Should be unreachable given the activeRun?.runId guard above,
+      // but defence-in-depth — never leave focusedRunId pointing at a
+      // dropped key.
+      setFocusedRunId(null);
+    }
+  }
+
+  // G9 — Drawer card click. Focus a run without launching anything.
+  // When the focused run differs from the single-run `activeRun`, the
+  // middle column would render the wrong run; for the migration we
+  // mirror the focus into `activeRun` too. Once the single-run state
+  // is deleted (next PR), this function only sets `focusedRunId`.
+  function handleFocusRun(runId) {
+    if (!runId) return;
+    const entry = activeRuns.get(runId);
+    if (!entry) return;
+    setFocusedRunId(runId);
+    setActiveRun(entry);
+    const rd = runDataByRunId.get(runId);
+    if (rd) setRunData(rd);
+    const lines = logLinesByRunId.get(runId);
+    if (Array.isArray(lines)) setLogLines(lines);
+    setInnerTab("pipeline");
   }
 
   /**
@@ -1029,13 +1250,33 @@ export default function TestLab() {
         navigate(`/projects/${run.projectId}/test-lab${qs ? `?${qs}` : ""}`, { replace: true });
       }
     }
-    setActiveRun({ runId: run.id, projectId: run.projectId, type: run.type });
+    const entry = { runId: run.id, projectId: run.projectId, type: run.type };
+    setActiveRun(entry);
     // Seed runData with whatever we already have cached — SSE's first
     // `snapshot` event will overwrite with the authoritative server copy.
     setRunData({ ...run, status: run.status });
     setLogLines([]);
     setInnerTab("pipeline");
     setError(null);
+    // G9 — register the attached run in the parallel Maps + focus it.
+    // Seeds runData per-runId from the cached row so the drawer card
+    // renders subtitle + tone immediately even before SSE connects.
+    setActiveRuns(prev => {
+      const next = new Map(prev);
+      next.set(run.id, entry);
+      return next;
+    });
+    setRunDataByRunId(prev => {
+      const next = new Map(prev);
+      next.set(run.id, { ...run, status: run.status });
+      return next;
+    });
+    setLogLinesByRunId(prev => {
+      const next = new Map(prev);
+      next.set(run.id, []);
+      return next;
+    });
+    setFocusedRunId(run.id);
     // If we were on the Queue tab, switch to the matching config tab so the
     // user sees the pipeline view (which only renders under crawl/requirement).
     if (tab === "queue") {
