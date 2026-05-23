@@ -758,24 +758,4 @@ The good news: the foundations are solid. The design token system is well-struct
 
 ---
 
-### Fix all UI/UX Issues
-# Fix `[object Object]` notification rendering in NotificationContext
-## Problem
-The notification bell occasionally shows entries with the literal text `"[object Object]"` instead of a real title/body. This happens when a caller passes a non-string value (an `Error` instance, an API error envelope like `{ type, message }`, or any other object) to `addNotification()`. The default JavaScript `Object.prototype.toString()` produces `"[object Object]"` when such a value is rendered.
-The defensive `String()` wrap at `frontend/src/components/layout/NotificationBell.jsx:194` and `:201` prevents React from crashing with `"Objects are not valid as a React child"`, but it doesn't fix:
-1. The bad data already persisted in `localStorage` (lingers across page loads until the user clicks "Clear all").
-2. The offending callsite that wrote the bad entry in the first place.
-## Acceptance criteria
-- [ ] Calling `addNotification({ title: someError, body: someObject })` produces a readable string in the bell instead of `"[object Object]"`.
-- [ ] Existing `"[object Object]"` entries in `localStorage` are sanitized on next page load.
-- [ ] A dev-mode `console.warn` fires at the moment a non-string title/body is passed to `addNotification`, so future regressions are easy to find.
-- [ ] The fix is defence-in-depth: source coercion + load-time sanitization, so neither layer alone is the only barrier.
-## Scope
-- `frontend/src/context/NotificationContext.jsx` — add coercion helper + apply in `addNotification` and `loadFromStorage`.
-- (Optional) `frontend/src/components/layout/NotificationBell.jsx:194,201` — defensive `String()` wraps can stay (cheap insurance) or be removed (cleaner). Recommendation: keep.
-- Hunt the offending callsite once the dev-mode warning surfaces it. Likely candidates:
-  - `catch (err) { addNotification({ title: err, ... }) }` — should be `err.message`.
-  - `addNotification({ title: response, ... })` — passing a raw fetch response.
-  - `addNotification({ title: result, ... })` — passing an API result envelope.
-
 *Audit produced by: Principal Product Designer / Enterprise UX Architect review of `sentri_v1_4` codebase, May 2026.*
