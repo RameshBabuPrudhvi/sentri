@@ -23,26 +23,36 @@ export const AGENT_ROLES = ["explorer", "planner", "author", "oracle", "reviewer
 // Source of truth: the `agentRole: "<name>"` argument passed to
 // `generateText` / `streamText` at each pipeline call site:
 //
-//   step 1 (Crawl)         → no LLM agent, pre-LLM Playwright crawl
-//   step 2 (Filter)        → no LLM agent, heuristic DOM element filter
-//   step 3 (Classify)      → "explorer" (intent classification at
-//                            intentClassifier.js:158) +
-//                            "planner" (journey decomposition at
-//                            journeyGenerator.js:218)
-//   step 4 (Generate)      → "author" (codegen at journeyGenerator.js
-//                            :186-187, :242, :457)
-//   step 5 (Deduplicate)   → "author" (LLM-assisted dedup)
-//   step 6 (Enhance)       → "author" (assertion enhancement)
-//   step 7 (Validate)      → "author" (validation pass)
-//   step 8 (Done)          → terminal marker, no agent
+//   step 1 (Crawl)          → no LLM agent, pre-LLM Playwright crawl
+//   step 2 (Filter)         → no LLM agent, heuristic DOM element filter
+//   step 3 (Classify)       → "explorer" (intent classification at
+//                             intentClassifier.js:158) +
+//                             "planner" (journey decomposition at
+//                             journeyGenerator.js:218)
+//   step 4 (Generate)       → "author" (codegen at journeyGenerator.js)
+//   step 5 (Deduplicate)    → "author" (LLM-assisted dedup)
+//   step 6 (Enhance/Oracle) → "oracle" (assertion strengthening — see
+//                             migration 058's `oracleEnabled` per-project
+//                             flag and `prompts/oraclePrompt.js`)
+//   step 7 (Validate/Review)→ "reviewer" (quality gate — see migration
+//                             058's `reviewerEnabled` per-project flag
+//                             and `prompts/reviewerPrompt.js`)
+//   step 8 (Done)           → terminal marker, no agent
 //
 // `healer` runs at RUNTIME (selfHealing.js:274, vision.js:186) — not in
-// the pipeline stage list, so it doesn't appear in this map. `oracle`,
-// `reviewer`, `triager` are declared in AGENT_ROLES but not yet wired to
-// any pipeline call site (per the docblock at
-// `backend/src/aiProvider/agentHealthCheck.js`), so they don't appear here
-// either. Adding them here without a real call site would mis-attribute
-// the stage's actual agent.
+// the pipeline stage list, so it doesn't appear in this map. `triager`
+// is declared in AGENT_ROLES but not yet wired to any pipeline call
+// site, so it doesn't appear here.
+//
+// **Per-project gating note:** when `oracleEnabled === false` /
+// `reviewerEnabled === false` on a given project, the backend skips the
+// respective LLM call at the dispatch layer — no `agent_event` is emitted
+// and the conversation feed naturally shows nothing for that step. The
+// AgentConversation synthesizer fallback at
+// `frontend/src/components/ai/agentConversationSynth.js` uses this map
+// to surface optimistic turns when no real events have arrived yet;
+// disabled stages will see the synthesized turn but the absence of a
+// real `start` event keeps the turn from advancing past "doing".
 //
 // **Drift contract:** when the backend wires a new `agentRole: "<name>"`
 // at a pipeline call site, update this map AND the canonical
@@ -56,8 +66,8 @@ const PIPELINE_STEP_ROLES = {
   3: ["explorer", "planner"],
   4: ["author"],
   5: ["author"],
-  6: ["author"],
-  7: ["author"],
+  6: ["oracle"],
+  7: ["reviewer"],
 };
 
 /**

@@ -188,11 +188,14 @@ export const TURN_TEMPLATES = {
     return `All done — ${total} tests ready for your review.`;
   },
 
-  // ── Future: Oracle + Reviewer (AUTO-023) ──
-  // Templates declared but unreferenced until `PIPELINE_STEP_ROLES` in
-  // config.js flips 6 → ["oracle"] and 7 → ["reviewer"]. Defining them now
-  // means the AUTO-023 PR is a one-line config change, not a component
-  // rewrite — the synthesizer picks these up automatically.
+  // ── Oracle (step 6) + Reviewer (step 7) ──
+  // Live as of migration 058 — `frontend/src/config.js#PIPELINE_STEP_ROLES`
+  // routes step 6 → "oracle" (assertion strengthening) and step 7 →
+  // "reviewer" (quality gate). Per-project flags (`oracleEnabled` /
+  // `reviewerEnabled`) gate the LLM call backend-side; when disabled, no
+  // `agent_event` arrives so the synthesizer's optimistic turn renders
+  // but never advances past `doing`. Single-step agents — no `.N`-suffixed
+  // variants needed (the un-suffixed key wins via `resolveTemplate`).
   "oracle.onboard":   () => "Oracle here. I'll strengthen the assertions Author wrote.",
   "oracle.accept":    () => "Thanks Author. I'll strengthen the assertions you wrote.",
   "oracle.doing":     () => "Reviewing each test for assertion depth — cart counts, form errors, response codes.",

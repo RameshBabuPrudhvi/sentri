@@ -60,11 +60,17 @@ test("step 3 is the multi-agent stage (explorer + planner)", () => {
   assert.deepEqual(getStepAgentSequence(3), ["explorer", "planner"]);
 });
 
-test("steps 4-7 currently route to `author`", () => {
+test("steps 4-5 route to `author`, 6 to `oracle`, 7 to `reviewer`", () => {
+  // Migration 058 wired oracleEnabled / reviewerEnabled per-project flags
+  // and `frontend/src/config.js#PIPELINE_STEP_ROLES` now reflects the
+  // canonical pipeline shape (steps 6 = oracle, 7 = reviewer). Author
+  // still owns steps 4 + 5 (generate + dedup). The synthesizer's
+  // `getStepAgentSequence` mirrors PIPELINE_STEP_ROLES directly so the
+  // conversation feed surfaces Oracle / Reviewer turns automatically.
   assert.deepEqual(getStepAgentSequence(4), ["author"]);
   assert.deepEqual(getStepAgentSequence(5), ["author"]);
-  assert.deepEqual(getStepAgentSequence(6), ["author"]);
-  assert.deepEqual(getStepAgentSequence(7), ["author"]);
+  assert.deepEqual(getStepAgentSequence(6), ["oracle"]);
+  assert.deepEqual(getStepAgentSequence(7), ["reviewer"]);
 });
 
 test("step 8 is terminal — no speaker (Author handles wrapup separately)", () => {
@@ -140,17 +146,18 @@ test("step 3 multi-agent: explorer handoff to planner (intra-step), planner hand
   assert.ok(ids.includes("3-planner-handoff"),   "planner → author handoff at end of step 3");
 });
 
-test("author 4 → 5 → 6 → 7 — onboard at step 4, no redundant `accept` on 5/6/7", () => {
-  // Author is the only multi-step agent that arrives via handoff. Step 4
-  // is Author's FIRST appearance in the conversation, so the opening turn
-  // is `onboard` ("Author here. Writing tests…") — same convention as
-  // Explorer at step 1 and Planner at step 3. The "Thanks Planner" handoff
-  // is already rendered as Planner's `3-planner-handoff` turn the moment
-  // before, so Author's first turn doesn't need to repeat it.
-  //
-  // Steps 5/6/7 are same-agent continuations and must NOT emit `accept`
-  // OR `onboard` — the conversation reads as one person continuing, not
-  // formally accepting a handoff from themselves or re-introducing.
+test("author 4 → 5 (generate + dedup), oracle@6, reviewer@7 — onboard pattern", () => {
+  // Migration 058 split steps 6 + 7 off Author: Oracle owns step 6
+  // (assertion strengthening), Reviewer owns step 7 (quality gate).
+  // Expected flow:
+  //   - Step 3 ends with `planner.handoff` to Author.
+  //   - Step 4: Author onboards (first appearance).
+  //   - Step 5: same-agent (Author → Author), NO accept, NO onboard.
+  //   - End of step 5: inter-step handoff Author → Oracle fires.
+  //   - Step 6: Oracle onboards (first appearance — falls back to the
+  //     un-suffixed `oracle.onboard` template).
+  //   - End of step 6: inter-step handoff Oracle → Reviewer fires.
+  //   - Step 7: Reviewer onboards (first appearance).
   const run = {
     runId: "RUN-1", currentStep: 8, status: "completed",
     pagesFound: 5, testsGenerated: 12, tests: [],
@@ -164,15 +171,29 @@ test("author 4 → 5 → 6 → 7 — onboard at step 4, no redundant `accept` on
     allTests: [],
   });
   const ids = turns.map(t => t.id);
-  assert.ok(ids.includes("4-author-onboard"),  "step 4: onboard (first appearance)");
-  assert.ok(!ids.includes("4-author-accept"),  "step 4: NO accept (first appearance uses onboard, not accept)");
+  // Author owns 4 + 5 (no re-onboard / accept on 5 — same agent continues).
+  assert.ok(ids.includes("4-author-onboard"),  "step 4: Author onboard (first appearance)");
+  assert.ok(!ids.includes("4-author-accept"),  "step 4: NO accept (first appearance uses onboard)");
   assert.ok(!ids.includes("5-author-onboard"), "step 5: NO re-onboard");
-  assert.ok(!ids.includes("5-author-accept"),  "step 5: NO accept (same agent)");
-  assert.ok(!ids.includes("6-author-accept"),  "step 6: NO accept");
-  assert.ok(!ids.includes("7-author-accept"),  "step 7: NO accept");
+  assert.ok(!ids.includes("5-author-accept"),  "step 5: NO accept (same agent as step 4)");
+  // Inter-step handoff Author → Oracle at end of step 5.
+  assert.ok(ids.includes("5-author-handoff"),  "step 5: Author hands off to Oracle (next step's agent differs)");
+  // Oracle owns step 6 — first appearance, onboards.
+  assert.ok(ids.includes("6-oracle-onboard"),  "step 6: Oracle onboard (first appearance)");
+  assert.ok(!ids.includes("6-author-finding"), "step 6: Author no longer authors step 6");
+  // Inter-step handoff Oracle → Reviewer at end of step 6.
+  assert.ok(ids.includes("6-oracle-handoff"),  "step 6: Oracle hands off to Reviewer");
+  // Reviewer owns step 7 — first appearance, onboards.
+  assert.ok(ids.includes("7-reviewer-onboard"), "step 7: Reviewer onboard (first appearance)");
+  assert.ok(!ids.includes("7-author-finding"),  "step 7: Author no longer authors step 7");
 });
 
-test("author per-step finding templates are step-specific", () => {
+test("per-step finding templates are step-specific and route to the correct agent", () => {
+  // Steps 4 + 5 still hit Author's `.doing.N` / `.finding.N` variants
+  // (the multi-step Author template family is preserved). Steps 6 + 7
+  // resolve to Oracle / Reviewer's un-suffixed templates via
+  // `resolveTemplate`'s fallback — those agents only run once per pipeline
+  // so they don't need per-step disambiguation.
   const run = {
     runId: "RUN-1", currentStep: 8, status: "completed",
     pagesFound: 5, testsGenerated: 12, tests: [],
@@ -186,10 +207,15 @@ test("author per-step finding templates are step-specific", () => {
     allTests: [],
   });
   const byId = Object.fromEntries(turns.map(t => [t.id, t.text]));
+  // Author's per-step variants still own steps 4 + 5.
   assert.match(byId["4-author-finding"], /Generated 12 tests/);
   assert.match(byId["5-author-finding"], /Removed 3 duplicates\./);
-  assert.match(byId["6-author-finding"], /Enhanced 7 tests with stronger assertions/);
-  assert.match(byId["7-author-finding"], /Rejected 1 test with brittle selectors/);
+  // Oracle's finding template (un-suffixed key) reports the upgraded
+  // assertion count.
+  assert.match(byId["6-oracle-finding"], /Upgraded 7 assertions?\./);
+  // Reviewer's finding template reports the rejection count + tighten-and-
+  // re-submit cue back to Author.
+  assert.match(byId["7-reviewer-finding"], /Rejected 1 test\b.*Author/);
 });
 
 test("step 8 wrapup fires only on `completed`, not on failed/aborted", () => {
