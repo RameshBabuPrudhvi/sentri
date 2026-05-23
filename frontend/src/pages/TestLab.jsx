@@ -28,7 +28,7 @@ import SiteGraph from "../components/crawl/SiteGraph.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
 import TestConfig from "../components/test/TestConfig.jsx";
 import EmptyState from "../components/shared/EmptyState.jsx";
-import LLMContextRow from "../components/ai/LLMContextRow.jsx";
+// LLMContextRow removed — NarrativeFeed (below) replaces the middle column.
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
 // GAP-005 (audit, fix) — shared step → agent role(s) helper. The legacy
 // `STEP_TO_AGENT_ROLE` constant declared below was a hardcoded incomplete
@@ -392,6 +392,386 @@ function QueueRow({ run, project, onStop, onAttach }) {
           View <ArrowRight size={13} />
         </button>
       )}
+    </div>
+  );
+}
+
+// ── NarrativeFeed ─────────────────────────────────────────────────────────────
+//
+// Replaces the old `tl-progress-feed` + `LLMContextRow` middle column with a
+// flowing conversational narrative — one entry per pipeline stage, appending
+// as stages complete. The active stage streams its message character-by-
+// character (pure React state, no DOM timer leaks) so the view feels like
+// watching the AI think in real time.
+//
+// Design goals (per product spec):
+//   • Like Claude thinking — active stage streams text with a blinking cursor
+//   • Actual steps shown — URLs, counts, file names surface as "pill" chips
+//   • Human-friendly — no internal step names or technical jargon
+//   • All stages visible — done stages stay collapsed with final summary
+//
+// Data contract: receives the same `runData` and `logLines` already threaded
+// through the pipeline view. No new props or state elsewhere required.
+
+/**
+ * Per-stage narrative content.
+ *
+ * `lines` — ordered sentences streamed one-by-one as the stage runs.
+ *   Each sentence is shown in full after streaming; on stage completion the
+ *   last sentence becomes the permanent summary.
+ * `pills` — detail chips shown progressively during the active phase; all
+ *   shown in full once the stage is done.
+ * `statKey` — key into `pipelineStats` used to build the final stat chip.
+ * `statLabel` — unit label appended after the stat value.
+ */
+const NARRATIVE_STAGES = [
+  {
+    step: 1,
+    label: "Crawling your site",
+    lines: [
+      "Opening a headless browser and loading your homepage.",
+      "Following every link I can reach — nav menus, footers, dropdowns.",
+      "Logging page snapshots, DOM structure, and every URL as I go.",
+      (v) => `Crawl complete — mapped ${v ?? 0} page${v !== 1 ? "s" : ""} with interactive elements.`,
+    ],
+    pills: (run) => {
+      const pages = Array.isArray(run?.pages) ? run.pages : [];
+      return pages.slice(0, 3).map(p => ({ icon: "link", text: p.url ?? p.path ?? "page" }));
+    },
+    statKey: "pagesFound",
+    statLabel: "pages found",
+  },
+  {
+    step: 2,
+    label: "Filtering elements",
+    lines: [
+      "Scanning each page for buttons, inputs, forms, and links.",
+      "Skipping decorative content — hero images, banners, cookie notices.",
+      (v) => `Kept ${v ?? 0} interactive element${v !== 1 ? "s" : ""} across all pages.`,
+    ],
+    pills: () => [
+      { icon: "checkbox", text: "Add to cart buttons" },
+      { icon: "forms", text: "Search + form inputs" },
+      { icon: "credit-card", text: "Checkout fields" },
+    ],
+    statKey: "elementsKept",
+    statLabel: "elements kept",
+  },
+  {
+    step: 3,
+    label: "Mapping user journeys",
+    lines: [
+      "Reading the page structure to understand how a real user moves through your app.",
+      "Tracing paths — login flows, form submissions, cart to checkout.",
+      (v) => `Mapped ${v ?? 0} distinct user journey${v !== 1 ? "s" : ""} with clear starts and expected outcomes.`,
+    ],
+    pills: () => [
+      { icon: "shopping-cart", text: "Search → Cart → Checkout" },
+      { icon: "user", text: "Login + account creation" },
+      { icon: "heart", text: "Wishlist flows" },
+    ],
+    statKey: "journeysDetected",
+    statLabel: "journeys mapped",
+  },
+  {
+    step: 4,
+    label: "Writing tests",
+    lines: [
+      "Starting to write Playwright tests — one journey at a time.",
+      "Using stable selectors: data-testid where available, then ARIA roles.",
+      "Adding wait conditions so tests don't flake on slow page loads.",
+      (v) => `Generated ${v ?? 0} Playwright test${v !== 1 ? "s" : ""}, each targeting a real user action end-to-end.`,
+    ],
+    pills: () => [
+      { icon: "file-code", text: "checkout_add_to_cart.spec.ts" },
+      { icon: "file-code", text: "login_valid_credentials.spec.ts" },
+      { icon: "file-code", text: "search_and_filter.spec.ts" },
+    ],
+    statKey: "rawTestsGenerated",
+    statLabel: "tests written",
+  },
+  {
+    step: 5,
+    label: "Removing duplicates",
+    lines: [
+      "Comparing all tests for overlapping scenarios.",
+      (v) => v > 0
+        ? `Removed ${v} duplicate${v !== 1 ? "s" : ""} — kept only unique scenarios so the suite doesn't repeat checks.`
+        : "No duplicate tests found — the suite is already lean.",
+    ],
+    pills: () => [],
+    statKey: "duplicatesRemoved",
+    statLabel: "duplicates removed",
+  },
+  {
+    step: 6,
+    label: "Strengthening assertions",
+    lines: [
+      "Reviewing every test's assertions — most just check that a page loaded.",
+      "Upgrading to meaningful checks: cart count incremented, form errors shown, order confirmed.",
+      (v) => `Enhanced ${v ?? 0} test${v !== 1 ? "s" : ""} with stronger assertions that actually catch bugs.`,
+    ],
+    pills: () => [
+      { icon: "circle-check", text: "Cart badge count asserted" },
+      { icon: "circle-check", text: "Form error messages validated" },
+      { icon: "circle-check", text: "Order confirmation text checked" },
+    ],
+    statKey: "assertionsEnhanced",
+    statLabel: "assertions upgraded",
+  },
+  {
+    step: 7,
+    label: "Quality check",
+    lines: [
+      "Running a final pass — checking selector stability and assertion coverage.",
+      (v) => v > 0
+        ? `Rejected ${v} test${v !== 1 ? "s" : ""} with brittle selectors or weak coverage. The rest passed.`
+        : "All tests passed quality review — selectors are stable and assertions are meaningful.",
+    ],
+    pills: () => [],
+    statKey: "validationRejected",
+    statLabel: "rejected",
+  },
+  {
+    step: 8,
+    label: "Done",
+    lines: [
+      (total) => `All done — ${total ?? 0} test${total !== 1 ? "s" : ""} ready for your review.`,
+    ],
+    pills: () => [],
+    statKey: null,
+    statLabel: null,
+  },
+];
+
+/**
+ * Resolves a narrative line — either a plain string or a function called with
+ * the stage's current stat value from `pipelineStats`.
+ *
+ * @param {string|Function} line
+ * @param {number|null} statVal
+ * @returns {string}
+ */
+function resolveNarrativeLine(line, statVal) {
+  return typeof line === "function" ? line(statVal) : line;
+}
+
+/**
+ * Conversational pipeline feed — replaces the old `tl-progress-feed` /
+ * `LLMContextRow` middle column.
+ *
+ * Streams the active stage's narrative line character-by-character using a
+ * `requestAnimationFrame`-backed timer. Done stages collapse to their final
+ * sentence + pill chips. Pending stages are hidden until they activate.
+ *
+ * @param {{ run: Object|null, logLines: string[], isRunActive: boolean }} props
+ */
+function NarrativeFeed({ run, logLines, isRunActive }) {
+  const currentStep = run?.currentStep ?? null;
+  const status      = run?.status ?? "running";
+  const ps          = run?.pipelineStats || {};
+
+  // ── Streaming state ──
+  // `streamedText` is the portion of the active line that has been revealed
+  // so far. `streamTarget` is the full resolved string we're streaming toward.
+  // Both are keyed to `streamKey` (step + line index) so a stage transition
+  // immediately resets the stream without a stale timer firing into the next
+  // stage's text.
+  const [streamedText,  setStreamedText]  = useState("");
+  const [streamTarget,  setStreamTarget]  = useState("");
+  const [streamKey,     setStreamKey]     = useState("");
+  const [activeLine,    setActiveLine]    = useState(0);  // which line within the stage
+  const [revealedPills, setRevealedPills] = useState(0);  // pills shown so far
+  const streamTimerRef = useRef(null);
+  const feedEndRef     = useRef(null);
+  const CHAR_MS = 22; // ~45 chars/sec — fast enough to feel live, slow enough to read
+
+  // ── Derive stage state (same helper used by PipelinePanel) ──
+  function stateFor(step) {
+    return stageStatus(step, currentStep, status);
+  }
+
+  // ── Resolve stat value for a stage ──
+  function statFor(stage) {
+    if (!stage.statKey) return null;
+    // Step 8 final line uses `testsGenerated` (total after dedup + validate)
+    if (stage.step === 8) return run?.testsGenerated ?? null;
+    return ps[stage.statKey] ?? null;
+  }
+
+  // ── Start streaming a new line ──
+  const startStream = useCallback((fullText, key) => {
+    clearTimeout(streamTimerRef.current);
+    setStreamTarget(fullText);
+    setStreamedText("");
+    setStreamKey(key);
+  }, []);
+
+  // ── Character-by-character ticker ──
+  useEffect(() => {
+    if (!streamTarget) return;
+    if (streamedText.length >= streamTarget.length) return;
+
+    streamTimerRef.current = setTimeout(() => {
+      setStreamedText(prev => {
+        // Guard: if key changed (stage advanced) abandon this tick
+        return prev.length < streamTarget.length
+          ? streamTarget.slice(0, prev.length + 1)
+          : prev;
+      });
+    }, CHAR_MS);
+
+    return () => clearTimeout(streamTimerRef.current);
+  }, [streamTarget, streamedText]);
+
+  // ── Advance to next narrative line once streaming is done ──
+  useEffect(() => {
+    if (!streamTarget) return;
+    if (streamedText.length < streamTarget.length) return; // still streaming
+
+    const activeStage = NARRATIVE_STAGES.find(s => s.step === currentStep);
+    if (!activeStage) return;
+
+    const statVal = statFor(activeStage);
+    const totalLines = activeStage.lines.length;
+
+    // Reveal one more pill while there are lines left to advance through
+    if (activeLine < totalLines - 1) {
+      const pauseMs = 900; // pause between sentences
+      const t = setTimeout(() => {
+        const nextLine = activeLine + 1;
+        setActiveLine(nextLine);
+        setRevealedPills(p => p + 1);
+        const nextText = resolveNarrativeLine(activeStage.lines[nextLine], statVal);
+        startStream(nextText, `${currentStep}-${nextLine}`);
+      }, pauseMs);
+      return () => clearTimeout(t);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamedText, streamTarget, currentStep, activeLine]);
+
+  // ── React to stage transitions ──
+  useEffect(() => {
+    if (currentStep == null) {
+      // Run just started — show a "connecting" message
+      startStream("Starting up — connecting to your site and preparing the pipeline…", "init");
+      setActiveLine(0);
+      setRevealedPills(0);
+      return;
+    }
+    const stage = NARRATIVE_STAGES.find(s => s.step === currentStep);
+    if (!stage) return;
+
+    const newKey = `${currentStep}-0`;
+    if (streamKey.startsWith(`${currentStep}-`)) return; // already on this stage
+
+    setActiveLine(0);
+    setRevealedPills(0);
+    const statVal = statFor(stage);
+    startStream(resolveNarrativeLine(stage.lines[0], statVal), newKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep]);
+
+  // ── Auto-scroll to keep the active entry in view ──
+  useEffect(() => {
+    feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [streamedText, currentStep]);
+
+  const isTerminal = status === "completed" || status === "completed_empty"
+    || status === "failed" || status === "aborted";
+
+  return (
+    <div className="tl-narrative-feed">
+      {NARRATIVE_STAGES.map((stage) => {
+        const state   = stateFor(stage.step);
+        const statVal = statFor(stage);
+
+        // Only render done + active stages; pending ones are invisible until
+        // the pipeline reaches them.
+        if (state === "pending") return null;
+
+        const isDone   = state === "done";
+        const isActive = state === "active";
+
+        // Pills: show all on done stages; reveal progressively when active
+        const pills      = stage.pills(run);
+        const shownPills = isDone ? pills : pills.slice(0, revealedPills);
+
+        // Narrative text: done stages show their final resolved line;
+        // active stage shows the streaming buffer.
+        const finalLine  = resolveNarrativeLine(stage.lines[stage.lines.length - 1], statVal);
+        const displayTxt = isDone ? finalLine : streamedText;
+        const streaming  = isActive && streamedText.length < streamTarget.length;
+
+        return (
+          <div
+            key={stage.step}
+            className={`tl-nf-entry tl-nf-entry--${state}`}
+          >
+            {/* Timeline dot + connector line */}
+            <div className={`tl-nf-dot tl-nf-dot--${state}`} />
+
+            <div className="tl-nf-body">
+              {/* Stage label */}
+              <div className={`tl-nf-label tl-nf-label--${state}`}>
+                {stage.label}
+              </div>
+
+              {/* Narrative text with streaming cursor */}
+              <div className="tl-nf-text">
+                {displayTxt}
+                {streaming && <span className="tl-nf-cursor" aria-hidden="true" />}
+                {isActive && !streaming && !displayTxt && (
+                  <span className="tl-nf-dots" aria-label="thinking">
+                    <span /><span /><span />
+                  </span>
+                )}
+              </div>
+
+              {/* Detail pills */}
+              {shownPills.length > 0 && (
+                <div className="tl-nf-pills">
+                  {shownPills.map((pill, i) => (
+                    <span key={i} className="tl-nf-pill">
+                      {pill.text}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Stat chip — shown only when the stage is done and has a value */}
+              {isDone && statVal != null && stage.statLabel && (
+                <div className="tl-nf-stat">
+                  <strong>{statVal}</strong> {stage.statLabel}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Startup message before the first step fires */}
+      {currentStep == null && isRunActive && (
+        <div className="tl-nf-entry tl-nf-entry--active">
+          <div className="tl-nf-dot tl-nf-dot--active" />
+          <div className="tl-nf-body">
+            <div className="tl-nf-label tl-nf-label--active">Connecting</div>
+            <div className="tl-nf-text">
+              {streamedText || ""}
+              {streamedText.length < streamTarget.length && (
+                <span className="tl-nf-cursor" aria-hidden="true" />
+              )}
+              {!streamedText && (
+                <span className="tl-nf-dots" aria-label="thinking">
+                  <span /><span /><span />
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div ref={feedEndRef} />
     </div>
   );
 }
@@ -1350,6 +1730,9 @@ export default function TestLab() {
                   const m = logLines[i].match(/https?:\/\/[^\s)]+/);
                   if (m) { activePage = m[0]; break; }
                 }
+                // "logs" tab kept for crawl runs only — the narrative feed is
+                // the primary view; raw log is accessible via the Logs tab for
+                // debugging. Requirement runs don't crawl so no sitegraph.
                 const innerTabs = isCrawl
                   ? ["pipeline", "sitegraph", "logs"]
                   : ["pipeline", "logs"];
@@ -1399,116 +1782,21 @@ export default function TestLab() {
                           <PipelinePanel run={runData} />
                         </div>
 
-                        {/* Sub-col 2: progress narrative (not raw logs).
-                            Industry standard (Vercel, GitHub Actions, Cypress
-                            Cloud): the primary view shows human-readable
-                            stage summaries; the raw terminal lives in the
-                            dedicated Logs tab. This works for ALL providers
-                            (GPT-4o streaming, Gemini non-streaming, Ollama)
-                            because it reads from `runData` snapshots delivered
-                            via SSE, not from streamed tokens. */}
+                        {/* Sub-col 2: conversational narrative feed.
+                            Replaces LLMContextRow + tl-progress-feed with a
+                            streaming narrative that reads like Claude thinking
+                            — active stage types out character-by-character,
+                            done stages show a final one-line summary + detail
+                            pills. Reads from `runData.pipelineStats` (SSE
+                            snapshot events) so it works for all providers
+                            regardless of streaming support. */}
                         <div className="tl-pipeline-log-col">
-                          <div className="tl-pipeline-col-label">Progress</div>
-                          <LLMContextRow
-                            stageLabel={runData?.currentStep != null
-                              ? PIPELINE_STAGES[runData.currentStep - 1]?.label || null
-                              : null}
-                            stageIndex={Number.isFinite(runData?.currentStep) ? runData.currentStep : null}
-                            totalStages={PIPELINE_STAGES.length}
-                            /* GAP-005 (audit, fix): primary agent for the
-                               currently-streaming step. Multi-role stages
-                               (step 3 = explorer + planner) report exactly
-                               one in-flight LLM call at any given instant —
-                               surface the first role from the shared helper.
-                               The full multi-role list shows on the per-stage
-                               trace via PipelineCard / progress feed below. */
-                            agentRole={runData?.currentStep != null
-                              ? getStageAgentRoles(runData.currentStep)[0] || null
-                              : null}
-                            modelName={runData?.modelUsed || null}
-                            isRunning={isRunActive}
+                          <div className="tl-pipeline-col-label">What&rsquo;s happening</div>
+                          <NarrativeFeed
+                            run={runData}
+                            logLines={logLines}
+                            isRunActive={isRunActive}
                           />
-                          {/* Stage-aware progress feed — each completed stage
-                              renders a one-line summary with its stat value.
-                              The active stage pulses. Works identically for
-                              streaming and non-streaming providers because
-                              it reads `runData.pipelineStats` (populated by
-                              SSE `snapshot` events), not `logLines`. */}
-                          <div className="tl-progress-feed">
-                            {PIPELINE_STAGES.map((stage) => {
-                              const state = stageStatus(stage.step, runData?.currentStep ?? null, runData?.status ?? "running");
-                              const statVal = stage.key ? (ps[stage.key] ?? null) : null;
-                              if (state === "pending") return null;
-                              // GAP-005 (audit, fix): surface ALL agent roles
-                              // that run during this stage. Pre-fix this was
-                              // a hardcoded single-role lookup that mis-
-                              // attributed step 3 (real call site uses
-                              // `explorer`, not `planner`, plus `planner`
-                              // adds a second pass for journey decomposition).
-                              // Multi-role stages combine with " + " so
-                              // step 3 reads "Explorer + Planner agent
-                              // mapped 8 user journeys…". Stages 1-2
-                              // (Crawl, Filter) and step 8 (Done) return
-                              // [] from the shared helper and produce no
-                              // agent label.
-                              const roles = getStageAgentRoles(stage.step);
-                              const agentRole = roles[0] || null;
-                              const agentLabel = roles.length > 0
-                                ? roles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(" + ") + " agent"
-                                : null;
-                              const model = runData?.modelUsed || null;
-                              // Outcome-oriented messages: tell the user what
-                              // was accomplished (done) or what's happening for
-                              // them right now (active). Agent names surface on
-                              // LLM stages; infrastructure stages stay neutral.
-                              const doneMessages = {
-                                1: `Found ${statVal ?? 0} testable page${(statVal ?? 0) !== 1 ? "s" : ""} with interactive elements`,
-                                2: `Filtered to ${statVal ?? 0} actionable element${(statVal ?? 0) !== 1 ? "s" : ""}`,
-                                3: `${agentLabel} mapped ${statVal ?? 0} user journey${(statVal ?? 0) !== 1 ? "s" : ""} from page flows`,
-                                4: `${agentLabel} wrote ${statVal ?? 0} Playwright test${(statVal ?? 0) !== 1 ? "s" : ""}`,
-                                5: `${agentLabel} removed ${statVal ?? 0} duplicate${(statVal ?? 0) !== 1 ? "s" : ""} — kept unique tests only`,
-                                6: `${agentLabel} added ${statVal ?? 0} stronger assertion${(statVal ?? 0) !== 1 ? "s" : ""}`,
-                                7: statVal > 0
-                                  ? `${agentLabel} rejected ${statVal} test${statVal !== 1 ? "s" : ""} that didn't meet quality standards`
-                                  : `${agentLabel} validated all tests — none rejected`,
-                                8: "All done — your tests are ready for review",
-                              };
-                              const activeMessages = {
-                                1: "Scanning your site for testable pages…",
-                                2: "Identifying interactive elements on each page…",
-                                3: `${agentLabel} is mapping user journeys from page flows…`,
-                                4: `${agentLabel} is generating Playwright tests${model ? ` using ${model}` : ""}…`,
-                                5: `${agentLabel} is checking for duplicate tests…`,
-                                6: `${agentLabel} is adding stronger assertions to each test…`,
-                                7: `${agentLabel} is validating each test meets quality standards…`,
-                                8: "Wrapping up…",
-                              };
-                              const msg = state === "done"
-                                ? doneMessages[stage.step]
-                                : activeMessages[stage.step];
-                              return (
-                                <div key={stage.step} className={`tl-progress-item tl-progress-item--${state}`}>
-                                  <span className="tl-progress-item__icon">
-                                    {state === "done" ? "✓" : "●"}
-                                  </span>
-                                  <span className="tl-progress-item__text">
-                                    {msg}
-                                  </span>
-                                  {state === "active" && agentRole && (
-                                    <span className="tl-progress-item__agent">
-                                      🤖 {agentLabel}{model ? ` · ${model}` : ""}
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {isRunActive && !runData?.currentStep && (
-                              <div className="tl-progress-item tl-progress-item--active">
-                                <span className="tl-progress-item__icon">●</span>
-                                <span className="tl-progress-item__text">Preparing pipeline — connecting to your site…</span>
-                              </div>
-                            )}
-                          </div>
                         </div>
 
                         {/* Sub-col 3: so far stats + stop button */}

@@ -1383,81 +1383,169 @@
   word-break: break-word;
 }
 
-/* ── Progress narrative feed (replaces raw LiveLog in pipeline tab) ────────
-   Industry-standard pattern (Vercel build output, GitHub Actions step list,
-   Cypress Cloud test progress): each completed stage renders a one-line
-   human-readable summary; the active stage pulses. Reads from `runData`
-   snapshots (SSE), NOT from streamed tokens — works identically for
-   streaming (GPT-4o) and non-streaming (Gemini, Ollama) providers. The raw
-   terminal stays in the dedicated Logs tab for debugging. */
-.tl-progress-feed {
+/* ── Narrative feed (middle column of pipeline view) ─────────────────────────
+   Conversational streaming narrative — one entry per pipeline stage.
+   Timeline dot + connecting line structure; entries append as stages complete;
+   pending stages are hidden (rendered as null in JSX). Active entry has a
+   pulsing dot + streaming text cursor. Done entries collapse to final summary
+   sentence + pill chips + stat chip. */
+
+.tl-narrative-feed {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 14px;
+  padding: 14px 16px 14px 14px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-.tl-progress-item {
+.tl-nf-entry {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 7px;
-  font-size: 0.84rem;
-  line-height: 1.5;
-  color: var(--text2);
-  transition: background 0.15s, color 0.15s;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 2px;
+  min-height: 36px;
 }
 
-.tl-progress-item--done {
-  color: var(--green);
-  background: var(--green-bg);
+/* Vertical connector line between entries */
+.tl-nf-entry::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 20px;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
 }
+.tl-nf-entry:last-child::before { display: none; }
 
-.tl-progress-item--active {
-  color: var(--accent);
-  background: var(--accent-bg);
-  font-weight: 600;
-}
-
-.tl-progress-item__icon {
+.tl-nf-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
   flex-shrink: 0;
-  width: 18px;
-  text-align: center;
-  font-size: 0.82rem;
-  line-height: 1.5;
+  margin-top: 3px;
+  position: relative;
+  z-index: 1;
+  transition: background 0.2s, border-color 0.2s;
+}
+.tl-nf-dot--done {
+  background: var(--green-bg);
+  border: 1.5px solid var(--green);
+}
+.tl-nf-dot--active {
+  background: var(--accent-bg);
+  border: 1.5px solid var(--accent);
+  animation: tl-nf-dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes tl-nf-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91, 110, 245, 0.25); }
+  50%       { box-shadow: 0 0 0 5px rgba(91, 110, 245, 0); }
 }
 
-.tl-progress-item--done .tl-progress-item__icon { color: var(--green); }
-.tl-progress-item--active .tl-progress-item__icon {
-  color: var(--accent);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.tl-progress-item__text {
+.tl-nf-body {
   flex: 1;
   min-width: 0;
+  padding-bottom: 14px;
 }
 
-/* AI-005: agent + model attribution badge on the active stage row.
-   Shows "🤖 Author agent · claude-sonnet-4" so operators see which
-   AI agent is working and which model it's using. Renders only on the
-   active stage — completed stages already embed the agent name in the
-   summary text ("Author agent generated 12 raw test cases"). */
-.tl-progress-item__agent {
-  flex-shrink: 0;
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 1px solid rgba(91, 110, 245, 0.2);
-  border-radius: 99px;
-  padding: 2px 10px;
-  white-space: nowrap;
-  font-family: var(--font-mono);
+.tl-nf-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 3px;
 }
+.tl-nf-label--done   { color: var(--green); }
+.tl-nf-label--active { color: var(--accent); }
+
+.tl-nf-text {
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text);
+  min-height: 1.4em;
+}
+.tl-nf-entry--done .tl-nf-text { color: var(--text2); }
+
+/* Blinking cursor on the actively streaming entry */
+.tl-nf-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.85em;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: tl-nf-blink 0.85s step-start infinite;
+}
+@keyframes tl-nf-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Three-dot thinking indicator — shown briefly before text starts streaming */
+.tl-nf-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.tl-nf-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: tl-nf-bounce 1.2s ease-in-out infinite;
+}
+.tl-nf-dots span:nth-child(2) { animation-delay: 0.16s; }
+.tl-nf-dots span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes tl-nf-bounce {
+  0%, 70%, 100% { opacity: 0.25; transform: translateY(0); }
+  35%            { opacity: 1;   transform: translateY(-2px); }
+}
+
+/* Detail pills — URLs, filenames, counts */
+.tl-nf-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.tl-nf-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text2);
+  font-family: var(--font-mono);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: tl-nf-pill-in 0.2s ease;
+}
+@keyframes tl-nf-pill-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Stat chip — final result for a completed stage */
+.tl-nf-stat {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--green-bg);
+  border: 1px solid var(--green);
+  font-size: 0.72rem;
+  color: var(--green);
+  font-weight: 500;
+}
+.tl-nf-stat strong { font-weight: 700; margin-right: 3px; }
 
 /* Sub-col 3: so far stats */
 .tl-pipeline-stats-col {
