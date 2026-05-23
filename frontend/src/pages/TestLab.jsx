@@ -702,6 +702,20 @@ export default function TestLab() {
   // prevents the effect from re-firing every time `allRuns` refreshes.
   const attachedFromQueueRef = useRef(false);
   useEffect(() => {
+    // G10 — the auto-attach effect runs only when NOTHING is attached.
+    // Pre-fix it re-fired on every `selectedId` change too, which after
+    // the project-switch decoupling above would silently swap the live
+    // view between projects: user starts crawl on A, clicks B in the
+    // sidebar, and if B happens to have a running run the effect
+    // overwrites A's `activeRun` with B's. The user loses A's live view
+    // without any action that intended to drop it.
+    //
+    // The fix is conservative — auto-attach only when `activeRun` is
+    // null. If the user wants to switch to a sibling project's running
+    // run, they use the right-rail "Active runs" list which goes
+    // through `handleAttachRun` explicitly. The effect's `selectedId`
+    // dep is preserved so a future project change on an idle view
+    // still discovers running runs.
     if (activeRun) { attachedFromQueueRef.current = false; return; }
     if (attachedFromQueueRef.current) return;
     if (!selectedId) return;
@@ -1042,16 +1056,34 @@ export default function TestLab() {
    */
   function handleSelectProject(nextProjectId) {
     if (nextProjectId === selectedId) return;
-    if (isRunActive) {
-      const ok = window.confirm(
-        "A generation run is in progress for the current project. " +
-        "Switching projects will close this live view — the run keeps executing " +
-        "and stays visible in the Queue tab. Continue?",
-      );
-      if (!ok) return;
-    }
+    // G10 — the live run view no longer follows the project selector.
+    // Before this fix, switching projects called `handleReset()`, which
+    // tore down the SSE connection + cleared `runData` / `logLines` /
+    // `activeRun`. The run kept executing server-side but the user lost
+    // all visibility into it from the page they were on — the only
+    // recovery was clicking through the Queue tab. That broke the
+    // legitimate workflow of "kick off a long crawl, then browse other
+    // projects' tests while it runs."
+    //
+    // The fix: keep `activeRun` + `runData` + `logLines` + the SSE
+    // connection intact when `selectedId` changes. The middle column's
+    // attached-run view (`activeRun ? <run-center> : <config>`) stays
+    // visible because `activeRun` is unchanged; the run-center label
+    // shows the ORIGINAL project's name (resolved via
+    // `runProjectForLabel` below) rather than the newly-selected one,
+    // so the user can see "MYPROJ-A · LINK CRAWL" while the sidebar
+    // highlights MYPROJ-B and the right rail shows MYPROJ-B's config.
+    //
+    // Mental model: project sidebar = "which project's config am I
+    // looking at" (cheap, frequent). Run view = "which run am I
+    // monitoring" (expensive, sticky). Decoupling the two lets the
+    // user do both at once without losing either context.
+    //
+    // The right rail's "Active runs" list already provided a re-attach
+    // path via `handleAttachRun`, but it only listed running runs and
+    // discarded view state on every switch — keeping the live view
+    // pinned is strictly better for the operator-flow case.
     setSelectedId(nextProjectId);
-    handleReset();
     if (routeProjectId) {
       const qs = searchParams.toString();
       navigate(`/projects/${nextProjectId}/test-lab${qs ? `?${qs}` : ""}`, { replace: true });
@@ -1415,8 +1447,20 @@ export default function TestLab() {
           {activeRun ? (
             // ── Attached run: pipeline + site graph + live log ──
             <div className="tl-run-center">
+              {/* G10 — the run-center label shows the RUN's project, not
+                  the sidebar's `selectedProject`. After the project-
+                  switch decoupling above, those can diverge: the user
+                  starts a crawl on MYPROJ-A, then clicks MYPROJ-B in
+                  the sidebar to browse its tests. The middle column
+                  must still show "MYPROJ-A · LINK CRAWL" because that's
+                  the run we're monitoring. Resolved by id from the
+                  shared `projects` cache (`useProjectData`) — falls
+                  back to the bare project id when the cache hasn't
+                  populated yet (rare; defence-in-depth). */}
               <div className="tl-run-label">
-                {selectedProject?.name?.toUpperCase()} · {activeRun?.type === "crawl" ? "LINK CRAWL" : "REQUIREMENT"}
+                {(projects.find(p => p.id === activeRun.projectId)?.name
+                  || activeRun.projectId
+                  || "—").toUpperCase()} · {activeRun?.type === "crawl" ? "LINK CRAWL" : "REQUIREMENT"}
                 {isRunDone && <span className="tl-run-status-suffix tl-run-status-suffix--done">· COMPLETED</span>}
                 {isRunFailed && (
                   <span className="tl-run-status-suffix tl-run-status-suffix--failed">
