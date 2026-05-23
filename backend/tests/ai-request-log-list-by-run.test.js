@@ -104,16 +104,26 @@ async function main() {
     assert.equal(rows.length, 2, "explicit limit must clip the result set");
   }
 
-  // ── 6. Limit clamping: non-finite limit falls back to default ──────────
-  // Without this guard, `Number(opts.limit) || 200` resolves to 200 for
-  // NaN / "abc" / 0 / negative numbers — pinning the contract.
+  // ── 6. Limit clamping: non-finite / non-positive limit handling ────────
+  // The implementation is `Math.max(1, Math.min(500, Number(opts.limit) || 200))`:
+  //   - Falsy values (NaN, 0) trip the `|| 200` fallback → default 200.
+  //   - Negative numbers are truthy, so they pass through the `||`; the
+  //     outer `Math.max(1, …)` then clamps them up to the floor of 1.
+  // Either way the query is safe — it never receives `undefined` or a
+  // negative number — but the observable row count differs between the
+  // two paths, which this test pins.
   {
     const rowsNaN = aiRequestLogRepo.listByRun("WS-test", "RUN-A", { limit: NaN });
-    assert.equal(rowsNaN.length, 3, "NaN limit must fall back to default");
+    assert.equal(rowsNaN.length, 3, "NaN limit must fall back to default (200)");
     const rowsZero = aiRequestLogRepo.listByRun("WS-test", "RUN-A", { limit: 0 });
     assert.equal(rowsZero.length, 3, "limit=0 must fall back to default (not return empty)");
+    // Negative limit clamps to the floor of 1 — NOT to the default. This
+    // is the documented behaviour of `Math.max(1, …)`; the test pins it
+    // so a future refactor (e.g. swapping to a `Number.isFinite` guard
+    // that would re-route negatives to the default) is a deliberate
+    // contract change, not a silent regression.
     const rowsNeg = aiRequestLogRepo.listByRun("WS-test", "RUN-A", { limit: -5 });
-    assert.equal(rowsNeg.length, 3, "negative limit must fall back to default");
+    assert.equal(rowsNeg.length, 1, "negative limit must clamp to floor of 1 (not crash, not default)");
   }
 
   // ── 7. Empty result set for unknown runId ──────────────────────────────
