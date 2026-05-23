@@ -446,6 +446,9 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
           routeId: routeIdForLog(dispatchRoute.id),
           agentRole: callOpts?.agentRole || null,
           userId: callOpts?.userId || null,
+          // GAP-005 (migration 056): same runId correlation on the
+          // streaming success path.
+          runId: callOpts?.runId || null,
           prompt: promptForLog,
           response: res?.text || "",
           inputTokens: Number.isFinite(res?.usage?.input) ? res.usage.input : null,
@@ -478,6 +481,9 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
           routeId: routeIdForLog(dispatchRoute.id),
           agentRole: callOpts?.agentRole || null,
           userId: callOpts?.userId || null,
+          // GAP-005 (migration 056): same runId correlation on the
+          // streaming error path.
+          runId: callOpts?.runId || null,
           prompt: promptForLog,
           response: "",
           latencyMs: Date.now() - startedMs,
