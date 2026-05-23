@@ -358,7 +358,7 @@ export default function Dashboard() {
     <div className="fade-in page-container">
 
       {/* ── Page header ─────────────────────────────────────────────── */}
-      <div className="page-header" data-tour="tour-welcome">
+      <div className="page-header">
         <div>
           <h1 className="page-title">Dashboard</h1>
           <p className="page-subtitle">
