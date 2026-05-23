@@ -188,3 +188,71 @@
 .sys-app-card__crawl-auth {
   margin-left: auto;
 }
+
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   The Systems page is admin-only telemetry but operators ARE going to
+   open it from their phones during on-call incidents (PagerDuty / Sentry
+   linkbacks land here). Three rules to fix:
+     1. `.sys-info-row__label` `min-width: 140px` combined with
+        `.sys-info-row__value` `text-align: right + flex: 1` produces a
+        non-wrapping row where the right-aligned value gets clipped on
+        narrow screens (model strings like `claude-3-5-sonnet-20241022`
+        truncate to ~10 chars).
+     2. `.sys-app-card__stats` is a fixed 4-column grid that crushes
+        each StatCard to ~75px on a 375px viewport, hiding the value
+        text under ellipsis.
+     3. `.sys-app-card__head` (avatar + name + ChevronRight) is fine but
+        the `.sys-app-card__url` mono URL inside it overflows when the
+        project URL is long. */
+@media (max-width: 600px) {
+  /* Info row: stack label above value so the model string gets full width. */
+  .sys-info-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .sys-info-row__label { min-width: 0; }
+  .sys-info-row__value {
+    text-align: left;
+    word-break: break-word;
+  }
+
+  /* Project stats grid: 4 → 2 columns. Same recipe as the dashboard
+     stat-grid breakpoint in utilities.css — keeps the visual rhythm
+     consistent across pages. */
+  .sys-app-card__stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  /* URL inside project card head: clip at panel edge with ellipsis. */
+  .sys-app-card__url {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60vw;
+  }
+}
+
+@media (max-width: 480px) {
+  /* 4 → 1 column on the smallest phones — 2-col still crushes stat
+     values when the project has 5-digit test counts. */
+  .sys-app-card__stats {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  /* Card padding tightens to match the components.css 480px rule for
+     `.card-padded` (14px). */
+  .sys-app-card {
+    padding: 14px;
+  }
+
+  /* Crawl footer: the avatar badge on the right pushes the time text
+     onto a single line; allow wrapping so long timestamps stack. */
+  .sys-app-card__crawl {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .sys-app-card__crawl-auth { margin-left: 0; }
+}

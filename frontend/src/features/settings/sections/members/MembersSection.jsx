@@ -23,6 +23,7 @@ const ROLE_OPTIONS = [
 
 export default function MembersSection() {
   const { user } = useAuth();
+  const isAdmin = user?.workspaceRole === "admin";
   const [error, setError] = useState(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("viewer");
@@ -90,43 +91,50 @@ export default function MembersSection() {
         </div>
       )}
 
-      {/* Invite form */}
-      <form onSubmit={handleInvite} className="card card-padded members-invite-form">
-        <div className="members-invite__email">
-          <label className="members-invite__label">
-            <UserPlus size={12} className="members-invite__label-icon" />
-            Invite by email
-          </label>
-          <input
-            className="input members-invite__input"
-            type="email"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-            placeholder="colleague@company.com"
-            required
-          />
-        </div>
-        <div className="members-invite__role">
-          <label className="members-invite__label">Role</label>
-          <select
-            className="input members-invite__input"
-            value={inviteRole}
-            onChange={(e) => setInviteRole(e.target.value)}
-          >
-            {ROLE_OPTIONS.map((r) => (
-              <option key={r.value} value={r.value}>{r.label}</option>
-            ))}
-          </select>
-        </div>
-        <button className="btn btn-primary btn-sm members-invite__submit" type="submit" disabled={inviting || !inviteEmail.trim()}>
-          {inviting ? <RefreshCw size={13} className="spin" /> : <UserPlus size={13} />}
-          Invite
-        </button>
-      </form>
-      {inviteMsg && (
-        <div className={inviteMsg.type === "ok" ? "st-status-ok" : "st-status-err"}>
-          {inviteMsg.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {inviteMsg.text}
-        </div>
+      {/* Invite form — admin-only. UX-AUDIT (May 2026): non-admins see the
+          member roster (transparency, parity with GitHub / Linear / Vercel)
+          but the invite UI is hidden. Backend `requireRole("admin")` on
+          POST /workspace/members enforces this server-side too. */}
+      {isAdmin && (
+        <>
+          <form onSubmit={handleInvite} className="card card-padded members-invite-form">
+            <div className="members-invite__email">
+              <label className="members-invite__label">
+                <UserPlus size={12} className="members-invite__label-icon" />
+                Invite by email
+              </label>
+              <input
+                className="input members-invite__input"
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="colleague@company.com"
+                required
+              />
+            </div>
+            <div className="members-invite__role">
+              <label className="members-invite__label">Role</label>
+              <select
+                className="input members-invite__input"
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value)}
+              >
+                {ROLE_OPTIONS.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+            <button className="btn btn-primary btn-sm members-invite__submit" type="submit" disabled={inviting || !inviteEmail.trim()}>
+              {inviting ? <RefreshCw size={13} className="spin" /> : <UserPlus size={13} />}
+              Invite
+            </button>
+          </form>
+          {inviteMsg && (
+            <div className={inviteMsg.type === "ok" ? "st-status-ok" : "st-status-err"}>
+              {inviteMsg.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {inviteMsg.text}
+            </div>
+          )}
+        </>
       )}
 
       {/* Member list */}
@@ -156,25 +164,37 @@ export default function MembersSection() {
                   {m.email}
                 </div>
               </div>
-              <select
-                className="input members-row__role-select"
-                value={m.role}
-                onChange={(e) => handleRoleChange(m.userId, e.target.value)}
-                disabled={isCurrentUser}
-                title={isCurrentUser ? "You cannot change your own role" : `Change role for ${m.name || m.email}`}
-              >
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
-              <button
-                className="btn btn-ghost btn-xs members-row__remove-btn"
-                onClick={() => handleRemove(m.userId, m.name || m.email)}
-                disabled={isCurrentUser}
-                title={isCurrentUser ? "You cannot remove yourself" : `Remove ${m.name || m.email}`}
-              >
-                <Trash2 size={12} />
-              </button>
+              {isAdmin ? (
+                <>
+                  <select
+                    className="input members-row__role-select"
+                    value={m.role}
+                    onChange={(e) => handleRoleChange(m.userId, e.target.value)}
+                    disabled={isCurrentUser}
+                    title={isCurrentUser ? "You cannot change your own role" : `Change role for ${m.name || m.email}`}
+                  >
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn btn-ghost btn-xs members-row__remove-btn"
+                    onClick={() => handleRemove(m.userId, m.name || m.email)}
+                    disabled={isCurrentUser}
+                    title={isCurrentUser ? "You cannot remove yourself" : `Remove ${m.name || m.email}`}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </>
+              ) : (
+                /* Non-admin view: static role label, no role-change dropdown,
+                   no remove button. Mirrors GitHub / Linear / Vercel where
+                   viewers see who's in the workspace + each person's role
+                   but cannot mutate. */
+                <span className="badge badge-gray members-row__role-static">
+                  {ROLE_OPTIONS.find((r) => r.value === m.role)?.label || m.role}
+                </span>
+              )}
             </div>
           );
         })}

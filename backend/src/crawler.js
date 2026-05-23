@@ -291,7 +291,7 @@ export async function generateFromUserDescription(project, run, { name, descript
 
   const rawTests = await generateFromDescription(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
-  }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null });
+  }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Steps 5-7: Dedup → Enhance → Validate (shared pipeline) ────────────
@@ -655,7 +655,7 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     journeys,
     effectiveSnapshotsByUrl,
     (msg) => log(run, msg),
-    { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null },
+    { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id },
   );
   const rawTests = genResult.tests;
   log(run, `📝 Raw UI tests: ${rawTests.length}`);
@@ -686,7 +686,7 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     throwIfAborted(signal);
     log(run, `🌐 Generating API tests from ${apiEndpoints.length} discovered endpoints...`);
     try {
-      const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal, workspaceId: project.workspaceId || null });
+      const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal, workspaceId: project.workspaceId || null, runId: run.id });
       if (apiTests.length > 0) {
         for (const t of apiTests) rawTests.push(t);
         log(run, `📝 API tests generated: ${apiTests.length} (total raw: ${rawTests.length})`);

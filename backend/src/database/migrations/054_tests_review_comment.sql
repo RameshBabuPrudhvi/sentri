@@ -1,0 +1,34 @@
+-- Migration 054: Per-test review comment
+--
+-- Adds a free-text `reviewComment` column to the `tests` table so the
+-- frontend can render an explanation of why a test is in its current
+-- review status. Two concrete consumers today:
+--
+--   1. The feedback-loop regenerator (`backend/src/pipeline/feedbackLoop.js`)
+--      writes a synthesised "Auto-regenerated after failure (REASON)…" line
+--      when it puts a previously-approved test back into draft. Before this
+--      column existed, the field was silently dropped by `testRepo.update()`
+--      (filtered out by `VALID_COLS`) so users saw a test mysteriously
+--      revert to draft with no in-row explanation. The matching audit row
+--      under `test.regenerate` provides the workspace-wide audit trail;
+--      this column provides the per-row "why is this draft?" affordance
+--      next to the test itself.
+--
+--   2. ENT-004 (audit) — TestDetail's new Activity feed can use this column
+--      as the canonical place for human reviewers to leave a rejection
+--      note. The bulk-update path in `routes/tests.js` is already shaped
+--      to forward arbitrary `extraFields` keys through `bulkUpdateReviewStatus`,
+--      so a future "reject with comment" flow only needs to add the column
+--      to `extraFields`; the existing VALID_COLS filter prevents drift.
+--
+-- TEXT column, nullable. Pre-migration rows get `reviewComment = NULL`
+-- which the frontend renders as no banner.
+--
+-- Idempotency note: bare `ALTER TABLE ... ADD COLUMN` per the convention
+-- followed by 003 / 006 / 007 / 011 / 014 / 015 / 017 / 018. The migration
+-- runner tracks applied versions in `schema_migrations` so re-running this
+-- file is a no-op.
+--
+-- Both SQLite and PostgreSQL accept this syntax unchanged.
+
+ALTER TABLE tests ADD COLUMN reviewComment TEXT;

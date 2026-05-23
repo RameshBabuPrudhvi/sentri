@@ -89,6 +89,16 @@ router.get("/activities", (req, res) => {
   const activities = activityRepo.getFiltered({
     type: req.query.type || undefined,
     projectId: req.query.projectId || undefined,
+    // ENT-004 (audit) — per-entity scoping. Pass-through to the repo's
+    // `testId = ?` predicate so the AuditLog page can link directly to
+    // a test's slice via `/audit-log?testId=…`. Project/workspace ACL
+    // is still enforced by `workspaceId` below; without that guard a
+    // bare `testId` filter would let any authenticated user read activity
+    // for a test in any workspace.
+    testId: req.query.testId || undefined,
+    // ENT-004 (migration 055) — per-run scoping for RunDetail's matching
+    // "View activity →" link. Same workspace-ACL guarantee as `testId`.
+    runId: req.query.runId || undefined,
     workspaceId: req.workspaceId,
     after: req.query.after || undefined,
     before: req.query.before || undefined,
@@ -226,11 +236,37 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), auditExpo
       ? req.query.cursor
       : undefined;
 
+    // ── Default-hide meta-audit reads ───────────────────────────────────────
+    // Every audit-log view itself emits a `audit.read` (or `audit.export`)
+    // row for SOC 2 / PCI-DSS 10.2.6 compliance. On a low-activity
+    // workspace those rows dominate the feed — the operator's own page
+    // reloads bury actual events. Hide them by default; admins doing
+    // forensic review can opt back in with `?includeAuditReads=true` (the
+    // "Audit reads" filter chip in the UI). Skipped when the caller has
+    // explicitly filtered TO audit.read/export via `?type=` so the chip
+    // still works.
+    const wantsAuditReads = req.query.includeAuditReads === "true";
+    const filteringToAuditReads = types.some((t) => t === "audit.read" || t === "audit.export");
+    const excludeTypes = (wantsAuditReads || filteringToAuditReads)
+      ? undefined
+      : ["audit.read", "audit.export"];
+
     // ── Fetch ──
     const { rows, nextCursor } = activityRepo.getWorkspaceAuditLog(req.workspaceId, {
       userId: req.query.userId || undefined,
       projectId: req.query.projectId || undefined,
+      // ENT-004 (audit) — per-test filter so the "View activity →" link on
+      // TestDetail can deep-link into the AuditLog page (`/audit-log?testId=…`).
+      // Workspace scope is still enforced by the leading `workspaceId = ?`
+      // predicate in `getWorkspaceAuditLog`; the testId narrow is render-time.
+      testId: req.query.testId || undefined,
+      // ENT-004 (migration 055) — matching per-run filter for RunDetail's
+      // "View activity →" deep link. Server-side filtered + indexed via
+      // `idx_activities_runId` so admins land on a tight per-run slice
+      // instead of the full project's feed.
+      runId: req.query.runId || undefined,
       types,
+      excludeTypes,
       dateFrom: req.query.dateFrom || undefined,
       dateTo: req.query.dateTo || undefined,
       ipAddress: req.query.ipAddress || undefined,

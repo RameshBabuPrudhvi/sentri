@@ -362,6 +362,12 @@ export function resolveAgentCall(prompt, options = {}) {
       // `resolveRequestLogConfig(callOpts)` in callProvider before
       // the LLM call fires.
       requestLogMode: options.requestLogMode || null,
+      // GAP-005 (migration 056): thread the originating run's id so
+      // `logRequest` can persist it on the `ai_request_log` row. Callers
+      // that aren't inside a run context (chat, healthchecks, replay)
+      // pass null; `callProvider`'s `logRequest` call reads `callOptions.runId`
+      // and writes null — the column is nullable by design.
+      runId: options.runId || null,
     },
     useRoutes: true,
   };
@@ -753,6 +759,11 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
         routeId: routeIdForLog(callOptions.routeId),
         agentRole: callOptions.agentRole || null,
         userId: callOptions.userId || null,
+        // GAP-005 (migration 056): correlate this AI call to the
+        // originating run so RunDetail can render the per-call agent
+        // timeline. `null` for calls outside a run context (chat,
+        // healthchecks, replay endpoint).
+        runId: callOptions.runId || null,
         prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
         response: typeof text === "string" ? text : "",
         // B2.5 — populate token + cost fields so per-request log rows
@@ -789,6 +800,9 @@ export async function callProvider(provider, promptOrMessages, maxTokens, signal
         routeId: routeIdForLog(callOptions.routeId),
         agentRole: callOptions.agentRole || null,
         userId: callOptions.userId || null,
+        // GAP-005 (migration 056): same runId correlation on the error
+        // path so the RunDetail agent timeline shows failed calls too.
+        runId: callOptions.runId || null,
         prompt: typeof promptOrMessages === "string" ? promptOrMessages : JSON.stringify(promptOrMessages),
         response: "",
         // No usage on the error path — token + cost fields stay null.

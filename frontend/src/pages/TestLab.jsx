@@ -30,6 +30,12 @@ import TestConfig from "../components/test/TestConfig.jsx";
 import EmptyState from "../components/shared/EmptyState.jsx";
 import LLMContextRow from "../components/ai/LLMContextRow.jsx";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
+// GAP-005 (audit, fix) — shared step → agent role(s) helper. The legacy
+// `STEP_TO_AGENT_ROLE` constant declared below was a hardcoded incomplete
+// duplicate (only `planner` + `author`, missing `explorer` on step 3).
+// Now sourced from `frontend/src/config.js#getStageAgentRoles` next to the
+// canonical AGENT_ROLES list that mirrors the backend.
+import { getStageAgentRoles } from "../config.js";
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -45,22 +51,12 @@ const PIPELINE_STAGES = [
   { label: "Done",                 step: 8, key: null,                   unit: null },
 ];
 
-// AI-004 (audit): map pipeline-step index → AI agent role. Mirrors the same
-// mapping in `frontend/src/components/generate/GenerateView.jsx` so the
-// TestLab pipeline view's LLMContextRow attributes streamed output to the
-// same role labels as the Generate flow. Stages 1-2 (Crawl, Filter) are
-// pre-LLM (Playwright crawl + heuristic filter) and intentionally omitted
-// — the context row hides itself when `agentRole` is null. Roles match
-// `backend/src/aiProvider/registry.js#resolveProvider` dispatch values, so
-// once `run.modelByStage` lands (GAP-005 backend work) the row will light
-// up with the actual per-stage model attribution without a frontend change.
-const STEP_TO_AGENT_ROLE = {
-  3: "planner",   // Classify Intent
-  4: "author",    // Generate Tests via AI — the heavy LLM stage
-  5: "author",    // Deduplicate (LLM-assisted dedup)
-  6: "author",    // Enhance Assertions
-  7: "author",    // Validate
-};
+// GAP-005 (audit, fix) — `STEP_TO_AGENT_ROLE` removed in favour of the
+// shared `getStageAgentRoles` helper imported above. The old map was both
+// incomplete (only `planner` + `author`, missing `explorer` and 3 other
+// configurable roles) and wrong on step 3 (the real call site is
+// `backend/src/pipeline/intentClassifier.js#L158` with `explorer`, plus
+// `journeyGenerator.js#L218` with `planner` — multi-agent stage).
 
 // Coverage / perspective / quality / test-count / profile option lists used to
 // live here; they have moved to the shared <TestConfig /> component which
@@ -987,6 +983,39 @@ export default function TestLab() {
   const isRunFailed = runStatus === "failed" || runStatus === "aborted";
   const ps          = runData?.pipelineStats || {};
 
+  // ── Split generated-test outcomes (drafts vs auto-approved) ────────────
+  // The run payload reports `testsGenerated` as a single count and the SSE
+  // `done` event only carries that total — it has no per-outcome breakdown.
+  // Without splitting, the completion banner labels every test a "draft"
+  // even when the project's auto-approval threshold cleared some of them,
+  // contradicting what the user sees the moment they land in Review Queue.
+  //
+  // `runData.tests` is the canonical array of test IDs persisted on the run
+  // row (see `backend/src/database/repositories/runRepo.js#INSERT_COLS`),
+  // and `allTests` (from `useProjectData`) already carries the authoritative
+  // `reviewStatus` + `approvalSource` columns refreshed by the
+  // `invalidateProjectDataCache()` we fire on the SSE done event. So the
+  // split is a pure client-side derivation against data we already have.
+  const generatedOutcome = useMemo(() => {
+    const total = runData?.testsGenerated ?? 0;
+    const ids = Array.isArray(runData?.tests) ? runData.tests : [];
+    if (!ids.length || !allTests.length) {
+      // Fall back to the legacy "treat as drafts" shape until the tests
+      // cache refreshes — this matches pre-fix behaviour and avoids
+      // flashing "0 drafts" while the refetch is in flight.
+      return { total, drafts: total, autoApproved: 0 };
+    }
+    const idSet = new Set(ids);
+    let drafts = 0;
+    let autoApproved = 0;
+    for (const t of allTests) {
+      if (!idSet.has(t.id)) continue;
+      if (t.reviewStatus === "approved" && t.approvalSource === "auto") autoApproved++;
+      else if (!t.reviewStatus || t.reviewStatus === "draft") drafts++;
+    }
+    return { total, drafts, autoApproved };
+  }, [runData?.testsGenerated, runData?.tests, allTests]);
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -1249,14 +1278,21 @@ export default function TestLab() {
                 <div className="banner banner-success tl-banner-margin">
                   <CheckCircle2 size={16} />
                   <div className="tl-banner-body">
-                    <strong>Generation complete</strong> — {runData?.testsGenerated ?? 0} test{(runData?.testsGenerated ?? 0) !== 1 ? "s" : ""} generated.
+                    <strong>Generation complete</strong> — {generatedOutcome.total} test{generatedOutcome.total !== 1 ? "s" : ""} generated
+                    {generatedOutcome.autoApproved > 0 && (
+                      <> · <span className="text-green">{generatedOutcome.autoApproved} auto-approved</span></>
+                    )}
+                    {generatedOutcome.drafts > 0 && (
+                      <> · {generatedOutcome.drafts} awaiting review</>
+                    )}
+                    .
                     <div className="tl-banner-actions">
-                      {(runData?.testsGenerated ?? 0) > 0 && (
+                      {generatedOutcome.drafts > 0 && (
                         <button
                           className="btn btn-primary btn-xs"
                           onClick={() => navigate(`/review-queue?projectId=${activeRun.projectId}`)}
                         >
-                          Review {runData.testsGenerated} draft{runData.testsGenerated !== 1 ? "s" : ""} <ChevronRight size={12} />
+                          Review {generatedOutcome.drafts} draft{generatedOutcome.drafts !== 1 ? "s" : ""} <ChevronRight size={12} />
                         </button>
                       )}
                       <button
@@ -1363,31 +1399,116 @@ export default function TestLab() {
                           <PipelinePanel run={runData} />
                         </div>
 
-                        {/* Sub-col 2: live log */}
+                        {/* Sub-col 2: progress narrative (not raw logs).
+                            Industry standard (Vercel, GitHub Actions, Cypress
+                            Cloud): the primary view shows human-readable
+                            stage summaries; the raw terminal lives in the
+                            dedicated Logs tab. This works for ALL providers
+                            (GPT-4o streaming, Gemini non-streaming, Ollama)
+                            because it reads from `runData` snapshots delivered
+                            via SSE, not from streamed tokens. */}
                         <div className="tl-pipeline-log-col">
-                          <div className="tl-pipeline-col-label">Live Output</div>
-                          {/* AI-004 (audit): context row above the log so
-                              operators running generation from TestLab see
-                              the same "Author agent · generate tests via ai —
-                              Stage 4/8" attribution that GenerateView's
-                              LLMStreamPanel surfaces. Identical mapping +
-                              shared component means the two surfaces stay
-                              in sync. `runData.modelUsed` forward-compat
-                              with GAP-005 — the model fragment hides
-                              cleanly while the backend column is null. */}
+                          <div className="tl-pipeline-col-label">Progress</div>
                           <LLMContextRow
                             stageLabel={runData?.currentStep != null
                               ? PIPELINE_STAGES[runData.currentStep - 1]?.label || null
                               : null}
                             stageIndex={Number.isFinite(runData?.currentStep) ? runData.currentStep : null}
                             totalStages={PIPELINE_STAGES.length}
+                            /* GAP-005 (audit, fix): primary agent for the
+                               currently-streaming step. Multi-role stages
+                               (step 3 = explorer + planner) report exactly
+                               one in-flight LLM call at any given instant —
+                               surface the first role from the shared helper.
+                               The full multi-role list shows on the per-stage
+                               trace via PipelineCard / progress feed below. */
                             agentRole={runData?.currentStep != null
-                              ? STEP_TO_AGENT_ROLE[runData.currentStep] || null
+                              ? getStageAgentRoles(runData.currentStep)[0] || null
                               : null}
                             modelName={runData?.modelUsed || null}
                             isRunning={isRunActive}
                           />
-                          <LiveLog lines={logLines} />
+                          {/* Stage-aware progress feed — each completed stage
+                              renders a one-line summary with its stat value.
+                              The active stage pulses. Works identically for
+                              streaming and non-streaming providers because
+                              it reads `runData.pipelineStats` (populated by
+                              SSE `snapshot` events), not `logLines`. */}
+                          <div className="tl-progress-feed">
+                            {PIPELINE_STAGES.map((stage) => {
+                              const state = stageStatus(stage.step, runData?.currentStep ?? null, runData?.status ?? "running");
+                              const statVal = stage.key ? (ps[stage.key] ?? null) : null;
+                              if (state === "pending") return null;
+                              // GAP-005 (audit, fix): surface ALL agent roles
+                              // that run during this stage. Pre-fix this was
+                              // a hardcoded single-role lookup that mis-
+                              // attributed step 3 (real call site uses
+                              // `explorer`, not `planner`, plus `planner`
+                              // adds a second pass for journey decomposition).
+                              // Multi-role stages combine with " + " so
+                              // step 3 reads "Explorer + Planner agent
+                              // mapped 8 user journeys…". Stages 1-2
+                              // (Crawl, Filter) and step 8 (Done) return
+                              // [] from the shared helper and produce no
+                              // agent label.
+                              const roles = getStageAgentRoles(stage.step);
+                              const agentRole = roles[0] || null;
+                              const agentLabel = roles.length > 0
+                                ? roles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(" + ") + " agent"
+                                : null;
+                              const model = runData?.modelUsed || null;
+                              // Outcome-oriented messages: tell the user what
+                              // was accomplished (done) or what's happening for
+                              // them right now (active). Agent names surface on
+                              // LLM stages; infrastructure stages stay neutral.
+                              const doneMessages = {
+                                1: `Found ${statVal ?? 0} testable page${(statVal ?? 0) !== 1 ? "s" : ""} with interactive elements`,
+                                2: `Filtered to ${statVal ?? 0} actionable element${(statVal ?? 0) !== 1 ? "s" : ""}`,
+                                3: `${agentLabel} mapped ${statVal ?? 0} user journey${(statVal ?? 0) !== 1 ? "s" : ""} from page flows`,
+                                4: `${agentLabel} wrote ${statVal ?? 0} Playwright test${(statVal ?? 0) !== 1 ? "s" : ""}`,
+                                5: `${agentLabel} removed ${statVal ?? 0} duplicate${(statVal ?? 0) !== 1 ? "s" : ""} — kept unique tests only`,
+                                6: `${agentLabel} added ${statVal ?? 0} stronger assertion${(statVal ?? 0) !== 1 ? "s" : ""}`,
+                                7: statVal > 0
+                                  ? `${agentLabel} rejected ${statVal} test${statVal !== 1 ? "s" : ""} that didn't meet quality standards`
+                                  : `${agentLabel} validated all tests — none rejected`,
+                                8: "All done — your tests are ready for review",
+                              };
+                              const activeMessages = {
+                                1: "Scanning your site for testable pages…",
+                                2: "Identifying interactive elements on each page…",
+                                3: `${agentLabel} is mapping user journeys from page flows…`,
+                                4: `${agentLabel} is generating Playwright tests${model ? ` using ${model}` : ""}…`,
+                                5: `${agentLabel} is checking for duplicate tests…`,
+                                6: `${agentLabel} is adding stronger assertions to each test…`,
+                                7: `${agentLabel} is validating each test meets quality standards…`,
+                                8: "Wrapping up…",
+                              };
+                              const msg = state === "done"
+                                ? doneMessages[stage.step]
+                                : activeMessages[stage.step];
+                              return (
+                                <div key={stage.step} className={`tl-progress-item tl-progress-item--${state}`}>
+                                  <span className="tl-progress-item__icon">
+                                    {state === "done" ? "✓" : "●"}
+                                  </span>
+                                  <span className="tl-progress-item__text">
+                                    {msg}
+                                  </span>
+                                  {state === "active" && agentRole && (
+                                    <span className="tl-progress-item__agent">
+                                      🤖 {agentLabel}{model ? ` · ${model}` : ""}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {isRunActive && !runData?.currentStep && (
+                              <div className="tl-progress-item tl-progress-item--active">
+                                <span className="tl-progress-item__icon">●</span>
+                                <span className="tl-progress-item__text">Preparing pipeline — connecting to your site…</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {/* Sub-col 3: so far stats + stop button */}
@@ -1691,12 +1812,20 @@ export default function TestLab() {
                     </button>
                   ) : (
                     <div className="tl-btn-stack">
-                      {isRunDone && (runData?.testsGenerated ?? 0) > 0 && (
+                      {isRunDone && generatedOutcome.drafts > 0 && (
                         <button
                           className="btn btn-primary tl-full-btn"
                           onClick={() => navigate(`/review-queue?projectId=${activeRun.projectId}`)}
                         >
-                          Review {runData.testsGenerated} draft{runData.testsGenerated !== 1 ? "s" : ""} <ChevronRight size={13} />
+                          Review {generatedOutcome.drafts} draft{generatedOutcome.drafts !== 1 ? "s" : ""} <ChevronRight size={13} />
+                        </button>
+                      )}
+                      {isRunDone && generatedOutcome.drafts === 0 && generatedOutcome.autoApproved > 0 && (
+                        <button
+                          className="btn btn-primary tl-full-btn"
+                          onClick={() => navigate(`/projects/${activeRun.projectId}?tab=tests`)}
+                        >
+                          View {generatedOutcome.autoApproved} auto-approved <ChevronRight size={13} />
                         </button>
                       )}
                       <button

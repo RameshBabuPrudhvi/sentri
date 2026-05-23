@@ -758,6 +758,19 @@ export default function TestDetail() {
             <StatusBadge result={test.lastResult} />
           </InfoRow>
 
+          {/* ENT-004 (audit) — surface the `reviewComment` column (migration
+              054) so the feedback-loop's "Auto-regenerated after failure
+              (REASON)…" line is visible inline on the test detail page.
+              Before this, the column was silently dropped by VALID_COLS
+              filtering and the only signal was a workspace-wide audit row.
+              Renders nothing when null (most rows) so the sidebar stays
+              compact for tests with no comment. */}
+          {test.reviewComment && (
+            <InfoRow label="Review note">
+              <div className="td-review-comment">{test.reviewComment}</div>
+            </InfoRow>
+          )}
+
           {typeof test.qualityScore === "number" && (
             // AI-001 (audit): the bare numeric badge was a number-without-
             // context. The shared `QualityScoreChip` carries the
@@ -976,6 +989,20 @@ export default function TestDetail() {
             </button>
             <button className="btn btn-ghost btn-sm td-view-project-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
               View Project
+            </button>
+            {/* ENT-004 (audit) — deep-link to the workspace Audit Log
+                pre-filtered to this test. Admins see the per-test slice
+                (approved by, rejected by, regenerated, healed) without
+                hunting through the workspace-wide feed. Non-admin users
+                land on the same route's permission gate; the audit's
+                follow-up to expose a viewer-friendly variant is tracked
+                separately. */}
+            <button
+              className="btn btn-ghost btn-sm td-view-project-btn"
+              onClick={() => navigate(`/audit-log?testId=${encodeURIComponent(test.id)}`)}
+              title="See approve / reject / regenerate / healing events for this test"
+            >
+              View activity →
             </button>
           </div>
         </div>

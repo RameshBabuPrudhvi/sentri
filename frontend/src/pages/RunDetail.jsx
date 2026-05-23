@@ -31,6 +31,7 @@ import AgentTag from "../components/shared/AgentTag.jsx";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import GateBadge from "../components/shared/GateBadge.jsx";
 import Breadcrumb from "../components/shared/Breadcrumb.jsx";
+import AgentCallTimeline from "../components/run/AgentCallTimeline.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { countNonExecutedSkips } from "../utils/skipReasons.js";
 
@@ -650,6 +651,23 @@ export default function RunDetail() {
             {!isCrawl && !isGenerate && (
               <button className="btn btn-ghost btn-sm" onClick={handleCompare}>Compare</button>
             )}
+            {/* ENT-004 (audit) — deep-link to the workspace Audit Log
+                pre-filtered to this run. Server-side `runId = ?` filter
+                lands admins on the tight per-run slice (trigger / abort /
+                complete / regenerate / healing rows) instead of the
+                whole project's feed. Backed by `activities.runId` (column
+                + index added in migration 055); writers populate the
+                column from a first-class `logActivity({ runId, … })`
+                arg OR from legacy `meta.runId` so historical rows that
+                stashed it in JSON are also reachable. Mirrors the same
+                affordance on TestDetail.jsx. */}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => navigate(`/audit-log?runId=${encodeURIComponent(runId)}`)}
+              title="See trigger, abort, completion, and regenerate events for this run"
+            >
+              View activity →
+            </button>
             <button className="btn btn-ghost btn-sm" onClick={fetchRun}>
               <RefreshCw size={12} /> Refresh
             </button>
@@ -974,6 +992,15 @@ export default function RunDetail() {
         <GenerateView run={run} isRunning={isRunning} llmTokens={llmTokens} />
       ) : (
         <TestRunView run={run} frames={frames} />
+      )}
+
+      {/* ── GAP-005 (audit, Path B): Agent Call Timeline ─────────────────
+          Per-run AI call drill-down. Renders a collapsible card that lazy-
+          fetches `GET /runs/:runId/ai-requests` on click. Admin-gated on the
+          backend; non-admin users see an empty state. Only shown for crawl
+          and generate runs (test_run doesn't make AI calls). */}
+      {(isCrawl || isGenerate) && !isRunning && (
+        <AgentCallTimeline runId={runId} />
       )}
 
       {/* ── Quality Analytics (shown when run has analytics data) ──────── */}

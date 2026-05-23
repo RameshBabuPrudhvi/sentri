@@ -1,0 +1,32 @@
+-- Migration 055: Per-run scoping on the activities table
+--
+-- Adds a `runId` column + index to `activities` so the workspace audit log
+-- and the per-entity activity feed can server-side filter by run.
+--
+-- ENT-004 (audit) — TestDetail's "View activity →" button already
+-- deep-links to `/audit-log?testId=…`. RunDetail wants the matching
+-- `?runId=…` filter so admins see "trigger / abort / complete /
+-- regenerate" rows clustered around the specific run they're looking
+-- at, not the whole project's activity feed.
+--
+-- Pre-this-migration the runId only lived inside `meta.runId` (JSON)
+-- when the writer remembered to include it; that's not indexable on
+-- either SQLite or PostgreSQL without dialect-specific JSON paths, and
+-- consistently absent on many writer call sites. The cleanest fix is a
+-- dedicated nullable column + index.
+--
+-- Writer updates (same PR): every `logActivity()` call that previously
+-- stuffed `meta.runId` now also passes `runId` as a first-class field
+-- so the column populates from now on. Pre-migration rows get
+-- `runId = NULL` and remain reachable via the existing `projectId` /
+-- `testId` filters — no backfill required.
+--
+-- Idempotency: bare `ALTER TABLE ... ADD COLUMN` + `CREATE INDEX IF NOT
+-- EXISTS` per the convention used by migrations 003 / 006 / 007 / 011
+-- / 014 / 015 / 017 / 018 / 054. The migration runner tracks applied
+-- versions in `schema_migrations`, so re-running this file is a no-op.
+--
+-- Both SQLite and PostgreSQL accept this syntax unchanged.
+
+ALTER TABLE activities ADD COLUMN runId TEXT;
+CREATE INDEX IF NOT EXISTS idx_activities_runId ON activities(runId);

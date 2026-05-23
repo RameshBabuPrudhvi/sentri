@@ -60,6 +60,7 @@ const INSERT_COLS = [
   "generatedFrom", "isApiTest", "scenario", "codeRegeneratedAt",
   "aiFixAppliedAt", "codeVersion", "workspaceId", "isStale", "flakyScore",
   "confidenceScore", "approvalSource", "approvalThreshold", "approvedAt", "approvedBy",
+  "reviewComment", // migration 054 — free-text "why is this draft?" explainer
 ];
 
 const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})

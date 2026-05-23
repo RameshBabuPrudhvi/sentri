@@ -90,7 +90,19 @@ export default function ProvidersSection() {
         </div>
       )}
 
-      {/* Persistence note */}
+      <CompatProviderForm
+        compatProviders={settings?.compatProviders}
+        reload={reload}
+        onDelete={handleDelete}
+      />
+
+      {/* Persistence note — UX-AUDIT (May 2026): moved to the bottom of the
+          providers section so it reads as a closing footer note covering
+          BOTH the built-in provider cards above AND the compat slots. The
+          previous mid-page placement (between built-ins and compat) made
+          the note look like it only applied to the built-in cards and
+          visually disowned the compat section. Mirrors the disclaimer
+          placement on Stripe's "Developers → API keys" page. */}
       <div className="st-env-tip">
         <div className="st-env-tip__row">
           <Info size={13} className="shrink-0 st-env-tip__icon" />
@@ -100,12 +112,6 @@ export default function ProvidersSection() {
           </div>
         </div>
       </div>
-
-      <CompatProviderForm
-        compatProviders={settings?.compatProviders}
-        reload={reload}
-        onDelete={handleDelete}
-      />
     </>
   );
 }

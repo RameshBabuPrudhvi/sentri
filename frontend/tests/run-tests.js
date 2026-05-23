@@ -18,6 +18,9 @@ const files = [
   "tests/approval-provenance.test.js",
   // AUTO-022 — score-format helpers powering the EvalPanel ScoreBadge.
   "tests/eval-score-format.test.js",
+  // Audit fix — notification-coerce helpers that prevent `[object Object]`
+  // from rendering in the bell when a callsite passes a non-string title.
+  "tests/notification-coerce.test.js",
 ];
 
 let passed = 0;

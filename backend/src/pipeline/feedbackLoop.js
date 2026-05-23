@@ -25,6 +25,9 @@ import * as projectRepo from "../database/repositories/projectRepo.js";
 import { getPromptRules } from "../selfHealing.js";
 import { getTier, TIER_CONFIG } from "./prompts/promptTiers.js";
 import { buildCapabilityCoverageBlock } from "./prompts/playwrightCapabilityGuide.js";
+import { scoreTestWithFactors, normalizeQualityToConfidence } from "./deduplicator.js";
+import { logActivity } from "../utils/activityLogger.js";
+import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 //
@@ -48,6 +51,49 @@ import { buildCapabilityCoverageBlock } from "./prompts/playwrightCapabilityGuid
 //      not already classified as a selector or navigation issue.
 
 const FAILURE_PATTERNS = [
+  // BOT_BLOCK — checked FIRST because anti-bot interstitials produce SECONDARY
+  // symptoms (locator timeout, navigation timeout) that would otherwise be
+  // misclassified as SELECTOR_ISSUE / TIMEOUT and trigger the misleading
+  // "AI is generating CSS selectors" insight. The runtime page URL ends up
+  // on `/sorry/`, `/captcha`, `/challenge`, `/blocked` (mirrors the same
+  // anti-bot list at `backend/src/pipeline/stateExplorer.js:51-52`), or the
+  // raw "Are you a robot" / CAPTCHA page-text leaks into the error message
+  // via the failure screenshot's adjacent log lines. Telling operators
+  // "this site blocks automation" is the only honest message — no amount of
+  // selector self-healing or assertion softening recovers from an
+  // interstitial that intentionally hides the real page.
+  // NOTE: `/access denied/i` is intentionally OMITTED — it matches generic
+  // HTTP 403 authorization failures (e.g. `"Error: Access denied — insufficient
+  // permissions for /admin"`), which are NOT bot-block interstitials. Classifying
+  // them as BOT_BLOCK would skip auto-regeneration on legitimate auth-needed
+  // tests. Bot-detection pages reliably surface one of the URL/text patterns
+  // below; falling back to UNKNOWN for naked "access denied" preserves the
+  // feedback loop's chance to repair an auth-flow test.
+  ["BOT_BLOCK", [
+    /\/sorry\//i,
+    /\/captcha/i,
+    /\/challenge/i,
+    // `/blocked` mirrors the `stateExplorer.js` anti-bot URL list referenced
+    // in the comment block above. Without it a SUT that redirects to
+    // `/blocked` (Cloudflare's "you have been blocked" page, custom WAF
+    // landing pages) falls through to SELECTOR_ISSUE on the secondary
+    // locator timeout — defeating the entire reason this category exists.
+    //
+    // Anchored to a path-segment boundary (`/blocked` followed by `/`,
+    // `?`, `#`, or end-of-string) so legitimate application paths like
+    // `/users/blocked-list`, `/content/blocked-items`, or
+    // `/admin/blocked-accounts` are NOT misclassified as bot-blocks. The
+    // canonical anti-bot landing page is exactly `/blocked` (Cloudflare,
+    // most WAF vendors); apps that nest functionality under `/blocked-*`
+    // are a real-world false-positive risk per Lifeguard BUG-0003.
+    /\/blocked(?:[/?#]|$)/i,
+    /recaptcha/i,
+    /unusual traffic/i,
+    /are you a robot/i,
+    /detected unusual traffic/i,
+    /verify you are human/i,
+    /cloudflare.*challenge/i,
+  ]],
   ["SELECTOR_ISSUE", [
     /locator.*not found/i,
     /element not visible/i,
@@ -101,10 +147,39 @@ const FAILURE_PATTERNS = [
   ]],
 ];
 
-export function classifyFailure(errorMessage) {
-  if (!errorMessage) return "UNKNOWN";
+/**
+ * Classify a test failure.
+ *
+ * @param {string}  errorMessage  Playwright error text (`result.error`).
+ * @param {Object}  [context]
+ * @param {string}  [context.finalUrl]    Last page URL recorded on the result
+ *   (`result.url`). When the SUT redirected the test onto an anti-bot
+ *   interstitial like `https://www.google.com/sorry/…`, the URL is the most
+ *   reliable signal — the error message itself usually just shows a generic
+ *   `waiting for locator('h3')` timeout (the bot wall hides the real page).
+ *   Checking the URL alongside the error text closes that gap and prevents
+ *   bot-blocked runs from being misclassified as SELECTOR_ISSUE, which
+ *   surfaces the misleading "AI is generating CSS selectors" insight.
+ * @returns {string} One of the FAILURE_PATTERNS keys, or "UNKNOWN".
+ */
+export function classifyFailure(errorMessage, context = {}) {
+  const finalUrl = typeof context?.finalUrl === "string" ? context.finalUrl : "";
+  if (!errorMessage && !finalUrl) return "UNKNOWN";
   for (const [category, patterns] of FAILURE_PATTERNS) {
-    if (patterns.some(p => p.test(errorMessage))) return category;
+    // `finalUrl` is ONLY consulted for BOT_BLOCK. The other categories'
+    // patterns are tuned for Playwright error text — letting them match
+    // arbitrary URL substrings (e.g. `executeTest.js` falls back to
+    // `test.sourceUrl` when the live page URL is blank, so a test sourced
+    // from `https://example.com/expect/received` could spuriously trigger
+    // ASSERTION_FAIL's `/expect.*received/i`) misclassifies failures and
+    // distorts the dashboard's defect breakdown.
+    const allowUrlMatch = category === "BOT_BLOCK";
+    if (patterns.some(p =>
+      (errorMessage && p.test(errorMessage)) ||
+      (allowUrlMatch && finalUrl && p.test(finalUrl))
+    )) {
+      return category;
+    }
   }
   return "UNKNOWN";
 }
@@ -212,6 +287,16 @@ export function buildQualityAnalytics(improvements, testMap) {
 
   // Generate actionable insights
   const insights = [];
+  if (byCategory.BOT_BLOCK > 0) {
+    // Honest message — when the SUT redirects to an anti-bot interstitial
+    // (`/sorry/`, `/captcha`, "unusual traffic", etc.) the test code itself
+    // is fine. No selector self-heal or assertion rewrite recovers from a
+    // CAPTCHA. Surfacing the truth keeps operators from chasing the
+    // misleading "AI is generating CSS selectors" insight that would
+    // otherwise fire on the secondary `waiting for locator('h3') timeout`
+    // symptom.
+    insights.push(`${byCategory.BOT_BLOCK} test(s) were blocked by the site's bot-detection (CAPTCHA / "unusual traffic" / "are you a robot" interstitial). The generated test is fine — the target site refused automation. Try a test-friendly site (e.g. https://duckduckgo.com, https://demoqa.com, your own staging environment), or configure browser fingerprinting / proxy rotation if you must exercise this domain.`);
+  }
   if (byCategory.URL_MISMATCH > 0) {
     insights.push(`${byCategory.URL_MISMATCH} test(s) failed on URL assertions — consider switching to content-based assertions (toBeVisible, toContainText) instead of toHaveURL.`);
   }
@@ -356,6 +441,12 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
   // prompt-quality issues rather than real application bugs.
   // ASSERTION_FAIL is included because hard-coded crawl-time values (dates, IDs,
   // counts) are a prompt-quality issue, not a real application regression.
+  //
+  // BOT_BLOCK is intentionally EXCLUDED — when the target site redirects to a
+  // CAPTCHA / "unusual traffic" interstitial, no AI rewrite of the test code
+  // recovers (the bot wall hides the real page). Regenerating would waste an
+  // AI call and produce another test that fails the same way. The Quality
+  // Insights banner already surfaces the honest BOT_BLOCK message.
   const HIGH_PRIORITY_CATEGORIES = new Set([
     "SELECTOR_ISSUE",
     "URL_MISMATCH",
@@ -379,7 +470,13 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
       const test = testMap[result.testId];
       if (!test) continue;
 
-      const failureCategory = classifyFailure(result.error);
+      // Pass `result.url` (final page URL captured by `executeTest.js` in its
+      // `finally` block) so the classifier can catch bot-block interstitials
+      // — e.g. a test against google.com that lands on `/sorry/index` shows
+      // up as a generic "waiting for locator('h3') timeout" in `result.error`
+      // but the URL clearly identifies the anti-bot page. See classifyFailure
+      // jsdoc for the full rationale.
+      const failureCategory = classifyFailure(result.error, { finalUrl: result.url });
       const snapshot = snapshotsByUrl[test.sourceUrl];
 
       improvements.push({
@@ -399,12 +496,20 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
 }
 
 /**
- * regenerateFailingTest(improvement, signal) → improved test or null
+ * regenerateFailingTest(improvement, signal, options) → improved test or null
  *
  * Calls the AI to produce a fixed version of a failing test.
  * Accepts an optional AbortSignal so the operation can be cancelled.
+ *
+ * @param {Object} improvement       - From `analyzeRunResults`.
+ * @param {AbortSignal} [signal]     - Forwarded to the AI provider call.
+ * @param {Object} [options]
+ * @param {string} [options.runId]   - GAP-005 (migration 056): correlate
+ *   the AI request log row to the originating run. The caller
+ *   (`applyFeedbackLoop` below) passes `run.id`; standalone callers may
+ *   omit it and the column simply stays NULL.
  */
-export async function regenerateFailingTest(improvement, signal) {
+export async function regenerateFailingTest(improvement, signal, options = {}) {
   const { test, failureCategory, errorMessage, snapshot } = improvement;
 
   try {
@@ -423,7 +528,14 @@ export async function regenerateFailingTest(improvement, signal) {
       try { workspaceId = projectRepo.getById(test.projectId)?.workspaceId || null; }
       catch { /* DB unavailable — fall back to env-default routing */ }
     }
-    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId });
+    // GAP-005 (migration 056): thread the originating runId (from
+    // `options.runId`) so the AI request log row is correlated to the
+    // run that triggered the regeneration. Was previously written as
+    // `run?.id` referencing an undefined `run` variable — that threw a
+    // ReferenceError on every regeneration, which the surrounding
+    // try/catch swallowed and returned `null`, silently breaking the
+    // feedback loop's auto-fix path on this PR.
+    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: options.runId || null });
     const improved = parseJSON(text);
 
     // Only pick safe fields from the AI response — never let the LLM
@@ -489,7 +601,7 @@ export async function applyFeedbackLoop(run, { signal } = {}) {
   for (const improvement of improvements) {
     if (improvement.priority !== "high") continue; // Only auto-fix high priority failures
     if (signal?.aborted) break; // Respect abort signal between AI calls
-    const regenerated = await regenerateFailingTest(improvement, signal);
+    const regenerated = await regenerateFailingTest(improvement, signal, { runId: run.id });
     if (regenerated) {
       // Route regenerated tests back through human review instead of
       // auto-approving. This preserves the "nothing executes until a
@@ -500,7 +612,95 @@ export async function applyFeedbackLoop(run, { signal } = {}) {
       // _originalCode) and the original test may carry _quality, _assertionEnhanced,
       // _generatedFrom — none of which are columns in the tests table.
       const { id: _id, _regenerated, _regenerationReason, _originalCode, _quality, _assertionEnhanced, _generatedFrom, ...fields } = regenerated;
-      testRepo.update(improvement.testId, { ...fields, reviewStatus: "draft" });
+
+      // Re-score quality against the *regenerated* `playwrightCode`. Without
+      // this, the persisted `qualityScore` / `qualityScoreFactors` /
+      // `confidenceScore` keep the values from the original (failing) test,
+      // so the Review Queue's "why was this drafted?" popover shows penalties
+      // that no longer apply, and the auto-approval threshold compares against
+      // a stale score. Mirrors the Step 6a re-score in
+      // `backend/src/pipeline/pipelineOrchestrator.js:108-129` so feedback-loop
+      // regenerations stay consistent with first-time generations.
+      const { score, factors } = scoreTestWithFactors(fields);
+      fields.qualityScore = score;
+      fields.qualityScoreFactors = factors;
+      fields.confidenceScore = normalizeQualityToConfidence(score);
+
+      // Persist the regeneration reason on the test row so the frontend can
+      // explain "why is this back in draft?" — without this column, users
+      // see a previously-approved test silently revert to draft with no
+      // visible cause (the underscore-prefixed `_regenerationReason` was
+      // stripped above because it is not a tests-table column). We piggy-back
+      // on the existing `reviewComment` column (already shown on test detail
+      // + review queue cards) so no schema migration is required.
+      const reason = _regenerationReason || "UNKNOWN";
+      const reviewComment = `Auto-regenerated by feedback loop after failure (${reason}). Original code preserved in run results.`;
+
+      const wasApproved = improvement.test.reviewStatus === "approved";
+      const previousSource = improvement.test.approvalSource || null;
+
+      testRepo.update(improvement.testId, {
+        ...fields,
+        reviewStatus: "draft",
+        reviewComment,
+        // Clear stale approval provenance — the previous decision applied to
+        // the *old* code, not the regenerated one. Without this, a once-
+        // auto-approved test that just regenerated would still display
+        // "auto-approved at score 0.87" provenance pointing at code that no
+        // longer exists in the row.
+        approvalSource: null,
+        approvalThreshold: null,
+        approvedAt: null,
+        approvedBy: null,
+      });
+
+      // Write an audit row so operators can see why a previously-approved
+      // test silently reverted to draft. Without this, the only signal in
+      // the Audit Log is `test_run.complete` — a user looking at the test
+      // detail sees "draft" with no explanation of who/what changed it.
+      // Actor is the system (no req available inside the pipeline); we use
+      // `userName: "auto-feedback-loop"` so the audit row visually matches
+      // the existing `auto-approver` convention used by AUTO-003b.
+      try {
+        const project = projectRepo.getById(improvement.test.projectId);
+        logActivity({
+          type: ACTIVITY_TYPES.TEST_REGENERATE,
+          projectId: improvement.test.projectId,
+          projectName: project?.name || null,
+          workspaceId: project?.workspaceId || null,
+          testId: improvement.testId,
+          testName: improvement.test.name,
+          // ENT-004 (migration 055) — pass `runId` as a first-class arg
+          // for consistency with every other PR-modified `logActivity`
+          // call site (routes/runs.js, routes/tests.js). The legacy
+          // `meta.runId` fallback in `activityLogger.js` still works,
+          // but explicit-arg is the canonical shape and won't break if
+          // the auto-derive fallback is ever removed.
+          runId: run.id,
+          userId: "system",
+          userName: "auto-feedback-loop",
+          detail: wasApproved
+            ? `Auto-regenerated after failure (${reason}) — reverted from ${previousSource === "auto" ? "auto-approved" : "approved"} to draft for re-review.`
+            : `Auto-regenerated after failure (${reason}). Re-scored quality=${Number((fields.qualityScore ?? 0)).toFixed(2)}.`,
+          status: "success",
+          meta: {
+            reason,
+            runId: run.id,
+            wasApproved,
+            previousApprovalSource: previousSource,
+            newQualityScore: fields.qualityScore ?? null,
+            newConfidenceScore: fields.confidenceScore ?? null,
+          },
+        });
+      } catch (auditErr) {
+        // Best-effort — never let an audit-log failure abort the regeneration.
+        // The persisted `reviewComment` already captures the reason on the
+        // test row, so the user-facing "why is this draft?" signal survives
+        // even if the activity row write fails.
+        // eslint-disable-next-line no-console
+        console.warn(`[feedbackLoop] failed to write audit row for test.regenerate: ${auditErr?.message || auditErr}`);
+      }
+
       improved++;
     }
   }

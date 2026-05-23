@@ -71,9 +71,42 @@
 .st-data-action__sub { margin-top: 2px; }
 .st-data-action__status { margin-top: 0; }
 .st-data-action__btn { flex-shrink: 0; }
-.st-provider-loading-grid { display: flex; flex-direction: column; gap: 24px; }
+/* Loading skeletons mirror the live grid (see `.st-provider-cards` below)
+   so first-paint doesn't shift the layout when cards hydrate. Same
+   `auto-fill` recipe + gap so the skeleton count visually matches the
+   live card count slot-for-slot. */
+.st-provider-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 20px;
+}
 .st-provider-skeleton { height: 200px; border-radius: 16px; }
-.st-provider-cards { display: flex; flex-direction: column; gap: 24px; }
+/* UX-AUDIT (May 2026) — provider cards in a responsive 2-column grid.
+   With the Settings shell widened to `page-container-xl` (1200px), a
+   single-column stack wastes ~half the content area. Switch to a CSS
+   grid with `auto-fill + minmax(360px, 1fr)` so:
+     - Wide viewports (≥ ~860px content width) render two cards per row.
+     - Narrow viewports automatically collapse to a single column with
+       no extra media query.
+     - `auto-fill` (NOT `auto-fit`) is critical: when the last row has a
+       single orphan card (5 built-in providers = row 3 has Ollama
+       alone; or a workspace with one compat slot), `auto-fit` would
+       collapse the empty track and stretch the orphan to 100% width
+       — it then looks bigger than its peers and breaks the visual
+       grid. `auto-fill` keeps the empty track present so the orphan
+       stays at its natural ~400px width, sitting flush-left with empty
+       space to its right. This is the industry-standard recipe used by
+       Vercel AI Gateway, OpenRouter, LangSmith, and Stripe dashboard
+       card grids.
+   360px is the breakpoint where a `.st-provider-card` (44px icon + name
+   + masked-key row + actions) stays legible without text wrapping its
+   provider description. */
+.st-provider-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
 .st-provider-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
 .st-provider-active-text { font-size: 0.7rem; font-weight: 700; }
 .st-provider-key-input { padding-right: 40px; }
@@ -86,10 +119,65 @@
 .st-provider-banner--ok { background: rgba(0,229,255,0.05); border: 1px solid rgba(0,229,255,0.15); }
 .st-provider-banner--missing { background: rgba(255,71,87,0.05); border: 1px solid rgba(255,71,87,0.2); }
 .st-provider-banner__title-missing { color: var(--red); font-weight: 700; }
-.st-compat-card { margin-top: 16px; }
-.st-compat-card__title { margin-bottom: 10px; }
-.st-compat-form { display: grid; gap: 8px; }
-.st-compat-form__error { color: var(--red); font-size: 0.875rem; }
+/* UX-AUDIT (May 2026) — compat provider section now renders each saved slot
+   as a full `.st-provider-card` (see CompatProviderForm.jsx). The outer
+   `.st-compat-card` is a flex column that stacks the section title, the
+   add-provider form card, and the provider-card list with consistent gap
+   matching the built-in ProviderCard rhythm in `.st-provider-cards`. */
+.st-compat-card {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.st-compat-form-card { /* the boxed "Add provider" form */ }
+.st-compat-card__title { margin-bottom: 14px; font-size: 0.95rem; }
+/* UX-AUDIT (May 2026) — 2-column form grid on wide viewports so the
+   five inputs (slot id / display name / base URL / model / API key)
+   don't render as a lonely vertical stack inside the 1200px container.
+   Pattern mirrors Vercel AI Gateway and Stripe API-key creation forms.
+   The `.st-compat-form__field--wide` modifier lets the Base URL and
+   API Key fields span both columns when their content typically runs
+   long. Collapses to single column at 700px (form-card breakpoint). */
+.st-compat-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+.st-compat-form__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.st-compat-form__field--wide { grid-column: 1 / -1; }
+.st-compat-form__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text2);
+}
+.st-compat-form__hint {
+  font-size: 0.7rem;
+  color: var(--text3);
+  margin-top: 2px;
+}
+.st-compat-form__error {
+  grid-column: 1 / -1;
+  color: var(--red);
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.st-compat-form__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+@media (max-width: 700px) {
+  .st-compat-form { grid-template-columns: 1fr; }
+  .st-compat-form__field--wide { grid-column: 1; }
+}
+/* Legacy classes kept for backward compatibility with any external CSS
+   overrides; the new card-shaped rendering no longer uses these selectors. */
 .st-compat-list { margin-top: 12px; display: grid; gap: 8px; }
 .st-compat-row { display: flex; justify-content: space-between; align-items: center; }
 .st-compat-row__actions { display: flex; gap: 6px; }
@@ -430,6 +518,46 @@
 /* Per-row form + list inside the ProviderRoutesTab. Class names follow the
    `.st-pr-*` prefix to stay scoped to the Settings page; no inline styles so
    the same look survives theme changes and the AGENT.md "no inline CSS" rule. */
+
+/* UX-AUDIT (May 2026) — page-level wrapper that stacks every Provider Routes
+   sub-card (spend caps, IO bar, create form, route list, audit log, request
+   log) with consistent vertical rhythm. Replaces the legacy "everything in
+   one big card" layout where users couldn't tell where one form ended and
+   the next began. 24px gap matches the `.flex-col.gap-lg` rhythm used by
+   the built-in provider list on /settings/providers so the two pages feel
+   like siblings. */
+.st-pr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* UX-AUDIT (May 2026) — per-card heading + sub. Visual rhythm matches the
+   `.st-pr-spend-title` / `.st-pr-audit-title` patterns already used by
+   WorkspaceSpendCapsPanel + Audit/Request-log subtabs (font-semi 0.88rem,
+   icon + label inline) so every card on the Provider Routes page reads as
+   a sibling of the others. The `--count` modifier renders the row count
+   in a muted parenthetical (mirrors Stripe Dashboard / GitHub Settings
+   "Members (12)" pattern). */
+.st-pr-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.st-pr-card-title__count {
+  color: var(--text3);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.st-pr-card-sub {
+  margin-top: 4px;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
 .st-pr-form {
   display: grid;
   gap: 12px;
@@ -991,5 +1119,71 @@
     align-items: flex-start;
     gap: 4px;
     padding: 10px 16px;
+  }
+
+  /* MOB-001 follow-up: members section — invite form and per-member rows.
+     The invite form already wraps via `flex-wrap: wrap`, but on a 375px
+     viewport the role select (130px) + submit button (auto) sit beside
+     each other and the email field above stretches edge-to-edge, leaving
+     awkward horizontal slack. Force a single column so each field claims
+     the full width and the submit CTA reads as a primary action. */
+  .members-invite-form {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .members-invite__email,
+  .members-invite__role {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .members-invite__submit {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Member row: avatar + body + role-select + remove button. The role
+     select keeps its 110px on tablets but at 375px the row overflows
+     because email truncation + select + button competes for space.
+     Allow wrapping and let the role-select / remove sit on a second
+     line beneath the identity block. */
+  .members-row {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .members-row__body {
+    flex: 1 1 100%;
+  }
+  .members-row__role-select {
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  /* MOB-001 follow-up: integrations row is a fixed 5-column grid
+     (`1.2fr 1fr 1fr auto auto`) that crushes inputs to ~60px each on a
+     375px viewport. Stack on phones so each field stays usable. */
+  .integrations-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  /* MOB-001 follow-up: MFA factor row — the row already uses flex-wrap,
+     but the `.factor-row__info` block keeps a `min-width: 200px` that
+     overflows. Drop the min-width on phones so the description + button
+     stack cleanly. */
+  .factor-row__info {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  /* MOB-001 follow-up: recovery panel actions / TOTP enroll actions —
+     same flex-wrap rule as `.modal-form-actions`, applied here so MFA
+     setup remains operable on phones (the enroll flow is a critical
+     first-run gate). */
+  .recovery-panel__actions .btn,
+  .totp-enroll__actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
   }
 }

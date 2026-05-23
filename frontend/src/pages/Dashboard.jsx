@@ -1,12 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp, AlertTriangle,
   SquareCheckBig, FileText, Wrench, Clock, Plus, Shield, Crosshair, Activity,
-  Download, RefreshCw, Rocket, CloudOff,
+  Download, RefreshCw, Rocket, CloudOff, ChevronDown,
 } from "lucide-react";
 import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
+import { useReviewQueueCounts } from "../hooks/queries/useReviewQueueQuery.js";
 import EmptyState from "../components/shared/EmptyState.jsx";
+import HealthBanner from "../components/dashboard/HealthBanner.jsx";
 import { fmtDurationMs } from "../utils/formatters.js";
 import { generateExecutivePDF } from "../utils/pdfReportGenerator.js";
 import AgentTag from "../components/shared/AgentTag.jsx";
@@ -310,6 +312,33 @@ export default function Dashboard() {
   usePageTitle("Dashboard");
 
   const dashboardQuery = useDashboardQuery();
+  // GAP-003 (audit) — workspace-wide draft count feeds the HealthBanner
+  // "N tests awaiting review" row. Reuses the same TanStack Query cache
+  // as the sidebar pending-pill (GAP-004) so the badge + banner + Review
+  // Queue page all stay in sync from one fetch.
+  const reviewCounts = useReviewQueueCounts({ projectId: "all" });
+  const pendingReviewCount = reviewCounts.draft || 0;
+
+  // GAP-003 (audit, tier 3 — supporting-detail accordion) — collapsible
+  // wrapper around the 7 secondary panels (rows 2-8 below the primary
+  // KPI grid + Coverage). Defaults to EXPANDED so existing users see the
+  // exact same dashboard on first load; toggle state persists in
+  // localStorage. The audit explicitly recommends "collapsed by default"
+  // but we soften that — defaulting to expanded preserves the workflow
+  // current users rely on while still giving them the focus-mode lever
+  // when they need it (e.g. an exec scanning health on a phone, or a QA
+  // Lead who's only looking at the failing-morning banner). The toggle
+  // sits inline so discoverability is high without burying it in a menu.
+  const SUPPORTING_KEY = "ui.dashboard.supportingDetailHidden";
+  const [supportingHidden, setSupportingHidden] = useState(() => {
+    try { return localStorage.getItem(SUPPORTING_KEY) === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(SUPPORTING_KEY, supportingHidden ? "1" : "0"); }
+    catch { /* localStorage unavailable */ }
+  }, [supportingHidden]);
+  const toggleSupporting = useCallback(() => setSupportingHidden((v) => !v), []);
 
   const data = dashboardQuery.data || null;
   const runs = (data?.recentRuns || []).slice(0, 8);
@@ -358,7 +387,7 @@ export default function Dashboard() {
     <div className="fade-in page-container">
 
       {/* ── Page header ─────────────────────────────────────────────── */}
-      <div className="page-header" data-tour="tour-welcome">
+      <div className="page-header">
         <div>
           <h1 className="page-title">Dashboard</h1>
           <p className="page-subtitle">
@@ -399,6 +428,15 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
+          {/* ── GAP-003 (audit): Workspace Health Banner ──
+              Surfaces actionable alerts above the stat grid so a failing-
+              morning is visible at first glance. Renders nothing when there
+              are no alerts (zero noise on healthy days). The component
+              derives its own alert list from `data` + `pendingReviewCount`
+              — no extra round-trip, reuses the dashboard payload already
+              fetched above. */}
+          <HealthBanner data={data} pendingReviewCount={pendingReviewCount} />
+
           {/* ── Row 1: Core Health KPIs ── */}
           <div className="stat-grid">
             <StatCard
@@ -416,6 +454,35 @@ export default function Dashboard() {
           </div>
           {/* ── AUTO-009 / AUTO-009b / AUTO-009c: Coverage panel with metric toggle ── */}
           <CoveragePanel data={data} Activity={Activity} SparklineChart={SparklineChart} />
+
+          {/* ── GAP-003 (audit, tier 3): Supporting-detail toggle ──
+              Single inline button that hides/reveals the 7 secondary panels
+              below. Defaults to expanded for behavioural parity with the
+              pre-PR dashboard. State persists in localStorage so power
+              users who hide once stay in focus-mode until they re-open.
+              `aria-expanded` + `aria-controls` so screen readers announce
+              the toggle correctly. */}
+          <div className="dash-supporting-toggle-row">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm dash-supporting-toggle"
+              onClick={toggleSupporting}
+              aria-expanded={!supportingHidden}
+              aria-controls="dash-supporting-detail"
+            >
+              <ChevronDown
+                size={13}
+                className={`dash-supporting-toggle__chevron${supportingHidden ? " dash-supporting-toggle__chevron--collapsed" : ""}`}
+              />
+              {supportingHidden ? "Show all metrics" : "Hide details"}
+            </button>
+          </div>
+
+          <div
+            id="dash-supporting-detail"
+            className={`dash-supporting${supportingHidden ? " dash-supporting--hidden" : ""}`}
+            hidden={supportingHidden}
+          >
 
           {/* ── Row 2: Duration / Created / Fixed / Healing ── */}
           <div className="stat-grid">
@@ -446,12 +513,32 @@ export default function Dashboard() {
 
           {/* ── Row 3: Flaky Tests + Defect Breakdown ── */}
           {data?.totalRuns > 0 && (() => {
+            // The backend currently surfaces six named categories in
+            // `defectBreakdown` (BOT_BLOCK + SELECTOR_ISSUE + NAVIGATION_FAIL
+            // + TIMEOUT + ASSERTION_FAIL + UNKNOWN) and may add more without
+            // a frontend change — `backend/src/routes/dashboard.js:130` falls
+            // back to UNKNOWN for unrecognised keys. Three named categories
+            // exist in the classifier but aren't in the dashboard's init
+            // shape today (NETWORK_MOCK_FAIL / FRAME_FAIL / API_ASSERTION_FAIL);
+            // we still aggregate any value the API returns for them into the
+            // "Other" bucket so a backend update that wires them in doesn't
+            // silently drop counts from the chart total. BOT_BLOCK is its
+            // own segment with a distinct gray hue so operators can tell
+            // bot-blocked sites apart from real defects at a glance.
+            const NAMED_KEYS = new Set([
+              "BOT_BLOCK", "SELECTOR_ISSUE", "NAVIGATION_FAIL", "TIMEOUT", "ASSERTION_FAIL",
+            ]);
+            let otherCount = dfb.UNKNOWN || 0;
+            for (const [key, value] of Object.entries(dfb)) {
+              if (!NAMED_KEYS.has(key) && key !== "UNKNOWN") otherCount += Number(value) || 0;
+            }
             const defectSegs = [
-              { label: "Selector",   count: dfb.SELECTOR_ISSUE || 0,  color: "var(--purple)" },
-              { label: "Navigation", count: dfb.NAVIGATION_FAIL || 0, color: "var(--blue)"   },
-              { label: "Timeout",    count: dfb.TIMEOUT || 0,         color: "var(--amber)"  },
-              { label: "Assertion",  count: dfb.ASSERTION_FAIL || 0,  color: "var(--red)"    },
-              { label: "Other",      count: dfb.UNKNOWN || 0,         color: "#6b7280"       },
+              { label: "Bot-blocked", count: dfb.BOT_BLOCK || 0,       color: "#94a3b8"       },
+              { label: "Selector",    count: dfb.SELECTOR_ISSUE || 0,  color: "var(--purple)" },
+              { label: "Navigation",  count: dfb.NAVIGATION_FAIL || 0, color: "var(--blue)"   },
+              { label: "Timeout",     count: dfb.TIMEOUT || 0,         color: "var(--amber)"  },
+              { label: "Assertion",   count: dfb.ASSERTION_FAIL || 0,  color: "var(--red)"    },
+              { label: "Other",       count: otherCount,               color: "#6b7280"       },
             ];
             const totalDefects = defectSegs.reduce((s, x) => s + x.count, 0);
             return (
@@ -737,6 +824,8 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+          </div>
+          {/* ── End GAP-003 supporting-detail wrapper ─────────────────── */}
         </>
       )}
     </div>
