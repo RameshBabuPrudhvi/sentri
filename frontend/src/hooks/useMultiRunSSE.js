@@ -237,6 +237,28 @@ export function useMultiRunSSE() {
       scheduleReconnect(sub);
     };
   }, [scheduleReconnect, teardownConnection]);
+  // ── unsubscribe: idempotent cleanup ──────────────────────────────────
+  // Declared BEFORE `subscribe` so the latter can reference it inside
+  // its closure body without a TDZ violation and without an ESLint
+  // `react-hooks/exhaustive-deps` warning. Pre-fix the order was
+  // subscribe → unsubscribe, which works in practice (closures resolve
+  // at call time, not capture time) but the linter flags it and a
+  // future change to `teardownConnection` or `refreshActiveRunIds`'
+  // dep arrays would silently flip `unsubscribe`'s identity per-render,
+  // leaving `subscribe`'s captured reference stale. Hoisting eliminates
+  // the invariant.
+  //
+  // Safe to call after `done` has already auto-closed the connection —
+  // the record is just removed from the Map.
+  const unsubscribe = useCallback((runId) => {
+    const sub = subscriptionsRef.current.get(runId);
+    if (!sub) return;
+    sub._terminated = true;
+    teardownConnection(sub);
+    subscriptionsRef.current.delete(runId);
+    refreshActiveRunIds();
+  }, [teardownConnection, refreshActiveRunIds]);
+
   // ── subscribe: caller-facing API ─────────────────────────────────────
   const subscribe = useCallback((runId, opts = {}) => {
     if (!runId) {
@@ -272,19 +294,7 @@ export function useMultiRunSSE() {
     refreshActiveRunIds();
     openEventSource(sub);
     return new SubscriptionHandle(() => unsubscribe(runId));
-  }, [openEventSource, refreshActiveRunIds]);
-  // ── unsubscribe: idempotent cleanup ──────────────────────────────────
-  // Called from the SubscriptionHandle returned by subscribe(). Safe to
-  // call after `done` has already auto-closed the connection — the record
-  // is just removed from the Map.
-  const unsubscribe = useCallback((runId) => {
-    const sub = subscriptionsRef.current.get(runId);
-    if (!sub) return;
-    sub._terminated = true;
-    teardownConnection(sub);
-    subscriptionsRef.current.delete(runId);
-    refreshActiveRunIds();
-  }, [teardownConnection, refreshActiveRunIds]);
+  }, [openEventSource, refreshActiveRunIds, unsubscribe]);
   // ── Cleanup on hook unmount ──────────────────────────────────────────
   // The hook itself unmounts when the parent component unmounts. Tear
   // down every live EventSource in the pool so we don't leak.

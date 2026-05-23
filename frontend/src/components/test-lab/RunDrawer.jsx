@@ -199,6 +199,18 @@ export default function RunDrawer({
           const isFocused = runId === focusedRunId;
           const typeLabel = entry.type === "crawl" ? "Crawl & Generate" : "Requirement";
           return (
+            // `<li>` is the positioning context — the focus button fills
+            // it and the dismiss button is absolute-positioned over the
+            // top-right corner. Both are real `<button>` siblings (valid
+            // HTML; nesting `<button>` inside `<button>` is forbidden by
+            // the HTML spec — interactive content descendants of a
+            // `<button>` produce undefined screen-reader behaviour and
+            // break native keyboard navigation between the two controls).
+            // The dismiss button's CSS (`.rd-card__dismiss`) anchors it
+            // visually inside the card; the `onClick` handler still calls
+            // `stopPropagation` defensively even though sibling buttons
+            // can't bubble between each other — the CSS overlap means a
+            // mis-tuned hit-test could otherwise fire both.
             <li key={runId} className="rd-drawer__item">
               <button
                 type="button"
@@ -235,34 +247,24 @@ export default function RunDrawer({
                     style={{ width: `${state.pct}%` }}
                   />
                 </div>
-                {/* Dismiss control. Nested inside the focus-button so
-                    visual layout stays as one rectangle, but
-                    stopPropagation keeps the click semantic clean
-                    (dismiss does not bubble to focus). Rendered as a
-                    <span role="button"> rather than a real <button>
-                    because nested <button> is invalid HTML. */}
-                 <span
-                  role="button"
-                  tabIndex={0}
-                  className="rd-card__dismiss"
-                  aria-label={`Dismiss run for ${project?.name || entry.projectId}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDismiss?.(runId);
-                  }}
-                  onKeyDown={(e) => {
-                    // Enter + Space activate the dismiss (mirrors the
-                    // native <button> contract). stopPropagation so the
-                    // parent card's onClick doesn't also fire on Enter.
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onDismiss?.(runId);
-                    }
-                  }}
-                >
-                  <X size={12} aria-hidden="true" />
-                </span>
+              </button>
+              {/* Dismiss is a sibling of the focus button, NOT a child —
+                  see the `<li>` comment above. CSS absolute-positions it
+                  inside the card's top-right corner so the visual layout
+                  reads as one rectangle. */}
+              <button
+                type="button"
+                className="rd-card__dismiss"
+                aria-label={`Dismiss run for ${project?.name || entry.projectId}`}
+                onClick={(e) => {
+                  // stopPropagation is defence-in-depth — sibling buttons
+                  // shouldn't bubble between each other, but keeps the
+                  // intent explicit if a future ancestor adds onClick.
+                  e.stopPropagation();
+                  onDismiss?.(runId);
+                }}
+              >
+                <X size={12} aria-hidden="true" />
               </button>
             </li>
           );
