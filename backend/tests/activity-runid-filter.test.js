@@ -28,22 +28,42 @@ import assert from "node:assert/strict";
 import { resetDb } from "./helpers/test-base.js";
 import * as activityRepo from "../src/database/repositories/activityRepo.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
+import { getDatabase } from "../src/database/sqlite.js";
 import { logActivity } from "../src/utils/activityLogger.js";
 
-// FK setup — `activities.projectId` references `projects.id` ON DELETE
-// CASCADE (`001_initial_schema.sql`). Without the parent project rows the
-// `activityRepo.create()` INSERT trips `SQLITE_CONSTRAINT_FOREIGNKEY`.
-// Inserting once at module load is sufficient because `resetDb()` (called
-// in `main()`) drops and re-creates the schema — we then re-create the
-// projects right after the reset.
-function seedProjects() {
+// FK setup — the `activities` table carries TWO foreign keys that fire
+// here (migrations 001 + 005):
+//   • `activities.projectId → projects(id)` ON DELETE CASCADE
+//   • `activities.workspaceId → workspaces(id)`
+// Without parent rows in BOTH tables the `activityRepo.create()` INSERT
+// trips `SQLITE_CONSTRAINT_FOREIGNKEY`. `resetDb()` re-seeds the
+// `__system__` user + workspace but our test uses bespoke
+// `WS-test` / `WS-other` workspaces — we have to seed those too.
+function seedFkParents() {
+  const db = getDatabase();
   const now = new Date().toISOString();
-  for (const id of ["PRJ-test", "PRJ-other"]) {
+  // Workspaces first — projects FK-reference them. ownerId points at
+  // the `__system__` user that `resetDb()` re-seeds, so no separate
+  // user insert is needed.
+  for (const id of ["WS-test", "WS-other"]) {
+    db.prepare(
+      `INSERT OR IGNORE INTO workspaces (id, name, slug, ownerId, createdAt, updatedAt)
+       VALUES (?, ?, ?, '__system__', ?, ?)`,
+    ).run(id, id, id.toLowerCase(), now, now);
+  }
+  // Projects — give each its matching workspaceId so the projects FK
+  // is satisfied AND so any downstream query that joins projects by
+  // workspace doesn't accidentally see orphaned rows.
+  const projects = [
+    { id: "PRJ-test", workspaceId: "WS-test" },
+    { id: "PRJ-other", workspaceId: "WS-other" },
+  ];
+  for (const p of projects) {
     projectRepo.create({
-      id,
-      name: id,
+      id: p.id,
+      name: p.id,
       url: "https://example.com",
-      workspaceId: null, // workspaces FK skipped for unit scope (see test-review-comment.test.js)
+      workspaceId: p.workspaceId,
       createdAt: now,
     });
   }
@@ -82,7 +102,7 @@ function makeActivity(overrides = {}) {
 
 async function main() {
   resetDb();
-  seedProjects();
+  seedFkParents();
 
   // ── 1. Persist via explicit `runId` field ─────────────────────────────────
   {
