@@ -211,6 +211,43 @@ test("emitAgentEvent persists AND delivers to a local SSE listener", () => {
   }
 });
 
+test("emitAgentEvent broadcasts `data` as a structured object (matches snapshot shape)", () => {
+  // Regression — pre-fix the live SSE push delivered `data` as a JSON
+  // string while the snapshot hydration parsed it back to an object,
+  // forcing consumers to seed-then-append a mixed-type array. This case
+  // pins the unified contract: both wire deliveries carry the SAME
+  // structured object. See agentEventEmitter.js#emitAgentEvent for the
+  // canonical comment.
+  const runId = uid("RUN");
+  const chunks = [];
+  const fakeRes = { write: (chunk) => { chunks.push(chunk); } };
+  if (!runListeners.has(runId)) runListeners.set(runId, new Set());
+  runListeners.get(runId).add(fakeRes);
+  try {
+    emitAgentEvent(runId, {
+      step: 4, agent: "author", phase: "finding",
+      data: { tokensIn: 1234, tokensOut: 567 },
+    });
+    // Broadcast: data is a parsed object (NOT a JSON string).
+    assert.equal(chunks.length, 1);
+    const payload = JSON.parse(chunks[0].slice("data: ".length).trim());
+    assert.deepEqual(payload.data, { tokensIn: 1234, tokensOut: 567 },
+      "broadcast data must be the structured object, not a JSON string");
+    assert.notEqual(typeof payload.data, "string",
+      "broadcast data must NOT be a string — that was the bug");
+    // Persistence: data is JSON-stringified in the DB column.
+    const rows = runAgentEventRepo.getByRunId(runId);
+    assert.equal(rows.length, 1);
+    assert.equal(typeof rows[0].data, "string",
+      "persisted data must be JSON-stringified (the column is TEXT)");
+    assert.deepEqual(JSON.parse(rows[0].data), { tokensIn: 1234, tokensOut: 567 });
+  } finally {
+    runListeners.get(runId)?.delete(fakeRes);
+    if (runListeners.get(runId)?.size === 0) runListeners.delete(runId);
+    runAgentEventRepo.deleteByRunId(runId);
+  }
+});
+
 test("emitAgentEvent is a no-op when runId is null/empty", () => {
   // Must not throw and must not append. Contract enforced by the guard in
   // agentEventEmitter.js — eval-harness / CLI callers (which omit runId)

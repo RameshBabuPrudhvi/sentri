@@ -52,23 +52,57 @@ import { emitRunEvent } from "../routes/sse.js";
  */
 export function emitAgentEvent(runId, { step, agent, phase, message, data, nextAgent, model } = {}) {
   if (!runId) return;
-  const evt = {
+
+  // ── `data` shape on the wire ─────────────────────────────────────────────
+  // Live SSE pushes AND the snapshot hydration MUST deliver `data` in the
+  // same shape — pre-fix the live event delivered it as a JSON string while
+  // `routes/sse.js` parsed it back to an object on the snapshot. A frontend
+  // consumer that seeds its buffer from `snapshot.run.agentEvents` (objects)
+  // and then appends live `agent_event` pushes (strings) ended up with mixed
+  // types in the same array (devin-ai-integration review thread).
+  //
+  // The contract is now: `data` is the **structured object** on every wire
+  // delivery. The DB column is TEXT-only, so we keep a separate stringified
+  // shape (`dataForPersist`) for the repo write only; `repo.append` also
+  // serialises defensively if a future caller bypasses this helper.
+  const createdAt = new Date().toISOString();
+  const dataForPersist = data == null
+    ? null
+    : (typeof data === "string" ? data : JSON.stringify(data));
+  // The broadcast/payload version: structured object (or pre-parsed when the
+  // caller already supplied a string — best-effort parse, fall back to the
+  // raw string on malformed input rather than dropping the event).
+  let dataForBroadcast = data ?? null;
+  if (typeof data === "string") {
+    try { dataForBroadcast = JSON.parse(data); }
+    catch { dataForBroadcast = data; }
+  }
+
+  // Persistence is best-effort. A failure here must NEVER break the
+  // originating LLM call — the run continues and the operator just
+  // misses a narrative line in the replay.
+  try {
+    repo.append(runId, {
+      step, agent, phase,
+      message: message ?? null,
+      data: dataForPersist,
+      nextAgent: nextAgent ?? null,
+      model: model ?? null,
+      createdAt,
+    });
+  } catch { /* non-fatal */ }
+
+  // Broadcast carries the structured `data` so live consumers and snapshot
+  // consumers see the identical shape. Matches the parsed-back form
+  // `routes/sse.js` builds for the snapshot's `agentEvents[]` hydration.
+  emitRunEvent(runId, "agent_event", {
     step,
     agent,
     phase,
     message: message ?? null,
-    // Serialise here so both the DB and the SSE payload carry the same
-    // canonical shape — the snapshot hydration parses it back on read.
-    data: data == null
-      ? null
-      : (typeof data === "string" ? data : JSON.stringify(data)),
+    data: dataForBroadcast,
     nextAgent: nextAgent ?? null,
     model: model ?? null,
-    createdAt: new Date().toISOString(),
-  };
-  // Persistence is best-effort. A failure here must NEVER break the
-  // originating LLM call — the run continues and the operator just
-  // misses a narrative line in the replay.
-  try { repo.append(runId, evt); } catch { /* non-fatal */ }
-  emitRunEvent(runId, "agent_event", evt);
+    createdAt,
+  });
 }
