@@ -298,3 +298,49 @@
   color: var(--text3);
 }
 .np-loading__label { font-size: 0.9rem; }
+
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   `.np` clamps at 620px so the page itself scales gracefully via `margin:
+   0 auto`. Three rules that don't degrade automatically:
+     1. `.np-steps` is a flex row of step pills that wraps awkwardly on
+        narrow viewports (pills shrink-fit at 4-6px gap, the wrap break
+        lands mid-step name).
+     2. `.np-auth-grid` is a fixed `1fr 1fr` 2-column grid for username
+        + password. At 375px wide each input field is ~150px — usable
+        for username but the password input + show/hide button (right-
+        anchored absolute) competes for space.
+     3. `.np-url__input` has hardcoded `padding-right: 100px` to clear
+        the absolutely-positioned "Test" button — on 375px the button
+        + URL text + left icon overlap. */
+@media (max-width: 600px) {
+  .np-steps {
+    flex-wrap: wrap;
+    gap: 6px 8px;
+  }
+
+  /* Auth grid: 2-col → 1-col on phones. Each input gets full width so
+     the password input + visibility toggle have room to breathe. */
+  .np-auth-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* URL field's "Test" button: hide the label text on phones (icon-only)
+     so the right-padding can shrink. The absolute-positioned button
+     still anchors right; this just tightens the inner text. The button
+     itself uses an inline icon + label in JSX — the icon stays. */
+  .np-url__input { padding-right: 60px; }
+  .np-url__test-btn { padding: 4px 6px; }
+  /* Hide the trailing "Test" / "Re-test" label text. The icon (Globe2
+     or matching status icon) stays as a 12-15px glyph that's still a
+     legible touch target. */
+  .np-url__test-btn > span:not([class*="icon"]) {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Tighter section padding on the smallest phones. */
+  .np-section__head { padding: 12px 14px; }
+  .np-section__body { padding: 14px; }
+}

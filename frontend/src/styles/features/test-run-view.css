@@ -49,6 +49,48 @@
 .trv-footer-rerun--fail { background: var(--red); color: #fff; border: none; font-weight: 700; gap: 6px; }
 .trv-footer-rerun--pass { background: var(--green); color: #fff; border: none; font-weight: 700; gap: 6px; }
 
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   `.trv-grid` is `minmax(260px, 320px) 1fr` — fine on tablet, but on a
+   375px viewport with 16px page padding the 1fr column collapses to ~63px
+   and the right-side preview becomes unreadable. Stack the panels at the
+   900px (icon-rail) breakpoint so the suite list sits above the preview.
+   The browser-chrome URL pill `.trv-chrome__tab` keeps its `max-width:
+   220px` but on phones can squeeze under that; let it shrink to fit. */
+@media (max-width: 900px) {
+  .trv-grid { grid-template-columns: 1fr; min-height: 0; }
+  /* `.trv-list` (the suite-list panel) gets a cap so the user can scroll
+     past it to reach the preview without an infinite list eating the
+     viewport. Mirrors the `.rq-list-pane` cap at 50vh used by ReviewQueue. */
+  .trv-grid > .trv-panel:first-child .trv-list { max-height: 50vh; }
+}
+
+@media (max-width: 600px) {
+  /* Preview header URL meta + chrome URL pill: the URL pill is fine
+     (already truncates) but the top row of the panel header (title +
+     meta) wraps awkwardly because `.trv-preview__meta` is a flex row
+     with no wrap. Allow wrapping so badges + ID + timestamp stack onto
+     a second line when the title is long. */
+  .trv-preview__meta { gap: 6px; }
+  /* Chrome tab can shrink — its 220px max overflows narrow screens
+     because the `.trv-chrome__urlbar` row is non-wrapping. */
+  .trv-chrome__tab { max-width: 60vw; }
+  /* API-result header URL on narrow screens is the only metadata that
+     matters; let it claim the row by hiding the title block. */
+  .trv-api__header-url { max-width: 60vw; }
+}
+
+@media (max-width: 480px) {
+  /* Tighter padding on every interior surface so the available content
+     width isn't eaten by 14–18px inner padding × multiple nested cards. */
+  .trv-suite-header,
+  .trv-preview__header,
+  .trv-running__header { padding: 12px 14px; }
+  .trv-preview__content,
+  .trv-running__content { padding: 12px; }
+  .trv-row,
+  .trv-pending-row { padding: 10px 12px; }
+}
+
 /* ── Browser chrome ── */
 .trv-chrome { border-radius: 10px; overflow: hidden; border: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0,0,0,0.08); margin-bottom: 14px; }
 .trv-chrome__titlebar { background: linear-gradient(180deg, #e8e8e8 0%, #d8d8d8 100%); padding: 7px 12px 0; border-bottom: 1px solid #c0c0c0; }

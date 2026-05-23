@@ -13,3 +13,22 @@
 /* Dropdown scrollbar */
 .notif-dropdown ::-webkit-scrollbar       { width: 5px; }
 .notif-dropdown ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   The `.notif-dropdown` panel is `width: 360px` inline (anchored
+   `right: 0` to the bell button) so on a 375px viewport with the topbar's
+   12px page padding the dropdown sits flush against the left edge of the
+   viewport with no breathing room — and on 360px-and-below phones it
+   overflows the left edge entirely (negative left position, dismissable
+   only by tapping the backdrop which itself is partially offscreen).
+   `!important` overrides the inline `width: 360px` and `right: 0` set
+   in `NotificationBell.jsx` — these inline values are documented above
+   in that file but predate the responsive shell pass; this is the
+   safest way to cap the dropdown without restructuring the component. */
+@media (max-width: 600px) {
+  .notif-dropdown {
+    width: calc(100vw - 24px) !important;
+    max-width: 360px;
+    right: 0 !important;
+  }
+}
