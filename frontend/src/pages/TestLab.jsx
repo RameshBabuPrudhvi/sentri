@@ -50,6 +50,12 @@ import { loadSavedConfig } from "../utils/testDialsStorage.js";
 // banner/panel JSX that previously lived in this file.
 import TestLabTabs from "../components/test-lab/TestLabTabs.jsx";
 import RetryButton from "../components/test-lab/RetryButton.jsx";
+// QueueTab extraction (AGENT.md §40) — the ~96-line inline Queue block
+// previously lived in this file; now owned by its own component. Reads
+// the same `activeQueueRuns` / `recentQueueRuns` / `queueFilter` props
+// the parent already computes, so the swap is a render-time refactor
+// only (no state shape changes).
+import QueueTab from "../components/test-lab/QueueTab.jsx";
 import { buildRetryPayload, resolveGenerateRetryFields } from "../utils/runRetry.js";
 
 
@@ -1420,100 +1426,26 @@ export default function TestLab() {
       </div>
 
       {/* ── Queue tab ── */}
+      {/* Extracted to `frontend/src/components/test-lab/QueueTab.jsx`.
+          `<QueueRow>`, `<EmptyState>`, and the `Clock` lucide icon are
+          injected so the extracted file doesn't have to reimport them —
+          `<QueueRow>` is a page-local component that closes over
+          `<ProjIcon>` + `PIPELINE_STAGES`, and the dependency injection
+          keeps that coupling explicit. */}
       {tab === "queue" && (
-        <div className="tl-queue-wrap fade-in">
-          <div className="tl-queue-header">
-            <div>
-              <h2 className="page-title tl-queue-title">Queue</h2>
-              <p className="page-subtitle">All active and recent generation runs across projects</p>
-            </div>
-            <div className="flex-between gap-sm tl-queue-actions">
-              <span className="badge badge-blue">{activeQueueRuns.length} active</span>
-              {activeQueueRuns.length > 0 && (
-                <span className="badge badge-green tl-queue-pulse-badge">running</span>
-              )}
-              {/* Project filter — shown when there are multiple projects */}
-              {projects.length > 1 && (
-                <select
-                  className="tl-select tl-queue-filter-select"
-                  value={queueFilter}
-                  onChange={e => setQueueFilter(e.target.value)}
-                >
-                  <option value="all">All projects</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </div>
-
-          {/* Apply project filter */}
-          {(() => {
-            const filteredActive = queueFilter === "all"
-              ? activeQueueRuns
-              : activeQueueRuns.filter(r => r.projectId === queueFilter);
-            const filteredRecent = queueFilter === "all"
-              ? recentQueueRuns
-              : recentQueueRuns.filter(r => r.projectId === queueFilter);
-            return (
-              <>
-                {filteredActive.length === 0 && filteredRecent.length === 0 && (
-                  // ONB-002 (audit): swap the bare emoji+text empty state for
-                  // the shared primitive so the Queue tab matches the icon +
-                  // title + description + CTA shape used on Tests, Projects,
-                  // Runs, HealingDashboard, and Dashboard. The CTA jumps the
-                  // user back to the Crawl & Generate tab — the action that
-                  // produces queue rows — instead of leaving them stuck on an
-                  // empty surface. When a project filter is active, we also
-                  // surface a "Clear filter" secondary action so the user has
-                  // an escape hatch without retyping the dropdown.
-                  <EmptyState
-                    icon={<Clock size={32} color="var(--accent)" />}
-                    title={queueFilter === "all" ? "No runs yet" : "No runs for this project"}
-                    description={queueFilter === "all"
-                      ? "Start a crawl or generate tests from a requirement to see them here."
-                      : "Switch to a different project or start a new run."}
-                    secondaryAction={queueFilter !== "all"
-                      ? { label: "Clear filter", onClick: () => setQueueFilter("all") }
-                      : null}
-                    action={{ label: "Start Crawl & Generate", onClick: () => setTab("crawl") }}
-                  />
-                )}
-
-                {filteredActive.length > 0 && (
-                  <>
-                    <div className="section-label mb-sm">Active</div>
-                    {filteredActive.map(run => (
-                      <QueueRow
-                        key={run.id}
-                        run={run}
-                        project={projects.find(p => p.id === run.projectId)}
-                        onStop={handleQueueStop}
-                        onAttach={handleAttachRun}
-                      />
-                    ))}
-                  </>
-                )}
-
-                {filteredRecent.length > 0 && (
-                  <>
-                    <div className="section-label mb-sm tl-queue-recent-label">Recent</div>
-                    {filteredRecent.map(run => (
-                      <QueueRow
-                        key={run.id}
-                        run={run}
-                        project={projects.find(p => p.id === run.projectId)}
-                        onStop={handleQueueStop}
-                        onAttach={handleAttachRun}
-                      />
-                    ))}
-                  </>
-                )}
-              </>
-            );
-          })()}
-        </div>
+        <QueueTab
+          activeQueueRuns={activeQueueRuns}
+          recentQueueRuns={recentQueueRuns}
+          projects={projects}
+          queueFilter={queueFilter}
+          onQueueFilterChange={setQueueFilter}
+          onStop={handleQueueStop}
+          onAttach={handleAttachRun}
+          onSwitchToCrawl={() => setTab("crawl")}
+          QueueRow={QueueRow}
+          EmptyState={EmptyState}
+          ClockIcon={Clock}
+        />
       )}
 
       {/* Recorder modal — launched from the topbar Record button. On save we
