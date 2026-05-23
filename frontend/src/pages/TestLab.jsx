@@ -432,9 +432,13 @@ const NARRATIVE_STAGES = [
       "Opening a headless browser and loading your homepage.",
       "Following every link I can reach — nav menus, footers, dropdowns.",
       "Logging page snapshots, DOM structure, and every URL as I go.",
-      (v) => v > 0
-        ? `Crawl complete — mapped ${v} page${v !== 1 ? "s" : ""} with interactive elements.`
-        : "Crawl complete — no reachable pages found on this site.",
+      (v) => {
+        // `v` is `null` while the count hasn't landed yet; only the explicit
+        // `0` case warrants the "no reachable pages" copy.
+        if (v == null) return "Wrapping up the crawl — collecting the final page list.";
+        if (v <= 0)    return "Crawl complete — no reachable pages found on this site.";
+        return `Crawl complete — mapped ${v} page${v !== 1 ? "s" : ""} with interactive elements.`;
+      },
     ],
     pills: (run) => {
       const pages = Array.isArray(run?.pages) ? run.pages : [];
@@ -449,9 +453,11 @@ const NARRATIVE_STAGES = [
     lines: [
       "Scanning each page for buttons, inputs, forms, and links.",
       "Skipping decorative content — hero images, banners, cookie notices.",
-      (v) => v > 0
-        ? `Kept ${v} interactive element${v !== 1 ? "s" : ""} across all pages.`
-        : "No interactive elements found — the crawled pages have nothing to test.",
+      (v) => {
+        if (v == null) return "Finalising the element list…";
+        if (v <= 0)    return "No interactive elements found — the crawled pages have nothing to test.";
+        return `Kept ${v} interactive element${v !== 1 ? "s" : ""} across all pages.`;
+      },
     ],
     // No hardcoded placeholder pills — what's "interactive" varies wildly
     // across sites (a search homepage = one input; a checkout flow = dozens).
@@ -467,9 +473,11 @@ const NARRATIVE_STAGES = [
     lines: [
       "Reading the page structure to understand how a real user moves through your app.",
       "Tracing paths — login flows, form submissions, cart to checkout.",
-      (v) => v > 0
-        ? `Mapped ${v} distinct user journey${v !== 1 ? "s" : ""} with clear starts and expected outcomes.`
-        : "No journeys could be mapped — the crawled pages don't expose enough structure.",
+      (v) => {
+        if (v == null) return "Finalising the journey list…";
+        if (v <= 0)    return "No journeys could be mapped — the crawled pages don't expose enough structure.";
+        return `Mapped ${v} distinct user journey${v !== 1 ? "s" : ""} with clear starts and expected outcomes.`;
+      },
     ],
     // No hardcoded placeholder journeys — same reasoning as step 2.
     pills: () => [],
@@ -489,8 +497,9 @@ const NARRATIVE_STAGES = [
       "Picking stable selectors and adding wait conditions so the tests don't flake.",
       "Capturing each step in plain English alongside the runnable code.",
       (v) => {
-        if (!v || v <= 0) return "No tests were generated — there were no viable journeys to encode.";
-        if (v === 1)      return "Generated 1 test targeting a real user action end-to-end.";
+        if (v == null) return "Finalising the test list…";
+        if (v <= 0)    return "No tests were generated — there were no viable journeys to encode.";
+        if (v === 1)   return "Generated 1 test targeting a real user action end-to-end.";
         return `Generated ${v} tests, each targeting a real user action end-to-end.`;
       },
     ],
@@ -516,9 +525,11 @@ const NARRATIVE_STAGES = [
     label: "Removing duplicates",
     lines: [
       "Comparing all tests for overlapping scenarios.",
-      (v) => v > 0
-        ? `Removed ${v} duplicate${v !== 1 ? "s" : ""} — kept only unique scenarios so the suite doesn't repeat checks.`
-        : "No duplicate tests found — the suite is already lean.",
+      (v) => {
+        if (v == null) return "Finalising the dedup pass…";
+        if (v <= 0)    return "No duplicate tests found — the suite is already lean.";
+        return `Removed ${v} duplicate${v !== 1 ? "s" : ""} — kept only unique scenarios so the suite doesn't repeat checks.`;
+      },
     ],
     pills: () => [],
     statKey: "duplicatesRemoved",
@@ -530,9 +541,11 @@ const NARRATIVE_STAGES = [
     lines: [
       "Reviewing every test's assertions — most just check that a page loaded.",
       "Upgrading to meaningful checks: cart count incremented, form errors shown, order confirmed.",
-      (v) => v > 0
-        ? `Enhanced ${v} test${v !== 1 ? "s" : ""} with stronger assertions that actually catch bugs.`
-        : "No assertions needed upgrading — the existing checks already look meaningful.",
+      (v) => {
+        if (v == null) return "Finalising the assertion pass…";
+        if (v <= 0)    return "No assertions needed upgrading — the existing checks already look meaningful.";
+        return `Enhanced ${v} test${v !== 1 ? "s" : ""} with stronger assertions that actually catch bugs.`;
+      },
     ],
     // No hardcoded placeholder assertions — same reasoning as step 2/3.
     pills: () => [],
@@ -544,9 +557,11 @@ const NARRATIVE_STAGES = [
     label: "Quality check",
     lines: [
       "Running a final pass — checking selector stability and assertion coverage.",
-      (v) => v > 0
-        ? `Rejected ${v} test${v !== 1 ? "s" : ""} with brittle selectors or weak coverage. The rest passed.`
-        : "All tests passed quality review — selectors are stable and assertions are meaningful.",
+      (v) => {
+        if (v == null) return "Finalising the quality review…";
+        if (v <= 0)    return "All tests passed quality review — selectors are stable and assertions are meaningful.";
+        return `Rejected ${v} test${v !== 1 ? "s" : ""} with brittle selectors or weak coverage. The rest passed.`;
+      },
     ],
     pills: () => [],
     statKey: "validationRejected",
@@ -619,6 +634,16 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
   }
 
   // ── Resolve stat value for a stage ──
+  // Returns the best-known count for a stage, or `null` when no source has
+  // populated it yet. Callers MUST treat `null` as "unknown" (not "zero") —
+  // the per-stage closures branch on `v > 0` vs `v === 0` vs `v == null` to
+  // avoid claiming "no X found" before the stage has actually reported in.
+  //
+  // Why this matters: `runData.pipelineStats` is built by the backend ONLY at
+  // step 8 (`backend/src/crawler.js:715`). During steps 1–7 it's undefined,
+  // so reading `pipelineStats[statKey] ?? 0` mid-run made every active
+  // stage read as zero and the narrative falsely declared "Crawl complete —
+  // no reachable pages found" while the crawler was actively logging URLs.
   function statFor(stage) {
     // Step 8's final line uses `testsGenerated` (total after dedup + validate).
     // Checked BEFORE the `!stage.statKey` early return because step 8 has
@@ -626,7 +651,18 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
     // narrative always read "0 tests ready for your review".
     if (stage.step === 8) return run?.testsGenerated ?? null;
     if (!stage.statKey) return null;
-    return ps[stage.statKey] ?? null;
+    // Step 1 (Crawl) has a live top-level mirror: `run.pagesFound` is
+    // incremented after every page snapshot (see `crawlBrowser.js:338` and
+    // `stateExplorer.js:227-233`). Prefer it over `pipelineStats.pagesFound`
+    // so the "Crawl complete — mapped N pages" summary uses the real count
+    // the moment step 1 finishes, instead of waiting until step 8 when the
+    // pipelineStats object finally materialises.
+    if (stage.step === 1) {
+      const live = run?.pagesFound;
+      if (live != null) return live;
+    }
+    const fromStats = ps[stage.statKey];
+    return fromStats == null ? null : fromStats;
   }
 
   // ── Start streaming a new line ──
