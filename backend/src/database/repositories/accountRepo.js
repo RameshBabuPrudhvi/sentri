@@ -68,6 +68,9 @@ export function buildAccountExport(userId) {
       tests: [],
       runs: [],
       runLogs: [],
+      // Task 2 — mirror the `runLogs: []` empty-state entry so the export
+      // shape is stable whether or not the user has owned workspaces.
+      runAgentEvents: [],
       activities: [],
       notificationSettings: [],
       schedules: [],
@@ -88,9 +91,19 @@ export function buildAccountExport(userId) {
   // logs, so without this the export would be missing all log data.
   const runIds = runs.map((r) => r.id);
   let runLogs = [];
+  // Task 2 — per-agent SSE events. Mirrors the runLogs export pattern so
+  // GDPR Article 20 data-portability returns the agent-event history
+  // alongside the runs they belong to. Without this the deletion path
+  // (further down) would purge `run_agent_events` but the export would
+  // silently omit them — violating the symmetry contract documented in
+  // the import comment at the top of this file.
+  let runAgentEvents = [];
   if (runIds.length > 0) {
     const rph = placeholders(runIds);
     runLogs = db.prepare(`SELECT * FROM run_logs WHERE runId IN (${rph}) ORDER BY runId, seq ASC`).all(...runIds);
+    runAgentEvents = db
+      .prepare(`SELECT * FROM run_agent_events WHERE runId IN (${rph}) ORDER BY runId, createdAt ASC, id ASC`)
+      .all(...runIds);
   }
 
   const activities = db.prepare(`SELECT * FROM activities WHERE workspaceId IN (${wsph})`).all(...ownedWorkspaceIds);
@@ -131,6 +144,7 @@ export function buildAccountExport(userId) {
     tests,
     runs,
     runLogs,
+    runAgentEvents,
     activities,
     notificationSettings,
     schedules,
