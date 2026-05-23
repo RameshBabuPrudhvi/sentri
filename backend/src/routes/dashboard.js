@@ -142,6 +142,17 @@ router.get("/dashboard", async (req, res) => {
         // when the error text is just a generic locator timeout. See
         // `classifyFailure` jsdoc in `backend/src/pipeline/feedbackLoop.js`.
         const cat = classifyFailure(result.error, { finalUrl: result.url });
+        // Don't inflate the UNKNOWN bucket with errorless-but-URL'd failed
+        // rows that pre-PR were silently excluded. We widened the guard
+        // above to `result.url` so BOT_BLOCK URL-only detection participates
+        // (the whole point — a failed run that lands on `/sorry/` has the
+        // URL but no error text), but a failed result with no error AND a
+        // non-bot URL still classifies as UNKNOWN — and counting those
+        // would change the defect-breakdown denominator on every
+        // dashboard since this PR shipped, without anything actionable to
+        // show for it. Skip them; the original `result.error`-only guard
+        // already dropped them.
+        if (!result.error && cat === "UNKNOWN") continue;
         if (cat in defectBreakdown) defectBreakdown[cat]++;
         else defectBreakdown.UNKNOWN++;
       }
