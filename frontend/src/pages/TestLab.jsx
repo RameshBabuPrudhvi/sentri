@@ -432,7 +432,9 @@ const NARRATIVE_STAGES = [
       "Opening a headless browser and loading your homepage.",
       "Following every link I can reach — nav menus, footers, dropdowns.",
       "Logging page snapshots, DOM structure, and every URL as I go.",
-      (v) => `Crawl complete — mapped ${v ?? 0} page${v !== 1 ? "s" : ""} with interactive elements.`,
+      (v) => v > 0
+        ? `Crawl complete — mapped ${v} page${v !== 1 ? "s" : ""} with interactive elements.`
+        : "Crawl complete — no reachable pages found on this site.",
     ],
     pills: (run) => {
       const pages = Array.isArray(run?.pages) ? run.pages : [];
@@ -447,13 +449,15 @@ const NARRATIVE_STAGES = [
     lines: [
       "Scanning each page for buttons, inputs, forms, and links.",
       "Skipping decorative content — hero images, banners, cookie notices.",
-      (v) => `Kept ${v ?? 0} interactive element${v !== 1 ? "s" : ""} across all pages.`,
+      (v) => v > 0
+        ? `Kept ${v} interactive element${v !== 1 ? "s" : ""} across all pages.`
+        : "No interactive elements found — the crawled pages have nothing to test.",
     ],
-    pills: () => [
-      { icon: "checkbox", text: "Add to cart buttons" },
-      { icon: "forms", text: "Search + form inputs" },
-      { icon: "credit-card", text: "Checkout fields" },
-    ],
+    // No hardcoded placeholder pills — what's "interactive" varies wildly
+    // across sites (a search homepage = one input; a checkout flow = dozens).
+    // Showing "Add to cart buttons" on a Google crawl was misleading. The
+    // stat chip below carries the real count.
+    pills: () => [],
     statKey: "elementsKept",
     statLabel: "elements kept",
   },
@@ -463,13 +467,12 @@ const NARRATIVE_STAGES = [
     lines: [
       "Reading the page structure to understand how a real user moves through your app.",
       "Tracing paths — login flows, form submissions, cart to checkout.",
-      (v) => `Mapped ${v ?? 0} distinct user journey${v !== 1 ? "s" : ""} with clear starts and expected outcomes.`,
+      (v) => v > 0
+        ? `Mapped ${v} distinct user journey${v !== 1 ? "s" : ""} with clear starts and expected outcomes.`
+        : "No journeys could be mapped — the crawled pages don't expose enough structure.",
     ],
-    pills: () => [
-      { icon: "shopping-cart", text: "Search → Cart → Checkout" },
-      { icon: "user", text: "Login + account creation" },
-      { icon: "heart", text: "Wishlist flows" },
-    ],
+    // No hardcoded placeholder journeys — same reasoning as step 2.
+    pills: () => [],
     statKey: "journeysDetected",
     statLabel: "journeys mapped",
   },
@@ -480,13 +483,26 @@ const NARRATIVE_STAGES = [
       "Starting to write Playwright tests — one journey at a time.",
       "Using stable selectors: data-testid where available, then ARIA roles.",
       "Adding wait conditions so tests don't flake on slow page loads.",
-      (v) => `Generated ${v ?? 0} Playwright test${v !== 1 ? "s" : ""}, each targeting a real user action end-to-end.`,
+      (v) => {
+        if (!v || v <= 0) return "No tests were generated — there were no viable journeys to encode.";
+        if (v === 1)      return "Generated 1 Playwright test targeting a real user action end-to-end.";
+        return `Generated ${v} Playwright tests, each targeting a real user action end-to-end.`;
+      },
     ],
-    pills: () => [
-      { icon: "file-code", text: "checkout_add_to_cart.spec.ts" },
-      { icon: "file-code", text: "login_valid_credentials.spec.ts" },
-      { icon: "file-code", text: "search_and_filter.spec.ts" },
-    ],
+    // Real test filenames pulled from `run.tests × allTests` — same join the
+    // completion banner uses (see `generatedOutcome` memo around line 1379).
+    // Falls back to [] until the tests cache refreshes after the SSE `done`
+    // event invalidates `useProjectData`.
+    pills: (run, ctx) => {
+      const ids = Array.isArray(run?.tests) ? run.tests : [];
+      const allTests = Array.isArray(ctx?.allTests) ? ctx.allTests : [];
+      if (!ids.length || !allTests.length) return [];
+      const idSet = new Set(ids);
+      return allTests
+        .filter(t => idSet.has(t.id))
+        .slice(0, 3)
+        .map(t => ({ icon: "file-code", text: t.name || t.title || `test-${t.id}` }));
+    },
     statKey: "rawTestsGenerated",
     statLabel: "tests written",
   },
@@ -509,13 +525,12 @@ const NARRATIVE_STAGES = [
     lines: [
       "Reviewing every test's assertions — most just check that a page loaded.",
       "Upgrading to meaningful checks: cart count incremented, form errors shown, order confirmed.",
-      (v) => `Enhanced ${v ?? 0} test${v !== 1 ? "s" : ""} with stronger assertions that actually catch bugs.`,
+      (v) => v > 0
+        ? `Enhanced ${v} test${v !== 1 ? "s" : ""} with stronger assertions that actually catch bugs.`
+        : "No assertions needed upgrading — the existing checks already look meaningful.",
     ],
-    pills: () => [
-      { icon: "circle-check", text: "Cart badge count asserted" },
-      { icon: "circle-check", text: "Form error messages validated" },
-      { icon: "circle-check", text: "Order confirmation text checked" },
-    ],
+    // No hardcoded placeholder assertions — same reasoning as step 2/3.
+    pills: () => [],
     statKey: "assertionsEnhanced",
     statLabel: "assertions upgraded",
   },
@@ -536,7 +551,11 @@ const NARRATIVE_STAGES = [
     step: 8,
     label: "Done",
     lines: [
-      (total) => `All done — ${total ?? 0} test${total !== 1 ? "s" : ""} ready for your review.`,
+      (total) => {
+        if (!total || total <= 0) return "All done — no tests were generated for this run.";
+        if (total === 1)          return "All done — 1 test ready for your review.";
+        return `All done — ${total} tests ready for your review.`;
+      },
     ],
     pills: () => [],
     statKey: null,
@@ -564,9 +583,12 @@ function resolveNarrativeLine(line, statVal) {
  * `requestAnimationFrame`-backed timer. Done stages collapse to their final
  * sentence + pill chips. Pending stages are hidden until they activate.
  *
- * @param {{ run: Object|null, logLines: string[], isRunActive: boolean }} props
+ * @param {{ run: Object|null, logLines: string[], isRunActive: boolean, allTests: Object[] }} props
+ *   `allTests` is forwarded to per-stage `pills()` helpers so step 4 can join
+ *   `run.tests` × the project's test inventory and surface real filenames
+ *   instead of hardcoded placeholders.
  */
-function NarrativeFeed({ run, logLines, isRunActive }) {
+function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
   const currentStep = run?.currentStep ?? null;
   const status      = run?.status ?? "running";
   const ps          = run?.pipelineStats || {};
@@ -593,9 +615,12 @@ function NarrativeFeed({ run, logLines, isRunActive }) {
 
   // ── Resolve stat value for a stage ──
   function statFor(stage) {
-    if (!stage.statKey) return null;
-    // Step 8 final line uses `testsGenerated` (total after dedup + validate)
+    // Step 8's final line uses `testsGenerated` (total after dedup + validate).
+    // Checked BEFORE the `!stage.statKey` early return because step 8 has
+    // `statKey: null` — pre-fix this branch was unreachable and the Done
+    // narrative always read "0 tests ready for your review".
     if (stage.step === 8) return run?.testsGenerated ?? null;
+    if (!stage.statKey) return null;
     return ps[stage.statKey] ?? null;
   }
 
@@ -693,8 +718,12 @@ function NarrativeFeed({ run, logLines, isRunActive }) {
         const isDone   = state === "done";
         const isActive = state === "active";
 
-        // Pills: show all on done stages; reveal progressively when active
-        const pills      = stage.pills(run);
+        // Pills: show all on done stages; reveal progressively when active.
+        // `ctx` carries extra cross-component data (e.g. `allTests`) that
+        // individual stage pill resolvers need to render real values instead
+        // of hardcoded placeholders — step 4 joins `run.tests × allTests` to
+        // surface actual generated test filenames.
+        const pills      = stage.pills(run, { allTests });
         const shownPills = isDone ? pills : pills.slice(0, revealedPills);
 
         // Narrative text: done stages show their final resolved line;
@@ -1796,6 +1825,7 @@ export default function TestLab() {
                             run={runData}
                             logLines={logLines}
                             isRunActive={isRunActive}
+                            allTests={allTests}
                           />
                         </div>
 
