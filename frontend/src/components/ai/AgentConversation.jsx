@@ -109,7 +109,7 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
       return haveEvents ? eventsToTurns(agentEvents) : synthesizeTurns(run, ctx);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [run?.runId, run?.currentStep, run?.status, run?.pagesFound, run?.testsGenerated, ps, allTests, agentEvents],
+    [run?.id, run?.currentStep, run?.status, run?.pagesFound, run?.testsGenerated, ps, allTests, agentEvents],
   );
 
   // Displayed turns track render state. New turns enter as `streaming`
@@ -221,17 +221,21 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
     }
   }, [displayed.length]);
 
-  // Reset when the run changes (different runId or null → set). Without this,
+  // Reset when the run changes (different run id or null → set). Without this,
   // launching a second run would carry the first run's transcript over.
-  const runIdRef = useRef(run?.runId);
+  // NOTE: `runData` from TestLab has `id` (the DB primary key), NOT `runId`.
+  // `runId` only exists on the separate `activeRun` state object. Pre-fix
+  // this ref compared `run?.runId` which was always `undefined`, so the
+  // transcript never cleared between runs.
+  const runIdRef = useRef(run?.id);
   useEffect(() => {
-    if (runIdRef.current !== run?.runId) {
-      runIdRef.current = run?.runId;
+    if (runIdRef.current !== run?.id) {
+      runIdRef.current = run?.id;
       setDisplayed([]);
       lastLenRef.current = 0;
       clearTimeout(streamTimerRef.current);
     }
-  }, [run?.runId]);
+  }, [run?.id]);
 
   // ── Render ──
   // ARIA contract (per task spec):

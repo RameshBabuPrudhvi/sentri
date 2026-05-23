@@ -431,16 +431,47 @@ export function eventsToTurns(events) {
       // to a generic "<Agent> is working" so the turn never renders empty.
       const persona = AGENT_PERSONAS[evt.agent];
       const text = evt.message || `${persona.label} is working…`;
-      const turn = {
-        id: `evt-${key}-doing`,
-        agent: evt.agent,
-        phase: "doing",
-        step,
-        text,
-        ts,
-      };
-      openByAgent.set(key, turn);
-      turns.push(turn);
+      // Bug fix: when the same agent emits multiple start/done cycles for
+      // the same step (e.g. Author writes tests per-page at step 4, or
+      // Planner plans per-journey at step 3), a previous `done` event
+      // deleted the key from `openByAgent` but the turn with id
+      // `evt-${key}-doing` is already in `turns`. If we push a new turn
+      // with the same id, the component's diff-by-id would silently drop
+      // the second cycle. Instead, find the existing completed turn and
+      // reopen it by appending the new message — the user sees the turn
+      // grow with each cycle's content rather than losing all but the first.
+      const existing = openByAgent.get(key);
+      if (!existing) {
+        // Check if a completed turn for this key is already in the array.
+        const prev = turns.find(t => t.id === `evt-${key}-doing`);
+        if (prev) {
+          // Reopen the completed turn — append the new cycle's message.
+          if (text && !prev.text.endsWith(text)) {
+            prev.text = prev.text ? `${prev.text} ${text}` : text;
+          }
+          prev._complete = false;
+          prev.ts = ts;
+          openByAgent.set(key, prev);
+        } else {
+          const turn = {
+            id: `evt-${key}-doing`,
+            agent: evt.agent,
+            phase: "doing",
+            step,
+            text,
+            ts,
+          };
+          openByAgent.set(key, turn);
+          turns.push(turn);
+        }
+      } else {
+        // Still open from a previous start (no done arrived yet).
+        // Append the new message as a continuation.
+        if (text && !existing.text.endsWith(text)) {
+          existing.text = existing.text ? `${existing.text} ${text}` : text;
+          existing.ts = ts;
+        }
+      }
       continue;
     }
 
