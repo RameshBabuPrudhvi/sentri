@@ -8,17 +8,29 @@
  * Author who writes/dedupes/enhances/validates tests. Each turn carries the
  * agent's avatar, label, model attribution, and a streaming text bubble.
  *
- * ### Synthesized vs. real-event modes
+ * ### Real-event mode (preferred) vs. synthesized fallback
  *
- * **Today (synthesized)** — turns are derived client-side from
- * `runData.currentStep` + `runData.pipelineStats` + `getStageAgentRoles`.
- * Wording is templated below. No backend changes required.
+ * **Real events (preferred)** — when `runData.agentEvents` carries any rows
+ * (seeded from the SSE snapshot at `backend/src/routes/sse.js#L170-L182`,
+ * appended live by `frontend/src/pages/TestLab.jsx#handleSSEEvent` on every
+ * `agent_event` push), turns come from `eventsToTurns(events)`. Each
+ * `phase: "start"` event opens a streaming turn, subsequent `finding` /
+ * `progress` events extend that turn's text in place (so a finding lands
+ * as continuation, not a new utterance), `phase: "handoff"` produces an
+ * instant-render handoff turn, and `phase: "done"` marks the open turn
+ * complete. Backend → component is a thin pass-through; the conversation
+ * faithfully mirrors what the pipeline actually did.
  *
- * **Future (Task 2 follow-up)** — once `runData.agentEvents` lands via the
- * SSE `agent_event` stream (already plumbed by Task 2, see migration 057),
- * the synthesizer below will be swapped for a thin adapter that maps SSE
- * events to turns. External API (props, role contract, ARIA contract) is
- * unchanged so the swap is a one-file refactor.
+ * **Synthesized fallback** — when `agentEvents` is empty (run pre-dates
+ * Task 2 migration 057 / the run hasn't started emitting events yet / the
+ * snapshot was truncated), the legacy `synthesizeTurns` walk over
+ * `runData.currentStep` + `runData.pipelineStats` + `getStageAgentRoles`
+ * still produces a valid turn list with the templated wording defined
+ * below. This preserves the prior UX for historical runs and gives the
+ * component something to render before the first `agent_event` lands.
+ *
+ * Both modes return turns with stable IDs so the diff-and-append step
+ * downstream is identical — the mode swap is invisible to the renderer.
  *
  * ### Bug fixes vs. NarrativeFeed
  *
@@ -51,12 +63,13 @@ import {
   getStepAgentSequence,
   TURN_TEMPLATES,
   synthesizeTurns,
+  eventsToTurns,
 } from "./agentConversationSynth.js";
 
 // Re-exports so the test file (and any future consumer) can import these
 // directly from `AgentConversation` if it prefers — single canonical
 // component entry point.
-export { getStepAgentSequence, TURN_TEMPLATES, synthesizeTurns };
+export { getStepAgentSequence, TURN_TEMPLATES, synthesizeTurns, eventsToTurns };
 
 
 
@@ -83,10 +96,20 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
   // SSE update that doesn't touch them (e.g. `logs.length` changing) doesn't
   // invalidate the memo unnecessarily.
   const ctx = useMemo(() => ({ ps, allTests }), [ps, allTests]);
+  // Real-event mode wins when the run has any `agent_event` rows. Falls
+  // back to the synthesizer for runs that pre-date Task 2 / haven't
+  // started emitting events yet — same turn shape, same diff semantics
+  // downstream, so the renderer is mode-agnostic. Memo keyed on the
+  // `agentEvents` array reference (re-built by `handleSSEEvent` on every
+  // append, so identity changes correctly track new events).
+  const agentEvents = run?.agentEvents;
   const targetTurns = useMemo(
-    () => synthesizeTurns(run, ctx),
+    () => {
+      const haveEvents = Array.isArray(agentEvents) && agentEvents.length > 0;
+      return haveEvents ? eventsToTurns(agentEvents) : synthesizeTurns(run, ctx);
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [run?.runId, run?.currentStep, run?.status, run?.pagesFound, run?.testsGenerated, ps, allTests],
+    [run?.runId, run?.currentStep, run?.status, run?.pagesFound, run?.testsGenerated, ps, allTests, agentEvents],
   );
 
   // Displayed turns track render state. New turns enter as `streaming`
@@ -97,17 +120,46 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
   const streamTimerRef = useRef(null);
   const containerRef = useRef(null);
 
-  // Diff synthesizer output against displayed turns and append new ones.
+  // Diff target turns against displayed and (a) append new turns, (b) extend
+  // text on already-displayed turns whose target text grew. (b) is the path
+  // event-mode takes when a `finding`/`progress` event extends an open
+  // `start` turn: same stable ID, longer `text`. Without (b), a finding
+  // arriving after the start turn finished streaming would never reach
+  // the screen. Synthesizer-mode turns never grow (their text is fixed at
+  // synthesis time) so (b) is a no-op for that path.
+  //
   // The dependency list intentionally omits `displayed` (stale-closure-safe
-  // because we use the functional updater) — otherwise this effect would
-  // fire on every renderedText tick and double-append.
+  // via the functional updater) — otherwise this effect would fire on every
+  // renderedText tick and double-append.
   useEffect(() => {
     setDisplayed(prev => {
-      const have = new Set(prev.map(t => t.id));
-      const additions = targetTurns.filter(t => !have.has(t.id));
-      if (additions.length === 0) return prev;
+      const byId = new Map(prev.map(t => [t.id, t]));
+      let mutated = false;
+      const next = prev.map(t => {
+        const target = targetTurns.find(tt => tt.id === t.id);
+        if (!target || target.text === t.text) return t;
+        // Target grew. Extend the streaming target while preserving the
+        // current `renderedText` cursor position — the streamer effect will
+        // catch up to the new length on its next tick. If the turn had
+        // already flipped to "done" (its old text fully rendered), revive
+        // it back to "streaming" so the new tail types out instead of
+        // appearing instantly. Handoff turns don't stream so their text
+        // can't grow incrementally; they update in place.
+        mutated = true;
+        if (t.phase === "handoff") {
+          return { ...t, text: target.text, renderedText: target.text };
+        }
+        const stillStreaming = t.renderedText.length < target.text.length;
+        return {
+          ...t,
+          text: target.text,
+          status: stillStreaming ? "streaming" : t.status,
+        };
+      });
+      const additions = targetTurns.filter(t => !byId.has(t.id));
+      if (additions.length === 0) return mutated ? next : prev;
       return [
-        ...prev,
+        ...next,
         ...additions.map(t => ({
           ...t,
           status: t.phase === "handoff" ? "done" : "streaming",

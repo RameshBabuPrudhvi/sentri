@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import {
   synthesizeTurns,
   getStepAgentSequence,
+  eventsToTurns,
 } from "../src/components/ai/agentConversationSynth.js";
 
 let passed = 0;
@@ -254,6 +255,119 @@ test("turn objects carry the expected shape ({id, agent, phase, step, text, ts})
     assert.equal(typeof t.text, "string");
     assert.equal(typeof t.ts, "number");
   }
+});
+
+// ─── eventsToTurns (real-event adapter) ───────────────────────────────────────
+
+console.log("\n── eventsToTurns ──");
+
+test("returns empty array for null/undefined/empty input", () => {
+  assert.deepEqual(eventsToTurns(null), []);
+  assert.deepEqual(eventsToTurns(undefined), []);
+  assert.deepEqual(eventsToTurns([]), []);
+});
+
+test("`start` event opens a doing turn with the event message", () => {
+  const turns = eventsToTurns([
+    { step: 4, agent: "author", phase: "start", message: "Writing tests for /cart" },
+  ]);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].phase, "doing");
+  assert.equal(turns[0].agent, "author");
+  assert.equal(turns[0].step, 4);
+  assert.equal(turns[0].text, "Writing tests for /cart");
+  assert.equal(turns[0].id, "evt-4-author-doing");
+});
+
+test("`finding` event extends the open `start` turn (not a new turn)", () => {
+  const turns = eventsToTurns([
+    { step: 4, agent: "author", phase: "start", message: "Writing tests" },
+    { step: 4, agent: "author", phase: "finding", message: "Generated 12 tests." },
+  ]);
+  // ONE turn — the finding merged into the start turn's text.
+  assert.equal(turns.length, 1, "finding must merge, not stack");
+  assert.match(turns[0].text, /Writing tests/);
+  assert.match(turns[0].text, /Generated 12 tests\./);
+});
+
+test("multiple findings stack into the same open turn", () => {
+  const turns = eventsToTurns([
+    { step: 4, agent: "author", phase: "start", message: "Writing tests" },
+    { step: 4, agent: "author", phase: "finding", message: "Found 8 journeys." },
+    { step: 4, agent: "author", phase: "finding", message: "Skipped 2 covered pages." },
+  ]);
+  assert.equal(turns.length, 1);
+  assert.match(turns[0].text, /Writing tests.*Found 8 journeys.*Skipped 2 covered/);
+});
+
+test("`handoff` event emits a separate instant-render turn", () => {
+  const turns = eventsToTurns([
+    { step: 3, agent: "explorer", phase: "start", message: "Classifying" },
+    { step: 3, agent: "explorer", phase: "done" },
+    { step: 3, agent: "explorer", phase: "handoff", nextAgent: "planner" },
+  ]);
+  // doing turn + handoff turn = 2 turns.
+  assert.equal(turns.length, 2);
+  const handoff = turns.find(t => t.phase === "handoff");
+  assert.ok(handoff, "expected a handoff turn");
+  assert.match(handoff.text, /Planner/);
+  assert.equal(handoff._complete, true, "handoff renders instantly (already complete)");
+});
+
+test("`done` event marks the open turn complete (no new turn emitted)", () => {
+  const turns = eventsToTurns([
+    { step: 4, agent: "author", phase: "start", message: "Writing tests" },
+    { step: 4, agent: "author", phase: "done" },
+  ]);
+  assert.equal(turns.length, 1, "done must not emit a separate turn");
+  assert.equal(turns[0]._complete, true, "open turn flagged complete");
+});
+
+test("orphan finding (no preceding start) is promoted to a standalone turn", () => {
+  // Defence path — possible if SSE snapshot was truncated or events
+  // arrived out of order. The user should still see the finding text.
+  const turns = eventsToTurns([
+    { step: 4, agent: "author", phase: "finding", message: "12 tests so far." },
+  ]);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].text, "12 tests so far.");
+  assert.equal(turns[0].agent, "author");
+});
+
+test("unknown agent in event payload is skipped (defence)", () => {
+  // Future migration safety — if the backend ever emits an event for an
+  // agent the frontend doesn't know about, the event must NOT crash the
+  // adapter. It's silently dropped instead.
+  const turns = eventsToTurns([
+    { step: 4, agent: "unknownbot", phase: "start", message: "ignored" },
+    { step: 4, agent: "author", phase: "start", message: "kept" },
+  ]);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].agent, "author");
+});
+
+test("multiple agents at the same step produce separate turns", () => {
+  // Step 3 is the multi-agent stage — explorer + planner. Each gets its
+  // own start turn (different `${step}-${agent}` key).
+  const turns = eventsToTurns([
+    { step: 3, agent: "explorer", phase: "start", message: "Classifying" },
+    { step: 3, agent: "explorer", phase: "done" },
+    { step: 3, agent: "planner",  phase: "start", message: "Planning" },
+  ]);
+  assert.equal(turns.length, 2);
+  assert.equal(turns[0].agent, "explorer");
+  assert.equal(turns[1].agent, "planner");
+});
+
+test("turn IDs are stable across calls with the same event sequence", () => {
+  // Diff-and-append in the component depends on stable IDs.
+  const events = [
+    { step: 4, agent: "author", phase: "start", message: "Writing" },
+    { step: 4, agent: "author", phase: "finding", message: "12 tests." },
+  ];
+  const a = eventsToTurns(events).map(t => t.id);
+  const b = eventsToTurns(events).map(t => t.id);
+  assert.deepEqual(a, b);
 });
 
 process.on("beforeExit", () => {

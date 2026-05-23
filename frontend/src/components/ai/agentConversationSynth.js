@@ -345,3 +345,176 @@ function pushTurn(turns, run, ctx, { agent, phase, step, prevAgent, nextAgent })
   const id = `${step}-${agent}-${phase}`;
   turns.push({ id, agent, phase, step, text, ts: Date.now() });
 }
+
+// ── Event-driven adapter (Task 2 follow-up) ───────────────────────────────────
+//
+// Maps the raw `agent_event[]` SSE history (seeded by the snapshot at
+// `backend/src/routes/sse.js#L170-L182` and appended live by
+// `frontend/src/pages/TestLab.jsx#handleSSEEvent` on every `agent_event`
+// push) into the same turn shape `synthesizeTurns` produces.
+//
+// Phase contract (mirrors `migration 057` CHECK clause):
+//   - `start`    → emit a streaming turn (one per `${step}-${agent}` pair).
+//   - `progress` → append `event.message` to the turn's text (rare; emitted
+//                  by future incremental progress hooks). Same merge semantics
+//                  as `finding`.
+//   - `finding`  → append `event.message` (or `event.data`'s scalar form) to
+//                  the existing `start` turn. NOT a separate turn — operators
+//                  read findings as continuations of "what the agent is doing
+//                  right now", not as fresh utterances.
+//   - `handoff`  → emit an instant-render handoff turn (matches the
+//                  `phase: "handoff"` shape `synthesizeTurns` produces, so
+//                  the component's diff layer handles both modes uniformly).
+//   - `done`     → no new turn; the component's streamer flips the matching
+//                  `start` turn's status to "done" once `renderedText` reaches
+//                  the end of `text`. We mark the merged turn as "complete"
+//                  via a `_complete` flag so the component knows not to wait
+//                  for further finding/progress events.
+//
+// Stable ID scheme: `evt-${step}-${agent}-${phase}` for non-merged turns
+// (`onboard`/`handoff`/`wrapup`-equivalent). Merged turns use
+// `evt-${step}-${agent}-doing` so a finding arriving after a start extends
+// the same turn instead of creating a sibling — operators see Explorer's
+// "Classifying intent…" turn grow with "Identified 8 user intents" appended,
+// not two stacked turns.
+
+const HANDOFF_TEMPLATES = {
+  explorer: "Handing off to <Next>.",
+  planner:  "Handing off to <Next>.",
+  author:   "Handing off to <Next>.",
+  oracle:   "Handing off to <Next>.",
+  reviewer: "Handing off to <Next>.",
+};
+
+/**
+ * Pure mapper from a chronological `agent_event[]` list to the turn shape
+ * the AgentConversation component renders. Returns turns in emission order;
+ * stable IDs let the component's diff-and-append step skip already-rendered
+ * turns and merge findings into open `start` turns.
+ *
+ * @param {Array<Object>} events - `runData.agentEvents`. Each row carries
+ *   `{ step, agent, phase, message, data, nextAgent, model, createdAt }`.
+ * @returns {Array<{id: string, agent: string, phase: string, step: number,
+ *   text: string, ts: number, _complete?: boolean}>}
+ */
+export function eventsToTurns(events) {
+  if (!Array.isArray(events) || events.length === 0) return [];
+  const turns = [];
+  // Map keyed by `${step}-${agent}` so finding/progress/done events know
+  // which previously-emitted turn to merge into.
+  const openByAgent = new Map();
+
+  for (const evt of events) {
+    if (!evt || !evt.agent || !evt.phase) continue;
+    if (!AGENT_PERSONAS[evt.agent]) continue; // skip unknown agents (defence)
+    const step = Number(evt.step) || 0;
+    const ts = evt.createdAt ? Date.parse(evt.createdAt) || Date.now() : Date.now();
+    const key = `${step}-${evt.agent}`;
+
+    if (evt.phase === "start") {
+      // Open a new doing-style turn. Wording prefers the backend's
+      // `message` (operator-controlled at the call site) and falls back
+      // to a generic "<Agent> is working" so the turn never renders empty.
+      const persona = AGENT_PERSONAS[evt.agent];
+      const text = evt.message || `${persona.label} is working…`;
+      const turn = {
+        id: `evt-${key}-doing`,
+        agent: evt.agent,
+        phase: "doing",
+        step,
+        text,
+        ts,
+      };
+      openByAgent.set(key, turn);
+      turns.push(turn);
+      continue;
+    }
+
+    if (evt.phase === "handoff") {
+      const persona = AGENT_PERSONAS[evt.agent];
+      const nextLabel = AGENT_PERSONAS[evt.nextAgent]?.label || "the next agent";
+      const tmpl = HANDOFF_TEMPLATES[evt.agent] || "Handing off to <Next>.";
+      const text = (evt.message || tmpl).replace(/<Next>/g, nextLabel);
+      turns.push({
+        id: `evt-${key}-handoff-${turns.length}`, // include index so multiple handoffs from the same agent (e.g. retry) don't collide
+        agent: evt.agent,
+        phase: "handoff",
+        step,
+        text,
+        ts,
+        // Handoffs are atomic — render instantly without streaming.
+        _complete: true,
+        // Carry persona reference for the component (avoids a second lookup).
+        _persona: persona,
+      });
+      continue;
+    }
+
+    if (evt.phase === "finding" || evt.phase === "progress") {
+      // Merge into the open doing turn for this (step, agent). When no
+      // start preceded this event (orphan finding — possible if the SSE
+      // snapshot was truncated or events arrived out of order), promote
+      // the finding to a standalone turn so the user still sees it.
+      const open = openByAgent.get(key);
+      const fragment = evt.message || formatScalarData(evt.data);
+      if (!fragment) continue;
+      if (open) {
+        // Append to the existing turn's text. Idempotent on duplicate
+        // events (rare but possible on reconnect): the second append no-ops
+        // when the fragment is already a suffix.
+        if (!open.text.endsWith(fragment)) {
+          open.text = open.text ? `${open.text} ${fragment}` : fragment;
+          open.ts = ts;
+        }
+      } else {
+        const orphan = {
+          id: `evt-${key}-${evt.phase}-${turns.length}`,
+          agent: evt.agent,
+          phase: "doing",
+          step,
+          text: fragment,
+          ts,
+        };
+        openByAgent.set(key, orphan);
+        turns.push(orphan);
+      }
+      continue;
+    }
+
+    if (evt.phase === "done") {
+      // Mark the matching start turn complete so the component's streamer
+      // knows the merged text won't grow further. If there's no open turn
+      // (done arrived without start — shouldn't happen but defended), this
+      // event is a no-op. We don't emit a separate turn for `done`: the
+      // streamer flipping the start turn to status="done" is the visible
+      // signal.
+      const open = openByAgent.get(key);
+      if (open) {
+        open._complete = true;
+        openByAgent.delete(key);
+      }
+      continue;
+    }
+  }
+
+  return turns;
+}
+
+/**
+ * Render an event's `data` payload as a short human-readable fragment when
+ * `message` is absent. Conservative: only stringifies primitives + small
+ * key/value objects so we don't dump megabyte JSON into the conversation.
+ */
+function formatScalarData(data) {
+  if (data == null) return "";
+  if (typeof data === "string" || typeof data === "number" || typeof data === "boolean") {
+    return String(data);
+  }
+  if (typeof data === "object" && !Array.isArray(data)) {
+    // Keep first 3 entries to avoid runaway payloads.
+    const entries = Object.entries(data).slice(0, 3);
+    if (entries.length === 0) return "";
+    return entries.map(([k, v]) => `${k}=${typeof v === "object" ? "…" : v}`).join(", ");
+  }
+  return "";
+}
