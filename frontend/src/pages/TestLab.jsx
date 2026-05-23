@@ -30,6 +30,12 @@ import TestConfig from "../components/test/TestConfig.jsx";
 import EmptyState from "../components/shared/EmptyState.jsx";
 import LLMContextRow from "../components/ai/LLMContextRow.jsx";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
+// GAP-005 (audit, fix) — shared step → agent role(s) helper. The legacy
+// `STEP_TO_AGENT_ROLE` constant declared below was a hardcoded incomplete
+// duplicate (only `planner` + `author`, missing `explorer` on step 3).
+// Now sourced from `frontend/src/config.js#getStageAgentRoles` next to the
+// canonical AGENT_ROLES list that mirrors the backend.
+import { getStageAgentRoles } from "../config.js";
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -45,22 +51,12 @@ const PIPELINE_STAGES = [
   { label: "Done",                 step: 8, key: null,                   unit: null },
 ];
 
-// AI-004 (audit): map pipeline-step index → AI agent role. Mirrors the same
-// mapping in `frontend/src/components/generate/GenerateView.jsx` so the
-// TestLab pipeline view's LLMContextRow attributes streamed output to the
-// same role labels as the Generate flow. Stages 1-2 (Crawl, Filter) are
-// pre-LLM (Playwright crawl + heuristic filter) and intentionally omitted
-// — the context row hides itself when `agentRole` is null. Roles match
-// `backend/src/aiProvider/registry.js#resolveProvider` dispatch values, so
-// once `run.modelByStage` lands (GAP-005 backend work) the row will light
-// up with the actual per-stage model attribution without a frontend change.
-const STEP_TO_AGENT_ROLE = {
-  3: "planner",   // Classify Intent
-  4: "author",    // Generate Tests via AI — the heavy LLM stage
-  5: "author",    // Deduplicate (LLM-assisted dedup)
-  6: "author",    // Enhance Assertions
-  7: "author",    // Validate
-};
+// GAP-005 (audit, fix) — `STEP_TO_AGENT_ROLE` removed in favour of the
+// shared `getStageAgentRoles` helper imported above. The old map was both
+// incomplete (only `planner` + `author`, missing `explorer` and 3 other
+// configurable roles) and wrong on step 3 (the real call site is
+// `backend/src/pipeline/intentClassifier.js#L158` with `explorer`, plus
+// `journeyGenerator.js#L218` with `planner` — multi-agent stage).
 
 // Coverage / perspective / quality / test-count / profile option lists used to
 // live here; they have moved to the shared <TestConfig /> component which
@@ -1419,8 +1415,15 @@ export default function TestLab() {
                               : null}
                             stageIndex={Number.isFinite(runData?.currentStep) ? runData.currentStep : null}
                             totalStages={PIPELINE_STAGES.length}
+                            /* GAP-005 (audit, fix): primary agent for the
+                               currently-streaming step. Multi-role stages
+                               (step 3 = explorer + planner) report exactly
+                               one in-flight LLM call at any given instant —
+                               surface the first role from the shared helper.
+                               The full multi-role list shows on the per-stage
+                               trace via PipelineCard / progress feed below. */
                             agentRole={runData?.currentStep != null
-                              ? STEP_TO_AGENT_ROLE[runData.currentStep] || null
+                              ? getStageAgentRoles(runData.currentStep)[0] || null
                               : null}
                             modelName={runData?.modelUsed || null}
                             isRunning={isRunActive}
@@ -1436,13 +1439,22 @@ export default function TestLab() {
                               const state = stageStatus(stage.step, runData?.currentStep ?? null, runData?.status ?? "running");
                               const statVal = stage.key ? (ps[stage.key] ?? null) : null;
                               if (state === "pending") return null;
-                              // AI-005: surface the agent role so operators see
-                              // which agent handled each stage. Stages 1-2 are
-                              // pre-LLM (Playwright crawl + heuristic filter) —
-                              // no AI agent involved.
-                              const agentRole = STEP_TO_AGENT_ROLE[stage.step] || null;
-                              const agentLabel = agentRole
-                                ? agentRole.charAt(0).toUpperCase() + agentRole.slice(1) + " agent"
+                              // GAP-005 (audit, fix): surface ALL agent roles
+                              // that run during this stage. Pre-fix this was
+                              // a hardcoded single-role lookup that mis-
+                              // attributed step 3 (real call site uses
+                              // `explorer`, not `planner`, plus `planner`
+                              // adds a second pass for journey decomposition).
+                              // Multi-role stages combine with " + " so
+                              // step 3 reads "Explorer + Planner agent
+                              // mapped 8 user journeys…". Stages 1-2
+                              // (Crawl, Filter) and step 8 (Done) return
+                              // [] from the shared helper and produce no
+                              // agent label.
+                              const roles = getStageAgentRoles(stage.step);
+                              const agentRole = roles[0] || null;
+                              const agentLabel = roles.length > 0
+                                ? roles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(" + ") + " agent"
                                 : null;
                               const model = runData?.modelUsed || null;
                               // Outcome-oriented messages: tell the user what

@@ -9,6 +9,12 @@ import GenerationSuccessBanner from "../generate/GenerationSuccessBanner.jsx";
 import ActivityLogCard from "../run/ActivityLogCard.jsx";
 import RunSidebar from "../run/RunSidebar.jsx";
 import { api } from "../../api.js";
+// GAP-005 (audit, fix) — pipeline-step → agent role(s) lookup from the
+// canonical source at `frontend/src/config.js`. Replaces the locally-
+// hardcoded `STEP_TO_AGENT_ROLE` map that was (1) only covering 2 of 7
+// AGENT_ROLES and (2) wrong on step 3 (the real call uses `explorer`,
+// not `planner`).
+import { getStageAgentRoles } from "../../config.js";
 
 // Each stage maps to a 1-based step index set authoritatively by the
 // backend via run.currentStep. No fragile log-string scraping needed.
@@ -22,6 +28,8 @@ const PIPELINE_STAGES = [
   { label: "Validate Tests",             icon: "✅", step: 7 },
   { label: "Done",                        icon: "🎉", step: 8 },
 ];
+
+
 
 export default function CrawlView({ run, isRunning }) {
   const navigate = useNavigate();
@@ -119,6 +127,38 @@ export default function CrawlView({ run, isRunning }) {
           currentStep={run?.currentStep ?? 0}
           status={run?.status}
           isRunning={isRunning}
+          /* GAP-005 (audit, fix): per-stage agent attribution via shared
+             config helper. Steps 1-2 (Crawl, Filter) are pre-LLM and
+             return []; step 3 returns ["explorer", "planner"] (multi-
+             agent); steps 4-7 return ["author"]. Pulling from
+             `config.js#getStageAgentRoles` keeps this single-sourced
+             across CrawlView / GenerateView / TestLab — drift between
+             frontend attribution and the actual backend call sites is
+             impossible because the map sits next to the AGENT_ROLES
+             list that mirrors the backend canonical list. */
+          agentRoleFor={getStageAgentRoles}
+          /* GAP-005 (audit): per-stage outcome chip. Reads from the same
+             `pipelineStats` object the RunSidebar's stat strip uses, so
+             counts agree across both surfaces. Step 1 (Crawl) prefers
+             `run.pagesFound` over `ps.pagesFound` so the in-flight value
+             surfaces during the crawl phase before pipelineStats is
+             finalised; step 4 prefers `run.testsGenerated` (post-validate
+             count) over `rawTestsGenerated` for the same reason. */
+          outcomeFor={(step) => {
+            if (step === 1) {
+              const v = run?.pagesFound ?? ps.pagesFound;
+              return v != null ? { label: "pages crawled", value: v } : null;
+            }
+            if (step === 3 && ps.journeysDetected != null) return { label: "journeys detected", value: ps.journeysDetected };
+            if (step === 4) {
+              const v = run?.testsGenerated ?? ps.rawTestsGenerated;
+              return v != null ? { label: "tests generated", value: v } : null;
+            }
+            if (step === 5 && ps.duplicatesRemoved != null) return { label: "duplicates removed", value: ps.duplicatesRemoved };
+            if (step === 6 && ps.assertionsEnhanced != null) return { label: "assertions enhanced", value: ps.assertionsEnhanced };
+            if (step === 7 && ps.validationRejected != null) return { label: "validation rejected", value: ps.validationRejected };
+            return null;
+          }}
         />
 
         <GenerationSuccessBanner run={run} isRunning={isRunning} />
