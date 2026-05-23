@@ -929,6 +929,75 @@ export default function TestLab() {
   }
 
   /**
+   * G11 — Retry a failed/aborted run using the same configuration that
+   * produced the original run. The backend persists `dialsConfig` inside
+   * `run.generateInput` (see `backend/src/routes/runs.js:95` for crawl and
+   * `backend/src/routes/tests.js:735` for generate), and `environmentId`
+   * lives on the run row directly (`runRepo.js` INSERT_COLS), so a retry
+   * is a stateless re-launch — no UI re-config required.
+   *
+   * Industry pattern: matches GitHub Actions' "Re-run failed jobs" and
+   * Vercel's "Retry deployment" — the user expects the same inputs to
+   * produce a fresh attempt without re-entering the form.
+   *
+   * Crawl runs reuse the project URL as the start page (no per-run URL
+   * override exists); requirement runs reuse `generateInput.name` +
+   * `generateInput.description` so the same prompt gets re-run.
+   * Attachments are NOT preserved — they were folded into `description`
+   * at launch time (`handleGenerateFromRequirement`), so retrying re-uses
+   * the folded prompt verbatim. The user can edit + relaunch from the
+   * config panel if they want a different prompt.
+   */
+  async function handleRetry() {
+    if (!activeRun?.projectId || !runData) return;
+    const runType = activeRun.type;
+    if (runType !== "crawl" && runType !== "generate") {
+      setError("Only crawl and generate runs can be retried.");
+      return;
+    }
+    // Pull config from the failed run's persisted shape. Fall back to the
+    // current `dialsConfig` state when `generateInput` is absent (legacy
+    // runs from before the field was persisted, or interrupted runs that
+    // never wrote the column).
+    const persistedDials = runData?.generateInput?.dialsConfig || dialsConfig;
+    const persistedEnv = runData?.environmentId || "";
+    setError(null);
+    if (!(await ensureAiProvider())) return;
+    setLaunching(true);
+    // Detach from the failed run BEFORE launching the new one. Same SSE
+    // reconnect-race rationale as handleStartCrawl / handleGenerateFromRequirement.
+    setActiveRun(null);
+    setLogLines([]);
+    setRunData(null);
+    clearPersistedRun();
+    try {
+      if (runType === "crawl") {
+        const body = { dialsConfig: persistedDials };
+        if (persistedEnv) body.environmentId = persistedEnv;
+        const { runId } = await api.crawl(activeRun.projectId, body);
+        setActiveRun({ runId, projectId: activeRun.projectId, type: "crawl" });
+      } else {
+        // Generate retry — preserve the original name + description verbatim.
+        // The backend requires `name`, so we fall back to a derived label
+        // when the failed run's input is somehow missing (defence-in-depth;
+        // the column has been written since the feature shipped).
+        const input = runData?.generateInput || {};
+        const name = input.name || "Retry";
+        const description = input.description || "";
+        const genBody = { name, description, dialsConfig: persistedDials };
+        if (persistedEnv) genBody.environmentId = persistedEnv;
+        const { runId } = await api.generateTest(activeRun.projectId, genBody);
+        setActiveRun({ runId, projectId: activeRun.projectId, type: "generate" });
+      }
+      setInnerTab("pipeline");
+    } catch (err) {
+      setError(err.message || "Failed to retry run.");
+    } finally {
+      setLaunching(false);
+    }
+  }
+
+  /**
    * Attach the Test Lab live-view (pipeline + logs) to an existing run that
    * was either started elsewhere or dropped when the user navigated away.
    * Seeds `activeRun` / `runData` from the cached run row so the SSE hook
@@ -1339,8 +1408,26 @@ export default function TestLab() {
                   <div>
                     <strong>{runStatus === "aborted" ? "Run aborted" : "Run failed"}</strong>
                     {runData?.error ? ` — ${runData.error}` : "."}
+                    {/* G11 — Retry uses the same dialsConfig + environmentId
+                        from the failed run. Disabled while a re-launch is
+                        in flight (`launching` from handleRetry) so a double-
+                        click can't fire two crawl requests. Rendered as
+                        primary so the recovery action stands out from the
+                        secondary View / Dismiss controls. */}
                     <button
-                      className="btn btn-ghost btn-xs tl-banner-spaced-btn-l"
+                      className="btn btn-primary btn-xs tl-banner-spaced-btn-l"
+                      onClick={handleRetry}
+                      disabled={launching}
+                      title="Re-run with the same configuration"
+                    >
+                      {launching ? (
+                        <><span className="spin"><RotateCcw size={12} /></span> Retrying…</>
+                      ) : (
+                        <><RotateCcw size={12} /> Retry</>
+                      )}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-xs tl-banner-spaced-btn-s"
                       onClick={() => navigate(`/runs/${activeRun.runId}`)}
                     >
                       View run <ChevronRight size={12} />
@@ -1756,6 +1843,25 @@ export default function TestLab() {
                           onClick={() => navigate(`/projects/${activeRun.projectId}?tab=tests`)}
                         >
                           View {generatedOutcome.autoApproved} auto-approved <ChevronRight size={13} />
+                        </button>
+                      )}
+                      {/* G11 — Retry shows on failed/aborted runs (not on
+                          completed runs — there's nothing to retry when the
+                          pipeline succeeded). Same handler the banner uses;
+                          the panel button is a redundant entry point for
+                          users who've scrolled past the top-of-page banner. */}
+                      {isRunFailed && (
+                        <button
+                          className="btn btn-primary tl-full-btn"
+                          onClick={handleRetry}
+                          disabled={launching}
+                          title="Re-run with the same configuration"
+                        >
+                          {launching ? (
+                            <><span className="spin"><RotateCcw size={13} /></span> Retrying…</>
+                          ) : (
+                            <><RotateCcw size={13} /> Retry run</>
+                          )}
                         </button>
                       )}
                       <button
