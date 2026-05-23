@@ -357,7 +357,35 @@ function pushTurn(turns, run, ctx, { agent, phase, step, prevAgent, nextAgent })
     .replace(/<Next>/g, AGENT_PERSONAS[nextAgent]?.label || "")
     .replace(/<Prev>/g, AGENT_PERSONAS[prevAgent]?.label || "");
   const id = `${step}-${agent}-${phase}`;
-  turns.push({ id, agent, phase, step, text, ts: Date.now() });
+  // Stat chip: finding turns carry a scannable summary chip so the user
+  // can glance at "47 pages found" / "12 tests written" without reading
+  // the full sentence. Mirrors the old NarrativeFeed's green `.tl-nf-stat`
+  // pill. Only populated for `finding` phase — other phases have no stat.
+  let _stat = undefined;
+  if (phase === "finding") {
+    const STAT_MAP = {
+      1: { key: "pagesFound",          label: "pages found" },
+      2: { key: "elementsKept",         label: "elements kept" },
+      3: { key: "journeysDetected",     label: "journeys mapped" },
+      4: { key: "rawTestsGenerated",    label: "tests written" },
+      5: { key: "duplicatesRemoved",    label: "duplicates removed" },
+      6: { key: "assertionsEnhanced",   label: "assertions upgraded" },
+      7: { key: "validationRejected",   label: "rejected" },
+    };
+    const spec = STAT_MAP[step];
+    if (spec) {
+      // Step 1 has a live top-level mirror (`run.pagesFound`), prefer it.
+      const val = step === 1
+        ? (run?.pagesFound ?? ctx.ps?.[spec.key])
+        : ctx.ps?.[spec.key];
+      if (val != null) _stat = { value: val, label: spec.label };
+    }
+    if (step === 8) {
+      const total = run?.testsGenerated ?? 0;
+      if (total > 0) _stat = { value: total, label: "tests ready" };
+    }
+  }
+  turns.push({ id, agent, phase, step, text, ts: Date.now(), _stat });
 }
 
 // ── Event-driven adapter (Task 2 follow-up) ───────────────────────────────────

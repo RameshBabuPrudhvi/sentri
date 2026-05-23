@@ -367,6 +367,16 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
                     `TestLab.jsx:884-891`). */}
                 {isStreaming && <span className="ac-cursor" aria-hidden="true" />}
               </div>
+              {/* Stat chip — scannable summary for completed finding turns.
+                  Mirrors the old NarrativeFeed's green `.tl-nf-stat` pill.
+                  Only renders when the turn is done streaming AND carries a
+                  `_stat` object (populated by the synthesizer for finding
+                  turns that have a resolved pipeline stat). */}
+              {turn.status === "done" && turn._stat && (
+                <div className="ac-stat">
+                  <strong>{turn._stat.value}</strong> {turn._stat.label}
+                </div>
+              )}
             </div>
           </article>
         );
