@@ -187,6 +187,17 @@ export const TURN_TEMPLATES = {
     if (total === 1) return "All done — 1 test ready for your review.";
     return `All done — ${total} tests ready for your review.`;
   },
+  // AUTO-023 — Author hands off to Oracle at end of step 5 (dedup → assertion
+  // strengthening). Pre-AUTO-023 Author owned steps 4-7 contiguously so no
+  // handoff template was needed (the synthesizer's `nextAgent !== agent`
+  // guard suppressed self-handoffs). Now that step 6 is Oracle, the inter-
+  // step handoff fires and `resolveTemplate("author", "handoff", 5)` falls
+  // back to this un-suffixed key. The `<Next>` token is substituted by
+  // `pushTurn` from `AGENT_PERSONAS[nextAgent].label`, so this template
+  // stays correct if a future config swap re-targets Author's handoff to
+  // a different downstream agent (e.g. AUTO-023 follow-up wires `triager`
+  // between Author and Oracle).
+  "author.handoff":    () => "Handing off to <Next>.",
 
   // ── Oracle (step 6) + Reviewer (step 7) ──
   // Live as of migration 058 — `frontend/src/config.js#PIPELINE_STEP_ROLES`
