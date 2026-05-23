@@ -1716,7 +1716,7 @@ export default function TestLab() {
                             the client-side synthesizer for real events in a
                             follow-up PR. */}
                         <div className="tl-pipeline-log-col">
-                          <div className="tl-pipeline-col-label">Agents talking</div>
+                          <div className="tl-pipeline-col-label">What&rsquo;s happening</div>
                           <AgentConversation
                             run={runData}
                             isRunActive={isRunActive}

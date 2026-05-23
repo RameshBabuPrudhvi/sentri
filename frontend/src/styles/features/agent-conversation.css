@@ -134,6 +134,10 @@
   padding: 8px 12px;
   border-radius: 12px;
   border: 1px solid transparent;
+  /* `eventsToTurns` joins doing + finding text with `\n` so the finding
+     reads as a visually separate paragraph. `pre-line` collapses runs of
+     spaces (unlike `pre-wrap`) but honours explicit newlines. */
+  white-space: pre-line;
 }
 .ac-turn--explorer .ac-text { background: var(--ac-explorer-bg); border-color: var(--ac-explorer-border); }
 .ac-turn--planner  .ac-text { background: var(--ac-planner-bg);  border-color: var(--ac-planner-border); }

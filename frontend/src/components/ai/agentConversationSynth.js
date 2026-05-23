@@ -532,11 +532,14 @@ export function eventsToTurns(events) {
       const fragment = evt.message || formatScalarData(evt.data);
       if (!fragment) continue;
       if (open) {
-        // Append to the existing turn's text. Idempotent on duplicate
-        // events (rare but possible on reconnect): the second append no-ops
-        // when the fragment is already a suffix.
+        // Append to the existing turn's text on a new line so the finding
+        // reads as a visually separate paragraph from the doing sentence.
+        // `.ac-text { white-space: pre-line }` renders the `\n` as a
+        // line break in the browser. Idempotent on duplicate events (rare
+        // but possible on reconnect): the second append no-ops when the
+        // fragment is already a suffix.
         if (!open.text.endsWith(fragment)) {
-          open.text = open.text ? `${open.text} ${fragment}` : fragment;
+          open.text = open.text ? `${open.text}\n${fragment}` : fragment;
           open.ts = ts;
         }
       } else {

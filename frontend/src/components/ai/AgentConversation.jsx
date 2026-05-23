@@ -353,7 +353,7 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
               {!isHandoff && (
                 <div className="ac-meta">
                   <span className="ac-agent-label">{persona.label}</span>
-                  {model && turn.phase !== "onboard" && (
+                  {model && turn.phase !== "onboard" && turn.phase !== "accept" && turn.phase !== "handoff" && (
                     <span className="ac-model">· {model}</span>
                   )}
                 </div>
