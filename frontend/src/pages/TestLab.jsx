@@ -665,8 +665,21 @@ function NarrativeFeed({ run, logLines, isRunActive, allTests }) {
     const statVal = statFor(activeStage);
     const totalLines = activeStage.lines.length;
 
-    // Reveal one more pill while there are lines left to advance through
-    if (activeLine < totalLines - 1) {
+    // Stop one line before the end. The last entry in `stage.lines` is the
+    // *summary* line (always the final, stat-aware sentence — e.g. "Crawl
+    // complete — mapped N pages…" or its zero-count counterpart). That line
+    // is only meaningful when the stage transitions to `done`; the render
+    // (`displayTxt = isDone ? finalLine : streamedText`) picks it up
+    // automatically at that point.
+    //
+    // Pre-fix this advanced all the way to `totalLines - 1`, so while step 1
+    // was still actively crawling we streamed the summary closure with
+    // `pagesFound = 0` and rendered "Crawl complete — no reachable pages
+    // found on this site." even though the crawl was in progress. Stopping
+    // at `totalLines - 2` holds on the last intermediate line ("Logging
+    // page snapshots…") until the stage actually finishes, at which point
+    // the render swaps to the resolved final summary with the real stat.
+    if (activeLine < totalLines - 2) {
       const pauseMs = 900; // pause between sentences
       const t = setTimeout(() => {
         const nextLine = activeLine + 1;
