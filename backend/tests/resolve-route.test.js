@@ -164,9 +164,10 @@ test("(1) sticky for a DIFFERENT role does not leak", () => {
     // author resolution must use its own env-detection fallback, not be
     // perturbed by planner's sticky-fallback. Both env keys are set in
     // the test header (ANTHROPIC_API_KEY first in CLOUD_DETECT_ORDER),
-    // so author gets anthropic via env detection.
+    // so author lands on anthropic via env detection — provided the
+    // `detectProvider({ agentRole: null })` sticky-leak fix is in place.
     const { route } = resolveRoute({ agentRole: "author", workspaceId: ws });
-    assert.equal(route._transientProvider, "anthropic", "author falls to env detection");
+    assert.equal(route._transientProvider, "anthropic", "author falls to env detection, NOT to planner's sticky");
     // and the planner sticky is still active
     const planner = resolveRoute({ agentRole: "planner", workspaceId: ws });
     assert.equal(planner.route._transientProvider, "openai", "planner sticky still active");

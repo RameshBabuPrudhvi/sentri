@@ -690,9 +690,32 @@ export function detectProvider({ agentRole = null } = {}) {
   // Sticky fallback first — a successful rate-limit fallback pins the working
   // provider until the TTL expires, even if the user has the original
   // (rate-limited) provider selected in the dropdown.
+  //
+  // Role isolation: stickies live in two keyspaces depending on workspace
+  // mode at the time `setStickyFallback` was called:
+  //   • `"provider::role"` — multi-agent workspace, per-role pin.
+  //   • `"provider"`       — single-agent workspace (AI-005c collapsed
+  //                          `effectiveAgentRole` to null on dispatch).
+  //
+  // The previous `agentRole && !keyHasRole(...)` guard short-circuited
+  // the role check on `null` agentRole and matched **every** sticky
+  // regardless of which role pinned it (Lifeguard detect-provider
+  // sticky-leak). When `detectProvider` is called WITH an `agentRole`
+  // we must only match that specific role's stickies — NOT another
+  // role's, and NOT a single-agent roleless sticky (which would leak
+  // single-agent state into a multi-agent role's resolution). When
+  // called WITHOUT an `agentRole` we may only match roleless stickies
+  // (legitimate single-agent recovery state). `keyHasRole` already
+  // returns false for keys without `::`, so the matching predicate is
+  // simply: roleless callers want roleless keys; role-scoped callers
+  // want their own role's keys.
   sweepExpiredStickies();
   for (const [key, entry] of stickyFallbacks) {
-    if (agentRole && !keyHasRole(key, agentRole)) continue;
+    const keyIsRoleless = !key.includes("::");
+    const matches = agentRole
+      ? keyHasRole(key, agentRole)
+      : keyIsRoleless;
+    if (!matches) continue;
     if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) return entry.provider;
   }
 

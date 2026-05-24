@@ -34,7 +34,25 @@ import { resetRouteBreakers } from "../aiProvider/registry.js";
 // AES boundary and the repo stays a pure DAL. Plaintext is never written
 // to disk and never persisted on the request object beyond the call.
 import * as secrets from "../aiProvider/secrets.js";
-import { FAMILY_EMOJI, formatCostTier, getCloudName } from "../aiProvider/modelCatalog.js";
+import { FAMILY_EMOJI, formatCostTier } from "../aiProvider/modelCatalog.js";
+
+// Static family → display label map. Used by `toDisplayRoute` to render
+// `displayLabel: "MyRoute (Anthropic)"` in the AI Providers dropdown.
+//
+// Why not use `getCloudName(row.family)` from modelCatalog.js? Because that
+// function reads `process.env[envVar]` (e.g. `ANTHROPIC_MODEL`) and returns
+// the raw model id when set — producing labels like "MyRoute (claude-3-opus-
+// 20240229)" instead of "MyRoute (Anthropic)" for every Anthropic-family
+// route in a deployment with model env overrides. This map is purely
+// family→brand, no env dependency. Lifeguard BUG-0001 / BUG-0004.
+const FAMILY_DISPLAY_LABEL = Object.freeze({
+  anthropic:  "Anthropic",
+  openai:     "OpenAI",
+  google:     "Google",
+  openrouter: "OpenRouter",
+  local:      "Ollama",
+  custom:     "Custom",
+});
 
 
 const router = Router();
@@ -65,7 +83,7 @@ const router = Router();
  */
 function toDisplayRoute(row, rolesByRouteId = null) {
   if (!row) return row;
-  const familyLabel = getCloudName(row.family) || row.family || "Custom";
+  const familyLabel = FAMILY_DISPLAY_LABEL[row.family] || row.family || "Custom";
   return {
     ...row,
     displayLabel: `${row.name} (${familyLabel})`,
@@ -1449,6 +1467,12 @@ router.patch("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
       workspaceId: req.workspaceId,
       userId: req.authUser?.sub || null,
     });
+    // Lifeguard BUG-0006 — operator-facing activity log entry. The repo's
+    // own audit (`providerRouteAuditRepo`) captures the field-level diff;
+    // this row surfaces "what changed" in the workspace activity stream
+    // so admins watching the audit page see the rename / re-enable / etc.
+    // without filtering on a separate provider-routes-audit subtab.
+    logActivity({ ...actor(req), type: "settings.update", detail: `AI Provider updated: ${updated.name}` });
     res.json(toDisplayRoute(updated));
   } catch (err) {
     return handleProviderRouteError(err, res);
