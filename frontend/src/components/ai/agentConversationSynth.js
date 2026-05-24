@@ -95,13 +95,45 @@ export const TURN_TEMPLATES = {
       : "Opening your homepage and following every link I can reach…";
   },
   "explorer.finding.1": (r, { ps }) => {
-    // `pagesFound` has a live top-level mirror (incremented per page
-    // snapshot at `crawlBrowser.js:338`), so prefer it over
+    // `pagesFound` + `pages` have a live top-level mirror (updated per
+    // page snapshot at `crawlBrowser.js:338-347`), so prefer them over
     // `pipelineStats.pagesFound` which only materialises at step 8.
+    //
+    // Step 1 is pre-LLM — the backend emits zero `agent_event` rows
+    // during the crawl loop (see comment at top of this file). To get
+    // Claude-style per-page narration ("just visited X… 5 pages mapped
+    // so far") we read `run.pages[-1]` directly from the snapshot SSE
+    // array. Each crawl tick re-renders this template and the streamer
+    // diffs the text by turn id (`1-explorer-finding`).
     const pages = r?.pagesFound ?? ps?.pagesFound;
     if (pages == null) return null;
     if (pages <= 0)    return "No reachable pages found on this site.";
-    return `Mapped ${pages} page${pages !== 1 ? "s" : ""}.`;
+
+    const list = Array.isArray(r?.pages) ? r.pages : [];
+    const last = list.length > 0 ? list[list.length - 1] : null;
+    const lastLabel = humanPageLabel(last);
+
+    // Verb choice — step 1 is the *crawl* phase (URL discovery only); the
+    // broader Explorer arc (steps 1-3) layers on element filtering + intent
+    // classification. Narration must reflect crawl semantics, not the full
+    // exploration. Constraints:
+    //   • Not "Explored" — that's the agent's whole arc, not step 1.
+    //   • Not "Visited" — too generic, doesn't convey "found a new URL".
+    //   • Not "Reviewed" — collides with step-7 Reviewer agent.
+    //   • Not "Crawled" — accurate but reads as technical jargon.
+    // "Discovered" fits: professional, conveys URL-finding, no collisions.
+    //
+    // `humanPageLabel` returns the page title or empty string — never a
+    // raw URL path. Title-less pages fall back to "another page" so
+    // non-technical users never see `/api/v2/users` in the bubble.
+    if (pages === 1) {
+      return lastLabel
+        ? `Discovered your homepage (${lastLabel}).`
+        : "Discovered your homepage.";
+    }
+    return lastLabel
+      ? `Discovered ${lastLabel}. ${pages} pages found so far.`
+      : `Discovered another page. ${pages} pages found so far.`;
   },
   "explorer.doing.2":   () => "Scanning each page for buttons, inputs, forms — anything a user can act on. Skipping decorative content.",
   "explorer.finding.2": (r, { ps }) => {
@@ -306,11 +338,16 @@ export function synthesizeTurns(run, ctx) {
         pushTurn(turns, run, ctx, { agent, phase: "doing", step, prevAgent, nextAgent });
       }
 
-      // 3. Finding turn — only when step is done AND the template resolved
-      //    to a non-null string (the stat actually landed). The honesty
-      //    guard: mid-run we don't fabricate "0 X found" while the stat is
-      //    still arriving.
-      if (isDone) {
+      // 3. Finding turn — emit when active OR done, and only when the
+      //    template resolved to a non-null string (the stat actually
+      //    landed). Mid-run emission is safe because each template's
+      //    honesty guard returns null until its stat materialises — but
+      //    step 1 has a live `run.pagesFound` mirror that ticks per page
+      //    snapshot (`backend/src/pipeline/crawlBrowser.js:338`), so the
+      //    bubble grows from "Mapped 3 pages." → "Mapped 30 pages." as
+      //    crawling progresses instead of staying frozen on "Opening…"
+      //    until the step flips done.
+      if (isActive || isDone) {
         pushTurn(turns, run, ctx, { agent, phase: "finding", step, prevAgent, nextAgent });
       }
 
@@ -461,8 +498,13 @@ export function eventsToTurns(events) {
       // Open a new doing-style turn. Wording prefers the backend's
       // `message` (operator-controlled at the call site) and falls back
       // to a generic "<Agent> is working" so the turn never renders empty.
+      // Backend messages can embed full URLs (e.g. step 4 emits
+      // `Writing tests for ${classifiedPage.url}` per journey at
+      // `backend/src/pipeline/journeyGenerator.js:273-274`). Run them
+      // through `prettifyMessage` so encoded query strings and long paths
+      // don't dump into the bubble verbatim.
       const persona = AGENT_PERSONAS[evt.agent];
-      const text = evt.message || `${persona.label} is working…`;
+      const text = prettifyMessage(evt.message) || `${persona.label} is working…`;
       // Bug fix: when the same agent emits multiple start/done cycles for
       // the same step (e.g. Author writes tests per-page at step 4, or
       // Planner plans per-journey at step 3), a previous `done` event
@@ -533,7 +575,7 @@ export function eventsToTurns(events) {
       // snapshot was truncated or events arrived out of order), promote
       // the finding to a standalone turn so the user still sees it.
       const open = openByAgent.get(key);
-      const fragment = evt.message || formatScalarData(evt.data);
+      const fragment = prettifyMessage(evt.message) || formatScalarData(evt.data);
       if (!fragment) continue;
       if (open) {
         // Append to the existing turn's text on a new line so the finding
@@ -578,6 +620,64 @@ export function eventsToTurns(events) {
   }
 
   return turns;
+}
+
+/**
+ * Build a short human-readable label for a crawled page row from
+ * `run.pages` (`{ url, title, status, ... }` — see `crawlBrowser.js:340-345`).
+ * Used by `explorer.finding.1` to narrate per-page crawl progress.
+ *
+ * Preference order: `title` (if non-empty and not a URL fallback) wrapped
+ * in quotes, else the URL's path segment in backticks, else null. Trims
+ * to ~40 chars to keep the bubble compact.
+ */
+function humanPageLabel(page) {
+  if (!page || typeof page !== "object") return "";
+  const url = typeof page.url === "string" ? page.url : "";
+  const title = typeof page.title === "string" ? page.title.trim() : "";
+  // Prefer the real page title — that's what a non-technical user
+  // recognises ("Pricing", "About Us"). `crawlBrowser.js:340-345`
+  // falls back to `s.url` when title is empty, so reject titles that
+  // are just the URL string — they'd leak raw paths into the bubble.
+  if (title && title !== url) {
+    return title.length > 40 ? title.slice(0, 37) + "…" : title;
+  }
+  // No usable title. Industry-standard UX (Linear / Notion / Vercel)
+  // hides raw URL paths from end users — they read as a leak, especially
+  // for technical paths like `/api/v2/users` or query strings. Return an
+  // empty string so the template falls through to its title-less branch
+  // ("another page" / generic count) instead of dumping the path.
+  return "";
+}
+
+/**
+ * Prettify a backend `agent_event.message` for display in the conversation
+ * bubble. The backend emits operator-readable strings, but step 4 in
+ * particular embeds full per-journey URLs (`backend/src/pipeline/journeyGenerator.js:273`)
+ * — encoded query strings and long paths blow out the chat bubble.
+ *
+ * Detects URL substrings, decodes percent-encoding, and replaces them
+ * with `host + truncated path` (max 40 chars). Non-URL text passes through
+ * unchanged so other backend wording (e.g. "Comparing 12 tests…") stays
+ * intact.
+ */
+function prettifyMessage(message) {
+  if (!message || typeof message !== "string") return message || "";
+  // Match http(s) or protocol-relative URLs up to whitespace.
+  return message.replace(/https?:\/\/\S+/g, (match) => {
+    try {
+      const u = new URL(match);
+      let path = decodeURIComponent(u.pathname || "");
+      if (u.search) path += u.search;
+      if (path.length > 40) path = path.slice(0, 37) + "…";
+      const tail = path && path !== "/" ? path : "";
+      return `${u.host}${tail}`;
+    } catch {
+      // Malformed URL — fall back to a hard length cap so the raw string
+      // can't blow out the bubble even when URL parsing fails.
+      return match.length > 60 ? match.slice(0, 57) + "…" : match;
+    }
+  });
 }
 
 /**
