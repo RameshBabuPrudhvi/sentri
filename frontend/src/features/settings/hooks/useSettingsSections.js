@@ -78,7 +78,7 @@ export function useSettingsSections() {
       sections: visible,
       groups,
       // Fallback section for `/settings` (no segment) → first visible. Admins
-      // land on `providers`; viewers / qa_leads land on `execution` (first
+      // land on `ai_providers`; viewers / qa_leads land on `execution` (first
       // non-admin entry — never a 403-prone surface).
       fallback: visible[0]?.key || "account",
       isAdmin,

@@ -71,170 +71,6 @@
 .st-data-action__sub { margin-top: 2px; }
 .st-data-action__status { margin-top: 0; }
 .st-data-action__btn { flex-shrink: 0; }
-/* Loading skeletons mirror the live grid (see `.st-provider-cards` below)
-   so first-paint doesn't shift the layout when cards hydrate. Same
-   `auto-fill` recipe + gap so the skeleton count visually matches the
-   live card count slot-for-slot. */
-.st-provider-loading-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 20px;
-}
-.st-provider-skeleton { height: 200px; border-radius: 16px; }
-/* UX-AUDIT (May 2026) — provider cards in a responsive 2-column grid.
-   With the Settings shell widened to `page-container-xl` (1200px), a
-   single-column stack wastes ~half the content area. Switch to a CSS
-   grid with `auto-fill + minmax(360px, 1fr)` so:
-     - Wide viewports (≥ ~860px content width) render two cards per row.
-     - Narrow viewports automatically collapse to a single column with
-       no extra media query.
-     - `auto-fill` (NOT `auto-fit`) is critical: when the last row has a
-       single orphan card (5 built-in providers = row 3 has Ollama
-       alone; or a workspace with one compat slot), `auto-fit` would
-       collapse the empty track and stretch the orphan to 100% width
-       — it then looks bigger than its peers and breaks the visual
-       grid. `auto-fill` keeps the empty track present so the orphan
-       stays at its natural ~400px width, sitting flush-left with empty
-       space to its right. This is the industry-standard recipe used by
-       Vercel AI Gateway, OpenRouter, LangSmith, and Stripe dashboard
-       card grids.
-   360px is the breakpoint where a `.st-provider-card` (44px icon + name
-   + masked-key row + actions) stays legible without text wrapping its
-   provider description. */
-.st-provider-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 20px;
-  align-items: start;
-}
-.st-provider-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-.st-provider-active-text { font-size: 0.7rem; font-weight: 700; }
-.st-provider-key-input { padding-right: 40px; }
-.st-key-remove-btn { padding: 3px 8px; }
-.st-key-status-inner { display: flex; align-items: center; gap: 8px; }
-.st-provider-actions { margin-top: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.st-provider-icon-emoji { font-size: 20px; }
-.st-provider-banner__title-ok { font-weight: 700; }
-.st-provider-banner__model { font-family: var(--font-mono); }
-.st-provider-banner--ok { background: rgba(0,229,255,0.05); border: 1px solid rgba(0,229,255,0.15); }
-.st-provider-banner--missing { background: rgba(255,71,87,0.05); border: 1px solid rgba(255,71,87,0.2); }
-.st-provider-banner__title-missing { color: var(--red); font-weight: 700; }
-/* UX-AUDIT (May 2026) — compat provider section now renders each saved slot
-   as a full `.st-provider-card` (see CompatProviderForm.jsx). The outer
-   `.st-compat-card` is a flex column that stacks the section title, the
-   add-provider form card, and the provider-card list with consistent gap
-   matching the built-in ProviderCard rhythm in `.st-provider-cards`. */
-.st-compat-card {
-  margin-top: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.st-compat-form-card { /* the boxed "Add provider" form */ }
-.st-compat-card__title { margin-bottom: 14px; font-size: 0.95rem; }
-/* UX-AUDIT (May 2026) — 2-column form grid on wide viewports so the
-   five inputs (slot id / display name / base URL / model / API key)
-   don't render as a lonely vertical stack inside the 1200px container.
-   Pattern mirrors Vercel AI Gateway and Stripe API-key creation forms.
-   The `.st-compat-form__field--wide` modifier lets the Base URL and
-   API Key fields span both columns when their content typically runs
-   long. Collapses to single column at 700px (form-card breakpoint). */
-.st-compat-form {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 14px;
-}
-.st-compat-form__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.st-compat-form__field--wide { grid-column: 1 / -1; }
-.st-compat-form__label {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text2);
-}
-.st-compat-form__hint {
-  font-size: 0.7rem;
-  color: var(--text3);
-  margin-top: 2px;
-}
-.st-compat-form__error {
-  grid-column: 1 / -1;
-  color: var(--red);
-  font-size: 0.82rem;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-.st-compat-form__actions {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-@media (max-width: 700px) {
-  .st-compat-form { grid-template-columns: 1fr; }
-  .st-compat-form__field--wide { grid-column: 1; }
-}
-/* Legacy classes kept for backward compatibility with any external CSS
-   overrides; the new card-shaped rendering no longer uses these selectors. */
-.st-compat-list { margin-top: 12px; display: grid; gap: 8px; }
-.st-compat-row { display: flex; justify-content: space-between; align-items: center; }
-.st-compat-row__actions { display: flex; gap: 6px; }
-.st-env-tip__row { display: flex; align-items: flex-start; gap: 8px; }
-.st-env-tip__icon { color: var(--text3); margin-top: 2px; }
-.st-env-tip__body { line-height: 1.6; }
-
-/* GAP-002 — Ollama panel */
-.ollama-panel { margin-top: 16px; display: grid; gap: 12px; }
-.ollama-status {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: var(--radius);
-}
-.ollama-status--ok { background: var(--green-bg); border: 1px solid #86efac; }
-.ollama-status--err { background: var(--red-bg); border: 1px solid #fca5a5; }
-.ollama-status--unknown { background: var(--bg3); border: 1px solid var(--border); }
-.ollama-status__icon { flex-shrink: 0; margin-top: 1px; }
-.ollama-status__body { flex: 1; min-width: 0; }
-.ollama-status__error {
-  font-size: 0.75rem;
-  color: var(--red);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.ollama-status__connected { font-size: 0.875rem; font-weight: 600; color: var(--green); }
-.ollama-status__check-btn { flex-shrink: 0; }
-.ollama-label {
-  display: block;
-  font-size: 0.8rem;
-  font-weight: 600;
-  margin-bottom: 5px;
-  color: var(--text2);
-}
-.ollama-select { height: 38px; font-family: var(--font-mono); font-size: 0.82rem; }
-.ollama-input--mono { font-family: var(--font-mono); }
-.ollama-input--url { font-family: var(--font-mono); font-size: 0.82rem; }
-.ollama-quickstart-card { background: var(--bg3); }
-.ollama-quickstart__title {
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.ollama-quickstart__pre {
-  margin: 0;
-  font-size: 0.75rem;
-  line-height: 1.9;
-  white-space: pre-wrap;
-}
-.ollama-tip { display: flex; align-items: flex-start; gap: 6px; }
-.ollama-tip__icon { flex-shrink: 0; margin-top: 2px; }
-.ollama-italic-hint { font-style: italic; }
-.ollama-code-inline { background: var(--bg3); padding: 1px 5px; border-radius: 3px; }
-
 /* GAP-002 — Members tab */
 .members-loading { padding: 32px 0; text-align: center; }
 .members-error {
@@ -366,49 +202,7 @@
   color: #6ab4a0; overflow-x: auto; line-height: 2;
 }
 
-/* ── Provider card ──────────────────────────────────────────────────────────── */
-.st-provider-card {
-  border-radius: var(--radius-lg); padding: 24px;
-  transition: all 0.2s; position: relative;
-}
-.st-provider-active-pill {
-  position: absolute; top: 16px; right: 16px;
-  display: flex; align-items: center; gap: 5;
-  border-radius: 99px; padding: 3px 10px;
-}
-.st-provider-header {
-  display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px;
-}
-.st-provider-icon {
-  width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 20px;
-}
-.st-provider-badge {
-  font-size: 0.65rem; font-weight: 700;
-  padding: 2px 7px; border-radius: 99px;
-}
-.st-provider-desc {
-  font-size: 0.82rem; color: var(--text2); margin-bottom: 16px; line-height: 1.6;
-}
-.st-provider-warning {
-  display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px;
-  padding: 10px 12px; border-radius: var(--radius);
-  background: rgba(255,165,2,0.07); border: 1px solid rgba(255,165,2,0.2);
-}
-.st-provider-warning-text {
-  font-size: 0.76rem; color: var(--amber); line-height: 1.5;
-}
-
-/* ── Key status row (saved API key) ─────────────────────────────────────────── */
-.st-key-status {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px; background: var(--bg3); border-radius: var(--radius);
-  margin-bottom: 12px; border: 1px solid var(--border);
-}
-
-/* ── Key input row ──────────────────────────────────────────────────────────── */
-.st-key-input-row { display: flex; gap: 8px; }
+/* ── Key input wrap + toggle (used by AiProvidersSection rotate-key + form) ─── */
 .st-key-input-wrap { flex: 1; position: relative; }
 .st-key-toggle {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
@@ -422,12 +216,6 @@
 }
 .st-status-err {
   margin-top: 8px; font-size: 0.78rem; color: var(--red);
-}
-
-/* ── Docs link ──────────────────────────────────────────────────────────────── */
-.st-docs-link {
-  display: inline-flex; align-items: center; gap: 5;
-  margin-top: 12px; font-size: 0.76rem;
 }
 
 /* ── Section title ──────────────────────────────────────────────────────────── */
@@ -448,24 +236,7 @@
   border-radius: var(--radius-lg);
 }
 
-/* ── Provider banner (active / missing) ─────────────────────────────────────── */
-.st-provider-banner {
-  margin-bottom: 28px; padding: 14px 20px; border-radius: var(--radius-lg);
-  display: flex; align-items: center; gap: 12px;
-}
-.st-active-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--green); box-shadow: 0 0 8px var(--green);
-}
-
-/* ── Env tip card ───────────────────────────────────────────────────────────── */
-.st-env-tip {
-  margin-top: 28px; padding: 16px 20px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-
-/* ── Restart tour card ──────────────────────────────────────────────────────── */
+/* ── Restart tour card (used by AccountSection) ─────────────────────────────── */
 .st-tour-card {
   margin-top: 28px; padding: 16px 20px;
   background: var(--surface); border: 1px solid var(--border);
@@ -519,13 +290,12 @@
    `.st-pr-*` prefix to stay scoped to the Settings page; no inline styles so
    the same look survives theme changes and the AGENT.md "no inline CSS" rule. */
 
-/* UX-AUDIT (May 2026) — page-level wrapper that stacks every Provider Routes
-   sub-card (spend caps, IO bar, create form, route list, audit log, request
-   log) with consistent vertical rhythm. Replaces the legacy "everything in
-   one big card" layout where users couldn't tell where one form ended and
-   the next began. 24px gap matches the `.flex-col.gap-lg` rhythm used by
-   the built-in provider list on /settings/providers so the two pages feel
-   like siblings. */
+/* UX-AUDIT (May 2026) — page-level wrapper that stacks every AI Providers
+   sub-card (spend caps, IO bar, create form, provider list, audit log,
+   request log) with consistent vertical rhythm. Replaces the legacy
+   "everything in one big card" layout where users couldn't tell where one
+   form ended and the next began. 24px gap matches the `.flex-col.gap-lg`
+   rhythm used elsewhere in Settings so every section feels like a sibling. */
 .st-pr-section {
   display: flex;
   flex-direction: column;
@@ -852,11 +622,6 @@
 
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
-  /* Provider cards: tighten padding */
-  .st-provider-card {
-    padding: 18px;
-  }
-
   /* Key-value rows: stack label above value */
   .kv-row {
     flex-direction: column;
@@ -907,14 +672,6 @@
     padding: 8px 12px;
     font-size: 0.82rem;
     white-space: nowrap;
-  }
-
-  /* Provider banner: stack vertically */
-  .st-provider-banner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 12px 16px;
   }
 
   /* Provider Routes: single-column form on phones */
@@ -1090,29 +847,6 @@
 
 /* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
 @media (max-width: 480px) {
-  /* Key input row: stack input above save button */
-  .st-key-input-row {
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .st-key-input-row .btn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  /* Key status row: stack */
-  .st-key-status {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  /* Provider header: tighter gap */
-  .st-provider-header {
-    gap: 10px;
-  }
-
   /* Info rows: stack */
   .info-row {
     flex-direction: column;

@@ -11,7 +11,7 @@ import { useSettingsSections, SETTINGS_SECTIONS } from "./hooks/useSettingsSecti
  *      install callback) → rewrite to `/settings/<key>` while preserving
  *      sibling query params (e.g. `?github=installed`).
  *   2. Bare `/settings` (no tab, no section) → role-aware fallback section
- *      (admins → `providers`, non-admins → `execution`).
+ *      (admins → `ai_providers`, non-admins → `execution`).
  *
  * Lives at the route layer rather than in `SettingsLayout`'s `useEffect` so
  * the redirect fires synchronously on first paint — no empty-Outlet flash,
@@ -78,7 +78,7 @@ function withSuspense(Component) {
  * Child route definitions for the Settings parent route in App.jsx. Renders
  * inside SettingsLayout's `<Outlet />`. The index route delegates to
  * `SettingsIndexRedirect` so the fallback section is role-aware: admins land
- * on `providers`, non-admins on `execution`. Synchronous redirect on first
+ * on `ai_providers`, non-admins on `execution`. Synchronous redirect on first
  * paint — no empty-Outlet flash.
  */
 export const settingsRoutes = (

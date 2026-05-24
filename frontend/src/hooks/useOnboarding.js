@@ -56,7 +56,7 @@ export function emitTourEvent(action) {
  *
  * The `advanceOn` mechanism is kept so that operators who close the wizard
  * and complete the matching action manually (e.g. saving a provider via
- * `/settings/providers`) still progress the wizard cleanly on next open.
+ * `/settings/ai_providers`) still progress the wizard cleanly on next open.
  *
  * @typedef {Object} TourStep
  * @property {string} id          - Stable identifier (used by JSX switch + tests).

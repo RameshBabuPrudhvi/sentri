@@ -693,7 +693,7 @@
      The audit names it as below 44×44. Same inflation rule — only
      active when the badge is reachable as a touch target (i.e. it's
      a button or has a click handler). The `.provider-badge` selector
-     in the topbar is the click-through to /settings/providers. */
+     in the topbar is the click-through to /settings/ai_providers. */
   .provider-badge,
   .st-provider-badge {
     min-height: 32px;
