@@ -553,6 +553,21 @@ const PROBE_DEBOUNCE_MS = 5_000;
 const probeInflight = new Map();   // routeId → Promise<route>
 const probeLastDone  = new Map();  // routeId → epoch ms
 
+/**
+ * Test-only escape hatch — clears the per-route debounce maps so a test
+ * file can assert behaviour across calls without waiting out the 5s
+ * window or dealing with leftover state from a previous test case.
+ *
+ * Production code MUST NOT call this. The `_` prefix mirrors the
+ * existing `_setProtocolAdapterForTests` / `_resetForTests` test seams
+ * elsewhere in the aiProvider tree (see `quotaGuard.js` /
+ * `responseCache.js`) so the convention is uniform.
+ */
+export function _resetProbeDebounceForTests() {
+  probeInflight.clear();
+  probeLastDone.clear();
+}
+
 export async function probeAndPersist(workspaceId, routeId, { userId = null, timeoutMs, force = false } = {}) {
   const route = getById(workspaceId, routeId);
   if (!route) return null;

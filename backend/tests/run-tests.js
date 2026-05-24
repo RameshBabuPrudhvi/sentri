@@ -111,6 +111,10 @@ const files = [
   // route.probeTimeoutMs → env default), and the [1s, 10min] defence-in-
   // depth clamp applied before reaching `runCapabilityProbe`.
   "tests/probe-timeout.test.js",
+  // PR #29 — Probe debounce + in-flight coalescing in providerRouteRepo.
+  // Pins the recent-result skip, force: true bypass, concurrent-coalesce,
+  // and the rotate-key gate's required force-skips-inflight semantics.
+  "tests/probe-debounce.test.js",
   // PR #28 — `getAiProviderState()` registry inspector backing the new
   // `GET /api/v1/system/ai-state` route + Systems page "AI provider state"
   // panel. Pins the snapshot shape (healthy + open-breaker + sticky cases),
