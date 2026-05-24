@@ -55,13 +55,19 @@
 import * as defaultProtocolAdapter from "./adapters/protocolAdapter.js";
 import { capabilitiesFor } from "./modelCatalog.js";
 
-// 30s — free-tier providers (OpenRouter `:free` models, Google Gemini free
-// tier) routinely queue the first request 10–25s during peak load. The
-// previous 10s ceiling was tight enough that the probe aborted before the
-// provider even started streaming, which made every free model appear
-// permanently broken in the AI Providers UI while crawls (no probe) worked
-// fine. 30s matches the OpenAI SDK's default request timeout.
-const DEFAULT_TIMEOUT_MS = 30_000;
+// Probe timeout — capability probes (`/settings/ai-providers/:id/probe` and
+// the auto-probe-on-upsert in providerRouteRepo.upsert) abort after this
+// many ms. Defaults to 30s, overridable via `AI_PROBE_TIMEOUT_MS` env var
+// for deployments that depend on slow free-tier providers (OpenRouter
+// `:free` models, Gemini free tier can queue 30–90s during peak load).
+// Clamped to a sane [1s, 5min] window so a typo in `.env` can't disable
+// timeouts entirely or set a sub-second value that aborts before TLS
+// handshake completes.
+const DEFAULT_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.AI_PROBE_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) return 30_000;
+  return Math.min(Math.max(raw, 1_000), 300_000);
+})();
 
 // ── Test seam ─────────────────────────────────────────────────────────────────
 // `protocolAdapter` is held by mutable reference rather than a top-level

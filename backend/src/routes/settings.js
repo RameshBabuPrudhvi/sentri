@@ -562,6 +562,19 @@ function buildProviderRoutePayload(body, { isCreate }) {
   if (body && "cacheEnabled" in body) payload.cacheEnabled = !!body.cacheEnabled;
   if (body && "cacheTtlSec" in body) payload.cacheTtlSec = numOrNull(body.cacheTtlSec) ?? 0;
   if (body && "fallbackRouteId" in body) payload.fallbackRouteId = body.fallbackRouteId || null;
+  // Migration 060 — per-route probe-timeout override (ms). NULL clears the
+  // override and falls back to the env-driven default. Clamped to a sane
+  // [1s, 10min] range so a UI typo can't disable timeouts or set sub-
+  // second values that would abort before TLS handshake completes.
+  if (body && "probeTimeoutMs" in body) {
+    const n = numOrNull(body.probeTimeoutMs);
+    if (n == null) payload.probeTimeoutMs = null;
+    else if (n < 1_000 || n > 600_000) {
+      return { error: "probeTimeoutMs must be between 1000 and 600000 (1s–10min)" };
+    } else {
+      payload.probeTimeoutMs = n;
+    }
+  }
 
   // apiKey — plaintext on the wire, encrypted before the repo sees it.
   // Empty string MUST be treated as "no change" (the create+edit form
