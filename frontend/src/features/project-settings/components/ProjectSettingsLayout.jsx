@@ -47,12 +47,43 @@ export default function ProjectSettingsLayout() {
 
   usePageTitle(project ? `${project.name} · Settings` : "Project Settings");
 
-  // Toast helper — sections forward this to their panel components, which
-  // already expect `onToast({ type, message })` shaped calls (see
-  // `QualityGatesPanel`, `AutoApprovalPanel`, etc.).
-  const onToast = useCallback((msg) => {
+  // Toast helper — sections forward this to their panel components. The
+  // callable supports two argument shapes because the panel components
+  // currently call it two different ways:
+  //
+  //   1. Object form: `onToast({ type, message })` — used by
+  //      AutoApprovalPanel, CoveragePanel, IterationCapPanel, PiiFirewallPanel,
+  //      VisionHealingPanel (the panels extracted directly into
+  //      `features/project-settings/sections/*`).
+  //
+  //   2. Positional form: `onToast(message, type)` — used by
+  //      `ConfigurablePanel` (`components/project/ConfigurablePanel.jsx:105`),
+  //      which backs both `QualityGatesPanel` and `WebVitalsBudgetsPanel`.
+  //
+  // Without the second branch, every save/clear/error from QualityGates +
+  // WebVitals would render as the default "info" type regardless of actual
+  // outcome — a regression the legacy `ProjectQualityCard` didn't have
+  // because it accepted both shapes implicitly.
+  //
+  // Unifying the panel-side contract would be cleaner but touches 7+ files;
+  // accepting both here is the smaller-blast-radius fix.
+  const onToast = useCallback((msg, typeArg) => {
     if (!msg) return;
-    const { type = "info", message } = typeof msg === "string" ? { message: msg } : msg;
+    let type;
+    let message;
+    if (typeof msg === "string") {
+      // Positional form: onToast("Saved", "success") — `typeArg` carries
+      // the level; default to "info" when absent (matches the legacy
+      // `showToast` helper signature in ConfigurablePanel).
+      message = msg;
+      type = typeArg || "info";
+    } else {
+      // Object form: onToast({ type, message }) — destructure with the
+      // same default. `typeArg` is ignored on the object path since the
+      // object already carries the level.
+      type = msg.type || "info";
+      message = msg.message;
+    }
     addNotification({
       type: type === "error" ? "error" : type === "success" ? "success" : "info",
       title: message,
