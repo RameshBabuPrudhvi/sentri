@@ -779,9 +779,11 @@ export const api = {
   // ── Project metric samples (MET-001 / AUTO-017.3) ───────────────────────────
   /**
    * Read a project's time-series samples for a single `metricKey`. Powers
-   * the `<TrendChart>` instances in `ProjectQualityCard`'s Web Vitals tab
-   * (`webVitals.lcp` / `.cls` / `.inp` / `.ttfb`) and any future per-project
-   * trend surface. Server caps `limit` at 200; the chart slices to 30.
+   * the `<TrendChart>` instances in the Quality Gates section's Web Vitals
+   * block (`features/project-settings/sections/quality-gates/QualityGatesSection.jsx`)
+   * for `webVitals.lcp` / `.cls` / `.inp` / `.ttfb`, and any future
+   * per-project trend surface. Server caps `limit` at 200; the chart
+   * slices to 30.
    *
    * @param {string} projectId
    * @param {string} metricKey - e.g. `"webVitals.lcp"`.
@@ -861,11 +863,11 @@ export const api = {
    * Backed by `GET /api/v1/dashboard`'s `coverageTrend` block. The
    * `projectId` parameter narrows the series to one project client-side.
    *
-   * **Consumers:** `ProjectQualityCard.jsx` → Coverage tab (fetches the
-   * per-project series on mount to render a latest-% badge + text sparkline
-   * without navigating to the Dashboard). The Dashboard `CoveragePanel`
-   * reads `data.coverageTrend` directly from `getDashboard()` instead
-   * (avoids a second fetch for the workspace-wide view).
+   * **Consumers:** `features/project-settings/sections/quality-gates/CoveragePanel.jsx`
+   * (fetches the per-project series on mount to render a latest-% badge +
+   * text sparkline without navigating to the Dashboard). The Dashboard
+   * `CoveragePanel` reads `data.coverageTrend` directly from `getDashboard()`
+   * instead (avoids a second fetch for the workspace-wide view).
    *
    * @param {string} [projectId] — Narrow the series to one project.
    * @returns {Promise<Object|null>}

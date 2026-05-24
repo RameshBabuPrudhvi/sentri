@@ -298,9 +298,12 @@
   color: var(--text3);
 }
 
-/* AUTO-017.3 — Web Vitals trend grid inside ProjectQualityCard's Web
-   Vitals tab. Class-driven per AGENT.md §127 (was inline `style={{...}}`
-   on the wrapping div in ProjectQualityCard.jsx). */
+/* AUTO-017.3 — Web Vitals trend grid inside the Quality Gates section
+   at `/projects/:id/settings/quality-gates`. Class-driven per AGENT.md
+   §127 (was inline `style={{...}}` on the wrapping div in the legacy
+   ProjectQualityCard.jsx, which was deleted after the project-settings
+   restructure). Consumed by
+   `features/project-settings/sections/quality-gates/QualityGatesSection.jsx`. */
 .aap-webvitals-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
