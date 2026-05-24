@@ -70,25 +70,39 @@ function routeHealth(route) {
 
 export default function ProviderBadge({ style }) {
   const [config,   setConfig]   = useState(_configCache);
+  const [routes,   setRoutes]   = useState(_routesCache);
   const [settings, setSettings] = useState(_settingsCache);
   const [open,     setOpen]     = useState(false);
-  const [switching, setSwitching] = useState(null); // provider id currently being switched to
+  // `switching` holds the *route id* currently being pinned. Was previously
+  // the legacy "provider id" enum value — kept the name to minimise rename
+  // churn, but the value space is now route ids (`pr-...`).
+  const [switching, setSwitching] = useState(null);
   const [error,    setError]    = useState(null);
   const navigate = useNavigate();
   const ref = useRef(null);
 
-  // Load on mount — always re-fetch if cache is empty
+  // Load on mount — always re-fetch when any of the three caches is empty.
+  // `listAiProviders` is the canonical source of switch targets (Phase 1 of
+  // the route-based switcher). `getConfig` / `getSettings` stay around for
+  // the legacy fallback when a workspace has zero configured routes.
   const load = useCallback(async () => {
-    if (_configCache && _settingsCache) {
+    if (_configCache && _routesCache && _settingsCache) {
       setConfig(_configCache);
+      setRoutes(_routesCache);
       setSettings(_settingsCache);
       return;
     }
     try {
-      const [cfg, sett] = await Promise.all([api.getConfig(), api.getSettings()]);
+      const [cfg, routesResp, sett] = await Promise.all([
+        api.getConfig(),
+        api.listAiProviders().catch(() => ({ routes: [] })),
+        api.getSettings().catch(() => null),
+      ]);
       _configCache   = cfg;
+      _routesCache   = routesResp?.routes || [];
       _settingsCache = sett;
       setConfig(cfg);
+      setRoutes(_routesCache);
       setSettings(sett);
     } catch { /* silent — badge degrades gracefully */ }
   }, []);
@@ -108,40 +122,53 @@ export default function ProviderBadge({ style }) {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  // ── Switch provider ────────────────────────────────────────────────────────
-  const switchProvider = useCallback(async (providerId) => {
-    if (providerId === config?.provider) { setOpen(false); return; }
+  // ── Pin a route as the workspace default ──────────────────────────────────
+  //
+  // Replaces the legacy `saveApiKey(provider, "__use_existing__")` flip of
+  // `runtimeActiveProvider` with the route-based primitive: POST
+  // `/settings/ai-providers/:id/default` writes `isWorkspaceDefault = 1`
+  // on the chosen `provider_routes` row (clearing it on every other row in
+  // the same transaction — Migration 059's partial UNIQUE index). The
+  // dispatcher's `resolveRoute()` honours this column before falling back
+  // to env detection (`backend/src/aiProvider/registry.js:571-578`), so the
+  // change takes effect on the next AI call without restart.
+  //
+  // Disabled routes (`route.enabled === 0`) and routes that already match
+  // `isWorkspaceDefault` short-circuit — clicking the active row just
+  // closes the dropdown.
+  const setDefaultRoute = useCallback(async (route) => {
+    if (!route || !route.enabled) return;
+    if (route.isWorkspaceDefault) { setOpen(false); return; }
 
-    setSwitching(providerId);
+    setSwitching(route.id);
     setError(null);
 
     try {
-      if (providerId === "local") {
-        await api.saveApiKey("local", null, {
-          baseUrl: settings?.ollamaBaseUrl || "http://localhost:11434",
-          model:   settings?.ollamaModel   || "mistral:7b",
-        });
-      } else {
-        await api.saveApiKey(providerId, "__use_existing__");
-      }
-
-      // Force re-fetch — clear cache first so fetchAll() can't return stale data
+      await api.setAiProviderDefault(route.id, true);
+      // Force re-fetch — clear caches so the next render reads the updated
+      // `isWorkspaceDefault` flag from `/settings/ai-providers` and the new
+      // active-provider name from `/config`.
       invalidateConfigCache();
-      const [freshCfg, freshSett] = await Promise.all([api.getConfig(), api.getSettings()]);
+      const [freshCfg, freshRoutes, freshSett] = await Promise.all([
+        api.getConfig(),
+        api.listAiProviders().catch(() => ({ routes: [] })),
+        api.getSettings().catch(() => null),
+      ]);
       _configCache   = freshCfg;
+      _routesCache   = freshRoutes?.routes || [];
       _settingsCache = freshSett;
       setConfig(freshCfg);
+      setRoutes(_routesCache);
       setSettings(freshSett);
       setOpen(false);
-
     } catch (err) {
-      setError(err?.message?.includes("No saved key")
-        ? "No saved key — add it in Settings first."
-        : "Switch failed. Try Settings to re-enter the key.");
+      setError(err?.message?.includes("not found")
+        ? "Route no longer exists. Refresh and try again."
+        : "Switch failed. Open Settings to inspect the route.");
     } finally {
       setSwitching(null);
     }
-  }, [config, settings]);
+  }, []);
 
   // ── Render: loading ────────────────────────────────────────────────────────
   if (!config) {
@@ -159,14 +186,23 @@ export default function ProviderBadge({ style }) {
     );
   }
 
-  // Compat slots have no entry in PROVIDER_STYLES — fall back to compatStyle()
-  // so the badge trigger uses the same per-slot palette color as the dropdown
-  // rows (avoids a green/correct-color visual mismatch).
-  const c      = PROVIDER_STYLES[config.provider] || compatStyle(config.provider || "");
-  const saved  = getSavedProviders(settings);
-  const compatIds = getCompatIds(settings);
-  const allSwitchable = [...ALL_IDS, ...compatIds];
-  const unsaved = allSwitchable.filter(id => !saved.includes(id));
+  // ── Resolve the active route ──────────────────────────────────────────────
+  // `routes` is the canonical switch-target set. The active row is the one
+  // pinned as workspace default — `resolveRoute()` uses the same column for
+  // dispatch (`backend/src/aiProvider/registry.js:571-578`), so this gives
+  // operators a guarantee that what the badge shows is what dispatch fires.
+  //
+  // Env-only fallback: when no route is pinned (or no routes exist at all,
+  // e.g. a fresh workspace using env keys), we fall back to the legacy
+  // `config.provider` enum so the badge keeps rendering. Resolves to the
+  // matching route by family when one exists; otherwise a synthetic shape
+  // good enough to colour the chip.
+  const allRoutes = Array.isArray(routes) ? routes : [];
+  const activeRoute =
+    allRoutes.find((r) => r.isWorkspaceDefault) ||
+    allRoutes.find((r) => r.family === config.provider) ||
+    null;
+  const c = styleForRoute(activeRoute) || FAMILY_STYLES[config.provider] || paletteStyle(config.provider || "?");
 
   return (
     <div ref={ref} style={{ position: "relative", flexShrink: 0, ...style }}>
@@ -220,80 +256,106 @@ export default function ProviderBadge({ style }) {
             </button>
           </div>
 
-          {/* Saved providers — one-click switch */}
-          {saved.length > 0 && (
-            <div style={{ padding: "4px 0" }}>
-              {saved.map(id => {
-                const sty      = PROVIDER_STYLES[id] || compatStyle(id);
-                const info     = getProviderInfo(config, id);
-                const isActive = config.provider === id;
-                const isBusy   = switching === id;
+          {/* ── Configured routes — one-click pin-as-default ── */}
+          {allRoutes.length > 0 ? (
+            <div style={{ padding: "4px 0", maxHeight: 340, overflowY: "auto" }}>
+              {allRoutes.map((route) => {
+                const sty       = styleForRoute(route);
+                const isActive  = !!route.isWorkspaceDefault;
+                const isBusy    = switching === route.id;
+                const isEnabled = !!route.enabled;
+                const health    = routeHealth(route);
+                // Health → dot opacity. `unknown` (never probed) renders at
+                // the same opacity as a non-active row so the operator can
+                // still see the family colour. `unhealthy` dims further so
+                // the row reads as a warning at a glance.
+                const dotOpacity = !isEnabled ? 0.2
+                  : isActive ? 1
+                  : health === "unhealthy" ? 0.35
+                  : health === "healthy" ? 0.85
+                  : 0.45;
                 return (
-                  <button key={id} onClick={() => switchProvider(id)}
-                    disabled={!!switching}
+                  <button
+                    key={route.id}
+                    onClick={() => setDefaultRoute(route)}
+                    disabled={!!switching || !isEnabled}
+                    title={!isEnabled ? "Route disabled — re-enable in Settings to switch" : route.displayLabel || route.name}
                     style={{
                       display: "flex", alignItems: "center", gap: 10,
                       width: "100%", padding: "8px 13px",
                       background: isActive ? sty.activeBg : "none",
                       border: "none",
-                      cursor: switching ? (isBusy ? "wait" : "default") : "pointer",
+                      cursor: !isEnabled ? "not-allowed"
+                        : switching ? (isBusy ? "wait" : "default")
+                        : "pointer",
                       textAlign: "left", transition: "background 0.1s",
-                      opacity: (switching && !isBusy) ? 0.45 : 1,
+                      opacity: !isEnabled ? 0.55 : (switching && !isBusy) ? 0.45 : 1,
                     }}
-                    onMouseEnter={e => { if (!isActive && !switching) e.currentTarget.style.background = "var(--bg2)"; }}
-                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                    onMouseEnter={(e) => { if (!isActive && !switching && isEnabled) e.currentTarget.style.background = "var(--bg2)"; }}
+                    onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
                   >
-                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: sty.dot, flexShrink: 0, opacity: isActive ? 1 : 0.45 }} />
+                    <span style={{
+                      width: 7, height: 7, borderRadius: "50%",
+                      background: sty.dot, flexShrink: 0,
+                      opacity: dotOpacity,
+                      // Red outline on an unhealthy row so the colour-blind
+                      // path still reads "this route has a problem".
+                      boxShadow: (isEnabled && health === "unhealthy") ? "0 0 0 1.5px rgba(220,38,38,0.55)" : "none",
+                    }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: "0.82rem", fontWeight: isActive ? 600 : 400, color: isActive ? sty.color : "var(--text)", lineHeight: 1.3 }}>
-                        {info.label}
+                      <div style={{
+                        fontSize: "0.82rem",
+                        fontWeight: isActive ? 600 : 400,
+                        color: isActive ? sty.color : "var(--text)",
+                        lineHeight: 1.3,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {route.displayLabel || route.name}
                       </div>
-                      <div style={{ fontSize: "0.68rem", color: "var(--text3)", marginTop: 1 }}>
-                        {info.sublabel}
+                      <div style={{
+                        fontSize: "0.68rem", color: "var(--text3)", marginTop: 1,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {route.model}
+                        {route.costTier ? ` · ${route.costTier}` : ""}
                       </div>
                     </div>
                     {isBusy
                       ? <RefreshCw size={12} color={sty.color} className="spin" style={{ flexShrink: 0 }} />
+                      : !isEnabled
+                      ? <CircleSlash size={12} color="var(--text3)" style={{ flexShrink: 0 }} />
                       : isActive
                       ? <Check size={12} color={sty.color} style={{ flexShrink: 0 }} />
-                      : <span style={{ fontSize: "0.68rem", color: "var(--text3)", flexShrink: 0 }}>Switch</span>
+                      : <span style={{ fontSize: "0.68rem", color: "var(--text3)", flexShrink: 0 }}>Set default</span>
                     }
                   </button>
                 );
               })}
             </div>
+          ) : (
+            // Empty-state — no `provider_routes` rows. Workspaces in this
+            // state are still dispatching via env detection; surface the
+            // CTA to migrate to row-based config instead of silently
+            // rendering a useless dropdown.
+            <div style={{ padding: "12px 14px", fontSize: "0.75rem", color: "var(--text3)", lineHeight: 1.5 }}>
+              No AI providers configured. Add one in{" "}
+              <button
+                onClick={() => { setOpen(false); navigate("/settings"); }}
+                style={{ background: "none", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", fontWeight: 600, textDecoration: "underline" }}
+              >
+                Settings
+              </button>
+              {" "}to enable per-route switching.
+            </div>
           )}
 
-          {/* Error banner */}
+          {/* Error banner — pinned to the bottom of the route list. */}
           {error && (
             <div style={{ padding: "7px 12px", fontSize: "0.72rem", color: "var(--red)", borderTop: "1px solid var(--border)", background: "var(--red-bg)", lineHeight: 1.5 }}>
               {error}
             </div>
           )}
 
-          {/* Unsaved providers — link to settings to add key */}
-          {unsaved.length > 0 && (
-            <>
-              <div style={{ borderTop: "1px solid var(--border)", padding: "7px 13px 3px", fontSize: "0.67rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                Add provider
-              </div>
-              {unsaved.map(id => {
-                const sty  = PROVIDER_STYLES[id] || compatStyle(id);
-                const info = getProviderInfo(config, id);
-                return (
-                  <button key={id} onClick={() => { setOpen(false); navigate("/settings"); }}
-                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "7px 13px", background: "none", border: "none", cursor: "pointer", textAlign: "left", transition: "background 0.1s" }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
-                  >
-                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: sty.dot, flexShrink: 0, opacity: 0.25 }} />
-                    <span style={{ fontSize: "0.81rem", color: "var(--text3)", flex: 1 }}>{info.label}</span>
-                    <span style={{ fontSize: "0.67rem", color: "var(--text3)", opacity: 0.6 }}>+ Add key →</span>
-                  </button>
-                );
-              })}
-            </>
-          )}
           <div style={{ height: 4 }} />
         </div>
       )}
