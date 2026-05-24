@@ -1,21 +1,20 @@
 /**
  * @module components/test-lab/TestLabConfigPanel
- * @description Right-rail configuration panel for Test Lab — the
+ * @description Middle-column configuration body for Test Lab — the
  * `tl-config` view that renders when no run is attached.
  *
- * **Incremental extraction in progress.** This file is being filled in
- * piece-by-piece from `frontend/src/pages/TestLab.jsx` to avoid a
- * single-shot 450-line extraction that risks misaligned `old_string`
- * matches when the parent file changes under us. Today this file owns
- * only the **Requirement composer** sub-block (testName input + Import
- * Issue dialog + composer textarea + attachment chips + toolbar);
- * subsequent PRs will fold in the dialsConfig wiring, environments
- * dropdown, launch stats, and Start/Generate buttons.
+ * Owns the entire idle-state middle column: error banner + (on the
+ * Requirement tab) the `<RequirementComposer>` sub-block + the unified
+ * `<TestConfig>` dials surface. The right-rail launch panel
+ * (`tl-panel`) is a sibling and stays in `pages/TestLab.jsx` for now —
+ * that extraction is Piece 3.
  *
  * AGENT.md §40 — helpers with their own JSX surface belong in a sibling
- * file once they exceed a screenful. The Requirement composer alone is
- * ~104 lines, and the eventual full config panel is ~450 lines, so the
- * extraction is justified before the file balloons further.
+ * file once they exceed a screenful. The previous PR extracted only
+ * `<RequirementComposer>` (~104 lines); this file now also owns the
+ * `tl-config-scroll` wrapper + error banner + `<TestConfig>` so the
+ * parent's render path drops from ~140 lines to a single component
+ * call.
  *
  * ### Prop contract (current surface — Requirement composer only)
  *
@@ -34,6 +33,12 @@
  *   fileInputRef                       — `useRef` from the page (the
  *                                        toolbar's paperclip triggers
  *                                        `fileInputRef.current?.click()`)
+ *   acceptedExtensions                 — comma-separated extension list
+ *                                        for the hidden `<input type="file">`
+ *                                        accept attribute (mirrors the
+ *                                        page-level `ACCEPTED_EXTENSIONS`
+ *                                        constant so the allowlist stays
+ *                                        a single source of truth)
  *   launching                          — disables the Cmd/Ctrl+Enter
  *                                        submit shortcut while a launch
  *                                        is in flight
@@ -52,6 +57,7 @@
 
 import React from "react";
 import { Paperclip, Trash2, Upload } from "lucide-react";
+import TestConfig from "../test/TestConfig.jsx";
 
 /**
  * Requirement composer surface — the testName + Import Issue + textarea
@@ -77,6 +83,7 @@ export function RequirementComposer({
   onImportIssue,
   onFileSelect,
   fileInputRef,
+  acceptedExtensions,
   launching,
   selectedProject,
   onSubmit,
@@ -185,24 +192,25 @@ export function RequirementComposer({
             rows={5}
           />
 
-          {/* Action toolbar — paperclip + Import Issue render inside
-              the composer footer, ChatGPT-style, so attachments
-              aren't a parallel section the user has to scroll past. */}
+          {/* Action toolbar — paperclip + Import Issue render
+              inside the composer footer, ChatGPT-style, so
+              attachments aren't a parallel section the user has
+              to scroll past. */}
           <div className="tl-composer-toolbar">
             <button
               type="button"
               className="tl-composer-action"
               onClick={() => fileInputRef.current?.click()}
-              title="Attach a file"
-              aria-label="Attach a file"
+              title="Attach a text file (.md, .json, .yaml, .feature, …)"
             >
-              <Paperclip size={14} />
+              <Paperclip size={13} />
+              <span>Attach</span>
             </button>
             <button
               type="button"
               className="tl-composer-action"
-              onClick={() => setShowImportIssue(s => !s)}
-              title="Import a Jira issue"
+              onClick={() => setShowImportIssue(v => !v)}
+              title="Paste a Jira / GitHub issue and auto-split into name + description"
             >
               <Upload size={13} />
               <span>Import issue</span>
@@ -210,14 +218,88 @@ export function RequirementComposer({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,.gherkin"
+              accept={acceptedExtensions}
               multiple
               onChange={onFileSelect}
-              style={{ display: "none" }}
+              className="tl-file-input-hidden"
             />
+            <span className="tl-composer-hint">
+              <kbd>⌘ / Ctrl</kbd> + <kbd>Enter</kbd> to generate
+            </span>
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Test Lab middle-column config body — the `tl-config` surface shown
+ * when no run is attached. Bundles the error banner, the
+ * `<RequirementComposer>` (Requirement tab only), and the unified
+ * `<TestConfig>` dials.
+ *
+ * Pure pass-through: every value + handler is owned by `pages/TestLab.jsx`,
+ * so the visual + behavioural surface is byte-identical to the inline
+ * version it replaces.
+ *
+ * @param {Object} props
+ * @param {"crawl"|"requirement"} props.tab          - active page tab.
+ * @param {string|null}           props.error        - launch-time error message.
+ * @param {Object}                props.dialsConfig  - canonical Test Dials shape.
+ * @param {Function}              props.setDialsConfig
+ * @param {Object}                props.composerProps - props forwarded verbatim
+ *   to `<RequirementComposer>` (see that component's prop contract above).
+ *   Only consumed when `tab === "requirement"`.
+ */
+export default function TestLabConfigPanel({
+  tab,
+  error,
+  dialsConfig,
+  setDialsConfig,
+  composerProps,
+}) {
+  return (
+    <div className="tl-config">
+      <div className="tl-config-scroll">
+
+        {/* Error banner — launch-time errors only; run-terminal
+            banners live inside the run-center view in the parent. */}
+        {error && (
+          <div className="banner banner-error mb-md">
+            {error}
+          </div>
+        )}
+
+        {/* Requirement input + extras — Requirement tab only. */}
+        {tab === "requirement" && (
+          <RequirementComposer {...composerProps} />
+        )}
+
+        {/* ── Unified Test Dials surface ──
+            Crawl tab gets the Explorer sub-tab (discovery mode + state-
+            explorer tuning); Requirement tab hides it because the
+            requirement flow doesn't crawl. The component is fully
+            controlled — `dialsConfig` is the single source of truth and
+            feeds the API call sites directly. */}
+        <TestConfig
+          value={dialsConfig}
+          onChange={setDialsConfig}
+          showExplorer={tab === "crawl"}
+          // Crawl tab: pick-a-URL vs. explore-state is the most
+          // consequential choice on this flow, so we lift it out of
+          // the sub-tab strip and render it as a prominent header.
+          // Requirement tab keeps the sub-tab layout (no crawl ⇒ no
+          // discovery decision to make).
+          showDiscoveryHeader={tab === "crawl"}
+          // `parallelWorkers` is consumed only by the test runner
+          // (POST /projects/:id/run → testRunner.js). Both Test Lab
+          // flows are pre-runner (crawl + AI generation), so the
+          // backend silently ignores the field — hiding it avoids
+          // surfacing a no-op control to users.
+          showRunnerOptions={false}
+        />
+      </div>
+    </div>
   );
 }
