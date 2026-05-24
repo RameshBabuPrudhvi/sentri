@@ -55,7 +55,13 @@
 import * as defaultProtocolAdapter from "./adapters/protocolAdapter.js";
 import { capabilitiesFor } from "./modelCatalog.js";
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+// 30s — free-tier providers (OpenRouter `:free` models, Google Gemini free
+// tier) routinely queue the first request 10–25s during peak load. The
+// previous 10s ceiling was tight enough that the probe aborted before the
+// provider even started streaming, which made every free model appear
+// permanently broken in the AI Providers UI while crawls (no probe) worked
+// fine. 30s matches the OpenAI SDK's default request timeout.
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 // ── Test seam ─────────────────────────────────────────────────────────────────
 // `protocolAdapter` is held by mutable reference rather than a top-level
@@ -112,6 +118,7 @@ function withTimeout(timeoutMs) {
  */
 async function probeReachability(route, opts = {}) {
   const { signal, cancel } = withTimeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const startedAt = Date.now();
   try {
     await protocolAdapter.generate(route, buildProbeMessages(), {
       maxTokens: 4,
@@ -120,6 +127,17 @@ async function probeReachability(route, opts = {}) {
     });
     return { ok: true };
   } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[capabilityProbe] reachability failed", {
+      routeId: route?.id,
+      family: route?.family,
+      protocol: route?.protocol,
+      baseUrl: route?.baseUrl,
+      model: route?.model,
+      elapsedMs: Date.now() - startedAt,
+      status: err?.status ?? err?.statusCode ?? null,
+      message: String(err?.message || err).slice(0, 300),
+    });
     return { ok: false, classification: classifyProbeError(err) };
   } finally {
     cancel();
