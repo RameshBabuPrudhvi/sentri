@@ -171,15 +171,16 @@ function buildPayload(form) {
     fallbackRouteId: form.fallbackRouteId || null,
   };
   if (form.apiKey && form.apiKey.trim()) payload.apiKey = form.apiKey.trim();
-  // Migration 060 — convert seconds (UI) → milliseconds (DB). Empty input
-  // sends `null` to clear the override; the backend treats null as
-  // "use env default". Skip the field entirely when blank on CREATE so
-  // the partial-patch upsert leaves the column at its NULL default.
+  // Migration 060 — convert seconds (UI) → milliseconds (DB). Mirror the
+  // `fallbackRouteId` pattern: always include the field with `null` when
+  // blank, regardless of create vs. update. The repo's `diffFields` sees
+  // null→null as a no-op on update, and on create the column defaults to
+  // NULL anyway — so we get a uniform wire contract without import/export
+  // round-trips emitting an asymmetric payload shape.
   if (form.probeTimeoutSec !== "" && form.probeTimeoutSec != null) {
     const sec = Number(form.probeTimeoutSec);
     payload.probeTimeoutMs = Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : null;
-  } else if (form.id) {
-    // On UPDATE only: explicitly send `null` to clear a prior override.
+  } else {
     payload.probeTimeoutMs = null;
   }
   return payload;

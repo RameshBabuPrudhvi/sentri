@@ -154,12 +154,32 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
         if (t.phase === "handoff") {
           return { ...t, text: target.text, renderedText: target.text };
         }
-        const stillStreaming = t.renderedText.length < target.text.length;
-        return {
-          ...t,
-          text: target.text,
-          status: stillStreaming ? "streaming" : t.status,
-        };
+        // Three cases for streaming turns when target text changes:
+        //   1. Pure extension (new text starts with current rendered prefix):
+        //      keep the cursor where it is and let the streamer tick onwards.
+        //   2. Replacement of already-done text (synthesizer-mode step 1
+        //      re-renders per crawl tick with a different page label —
+        //      `Discovered Pricing.` → `Discovered About Us.`): snap to the
+        //      new text in full so we don't leave stale chars on screen.
+        //   3. Replacement mid-stream (different prefix, still typing): reset
+        //      rendered text and restart streaming from the new text.
+        const isExtension = target.text.startsWith(t.renderedText);
+        if (isExtension) {
+          const stillStreaming = t.renderedText.length < target.text.length;
+          return {
+            ...t,
+            text: target.text,
+            status: stillStreaming ? "streaming" : t.status,
+          };
+        }
+        // Prefix divergence — replacement path. If the prior turn had already
+        // fully rendered, snap to the new text in place (no re-typing — the
+        // operator already read the old text). If it was mid-stream, reset
+        // and let the streamer re-type from scratch.
+        if (t.status === "done") {
+          return { ...t, text: target.text, renderedText: target.text };
+        }
+        return { ...t, text: target.text, renderedText: "", status: "streaming" };
       });
       const additions = targetTurns.filter(t => !byId.has(t.id));
       if (additions.length === 0) return mutated ? next : prev;
