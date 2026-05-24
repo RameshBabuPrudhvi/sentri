@@ -147,13 +147,22 @@ function toOpenAiMessages(messages) {
 export async function generate(route, messages, opts) {
   const client = mkClient(route, opts);
   const label = `OpenAI-protocol (${route.family || "openai"}/${route.name || route.id})`;
+  // Per-attempt timeout — defaults to `CLOUD_TIMEOUT_MS` (120s) for
+  // dispatch traffic. Capability probes pass a smaller value via
+  // `opts.attemptTimeoutMs` so a bad-key probe fails in a few seconds
+  // rather than burning the full dispatch budget on a hopeless retry
+  // chain (3 retries × 30s backoff ≈ 113s, the symptom that prompted
+  // this knob — see `capabilityProbe.runCapabilityProbe`).
+  const attemptTimeoutMs = Number.isFinite(opts.attemptTimeoutMs)
+    ? opts.attemptTimeoutMs
+    : CLOUD_TIMEOUT_MS;
   // Thread `opts.signal` through `withRetry` so the inter-attempt backoff
   // sleep also aborts when the caller's signal fires. Without this, a
   // probe / dispatch call with a 90s wall-clock budget could stretch
   // past the budget because `await sleep(delay)` ignored aborts —
   // surfaced by Bug 3 (probe ran 117s under a 90s `probeTimeoutMs`).
   return withRetry(async () => {
-    const { signal: composedSignal, cleanup } = composeSignal(opts.signal, CLOUD_TIMEOUT_MS);
+    const { signal: composedSignal, cleanup } = composeSignal(opts.signal, attemptTimeoutMs);
     try {
       const params = {
         model: route.model,
@@ -170,7 +179,7 @@ export async function generate(route, messages, opts) {
         },
       };
     } finally { cleanup(); }
-  }, label, opts.signal);
+  }, label, opts.signal, { maxRetries: opts.maxRetries });
 }
 
 /**

@@ -32,8 +32,14 @@ import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 export async function generate(route, messages, opts) {
   const genAI = new GoogleGenerativeAI(opts.apiKey);
   const label = `Gemini-protocol (${route.name || route.id})`;
+  // See `protocols/openai.js#generate` for the rationale — capability
+  // probes pass smaller per-attempt timeouts + `maxRetries: 0` so a
+  // bad-key probe fails fast instead of burning the full retry chain.
+  const attemptTimeoutMs = Number.isFinite(opts.attemptTimeoutMs)
+    ? opts.attemptTimeoutMs
+    : CLOUD_TIMEOUT_MS;
   return withRetry(async () => {
-    const { signal: composedSignal, cleanup } = composeSignal(opts.signal, CLOUD_TIMEOUT_MS);
+    const { signal: composedSignal, cleanup } = composeSignal(opts.signal, attemptTimeoutMs);
     try {
       const generationConfig = { maxOutputTokens: opts.maxTokens };
       if (opts.useJson) generationConfig.responseMimeType = "application/json";
@@ -53,7 +59,7 @@ export async function generate(route, messages, opts) {
         },
       };
     } finally { cleanup(); }
-  }, label, opts.signal);
+  }, label, opts.signal, { maxRetries: opts.maxRetries });
 }
 
 /**

@@ -99,19 +99,25 @@ function extractRetryAfter(err) {
  * @param {AbortSignal} [signal] - Optional signal that cancels the
  *   inter-attempt sleep. Does NOT cancel `fn` itself — `fn` is
  *   responsible for honouring its own signal.
+ * @param {Object} [opts]
+ * @param {number} [opts.maxRetries] - Override the module-level
+ *   `MAX_RETRIES` for this call. Used by capability probes (which set
+ *   `0` — a bad key shouldn't be retried, the failure IS the signal)
+ *   and by latency-sensitive paths that prefer fast-fail to retry-amp.
  */
-export async function withRetry(fn, label = "", signal = undefined) {
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+export async function withRetry(fn, label = "", signal = undefined, opts = {}) {
+  const maxRetries = Number.isFinite(opts?.maxRetries) ? opts.maxRetries : MAX_RETRIES;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      if (attempt === MAX_RETRIES || !isRetryableError(err)) throw err;
+      if (attempt === maxRetries || !isRetryableError(err)) throw err;
       const retryAfter = extractRetryAfter(err);
       const delay = retryAfter
         ? Math.min(retryAfter, MAX_BACKOFF_MS * 2)
         : Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
       const reason = isRateLimitError(err) ? "Rate limit" : "Transient server error (5xx)";
-      console.warn(formatLogLine("warn", null, `${reason} hit${label ? " for " + label : ""}: ${err.message?.slice(0, 120)}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
+      console.warn(formatLogLine("warn", null, `${reason} hit${label ? " for " + label : ""}: ${err.message?.slice(0, 120)}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries})`));
       // Honour the caller's abort signal during the backoff sleep so
       // a budget overrun cancels the retry chain instead of waiting
       // out the full delay. `sleep` rejects when the signal fires;

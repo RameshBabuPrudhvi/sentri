@@ -36,8 +36,14 @@ function mkClient(route, opts) {
 export async function generate(route, messages, opts) {
   const client = mkClient(route, opts);
   const label = `Anthropic-protocol (${route.name || route.id})`;
+  // See `protocols/openai.js#generate` for the rationale — capability
+  // probes pass smaller per-attempt timeouts + `maxRetries: 0` so a
+  // bad-key probe fails fast instead of burning the full retry chain.
+  const attemptTimeoutMs = Number.isFinite(opts.attemptTimeoutMs)
+    ? opts.attemptTimeoutMs
+    : CLOUD_TIMEOUT_MS;
   return withRetry(async () => {
-    const { signal: composedSignal, cleanup } = composeSignal(opts.signal, CLOUD_TIMEOUT_MS);
+    const { signal: composedSignal, cleanup } = composeSignal(opts.signal, attemptTimeoutMs);
     try {
       const params = {
         model: route.model,
@@ -54,7 +60,7 @@ export async function generate(route, messages, opts) {
         },
       };
     } finally { cleanup(); }
-  }, label, opts.signal);
+  }, label, opts.signal, { maxRetries: opts.maxRetries });
 }
 
 export async function stream(route, messages, opts) {

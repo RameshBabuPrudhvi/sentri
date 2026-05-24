@@ -70,6 +70,21 @@ const DEFAULT_TIMEOUT_MS = (() => {
   return Math.min(Math.max(raw, 1_000), 300_000);
 })();
 
+// Per-attempt timeout for probe SDK calls. Tighter than dispatch's
+// `CLOUD_TIMEOUT_MS` (120s) because probes don't retry — a single SDK
+// call that takes more than 15s is almost certainly hanging on
+// connect, not making real progress. Overridable via
+// `AI_PROBE_ATTEMPT_TIMEOUT_MS` for slow-network deployments. Clamped
+// to [1s, AI_PROBE_TIMEOUT_MS] so the per-attempt cap can never exceed
+// the overall probe budget — that combination would let a single hung
+// call eat the whole deadline before the deadline-race rejection
+// fires.
+const PROBE_ATTEMPT_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.AI_PROBE_ATTEMPT_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) return Math.min(15_000, DEFAULT_TIMEOUT_MS);
+  return Math.min(Math.max(raw, 1_000), DEFAULT_TIMEOUT_MS);
+})();
+
 // ── Test seam ─────────────────────────────────────────────────────────────────
 // `protocolAdapter` is held by mutable reference rather than a top-level
 // `import` binding so unit tests can swap it for a fake adapter that
@@ -160,6 +175,15 @@ async function probeReachability(route, opts = {}) {
       maxTokens: 4,
       responseFormat: "text",
       signal,
+      // Probes are fast-fail by design: a bad key / bad model / dead
+      // endpoint shouldn't be retried — the failure IS the answer the
+      // operator wants. The legacy 3 retries × 30s backoff (~113s)
+      // turned probe latency into a UX nightmare on the rotate-key
+      // gate; `maxRetries: 0` makes a 401 surface in seconds. Per-
+      // attempt timeout cap (`PROBE_ATTEMPT_TIMEOUT_MS`) further
+      // bounds slow-network cases.
+      maxRetries: 0,
+      attemptTimeoutMs: PROBE_ATTEMPT_TIMEOUT_MS,
     });
     return { ok: true };
   } catch (err) {
@@ -203,7 +227,15 @@ async function probeJsonMode(route, opts = {}) {
     await protocolAdapter.generate(
       route,
       { system: "Reply with the JSON object {}", user: "ping", combined: "Reply with the JSON object {}\n\n---\n\nping" },
-      { maxTokens: 8, responseFormat: "json_object", signal },
+      {
+        maxTokens: 8,
+        responseFormat: "json_object",
+        signal,
+        // Same fast-fail contract as probeReachability — see that
+        // function for the rationale.
+        maxRetries: 0,
+        attemptTimeoutMs: PROBE_ATTEMPT_TIMEOUT_MS,
+      },
     );
     return true;
   } catch (err) {
