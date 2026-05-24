@@ -641,7 +641,17 @@ export async function probeAndPersist(workspaceId, routeId, { userId = null, tim
   try {
     return await work;
   } finally {
-    probeInflight.delete(routeId);
+    // Identity-check the map entry before deleting. A concurrent
+    // `force: true` caller (rotate-key gate) may have arrived after we
+    // set our entry but before we resolved — in that case the Map now
+    // points at the force-probe's promise, not ours, and unconditionally
+    // deleting would orphan it. Subsequent non-force callers would
+    // then miss the coalescing window and fan out duplicate probes.
+    // The race window is tight (overlapping auto-probe + force-probe on
+    // the same route) but the check is cheap, so we close it
+    // defensively. Mirrors the pattern in `responseCache.js` /
+    // `quotaGuard.js` where in-flight maps gate deletion on identity.
+    if (probeInflight.get(routeId) === work) probeInflight.delete(routeId);
     probeLastDone.set(routeId, Date.now());
   }
 }
