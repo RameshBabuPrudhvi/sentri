@@ -1192,6 +1192,20 @@
   border-radius: 8px;
 }
 
+/* Ollama connectivity badge — shown inline in the form when family=local.
+   Compact single-line replacement for the deleted OllamaStatusPanel. */
+.st-ai-ollama-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
 /* Env-injected providers banner — read-only surface for ANTHROPIC_API_KEY /
    GOOGLE_API_KEY / OLLAMA_BASE_URL / compat-slot configs that aren't backed
    by a provider_routes row. Visually distinct from managed AI Provider rows

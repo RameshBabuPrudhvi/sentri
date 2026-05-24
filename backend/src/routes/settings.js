@@ -1430,6 +1430,39 @@ router.get("/settings/ai-providers", requireRole("admin"), (req, res) => {
   res.json({ routes: providerRouteRepo.list(req.workspaceId).map((r) => toDisplayRoute(r, rolesByRouteId)) });
 });
 
+/**
+ * After an AI Provider row with `family: "local"` is persisted, sync the
+ * runtime Ollama state in `registry.js` so legacy detection paths see the
+ * just-saved baseUrl + model. The new `provider_routes`-driven dispatch
+ * reads `route.baseUrl` / `route.model` directly on the row — this hook
+ * is purely for the **workspace-agnostic** surfaces the AI Providers UI
+ * doesn't replace:
+ *
+ *   • `getProvider()` / `/config` / header dropdown — `detectProvider`
+ *     calls `hasOllamaConfig()` which reads the runtime cache.
+ *   • `buildProviderMeta().local` — Settings dropdowns + crawler logs.
+ *   • Env-fallback bottom layer in `resolveRoute` — when no agent_configs
+ *     row, no workspace default, and no cloud env keys, this is the only
+ *     way Ollama ever surfaces.
+ *
+ * Same single-tenant assumption as the legacy `POST /settings` path
+ * (`backend/src/routes/settings.js:154`): the most recently saved Ollama
+ * row is the runtime "active" Ollama. Multi-workspace dispatch through
+ * `provider_routes.id` keeps working unchanged because each route still
+ * carries its own baseUrl/model.
+ *
+ * @param {Object} row - Hydrated `provider_routes` row (the just-saved one).
+ */
+function syncRuntimeOllamaFromRoute(row) {
+  if (!row || row.family !== "local") return;
+  if (!row.enabled) return; // Disabled local provider — don't promote to runtime.
+  setRuntimeOllama({
+    baseUrl: row.baseUrl || "",
+    model:   row.model   || "",
+    disabled: false,
+  });
+}
+
 /** Create a new AI Provider. */
 router.post("/settings/ai-providers", requireRole("admin"), (req, res) => {
   const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: true });
@@ -1440,6 +1473,7 @@ router.post("/settings/ai-providers", requireRole("admin"), (req, res) => {
       workspaceId: req.workspaceId,
       userId: req.authUser?.sub || null,
     });
+    syncRuntimeOllamaFromRoute(saved);
     logActivity({ ...actor(req), type: "settings.update", detail: `AI Provider created: ${saved.name}` });
     res.status(201).json(toDisplayRoute(saved));
   } catch (err) {
@@ -1473,6 +1507,7 @@ router.patch("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
       workspaceId: req.workspaceId,
       userId: req.authUser?.sub || null,
     });
+    syncRuntimeOllamaFromRoute(updated);
     // Lifeguard BUG-0006 — operator-facing activity log entry. The repo's
     // own audit (`providerRouteAuditRepo`) captures the field-level diff;
     // this row surfaces "what changed" in the workspace activity stream
@@ -1500,6 +1535,13 @@ router.delete("/settings/ai-providers/:id", requireRole("admin"), (req, res) => 
     });
   }
   const result = providerRouteRepo.remove(req.workspaceId, req.params.id, { userId: req.authUser?.sub || null });
+  // Migration 059 + Ollama-UX regression fix — when the deleted row was
+  // the runtime "active" Ollama, mark Ollama disabled so legacy detection
+  // paths don't keep advertising a now-deleted endpoint. Mirrors the
+  // legacy `DELETE /settings/local` behaviour (`backend/src/routes/settings.js:295`).
+  if (existing.family === "local") {
+    setRuntimeOllama({ baseUrl: "", model: "", disabled: true });
+  }
   logActivity({ ...actor(req), type: "settings.update", detail: `AI Provider deleted: ${existing.name}` });
   res.json({ ok: true, ...result });
 });

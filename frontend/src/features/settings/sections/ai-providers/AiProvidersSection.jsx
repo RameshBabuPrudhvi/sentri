@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Activity, AlertCircle, Check, ChevronDown, ChevronUp,
-  Eye, EyeOff, Info, KeyRound, Plus, RefreshCw, Star, Trash2, X,
+  Eye, EyeOff, Info, KeyRound, Plus, RefreshCw, Star, Trash2, Wifi, WifiOff, X,
 } from "lucide-react";
 import { api } from "../../../../api.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
+import { useOllamaStatusQuery } from "../../../../hooks/queries/useSettingsQueries.js";
 import { detectFallbackCycle, maskedKeyDisplay } from "../provider-routes/providerRoutes.utils.js";
 import ProbeBadge from "../provider-routes/ProbeBadge.jsx";
 import WorkspaceSpendCapsPanel from "../provider-routes/WorkspaceSpendCapsPanel.jsx";
@@ -200,6 +201,54 @@ function EmptyState({ onQuickStart }) {
 }
 
 /**
+ * Compact Ollama connectivity badge shown inside the form when `family === "local"`.
+ * Replaces the deleted OllamaStatusPanel.jsx with a single-line status +
+ * available-models dropdown. Uses the existing `useOllamaStatusQuery` hook
+ * (GET /ollama/status) which auto-refreshes every 15s.
+ */
+function OllamaStatusHint({ form, setForm }) {
+  const statusQuery = useOllamaStatusQuery();
+  const status = statusQuery.data ?? null;
+  const checking = statusQuery.isFetching;
+
+  return (
+    <div className="st-pr-field st-pr-field--wide">
+      <div className="st-ai-ollama-status">
+        {checking
+          ? <><RefreshCw size={12} className="spin" /> <span className="text-xs text-muted">Checking Ollama…</span></>
+          : status?.ok
+          ? <><Wifi size={12} color="var(--green)" /> <span className="text-xs" style={{ color: "var(--green)" }}>Connected · {status.model}</span></>
+          : <><WifiOff size={12} color="var(--red)" /> <span className="text-xs" style={{ color: "var(--red)" }}>{status?.error?.slice(0, 80) || "Ollama not reachable"}</span></>}
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs"
+          onClick={() => statusQuery.refetch()}
+          disabled={checking}
+        >
+          <RefreshCw size={10} /> Check
+        </button>
+      </div>
+      {status?.availableModels?.length > 0 && (
+        <select
+          className="input"
+          value={form.model}
+          onChange={(e) => setForm((s) => ({ ...s, model: e.target.value }))}
+        >
+          {status.availableModels.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      )}
+      {!status?.ok && !checking && (
+        <div className="hint text-xs text-muted" style={{ marginTop: 4 }}>
+          Install: <code>curl -fsSL https://ollama.ai/install.sh | sh && ollama pull {form.model || "llama3.2:3b"}</code>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Add / edit form. Shown inline above the provider list.
  */
 function ProviderForm({
@@ -287,6 +336,11 @@ function ProviderForm({
               required
             />
           </label>
+
+          {/* Ollama status — inline connectivity check when configuring a local provider.
+              Replaces the deleted OllamaStatusPanel.jsx with a compact badge + model
+              suggestions. Uses the same useOllamaStatusQuery hook (GET /ollama/status). */}
+          {form.family === "local" && <OllamaStatusHint form={form} setForm={setForm} />}
 
           {/* Base URL — always shown for custom/openrouter/local; hidden-but-accessible for others */}
           <label className="st-pr-field st-pr-field--wide">

@@ -711,7 +711,17 @@ export function detectProvider({ agentRole = null } = {}) {
   // want their own role's keys.
   sweepExpiredStickies();
   for (const [key, entry] of stickyFallbacks) {
-    const keyIsRoleless = !key.includes("::");
+    // A key is roleless when it has no `::` separator — i.e. it was
+    // stored via `breakerKey(provider, null)`. Compat slot IDs are
+    // validated as `/^[a-z0-9_-]+$/` at the HTTP boundary
+    // (`backend/src/routes/settings.js:132`), so `:` never appears in
+    // a compat provider name and `compat:foo::bar` is not a reachable
+    // state. Cloud provider names (`anthropic`, `openai`, etc.) also
+    // never contain `::`. The `lastIndexOf` check is therefore
+    // equivalent to `includes` for all reachable keys, but we use
+    // `lastIndexOf` to stay consistent with `keyHasRole`'s split.
+    const idx = key.lastIndexOf("::");
+    const keyIsRoleless = idx < 0;
     const matches = agentRole
       ? keyHasRole(key, agentRole)
       : keyIsRoleless;
