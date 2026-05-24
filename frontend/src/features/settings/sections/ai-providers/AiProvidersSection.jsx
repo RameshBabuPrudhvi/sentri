@@ -217,8 +217,8 @@ function OllamaStatusHint({ form, setForm }) {
         {checking
           ? <><RefreshCw size={12} className="spin" /> <span className="text-xs text-muted">Checking Ollama…</span></>
           : status?.ok
-          ? <><Wifi size={12} color="var(--green)" /> <span className="text-xs" style={{ color: "var(--green)" }}>Connected · {status.model}</span></>
-          : <><WifiOff size={12} color="var(--red)" /> <span className="text-xs" style={{ color: "var(--red)" }}>{status?.error?.slice(0, 80) || "Ollama not reachable"}</span></>}
+          ? <><Wifi size={12} className="st-ai-ollama-ok-icon" /> <span className="text-xs st-ai-ollama-ok">Connected · {status.model}</span></>
+          : <><WifiOff size={12} className="st-ai-ollama-err-icon" /> <span className="text-xs st-ai-ollama-err">{status?.error?.slice(0, 80) || "Ollama not reachable"}</span></>}
         <button
           type="button"
           className="btn btn-ghost btn-xs"
@@ -240,7 +240,7 @@ function OllamaStatusHint({ form, setForm }) {
         </select>
       )}
       {!status?.ok && !checking && (
-        <div className="hint text-xs text-muted" style={{ marginTop: 4 }}>
+        <div className="hint text-xs text-muted st-ai-ollama-hint">
           Install: <code>curl -fsSL https://ollama.ai/install.sh | sh && ollama pull {form.model || "llama3.2:3b"}</code>
         </div>
       )}

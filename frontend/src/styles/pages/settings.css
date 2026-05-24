@@ -1205,6 +1205,11 @@
   margin-bottom: 6px;
   font-size: 12px;
 }
+.st-ai-ollama-ok-icon { color: var(--green); }
+.st-ai-ollama-ok { color: var(--green); }
+.st-ai-ollama-err-icon { color: var(--red); }
+.st-ai-ollama-err { color: var(--red); }
+.st-ai-ollama-hint { margin-top: 4px; }
 
 /* Env-injected providers banner — read-only surface for ANTHROPIC_API_KEY /
    GOOGLE_API_KEY / OLLAMA_BASE_URL / compat-slot configs that aren't backed
