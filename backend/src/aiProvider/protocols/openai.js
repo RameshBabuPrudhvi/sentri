@@ -53,23 +53,36 @@ import { throwIfAborted } from "../../utils/abortHelper.js";
 // UI-suggestion catalog for the Settings UI defaults (B3.1).
 
 /**
- * Per-family default `baseURL`s for OpenAI-protocol routes whose row
- * has no explicit `baseUrl` set. Without this map, a route with
+ * Per-family default `baseURL` for OpenAI-protocol routes whose row
+ * has no explicit `baseUrl` set. Without this fallback, a route with
  * `family: "openrouter"` and `baseUrl: null` would fall through to the
  * OpenAI SDK's hardcoded `api.openai.com` default and the OpenRouter
  * API key would be sent to OpenAI's servers (rejected with a 401
  * "Incorrect API key" — TLS protected, but the wire request still
  * happened, which is a leak surface we don't want).
  *
- * `openai` is intentionally absent — `undefined` lets the SDK use its
- * built-in `api.openai.com` default, which is correct for that family.
- * Compat slots (`family` starting with `compat:`) carry their baseUrl
- * on the slot config and must never reach here with a null baseUrl —
- * `synthesiseTransientRoute` and the route repo both enforce that.
+ * Implemented as a function (not a frozen object) so we can read the
+ * `OPENROUTER_BASE_URL` env var at call time — deployments using a
+ * self-hosted OpenRouter proxy set this var (see `REFERENCE.md` and
+ * `docker-compose.yml`), and a static object literal would freeze the
+ * default at module-load time before `.env` had a chance to apply.
+ *
+ * `openai` is intentionally absent — returning `null` lets the SDK use
+ * its built-in `api.openai.com` default, which is correct for that
+ * family. Compat slots (`family` starting with `compat:`) carry their
+ * baseUrl on the slot config and must never reach here with a null
+ * baseUrl — `synthesiseTransientRoute` and the route repo both enforce
+ * that.
+ *
+ * @param {string} family - The route's `family` value.
+ * @returns {string|null} Canonical endpoint, or null when unknown.
  */
-const FAMILY_DEFAULT_BASE_URLS = Object.freeze({
-  openrouter: "https://openrouter.ai/api/v1",
-});
+function getFamilyDefaultBaseUrl(family) {
+  if (family === "openrouter") {
+    return process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+  }
+  return null;
+}
 
 /**
  * Build an OpenAI SDK client from a route + caller-supplied opts.
@@ -79,7 +92,7 @@ const FAMILY_DEFAULT_BASE_URLS = Object.freeze({
  * handles every variant.
  *
  * When `route.baseUrl` is null/empty but the family has a known
- * canonical endpoint (see {@link FAMILY_DEFAULT_BASE_URLS}), we
+ * canonical endpoint (see {@link getFamilyDefaultBaseUrl}), we
  * resolve to that endpoint here rather than letting the SDK silently
  * dispatch to `api.openai.com`. Any unknown family without an explicit
  * baseUrl throws — failing closed is safer than leaking credentials to
@@ -88,8 +101,8 @@ const FAMILY_DEFAULT_BASE_URLS = Object.freeze({
 function mkClient(route, opts) {
   const config = { apiKey: opts.apiKey };
   let baseUrl = route.baseUrl || null;
-  if (!baseUrl && route.family && FAMILY_DEFAULT_BASE_URLS[route.family]) {
-    baseUrl = FAMILY_DEFAULT_BASE_URLS[route.family];
+  if (!baseUrl && route.family) {
+    baseUrl = getFamilyDefaultBaseUrl(route.family);
   }
   // Fail closed: a family that isn't `openai` and has no baseUrl
   // (explicit or default) would otherwise leak the apiKey to

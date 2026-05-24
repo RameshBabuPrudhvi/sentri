@@ -352,25 +352,14 @@ export async function runCapabilityProbe(route, opts = {}) {
   const fam = route?.family === "custom" ? "openai" : route?.family;
   const catalogFloor = capabilitiesFor(fam) || {};
   const probedAt = new Date().toISOString();
-  // Migration 060 hard ceiling. `opts.timeoutMs` is meant to be a wall-clock
-  // budget for the WHOLE probe (reachability + jsonMode + retries + sleep),
-  // not a per-attempt timeout. We enforce it here by:
-  //   (a) opening one `AbortController` ("deadline") that fires at the
-  //       budget, AND
-  //   (b) racing the probe pipeline against a deadline Promise so even a
-  //       hung `await sleep(delay)` in retry.js can't extend the budget.
-  // Per-step `withTimeout()` calls receive the deadline signal so an
-  // in-flight SDK request also aborts when the budget expires.
-  const overallTimeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const deadlineAc = new AbortController();
-  const deadlineTimer = setTimeout(
-    () => deadlineAc.abort(new Error("probe deadline exceeded")),
-    overallTimeoutMs,
-  );
-  const stepOpts = { ...opts, deadlineSignal: deadlineAc.signal };
   // Defensive: if the route is missing required dispatch fields,
   // probe can't even attempt a network call. Persist the catalog
   // floor with a synthetic errorReason so the operator knows why.
+  //
+  // This guard MUST run before the deadline `setTimeout` / `AbortController`
+  // are created below — otherwise the leaked timer keeps the Node event
+  // loop alive for `overallTimeoutMs` after we return, and in test envs
+  // (or graceful shutdown) prevents clean process exit.
   if (!route?.id || !route?.workspaceId || !route?.protocol) {
     return {
       reachable: false,
@@ -387,6 +376,22 @@ export async function runCapabilityProbe(route, opts = {}) {
       errorReason: "route_missing_dispatch_fields",
     };
   }
+  // Migration 060 hard ceiling. `opts.timeoutMs` is meant to be a wall-clock
+  // budget for the WHOLE probe (reachability + jsonMode + retries + sleep),
+  // not a per-attempt timeout. We enforce it here by:
+  //   (a) opening one `AbortController` ("deadline") that fires at the
+  //       budget, AND
+  //   (b) racing the probe pipeline against a deadline Promise so even a
+  //       hung `await sleep(delay)` in retry.js can't extend the budget.
+  // Per-step `withTimeout()` calls receive the deadline signal so an
+  // in-flight SDK request also aborts when the budget expires.
+  const overallTimeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const deadlineAc = new AbortController();
+  const deadlineTimer = setTimeout(
+    () => deadlineAc.abort(new Error("probe deadline exceeded")),
+    overallTimeoutMs,
+  );
+  const stepOpts = { ...opts, deadlineSignal: deadlineAc.signal };
   // Build a deadline-rejection promise so the overall budget is a hard
   // ceiling even if the inner pipeline gets stuck in retry.js's
   // `await sleep(delay)` (which doesn't honour an AbortSignal). When the

@@ -652,10 +652,16 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
   // the OpenRouter key would then be sent to OpenAI's servers (rejected
   // 401, but the wire request still happened). Populate the canonical
   // OpenRouter endpoint here so dispatch reaches the right host.
-  // Keep this in sync with `FAMILY_DEFAULT_BASE_URLS` in
-  // `backend/src/aiProvider/protocols/openai.js`.
+  // Keep this in sync with `getFamilyDefaultBaseUrl()` in
+  // `backend/src/aiProvider/protocols/openai.js` — both must honour
+  // the same `OPENROUTER_BASE_URL` env-var override.
   if (provider === "openrouter") {
-    effectiveBaseUrl = "https://openrouter.ai/api/v1";
+    // Honour the documented `OPENROUTER_BASE_URL` override (see
+    // `REFERENCE.md` + `docker-compose.yml`) — without it, deployments
+    // routing through a self-hosted OpenRouter proxy would have traffic
+    // silently dispatched to `openrouter.ai` instead. Mirrors the
+    // `dispatcher.js:77` pattern used by the legacy provider path.
+    effectiveBaseUrl = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
   }
   if (isCompatProvider(provider)) {
     // Compat slots carry their own baseUrl + model on the slot config

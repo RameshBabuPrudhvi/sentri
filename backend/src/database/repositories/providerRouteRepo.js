@@ -559,7 +559,15 @@ export async function probeAndPersist(workspaceId, routeId, { userId = null, tim
   // Coalesce concurrent probes on the same route. Two upserts firing in
   // the same tick used to schedule two `setImmediate` probes; now the
   // second one rides on the first's promise.
-  if (probeInflight.has(routeId)) {
+  //
+  // `force: true` MUST bypass this coalescing — otherwise the rotate-key
+  // gate (settings.js POST /:id/rotate-key) could ride on an auto-probe
+  // that started BEFORE the new ciphertext was persisted, returning the
+  // OLD key's probe result. The rotation gate would then accept a bad
+  // new key because the in-flight probe used the old (still-working)
+  // key. Skipping inflight reuse on `force` makes the second call issue
+  // a fresh network probe against the freshly-rotated key.
+  if (!force && probeInflight.has(routeId)) {
     return probeInflight.get(routeId);
   }
   if (!force) {

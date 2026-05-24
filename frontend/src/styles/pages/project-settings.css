@@ -11,8 +11,10 @@
  *
  * This file only adds the section-content primitives that the project
  * sections (`features/project-settings/sections/*`) use. Each section
- * stacks one or more `.ps-section__block` panels under `<h2>` headers —
- * no inner tabs.
+ * stacks one or more `.ps-section__block` panels under `<h2>` headers,
+ * and MAY use the `.ps-tabs` inner tab strip when a section needs
+ * multiple sub-panels (e.g. Quality Gates → Gates / Web Vitals /
+ * Coverage). The tab strip mirrors `.st-pr-subtabs` in `settings.css`.
  */
 
 .ps-section {
@@ -67,10 +69,15 @@
   color: var(--text);
   border-bottom-color: var(--border);
 }
-.ps-tab--active {
-  color: var(--accent) !important;
-  font-weight: 600 !important;
-  border-bottom-color: var(--accent) !important;
+/* Scoped under `.ps-tabs` so the selector specificity matches the base
+   `.ps-tabs .btn` rule above (both 0,2,0). Without this scope the bare
+   `.ps-tab--active` (0,1,0) couldn't override `.ps-tabs .btn` (0,2,0)
+   without `!important`, AND the class would match anywhere in the DOM.
+   Mirrors `.tab-btn--active` in `settings.css`. */
+.ps-tabs .btn.ps-tab--active {
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
 }
 
 /* Step-2 placeholder boxes — kept for now so any section that hasn't been
