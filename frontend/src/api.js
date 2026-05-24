@@ -186,6 +186,16 @@ export const api = {
   /** Rotate API key for an AI Provider (probe-before-persist gate). */
   rotateAiProviderKey:  (id, apiKey) => req("POST", `/settings/ai-providers/${id}/rotate-key`, { apiKey }),
   /**
+   * Migration 059 — pin / unpin the workspace-default AI Provider. The
+   * default handles every agent role that has no per-role override in
+   * Agent Roles. Pass `true` to pin, `false` to clear the workspace's
+   * default entirely (dispatch then falls back to env detection).
+   * @param {string} id
+   * @param {boolean} isDefault
+   */
+  setAiProviderDefault: (id, isDefault) =>
+    req("POST", `/settings/ai-providers/${id}/default`, { default: !!isDefault }),
+  /**
    * B3.5 — Download a schema-v1 JSON dump of every provider_routes row
    * in the current workspace. Secrets are NEVER in the payload (only
    * `apiKeyLastFour` round-trips), so the file is safe to share with

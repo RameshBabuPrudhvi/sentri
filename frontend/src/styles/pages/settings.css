@@ -1102,6 +1102,25 @@
   margin-left: 8px;
 }
 
+/* Migration 059 — workspace-default badge + star button.
+   The "Default" pill sits next to the provider name, mirroring how GitHub
+   shows a "default branch" tag — informative, not a CTA. Uses accent-tinted
+   bg so it reads at a glance without screaming for attention. The Set-as-
+   default button uses the primary button style when active (filled star)
+   so operators can see which provider currently has the role at a glance. */
+.st-ai-default-badge {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg2));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.st-ai-default-btn {
+  /* Filled star (default pinned) inherits btn-primary colours; outlined
+     star (not pinned) uses btn-ghost. No extra rules needed — the modifier
+     classes from components.css handle it. */
+}
+
 /* Fallback chain visualization — rendered inline on each provider row so
    operators see the runtime dispatch order without opening the edit form.
    Visually quiet (no border, no bg) because chains will appear on most rows

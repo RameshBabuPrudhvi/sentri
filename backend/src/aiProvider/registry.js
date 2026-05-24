@@ -522,12 +522,18 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
         // caller surfaces a config error to the user.
         return { route: null, config: cfg, effectiveAgentRole: agentRole };
       }
-      // No routeId — fall through to (3) but keep `cfg` so any per-role
-      // overrides on the row (systemPromptOverride, maxTokens) still
-      // apply. We return `effectiveAgentRole: agentRole` (not null)
-      // because the admin DID configure something for this role, even
-      // if not the route itself — breakers / sticky / metrics use the
-      // per-role keyspace.
+      // No routeId — fall through to workspace default (Migration 059)
+      // then env detection. Keep `cfg` so any per-role overrides on the
+      // row (systemPromptOverride, maxTokens) still apply. We return
+      // `effectiveAgentRole: agentRole` (not null) because the admin DID
+      // configure something for this role, even if not the route itself
+      // — breakers / sticky / metrics use the per-role keyspace.
+      let defaultRoute = null;
+      try { defaultRoute = providerRouteRepo.getWorkspaceDefault(workspaceId); }
+      catch { /* DB unavailable — fall through to env detection */ }
+      if (defaultRoute && defaultRoute.enabled) {
+        return { route: defaultRoute, config: cfg, effectiveAgentRole: agentRole };
+      }
       const fallbackProvider = detectProvider();
       if (!fallbackProvider) return { route: null, config: cfg, effectiveAgentRole: agentRole };
       return {
@@ -538,11 +544,33 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
     }
   }
 
-  // (3) No agent_configs row → AI-005c single-agent collapse. Return
-  // a route synthesised from the workspace-default provider so
-  // dispatch can still go through the protocol adapter, but collapse
-  // `effectiveAgentRole` to null so breakers / sticky / metrics use
-  // the bare-discriminator path.
+  // (3a) Migration 059 — workspace-default `provider_routes` row.
+  //
+  // Industry-standard pattern for autonomous multi-agent platforms
+  // (Vercel AI Gateway, LangSmith, Mastra): a DB-stored "default" row
+  // wins over env detection so operators see the runtime behaviour in
+  // the AI Providers UI without needing to know about env vars. Env
+  // detection still runs as the final safety net for dev environments
+  // and freshly-provisioned workspaces with no default pinned yet.
+  //
+  // Visible in dispatch only when the route is enabled — a disabled
+  // default falls through to env detection so disabling can't be a
+  // foot-gun. Workspace-scoped, so a workspace with no default + valid
+  // env keys behaves exactly the same as before this migration.
+  if (workspaceId) {
+    let defaultRoute = null;
+    try { defaultRoute = providerRouteRepo.getWorkspaceDefault(workspaceId); }
+    catch { /* DB unavailable — fall through to env detection */ }
+    if (defaultRoute && defaultRoute.enabled) {
+      return { route: defaultRoute, config: null, effectiveAgentRole: null };
+    }
+  }
+
+  // (3b) No agent_configs row AND no workspace default → AI-005c
+  // single-agent collapse. Return a route synthesised from env-detected
+  // provider so dispatch can still go through the protocol adapter, but
+  // collapse `effectiveAgentRole` to null so breakers / sticky / metrics
+  // use the bare-discriminator path.
   const provider = detectProvider();
   if (!provider) return { route: null, config: null, effectiveAgentRole: null };
   return {

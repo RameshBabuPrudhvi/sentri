@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Activity, AlertCircle, Check, ChevronDown, ChevronUp,
-  Eye, EyeOff, Info, KeyRound, Plus, RefreshCw, Trash2, X,
+  Eye, EyeOff, Info, KeyRound, Plus, RefreshCw, Star, Trash2, X,
 } from "lucide-react";
 import { api } from "../../../../api.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
@@ -488,12 +488,17 @@ function walkFallbackChain(startId, allRows) {
  */
 function ProviderRow({
   row, rows, rowState, rotateOpen, setRotateOpen, rotateBuf, setRotateBuf,
-  onEdit, onDelete, onProbe, onRotate,
+  onEdit, onDelete, onProbe, onRotate, onSetDefault,
 }) {
   const probing  = rowState?.kind === "probing";
   const rotating = rowState?.kind === "rotating";
   const deleting = rowState?.kind === "deleting";
+  const settingDefault = rowState?.kind === "default";
   const liveCaps = rowState?.kind === "ok" && rowState.caps ? rowState.caps : null;
+  // Migration 059 — workspace default flag. Backend returns `1` (pinned)
+  // or `null` (not pinned). The star action toggles between the two via
+  // POST /settings/ai-providers/:id/default.
+  const isDefault = row.isWorkspaceDefault === 1 || row.isWorkspaceDefault === true;
   // Walk the full fallback chain so operators see the actual runtime
   // dispatch order at a glance — not just the next hop. This is the central
   // visual story for the autonomous-QA fallback model.
@@ -510,6 +515,14 @@ function ProviderRow({
         <div className="st-pr-row-name">
           <span className="st-ai-row-emoji">{familyEmoji(row)}</span>
           <span className="font-semi">{row.name}</span>
+          {isDefault && (
+            <span
+              className="st-pr-badge st-ai-default-badge"
+              title="Workspace default — used by every agent role that has no per-role override."
+            >
+              <Star size={10} /> Default
+            </span>
+          )}
           {!row.enabled && <span className="st-pr-badge st-pr-badge--disabled">Disabled</span>}
           <ProbeBadge capabilities={row.capabilities} live={liveCaps} />
         </div>
@@ -559,10 +572,16 @@ function ProviderRow({
               <span key={role} className="st-pr-badge st-ai-role-chip">{role}</span>
             ))}
           </div>
+        ) : isDefault ? (
+          <div className="st-ai-used-by">
+            <span className="text-xs text-muted">
+              Used by every agent role with no per-role override (workspace default).
+            </span>
+          </div>
         ) : (
           <div className="st-ai-used-by st-ai-used-by--none">
             <span className="text-xs text-muted">
-              Not assigned to any role — falls back to workspace default behaviour.
+              Not assigned to any role — pin as workspace default or assign in Agent Roles.
             </span>
           </div>
         )}
@@ -575,6 +594,21 @@ function ProviderRow({
       </div>
 
       <div className="st-pr-row-actions">
+        <button
+          className={`btn btn-xs ${isDefault ? "btn-primary" : "btn-ghost"} st-ai-default-btn`}
+          onClick={() => onSetDefault(row.id, !isDefault)}
+          disabled={settingDefault || !row.enabled}
+          title={
+            isDefault
+              ? "Clear workspace default — unassigned roles will fall back to env detection."
+              : "Pin as the workspace default. Every agent role with no per-role override will dispatch through this provider."
+          }
+        >
+          {settingDefault
+            ? <RefreshCw size={11} className="spin" />
+            : <Star size={11} fill={isDefault ? "currentColor" : "none"} />}
+          {isDefault ? "Unpin default" : "Set as default"}
+        </button>
         <button
           className="btn btn-ghost btn-xs"
           onClick={() => onProbe(row.id)}
@@ -788,6 +822,24 @@ export default function AiProvidersSection() {
     }
   }
 
+  // Migration 059 — pin / unpin the workspace default. Reloads after success
+  // because setting THIS row as default clears the flag on whichever row had
+  // it before, so we need the full list to refresh.
+  async function handleSetDefault(id, isDefault) {
+    setRowState((s) => ({ ...s, [id]: { kind: "default" } }));
+    try {
+      await api.setAiProviderDefault(id, isDefault);
+      await load();
+      setRowState((s) => {
+        const next = { ...s };
+        delete next[id];
+        return next;
+      });
+    } catch (err) {
+      setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message } }));
+    }
+  }
+
   // ── Import / export ─────────────────────────────────────────────────────
 
   async function handleExport() {
@@ -969,6 +1021,7 @@ export default function AiProvidersSection() {
                   onDelete={handleDelete}
                   onProbe={handleProbe}
                   onRotate={handleRotate}
+                  onSetDefault={handleSetDefault}
                 />
               ))}
             </div>

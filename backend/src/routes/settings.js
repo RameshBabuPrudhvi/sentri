@@ -1435,6 +1435,11 @@ router.patch("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
   if (!existing) return res.status(404).json({ error: "AI provider not found" });
   if (req.body && "apiKey" in req.body)
     return res.status(400).json({ error: "Use POST /settings/ai-providers/:id/rotate-key to change the API key" });
+  // Migration 059 — `isWorkspaceDefault` has side effects on other rows
+  // (clears any previous default in the same transaction). Force callers
+  // through the dedicated endpoint so the audit row is correctly tagged.
+  if (req.body && "isWorkspaceDefault" in req.body)
+    return res.status(400).json({ error: "Use POST /settings/ai-providers/:id/default to pin as workspace default" });
   const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: false });
   if (error) return res.status(400).json({ error });
   try {
@@ -1476,6 +1481,51 @@ router.post("/settings/ai-providers/:id/probe", requireRole("admin"), async (req
   });
   if (!updated) return res.status(404).json({ error: "AI provider not found" });
   return res.json({ ok: true, route: toDisplayRoute(updated), capabilities: updated.capabilities });
+});
+
+/**
+ * Migration 059 — pin / unpin the workspace-default AI Provider.
+ *
+ * This is the explicit operator surface for the "which provider handles
+ * agent roles that have no per-role override?" question. Without a default
+ * pinned, `resolveRoute` falls through to env-variable detection
+ * (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc.), which is invisible to
+ * operators looking only at the AI Providers UI.
+ *
+ * POST body: `{ default: true }` to pin THIS provider, `{ default: false }`
+ * to clear the workspace's default entirely. Mutual exclusion (one default
+ * per workspace) is enforced by the migration's partial UNIQUE index and
+ * the repo's `setWorkspaceDefault` transaction.
+ *
+ * Dedicated endpoint rather than a PATCH field because:
+ *   1. Setting a default has side effects on OTHER rows (clearing the
+ *      previous default). Hiding that in a generic PATCH would surprise
+ *      anyone reading the audit log.
+ *   2. The audit entry needs a specific `metadata.changed:
+ *      ["isWorkspaceDefault"]` shape so admins can filter for "who pinned
+ *      the default and when?".
+ */
+router.post("/settings/ai-providers/:id/default", requireRole("admin"), (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "AI provider not found" });
+  const wantDefault = req.body?.default === true;
+  try {
+    const updated = providerRouteRepo.setWorkspaceDefault(
+      req.workspaceId,
+      wantDefault ? existing.id : null,
+      { userId: req.authUser?.sub || null },
+    );
+    logActivity({
+      ...actor(req), type: "settings.update",
+      detail: wantDefault
+        ? `AI Provider pinned as workspace default: ${existing.name}`
+        : `AI Provider workspace default cleared`,
+    });
+    const rolesByRouteId = buildRolesByRouteId(req.workspaceId);
+    res.json({ ok: true, route: updated ? toDisplayRoute(updated, rolesByRouteId) : null });
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
 });
 
 /** Rotate API key for an AI Provider — identical logic to provider-routes rotate-key. */
