@@ -952,6 +952,14 @@ function serialiseRouteForExport(row) {
     cacheEnabled: row.cacheEnabled === 1 || row.cacheEnabled === true,
     cacheTtlSec: row.cacheTtlSec ?? 0,
     fallbackRouteId: row.fallbackRouteId ?? null,
+    // Migration 060 — preserve per-route probe-timeout override across
+    // export/import round-trips. Matches the rpmLimit / tpmLimit pattern
+    // (operator-set numeric override, NULL = use the workspace/env
+    // default). Without this an operator who configures a 120s probe
+    // timeout for an Ollama provider loses that setting when exporting
+    // from workspace A and importing into workspace B (or reimporting
+    // into the same workspace after disaster recovery).
+    probeTimeoutMs: row.probeTimeoutMs ?? null,
     capabilities: row.capabilities ?? null,
     pricing: row.pricing ?? null,
   };
@@ -1156,6 +1164,13 @@ router.post("/settings/provider-routes/import", requireRole("admin"), async (req
       // fallbackRouteId is rewired in phase 2 — leave it null on the
       // first pass so the cycle check can't trip on a forward reference.
       fallbackRouteId: null,
+      // Migration 060 — pass the per-route probe-timeout override through
+      // `buildProviderRoutePayload` so the validator enforces the
+      // [1000, 600000] range automatically. A hand-edited bundle with an
+      // out-of-range value lands in `stats.errors` rather than silently
+      // persisting; absent / null values fall through to the env default
+      // post-import, matching create semantics.
+      probeTimeoutMs: incoming.probeTimeoutMs ?? null,
       // apiKey is NEVER in the export, so the import never carries one.
       // The route lands keyless and the operator re-supplies via
       // rotate-key after import.

@@ -106,6 +106,11 @@ const files = [
   "tests/request-log.test.js",
   "tests/migration-rollback.test.js",
   "tests/capability-probe.test.js",
+  // PR #28 / Migration 060 — per-route probe-timeout override. Pins repo
+  // column round-trip, `probeAndPersist` precedence chain (explicit arg →
+  // route.probeTimeoutMs → env default), and the [1s, 10min] defence-in-
+  // depth clamp applied before reaching `runCapabilityProbe`.
+  "tests/probe-timeout.test.js",
   // B3.7 — Token-bucket reserve + spend-cap enforcement.
   "tests/quota-guard.test.js",
   // B3.8 — Exact-match response cache + thundering-herd coalescing + janitor.
