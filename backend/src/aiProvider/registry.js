@@ -795,29 +795,13 @@ export function getFallbackProviders(primaryProvider, agentRole = null) {
  * expired entry would surface in the UI for up to one TTL window after
  * its real-world effect ended.
  *
- * @returns {{
- *   breakers: Array<{
- *     key: string,
- *     provider: string,
- *     agentRole: string|null,
- *     failures: number,
- *     disabledUntil: number,
- *     openNow: boolean,
- *     remainingMs: number,
- *   }>,
- *   stickyFallbacks: Array<{
- *     key: string,
- *     provider: string,
- *     agentRole: string|null,
- *     expiry: number,
- *     remainingMs: number,
- *   }>,
- *   constants: {
- *     CIRCUIT_BREAKER_THRESHOLD: number,
- *     CIRCUIT_BREAKER_COOLDOWN_MS: number,
- *     STICKY_FALLBACK_TTL_MS: number,
- *   },
- * }}
+ * Return shape (kept single-line so `jsdoc` can parse the type — the
+ * multi-line form trips its expression parser):
+ *   `{ breakers: Array<{key, provider, agentRole, failures, disabledUntil, openNow, remainingMs}>,`
+ *   ` stickyFallbacks: Array<{key, provider, agentRole, expiry, remainingMs}>,`
+ *   ` constants: {CIRCUIT_BREAKER_THRESHOLD, CIRCUIT_BREAKER_COOLDOWN_MS, STICKY_FALLBACK_TTL_MS} }`
+ *
+ * @returns {Object} A read-only snapshot of dispatcher state.
  */
 export function getAiProviderState() {
   sweepExpiredStickies();
