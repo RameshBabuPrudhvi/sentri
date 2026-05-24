@@ -1,66 +1,71 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, ChevronDown, AlertTriangle, Check, RefreshCw, Settings } from "lucide-react";
+import { Brain, ChevronDown, AlertTriangle, Check, RefreshCw, Settings, CircleSlash } from "lucide-react";
 import { api } from "../../api.js";
 
-// ── Simple module-level cache (no in-flight dedup to avoid stale-closure bugs) ─
+// ── Module-level cache ────────────────────────────────────────────────────────
+// `_configCache` keeps `GET /config` for the active-provider name + hasProvider
+// gate. `_routesCache` keeps `GET /settings/ai-providers` — the list of every
+// `provider_routes` row in the workspace, which is the canonical "switch
+// target" set per the multi-route routing model (Phase 1 of the route-based
+// switcher rollout — see PR discussion). `_settingsCache` is intentionally
+// retained so the legacy env-only Ollama detection path keeps working until
+// every workspace has migrated to row-based dispatch.
 let _configCache   = null;
+let _routesCache   = null;
 let _settingsCache = null;
 
 export function invalidateConfigCache() {
   _configCache   = null;
+  _routesCache   = null;
   _settingsCache = null;
 }
 
-// ── Provider visual styles (colors only — labels come from the backend) ───────
-const PROVIDER_STYLES = {
+// ── Per-family visual styles (colors only — labels come from the backend) ─────
+// Keyed by `provider_routes.family`, NOT by the legacy "active provider id"
+// enum. The active route's family selects the badge color; per-route names
+// come from `route.displayLabel` (server-computed in `toDisplayRoute`).
+const FAMILY_STYLES = {
   anthropic:  { bg: "#fef3e2", border: "#fcd8a8", color: "#b45309", dot: "#d97706", activeBg: "rgba(180,83,9,0.08)" },
   openai:     { bg: "#dcfce7", border: "#bbf7d0", color: "#15803d", dot: "#16a34a", activeBg: "rgba(21,128,61,0.08)" },
   google:     { bg: "#dbeafe", border: "#bfdbfe", color: "#1d4ed8", dot: "#2563eb", activeBg: "rgba(29,78,216,0.08)" },
   openrouter: { bg: "#eef2ff", border: "#c7d2fe", color: "#4338ca", dot: "#6466f1", activeBg: "rgba(67,56,202,0.08)" },
   local:      { bg: "#f5f3ff", border: "#ddd6fe", color: "#6d28d9", dot: "#7c3aed", activeBg: "rgba(109,40,217,0.08)" },
+  custom:     { bg: "#f1f5f9", border: "#cbd5e1", color: "#475569", dot: "#64748b", activeBg: "rgba(71,85,105,0.08)" },
 };
 
-// Look up a provider's name/model from the backend-supplied supportedProviders list.
-// Falls back to the provider id so the UI never shows blank labels.
-function getProviderInfo(config, id) {
-  const sp = config?.supportedProviders?.find(p => p.id === id);
-  return { label: sp?.name || id, sublabel: sp?.model || "" };
-}
-
-const ALL_IDS = ["anthropic", "openai", "google", "openrouter", "local"];
-
-function getCompatIds(settings) {
-  return (settings?.compatProviders || []).map((p) => p.provider);
-}
-
-// Deterministic palette so each `compat:<id>` slot gets a stable, distinct
-// chip color instead of all sharing OpenRouter purple. Palette mirrors the
-// existing PROVIDER_STYLES hues (orange / green / blue / purple / teal / pink)
-// so compat slots blend visually with built-in providers.
-const COMPAT_PALETTE = ["#cd7f32", "#10a37f", "#4285f4", "#6466f1", "#0ea5e9", "#ec4899"];
-function compatStyle(id) {
+// Deterministic palette so a `custom`-family route (or any unmapped family)
+// gets a stable, distinct chip color instead of falling back to grey. Hash
+// the route id so two custom routes don't share the same colour.
+const CUSTOM_PALETTE = ["#cd7f32", "#10a37f", "#4285f4", "#6466f1", "#0ea5e9", "#ec4899"];
+function paletteStyle(id) {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  const c = COMPAT_PALETTE[h % COMPAT_PALETTE.length];
-  // Provide all five style fields the dropdown reads (bg, border, color, dot,
-  // activeBg) so compat-slot rows render with a visible status dot and active
-  // highlight, matching built-in providers in PROVIDER_STYLES.
+  const c = CUSTOM_PALETTE[h % CUSTOM_PALETTE.length];
   return { color: c, dot: c, bg: `${c}11`, border: `${c}44`, activeBg: `${c}14` };
 }
 
-// A provider is "saved" if getSettings() returns a non-empty masked key for it,
-// or (for Ollama) if the backend reports it as explicitly configured.
-function getSavedProviders(settings) {
-  if (!settings) return [];
-  const list = [];
-  if (settings.anthropic)  list.push("anthropic");
-  if (settings.openai)     list.push("openai");
-  if (settings.google)     list.push("google");
-  if (settings.openrouter) list.push("openrouter");
-  if (settings.ollamaConfigured || settings.activeProvider === "local") list.push("local");
-  for (const compatId of getCompatIds(settings)) list.push(compatId);
-  return list;
+// Resolve the colour swatch for a route. Prefer the family-keyed style when
+// recognised; fall back to a deterministic palette colour keyed on route id.
+function styleForRoute(route) {
+  if (!route) return FAMILY_STYLES.custom;
+  return FAMILY_STYLES[route.family] || paletteStyle(route.id || route.family || "?");
+}
+
+// `route.capabilities` is the JSON column populated by the probe system. The
+// ProbeBadge logic (`features/settings/.../ProbeBadge.jsx`) treats a route as
+// healthy only when every dimension is positively true AND there's no
+// `errorReason`. We mirror that gate here so the dropdown's per-row status
+// dot matches what the operator sees on the Settings page — no divergence
+// between "green in dropdown" and "red in Settings".
+function routeHealth(route) {
+  const caps = route?.capabilities;
+  if (!caps) return "unknown";   // never probed yet
+  if (caps.reachable === true
+      && caps.auth === true
+      && caps.model === true
+      && !caps.errorReason) return "healthy";
+  return "unhealthy";
 }
 
 export default function ProviderBadge({ style }) {
