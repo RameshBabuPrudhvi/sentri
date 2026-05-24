@@ -34,9 +34,36 @@ import { resetRouteBreakers } from "../aiProvider/registry.js";
 // AES boundary and the repo stays a pure DAL. Plaintext is never written
 // to disk and never persisted on the request object beyond the call.
 import * as secrets from "../aiProvider/secrets.js";
+import { FAMILY_EMOJI, formatCostTier, getCloudName } from "../aiProvider/modelCatalog.js";
 
 
 const router = Router();
+
+// ── AI Provider display helpers ───────────────────────────────────────────────
+//
+// Augment raw provider_routes rows with display-friendly fields for the
+// Settings UI and Agent Roles dropdown. Computed, never stored.
+//
+/**
+ * Enrich a provider_routes row with three display fields:
+ *   displayLabel — "Claude Sonnet 4.6 (Anthropic)" for dropdowns
+ *   familyEmoji  — "🔶" instant visual family ID
+ *   costTier     — "$3 / $15 per M" or "Free (local)" / "Variable"
+ *
+ * @param {Object} row - Hydrated provider_routes row.
+ * @returns {Object} Same row + display fields.
+ */
+function toDisplayRoute(row) {
+  if (!row) return row;
+  const familyLabel = getCloudName(row.family) || row.family || "Custom";
+  return {
+    ...row,
+    displayLabel: `${row.name} (${familyLabel})`,
+    familyEmoji:  FAMILY_EMOJI[row.family] ?? "🤖",
+    costTier:     formatCostTier(row.model),
+  };
+}
+
 
 // GET /api/config — provider info for the LLM badge shown everywhere
 router.get("/config", async (req, res) => {
@@ -540,7 +567,7 @@ function handleProviderRouteError(err, res) {
  * display. Workspace scoping is enforced by the repo's WHERE clause.
  */
 router.get("/settings/provider-routes", requireRole("admin"), (req, res) => {
-  res.json({ routes: providerRouteRepo.list(req.workspaceId) });
+  res.json({ routes: providerRouteRepo.list(req.workspaceId).map(toDisplayRoute) });
 });
 
 /**
@@ -558,7 +585,7 @@ router.post("/settings/provider-routes", requireRole("admin"), (req, res) => {
       userId: req.authUser?.sub || null,
     });
     logActivity({ ...actor(req), type: "settings.update", detail: `Provider route created: ${saved.name}` });
-    res.status(201).json(saved);
+    res.status(201).json(toDisplayRoute(saved));
   } catch (err) {
     return handleProviderRouteError(err, res);
   }
@@ -1333,6 +1360,146 @@ router.post("/settings/ai-requests/:id/replay", requireRole("admin"), async (req
 router.get("/settings/ai-requests", requireRole("admin"), (req, res) => {
   const rows = aiRequestLogRepo.list(req.workspaceId, req.query || {});
   res.json({ items: rows, nextCursor: rows.length ? rows[rows.length - 1].createdAt : null });
+});
+
+// ── /settings/ai-providers — renamed aliases for /settings/provider-routes ───
+//
+// "AI Providers" is the new operator-facing name for what was called
+// "Provider Routes". Every CRUD + probe + rotate-key operation is aliased
+// here so the frontend can call /settings/ai-providers without a DB
+// migration. The old /settings/provider-routes paths are preserved for
+// backward compat (existing integrations, runbooks, exported JSON schema).
+//
+// Each alias is a thin one-liner that calls the identical handler body
+// inline — no shared closure needed because the handlers read from
+// req.workspaceId / req.params / req.body / req.authUser which are the
+// same on both paths.
+
+/** List all AI Providers (= provider_routes) for this workspace. */
+router.get("/settings/ai-providers", requireRole("admin"), (req, res) => {
+  res.json({ routes: providerRouteRepo.list(req.workspaceId).map(toDisplayRoute) });
+});
+
+/** Create a new AI Provider. */
+router.post("/settings/ai-providers", requireRole("admin"), (req, res) => {
+  const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: true });
+  if (error) return res.status(400).json({ error });
+  try {
+    const saved = providerRouteRepo.upsert({
+      ...payload,
+      workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+    });
+    logActivity({ ...actor(req), type: "settings.update", detail: `AI Provider created: ${saved.name}` });
+    res.status(201).json(toDisplayRoute(saved));
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
+});
+
+/** Partial-update an AI Provider. */
+router.patch("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "AI provider not found" });
+  if (req.body && "apiKey" in req.body)
+    return res.status(400).json({ error: "Use POST /settings/ai-providers/:id/rotate-key to change the API key" });
+  const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: false });
+  if (error) return res.status(400).json({ error });
+  try {
+    const updated = providerRouteRepo.upsert({
+      ...payload,
+      id: existing.id,
+      workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+    });
+    res.json(toDisplayRoute(updated));
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
+});
+
+/** Delete an AI Provider (rejects with 409 if any agent_config references it). */
+router.delete("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "AI provider not found" });
+  const pinnedRoles = agentConfigRepo.listByWorkspace(req.workspaceId)
+    .filter((c) => c.routeId === existing.id)
+    .map((c) => c.role);
+  if (pinnedRoles.length > 0) {
+    return res.status(409).json({
+      error: `AI provider is in use by agent role(s): ${pinnedRoles.join(", ")}. Reassign or clear those roles first.`,
+      code: "ERR_ROUTE_IN_USE",
+      pinnedRoles,
+    });
+  }
+  const result = providerRouteRepo.remove(req.workspaceId, req.params.id, { userId: req.authUser?.sub || null });
+  logActivity({ ...actor(req), type: "settings.update", detail: `AI Provider deleted: ${existing.name}` });
+  res.json({ ok: true, ...result });
+});
+
+/** Probe an AI Provider (network reachability + auth + model check). */
+router.post("/settings/ai-providers/:id/probe", requireRole("admin"), async (req, res) => {
+  const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
+    userId: req.authUser?.sub || null,
+  });
+  if (!updated) return res.status(404).json({ error: "AI provider not found" });
+  return res.json({ ok: true, route: toDisplayRoute(updated), capabilities: updated.capabilities });
+});
+
+/** Rotate API key for an AI Provider — identical logic to provider-routes rotate-key. */
+router.post("/settings/ai-providers/:id/rotate-key", requireRole("admin"), async (req, res) => {
+  // Re-use the original handler by rewriting the param and delegating to
+  // the identically-scoped route. Express doesn't support router.dispatch
+  // directly, so we replicate the thin validation + delegate pattern here.
+  // The handler body is identical to /settings/provider-routes/:id/rotate-key.
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "AI provider not found" });
+  const rawKey = (typeof req.body?.newApiKey === "string" && req.body.newApiKey)
+    || (typeof req.body?.apiKey === "string" && req.body.apiKey)
+    || "";
+  const plaintext = rawKey.trim();
+  if (!plaintext || plaintext.length < 10)
+    return res.status(400).json({ error: "newApiKey is required and must be at least 10 characters" });
+  const priorSecret = providerRouteRepo.getSecretById(req.workspaceId, existing.id);
+  const enc = secrets.encryptKey(plaintext);
+  try {
+    providerRouteRepo.upsert({
+      id: existing.id, workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+      apiKeyEncrypted: enc.ciphertext, apiKeyNonce: enc.nonce, apiKeyLastFour: enc.lastFour,
+      skipAutoProbe: true,
+    });
+    const probed = await providerRouteRepo.probeAndPersist(req.workspaceId, existing.id, {
+      userId: req.authUser?.sub || null,
+    });
+    const caps = probed?.capabilities;
+    const probeOk = caps && caps.reachable && caps.auth !== false && caps.model !== false;
+    if (!probeOk) {
+      providerRouteRepo.upsert({
+        id: existing.id, workspaceId: req.workspaceId,
+        userId: req.authUser?.sub || null,
+        apiKeyEncrypted: priorSecret?.apiKeyEncrypted ?? null,
+        apiKeyNonce: priorSecret?.apiKeyNonce ?? null,
+        apiKeyLastFour: priorSecret?.apiKeyLastFour ?? null,
+        capabilities: existing.capabilities ?? null,
+        skipAutoProbe: true,
+      });
+      return res.status(400).json({
+        error: "Probe failed — new key was rejected",
+        reason: caps?.errorReason || "probe_failed",
+        capabilities: caps,
+      });
+    }
+    resetRouteBreakers(existing.id);
+    logActivity({
+      ...actor(req), type: "auth.api_key.rotate", req,
+      workspaceId: req.workspaceId,
+      meta: { routeId: existing.id, routeName: existing.name, lastFour: enc.lastFour },
+    });
+    res.json({ ok: true, lastFour: enc.lastFour, capabilities: caps });
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
 });
 
 export default router;

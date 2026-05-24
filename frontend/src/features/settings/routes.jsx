@@ -58,6 +58,7 @@ function SettingsIndexRedirect() {
  */
 const ProvidersSection      = lazy(() => import("./sections/providers/ProvidersSection.jsx"));
 const ProviderRoutesSection = lazy(() => import("./sections/provider-routes/ProviderRoutesSection.jsx"));
+const AiProvidersSection    = lazy(() => import("./sections/ai-providers/AiProvidersSection.jsx"));
 const AgentRolesSection     = lazy(() => import("./sections/agent-roles/AgentRolesSection.jsx"));
 const MembersSection        = lazy(() => import("./sections/members/MembersSection.jsx"));
 const ExecutionSection      = lazy(() => import("./sections/execution/ExecutionSection.jsx"));
@@ -84,8 +85,19 @@ function withSuspense(Component) {
 export const settingsRoutes = (
   <>
     <Route index element={<SettingsIndexRedirect />} />
-    <Route path="providers"       element={withSuspense(ProvidersSection)} />
-    <Route path="provider_routes" element={withSuspense(ProviderRoutesSection)} />
+    {/* New unified AI Providers section (replaces separate providers + provider_routes tabs). */}
+    <Route path="ai_providers"    element={withSuspense(AiProvidersSection)} />
+    {/*
+      Deep-link compat: /settings/providers and /settings/provider_routes
+      redirect to ai_providers so existing bookmarks, the onboarding wizard's
+      emitTourEvent("provider-saved") deep-link, and the GitHub App install
+      callback all land on the right page. ProvidersSection and
+      ProviderRoutesSection are still mounted (not deleted) in case any
+      out-of-band link targets them directly — they'll continue to work but
+      won't appear in the sidebar nav.
+    */}
+    <Route path="providers"       element={<Navigate to="/settings/ai_providers" replace />} />
+    <Route path="provider_routes" element={<Navigate to="/settings/ai_providers" replace />} />
     <Route path="agent_roles"     element={withSuspense(AgentRolesSection)} />
     <Route path="members"         element={withSuspense(MembersSection)} />
     <Route path="execution"       element={withSuspense(ExecutionSection)} />

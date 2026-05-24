@@ -1187,3 +1187,194 @@
     justify-content: center;
   }
 }
+
+/* ── AI Providers section (provider-rename) ──────────────────────────────── */
+
+/* List header: count label + Add button on the right */
+.st-ai-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+.st-ai-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Provider row cards */
+.st-ai-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.st-ai-row {
+  transition: opacity 0.15s;
+}
+.st-ai-row--disabled {
+  opacity: 0.55;
+}
+.st-ai-row-emoji {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+/* Cost tier badge inline in row meta */
+.st-ai-cost-tier {
+  color: var(--text2);
+  font-size: 11px;
+}
+
+/* Error banner inside the providers card */
+.st-ai-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+/* Tip at the bottom of the list */
+.st-ai-tip {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+/* Inline form wrapper */
+.st-ai-form-wrap {
+  margin-bottom: 20px;
+}
+.st-ai-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.st-ai-form-err {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.st-ai-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Advanced toggle button */
+.st-ai-adv-toggle {
+  align-self: flex-start;
+  color: var(--text2);
+  gap: 4px;
+  margin-top: 4px;
+}
+.st-ai-adv-grid {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+/* Docs link next to API key label */
+.st-ai-docs-link {
+  margin-left: 8px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.st-ai-docs-link:hover {
+  text-decoration: underline;
+}
+
+/* Checkbox fields */
+.st-pr-field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* Quick-start empty state */
+.st-ai-empty {
+  padding: 24px 0 8px;
+  text-align: center;
+}
+.st-ai-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text1);
+  margin-bottom: 6px;
+}
+.st-ai-empty-sub {
+  font-size: 12px;
+  color: var(--text2);
+  max-width: 480px;
+  margin: 0 auto 20px;
+  line-height: 1.6;
+}
+.st-ai-qs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.st-ai-qs-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--qs-color, var(--border));
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.st-ai-qs-tile:hover {
+  background: color-mix(in srgb, var(--qs-color, var(--accent)) 10%, var(--bg2));
+}
+.st-ai-qs-emoji {
+  font-size: 22px;
+}
+.st-ai-qs-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text1);
+}
+.st-ai-qs-hint {
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.4;
+}
+
+/* Agent Roles — provider dropdown richer styling */
+.st-agent-provider-select option {
+  font-family: inherit;
+}
+.st-agent-row-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text1);
+  margin-left: 8px;
+}
+
+/* Responsive: collapse quick-start to 2 columns on narrow viewports */
+@media (max-width: 640px) {
+  .st-ai-qs-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .st-ai-list-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

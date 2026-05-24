@@ -173,6 +173,25 @@ export const api = {
    * @returns {Promise<{routes: Array<Object>}>}
    */
   listProviderRoutes:   () => req("GET", "/settings/provider-routes"),
+
+  // ── AI Providers (new name for Provider Routes) ──────────────────────────
+  // These aliases call the /settings/ai-providers endpoints added in the
+  // provider-rename refactor. Each row returned includes three extra display
+  // fields: displayLabel, familyEmoji, costTier — computed server-side so
+  // the UI never has to re-derive them. The old listProviderRoutes() above
+  // is preserved for backward compat; new UI code uses listAiProviders().
+  /** List AI Providers (= provider_routes) with display enrichment. */
+  listAiProviders:      () => req("GET", "/settings/ai-providers"),
+  /** Create a new AI Provider. Same payload shape as createProviderRoute. */
+  createAiProvider:     (payload) => req("POST", "/settings/ai-providers", payload),
+  /** Partial-update an AI Provider. Omit apiKey — use rotateAiProviderKey. */
+  updateAiProvider:     (id, payload) => req("PATCH", `/settings/ai-providers/${id}`, payload),
+  /** Delete an AI Provider (409 if any agent role references it). */
+  deleteAiProvider:     (id) => req("DELETE", `/settings/ai-providers/${id}`),
+  /** Network probe — reachability + auth + model check. */
+  probeAiProvider:      (id) => req("POST", `/settings/ai-providers/${id}/probe`),
+  /** Rotate API key for an AI Provider (probe-before-persist gate). */
+  rotateAiProviderKey:  (id, apiKey) => req("POST", `/settings/ai-providers/${id}/rotate-key`, { apiKey }),
   /**
    * Create a new provider route. `apiKey` is plaintext on the wire,
    * encrypted server-side via `secrets.encryptKey` before persist.
