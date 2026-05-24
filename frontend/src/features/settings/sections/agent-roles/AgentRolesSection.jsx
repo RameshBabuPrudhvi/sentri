@@ -3,7 +3,7 @@ import {
   Activity, AlertCircle, Check, Info, RefreshCw,
 } from "lucide-react";
 import { api } from "../../../../api.js";
-import { AGENT_ROLES } from "../../../../config.js";
+import { AGENT_ROLES, FAMILY_EMOJI } from "../../../../config.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
 
 /**
@@ -19,12 +19,6 @@ import SectionTitle from "../../shared/SectionTitle.jsx";
  *
  * Extracted from Settings.jsx (GAP-002). Updated for provider-rename (B4.x).
  */
-
-// Emoji fallback when the server doesn't return familyEmoji (old API)
-const FAMILY_EMOJI = {
-  anthropic: "🔶", openai: "🟢", google: "🔷",
-  openrouter: "🧭", local: "🦙", custom: "🔧",
-};
 
 function providerEmoji(r) {
   return r.familyEmoji || FAMILY_EMOJI[r.family] || "🤖";

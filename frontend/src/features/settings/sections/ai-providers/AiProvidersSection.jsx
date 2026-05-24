@@ -4,6 +4,7 @@ import {
   Eye, EyeOff, Info, KeyRound, Plus, RefreshCw, Star, Trash2, Wifi, WifiOff, X,
 } from "lucide-react";
 import { api } from "../../../../api.js";
+import { FAMILY_EMOJI } from "../../../../config.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
 import { useOllamaStatusQuery } from "../../../../hooks/queries/useSettingsQueries.js";
 import { detectFallbackCycle, maskedKeyDisplay } from "../provider-routes/providerRoutes.utils.js";
@@ -86,7 +87,7 @@ const FORM_EMPTY = {
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function familyEmoji(row) {
-  return row.familyEmoji || { anthropic: "🔶", openai: "🟢", google: "🔷", openrouter: "🧭", local: "🦙", custom: "🔧" }[row.family] || "🤖";
+  return row.familyEmoji || FAMILY_EMOJI[row.family] || "🤖";
 }
 
 function numOrNull(v) {

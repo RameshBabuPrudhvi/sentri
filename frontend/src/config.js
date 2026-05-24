@@ -12,6 +12,14 @@
 // intentionally not user-configurable (it's a Prometheus catch-all).
 export const AGENT_ROLES = ["explorer", "planner", "author", "oracle", "reviewer", "healer", "triager"];
 
+// Provider-family emoji map. Mirrors `backend/src/aiProvider/modelCatalog.js#FAMILY_EMOJI`.
+// Used by AiProvidersSection + AgentRolesSection as a client-side fallback
+// when the server response doesn't include `familyEmoji` (older backend).
+export const FAMILY_EMOJI = {
+  anthropic: "🔶", openai: "🟢", google: "🔷",
+  openrouter: "🧭", local: "🦙", custom: "🔧",
+};
+
 // GAP-005 (audit, fix) — per-pipeline-step agent attribution. The earlier
 // hardcoded `STEP_TO_AGENT_ROLE` in CrawlView / GenerateView / TestLab
 // (1) only covered 2 of the 7 roles and (2) was WRONG on step 3 — the
