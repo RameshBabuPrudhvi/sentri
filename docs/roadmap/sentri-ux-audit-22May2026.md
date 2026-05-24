@@ -757,48 +757,5 @@ Sentri is an exceptionally capable product held back by a frontend that was buil
 The good news: the foundations are solid. The design token system is well-structured. TanStack Query is properly integrated. Lazy loading and code splitting are in place. The accessibility infrastructure (ARIA live regions, RBAC-conditional rendering) has been started. Sentri is 6–9 months of focused UX investment away from a world-class enterprise platform.
 
 ---
-Fix 
-Bug 1: baseUrl: null route used the wrong endpoint
-elapsedMs:773, status:401, message:"401 Incorrect API key provided: sk-or-v1*****13c6.
-You can find your API key at https://platform.openai.com/account/api-keys."
-That error message is OpenAI's, not OpenRouter's. The probe sent an OpenRouter key (sk-or-v1*****13c6) to api.openai.com because baseUrl was null — the OpenAI SDK's hardcoded default. OpenAI rejected it as a malformed OpenAI key.
-
-Why: provider_routes row has baseUrl: null but family: "openrouter". Dispatch falls through to the OpenAI SDK's default api.openai.com instead of https://openrouter.ai/api/v1.
-
-Fix locations to investigate:
-
-backend/src/aiProvider/protocols/openai.js — when route.baseUrl is null on a family: "openrouter" route, it should resolve to https://openrouter.ai/api/v1
-backend/src/aiProvider/registry.js#synthesiseTransientRoute — already has compat-slot baseUrl resolution; needs the same for openrouter family
-Or a NOT NULL DB constraint on provider_routes.baseUrl for family IN ('openrouter', 'compat')
-This is also a security concern — the openrouter key got sent to OpenAI's servers. Not a leak per se (TLS, rejected immediately), but the wire request happened.
-
-Bug 2: Probe accepts 4xx as "success" → UI shows green
-The 402 / 401 are recorded as status: 402 in capabilities but reachable: true (per your earlier export). I called this out previously — the badge logic doesn't honour errorReason / auth: false / status >= 400.
-
-The new logs prove this isn't a one-off — every failed probe stamps the route as reachable.
-
-Bug 3: Probe timeout doesn't honour probeTimeoutMs
-routeId:pr-ab08522f-8625-43ce-871d-6146023e4d9c
-elapsedMs:117503  ← 117 seconds
-The route's probeTimeoutMs: 90000 (90s) — but the probe ran 117s before aborting. Two possible causes:
-
-Probe doesn't apply timeout to retry loop. The 19:06:23 entry shows Rate limit hit … Retrying in 2s (attempt 1/3). The 90s timeout might gate one attempt but not the full retry chain.
-controller.abort() not awaited / signal not threaded through retry-after wait.
-This is the Migration 060 contract — probeTimeoutMs is supposed to be a hard ceiling on the probe call, not per-attempt.
-
-Bug 4 (less severe): Auto-probe storm on every UI render
-The logs show:
-
-19:04:22 probe abort (route A)
-19:05:22 probe abort (route A again, 60s later)
-19:06:23 retry chain (route A, third probe)
-19:08:30 probe attempt (route B)
-19:08:51 probe attempt (route B again, 21s later)
-19:08:53 probe attempt (route B again, 2s later)
-Two probes on the same route in 21s, then 2s — that's not auto-probe-on-upsert (skipAutoProbe aside, route rows don't change that fast). Either:
-
-The Settings UI fires a probe on every mount
-Or operator was clicking "Re-probe" rapidly
-Probably not a bug, but worth flagging — burning the OpenRouter free quota on duplicate probes is what got you to "20 requests/day exhausted" in the first place.
 
 *Audit produced by: Principal Product Designer / Enterprise UX Architect review of `sentri_v1_4` codebase, May 2026.*
