@@ -1368,6 +1368,77 @@
   margin-left: 8px;
 }
 
+/* Fallback chain visualization — rendered inline on each provider row so
+   operators see the runtime dispatch order without opening the edit form.
+   Visually quiet (no border, no bg) because chains will appear on most rows
+   in a multi-provider workspace and shouldn't compete with the row name. */
+.st-ai-fallback-chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text2);
+}
+.st-ai-fallback-label {
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.st-ai-fallback-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  color: var(--text1);
+}
+.st-ai-fallback-arrow {
+  color: var(--text3);
+  font-size: 12px;
+}
+
+/* "Used by" reverse reference — role chips that link this provider to the
+   pipeline agents that dispatch through it. Critical for the multi-agent
+   mental model so operators can see at a glance which roles depend on
+   this provider being healthy. */
+.st-ai-used-by {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.st-ai-used-by--none {
+  /* Muted style for the "not assigned" message — informational, not a
+     warning. Some providers are intentionally unassigned (warm spares
+     in a fallback chain). */
+  opacity: 0.7;
+}
+.st-ai-role-chip {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg2));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 7px;
+}
+
+/* Fallback dropdown promoted out of "Advanced" — wrapper just adds vertical
+   rhythm so the field doesn't crowd the primary form grid above it. */
+.st-ai-fallback-field {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg2));
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border));
+  border-radius: 8px;
+}
+
 /* Env-injected providers banner — read-only surface for ANTHROPIC_API_KEY /
    GOOGLE_API_KEY / OLLAMA_BASE_URL / compat-slot configs that aren't backed
    by a provider_routes row. Visually distinct from managed AI Provider rows

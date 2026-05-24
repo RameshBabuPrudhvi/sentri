@@ -45,15 +45,25 @@ const router = Router();
 // Settings UI and Agent Roles dropdown. Computed, never stored.
 //
 /**
- * Enrich a provider_routes row with three display fields:
+ * Enrich a provider_routes row with display-friendly fields:
  *   displayLabel — "Claude Sonnet 4.6 (Anthropic)" for dropdowns
  *   familyEmoji  — "🔶" instant visual family ID
  *   costTier     — "$3 / $15 per M" or "Free (local)" / "Variable"
+ *   usedByRoles  — Agent roles pinned to this route (reverse ref). Lets the
+ *                  Settings UI render "Used by: explorer, planner" inline on
+ *                  each provider row so operators see the multi-agent wiring
+ *                  without tab-switching to Agent Roles.
+ *
+ * The `rolesByRouteId` Map is optional — single-row enrichment paths
+ * (rotate-key, probe, upsert response) can omit it; the list endpoints
+ * build it once for the whole workspace and pass it in to amortise the
+ * agent_configs query across N rows.
  *
  * @param {Object} row - Hydrated provider_routes row.
+ * @param {Map<string, string[]>} [rolesByRouteId] - routeId → role[] reverse map.
  * @returns {Object} Same row + display fields.
  */
-function toDisplayRoute(row) {
+function toDisplayRoute(row, rolesByRouteId = null) {
   if (!row) return row;
   const familyLabel = getCloudName(row.family) || row.family || "Custom";
   return {
@@ -61,7 +71,27 @@ function toDisplayRoute(row) {
     displayLabel: `${row.name} (${familyLabel})`,
     familyEmoji:  FAMILY_EMOJI[row.family] ?? "🤖",
     costTier:     formatCostTier(row.model),
+    usedByRoles:  rolesByRouteId?.get(row.id) ?? [],
   };
+}
+
+/**
+ * Build the routeId → role[] reverse map for a workspace in one DB call.
+ * Used by the list endpoints so each row's `usedByRoles` field is
+ * populated without an N+1 query.
+ *
+ * @param {string} workspaceId
+ * @returns {Map<string, string[]>}
+ */
+function buildRolesByRouteId(workspaceId) {
+  const map = new Map();
+  for (const cfg of agentConfigRepo.listByWorkspace(workspaceId)) {
+    if (!cfg.routeId) continue;
+    const list = map.get(cfg.routeId) || [];
+    list.push(cfg.role);
+    map.set(cfg.routeId, list);
+  }
+  return map;
 }
 
 
@@ -567,7 +597,8 @@ function handleProviderRouteError(err, res) {
  * display. Workspace scoping is enforced by the repo's WHERE clause.
  */
 router.get("/settings/provider-routes", requireRole("admin"), (req, res) => {
-  res.json({ routes: providerRouteRepo.list(req.workspaceId).map(toDisplayRoute) });
+  const rolesByRouteId = buildRolesByRouteId(req.workspaceId);
+  res.json({ routes: providerRouteRepo.list(req.workspaceId).map((r) => toDisplayRoute(r, rolesByRouteId)) });
 });
 
 /**
@@ -1377,7 +1408,8 @@ router.get("/settings/ai-requests", requireRole("admin"), (req, res) => {
 
 /** List all AI Providers (= provider_routes) for this workspace. */
 router.get("/settings/ai-providers", requireRole("admin"), (req, res) => {
-  res.json({ routes: providerRouteRepo.list(req.workspaceId).map(toDisplayRoute) });
+  const rolesByRouteId = buildRolesByRouteId(req.workspaceId);
+  res.json({ routes: providerRouteRepo.list(req.workspaceId).map((r) => toDisplayRoute(r, rolesByRouteId)) });
 });
 
 /** Create a new AI Provider. */

@@ -50,14 +50,13 @@ function SettingsIndexRedirect() {
  * additions edit this file plus add their own section folder; App.jsx
  * never needs to change.
  *
- * The two largest tabs (`providers`, `provider_routes`) defer their
- * internal decomposition to GAP-002b — they currently render via a thin
- * wrapper around the legacy Settings.jsx component, but they ship with
- * the same URL contract, lazy boundary, and sidebar wayfinding as the
- * fully-extracted sections.
+ * The old `providers` (family key cards) and `provider_routes` (named
+ * model CRUD) sections were merged into the unified `ai_providers`
+ * surface in the provider-rename refactor. The legacy section files
+ * under `sections/providers/` and `sections/provider-routes/ProviderRoutesSection.jsx`
+ * have been deleted; the URL paths still resolve via `<Navigate>` below
+ * for deep-link compatibility.
  */
-const ProvidersSection      = lazy(() => import("./sections/providers/ProvidersSection.jsx"));
-const ProviderRoutesSection = lazy(() => import("./sections/provider-routes/ProviderRoutesSection.jsx"));
 const AiProvidersSection    = lazy(() => import("./sections/ai-providers/AiProvidersSection.jsx"));
 const AgentRolesSection     = lazy(() => import("./sections/agent-roles/AgentRolesSection.jsx"));
 const MembersSection        = lazy(() => import("./sections/members/MembersSection.jsx"));
@@ -91,10 +90,8 @@ export const settingsRoutes = (
       Deep-link compat: /settings/providers and /settings/provider_routes
       redirect to ai_providers so existing bookmarks, the onboarding wizard's
       emitTourEvent("provider-saved") deep-link, and the GitHub App install
-      callback all land on the right page. ProvidersSection and
-      ProviderRoutesSection are still mounted (not deleted) in case any
-      out-of-band link targets them directly — they'll continue to work but
-      won't appear in the sidebar nav.
+      callback all land on the right page. The legacy section components
+      have been deleted — only the redirect routes remain.
     */}
     <Route path="providers"       element={<Navigate to="/settings/ai_providers" replace />} />
     <Route path="provider_routes" element={<Navigate to="/settings/ai_providers" replace />} />

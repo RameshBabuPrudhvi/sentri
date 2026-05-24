@@ -346,14 +346,49 @@ function ProviderForm({
           )}
         </div>
 
-        {/* Advanced section (rate limits, caching, fallback) */}
+        {/* Fallback provider — promoted out of "Advanced" because for an
+            autonomous-QA platform this is the central multi-provider story.
+            Runtime fallback (registry.js + retry.js) walks this chain when
+            the primary hits 429/5xx, sticks to the survivor for the rest of
+            the run, and only stops calling once every fallback is exhausted. */}
+        {rows.filter((r) => r.id !== form.id).length > 0 && (
+          <div className="st-ai-fallback-field">
+            <label className="st-pr-field">
+              <span className="st-pr-field-label">
+                Fallback AI Provider <span className="text-xs text-muted">(used on rate-limit or outage)</span>
+              </span>
+              <select
+                className="input"
+                value={form.fallbackRouteId}
+                onChange={(e) => setForm((s) => ({ ...s, fallbackRouteId: e.target.value }))}
+              >
+                <option value="">— none (fail when this provider is exhausted) —</option>
+                {rows
+                  .filter((r) => r.id !== form.id)
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {familyEmoji(r)} {r.name}
+                      {r.id === cycleAt ? " ⚠ cycle" : ""}
+                    </option>
+                  ))}
+              </select>
+              {cycleAt && (
+                <span className="st-status-err hint">
+                  <AlertCircle size={11} /> Fallback chain would create a cycle.
+                </span>
+              )}
+            </label>
+          </div>
+        )}
+
+        {/* Advanced section (rate limits, caching, enabled toggle) */}
         <button
           type="button"
           className="btn btn-ghost btn-xs st-ai-adv-toggle"
           onClick={() => setShowAdvanced((v) => !v)}
         >
           {showAdvanced ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          {showAdvanced ? "Hide advanced" : "Advanced (rate limits, caching, fallback)"}
+          {showAdvanced ? "Hide advanced" : "Advanced (rate limits, caching)"}
         </button>
 
         {showAdvanced && (
@@ -385,29 +420,6 @@ function ProviderForm({
                 placeholder="0"
                 disabled={!form.cacheEnabled}
               />
-            </label>
-            <label className="st-pr-field st-pr-field--wide">
-              <span className="st-pr-field-label">Fallback AI Provider</span>
-              <select
-                className="input"
-                value={form.fallbackRouteId}
-                onChange={(e) => setForm((s) => ({ ...s, fallbackRouteId: e.target.value }))}
-              >
-                <option value="">— none —</option>
-                {rows
-                  .filter((r) => r.id !== form.id)
-                  .map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {familyEmoji(r)} {r.name}
-                      {r.id === cycleAt ? " ⚠ cycle" : ""}
-                    </option>
-                  ))}
-              </select>
-              {cycleAt && (
-                <span className="st-status-err hint">
-                  <AlertCircle size={11} /> Fallback chain would create a cycle.
-                </span>
-              )}
             </label>
             <label className="st-pr-field st-pr-field--checkbox">
               <input
@@ -446,6 +458,32 @@ function ProviderForm({
 }
 
 /**
+ * Walk the fallback chain starting at `startId` and return the ordered list
+ * of routes the dispatcher would try on durable failure. Stops at the first
+ * cycle or missing link, capped at 8 hops (industry-standard autonomous-QA
+ * runs never need deeper chains; the backend caps cycles at 64).
+ *
+ * @param {string|null} startId
+ * @param {Array} allRows
+ * @returns {Array} Chain WITHOUT the starting row (so it can be rendered as `start → chain[0] → chain[1]…`).
+ */
+function walkFallbackChain(startId, allRows) {
+  const byId = new Map(allRows.map((r) => [r.id, r]));
+  const chain = [];
+  const seen = new Set();
+  let next = startId;
+  while (next && chain.length < 8) {
+    if (seen.has(next)) break;
+    seen.add(next);
+    const row = byId.get(next);
+    if (!row) break;
+    chain.push(row);
+    next = row.fallbackRouteId || null;
+  }
+  return chain;
+}
+
+/**
  * Single provider row card in the list.
  */
 function ProviderRow({
@@ -456,9 +494,15 @@ function ProviderRow({
   const rotating = rowState?.kind === "rotating";
   const deleting = rowState?.kind === "deleting";
   const liveCaps = rowState?.kind === "ok" && rowState.caps ? rowState.caps : null;
-  const fallbackRow = row.fallbackRouteId
-    ? rows.find((r) => r.id === row.fallbackRouteId)
-    : null;
+  // Walk the full fallback chain so operators see the actual runtime
+  // dispatch order at a glance — not just the next hop. This is the central
+  // visual story for the autonomous-QA fallback model.
+  const fallbackChain = walkFallbackChain(row.fallbackRouteId, rows);
+  // Reverse reference from agent_configs (backend joins on every list call).
+  // Tells operators which pipeline agents actually dispatch against this
+  // provider — closing the loop between AI Providers and Agent Roles
+  // without forcing a tab switch.
+  const usedByRoles = row.usedByRoles || [];
 
   return (
     <div className={`card-padded-sm st-pr-row st-ai-row${!row.enabled ? " st-ai-row--disabled" : ""}`}>
@@ -480,8 +524,49 @@ function ProviderRow({
         <div className="text-xs text-muted st-pr-row-meta">
           {`rpm ${row.rpmLimit ?? "∞"} · tpm ${row.tpmLimit ?? "∞"}`}
           {row.cacheEnabled ? ` · cache ${row.cacheTtlSec || 0}s` : " · no cache"}
-          {fallbackRow ? ` · fallback → ${familyEmoji(fallbackRow)} ${fallbackRow.name}` : ""}
         </div>
+
+        {/* Fallback chain — rendered as a visible sequence so operators see
+            the actual runtime dispatch order. Hidden when no fallback is
+            configured (the most common single-provider case). */}
+        {fallbackChain.length > 0 && (
+          <div className="st-ai-fallback-chain" title="Runtime fallback order — used when a provider hits rate limits or 5xx errors.">
+            <span className="st-ai-fallback-label">Fallback:</span>
+            <span className="st-ai-fallback-step">
+              <span className="st-ai-row-emoji">{familyEmoji(row)}</span>
+              {row.name}
+            </span>
+            {fallbackChain.map((step) => (
+              <React.Fragment key={step.id}>
+                <span className="st-ai-fallback-arrow">→</span>
+                <span className="st-ai-fallback-step">
+                  <span className="st-ai-row-emoji">{familyEmoji(step)}</span>
+                  {step.name}
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+
+        {/* Reverse reference — which pipeline agent roles dispatch through
+            this provider. Critical for the multi-agent mental model: an
+            unassigned provider is dead weight; a provider assigned to many
+            roles is load-bearing infrastructure. */}
+        {usedByRoles.length > 0 ? (
+          <div className="st-ai-used-by">
+            <span className="text-xs text-muted">Used by:</span>
+            {usedByRoles.map((role) => (
+              <span key={role} className="st-pr-badge st-ai-role-chip">{role}</span>
+            ))}
+          </div>
+        ) : (
+          <div className="st-ai-used-by st-ai-used-by--none">
+            <span className="text-xs text-muted">
+              Not assigned to any role — falls back to workspace default behaviour.
+            </span>
+          </div>
+        )}
+
         {rowState?.kind === "err" && (
           <div className="st-status-err st-pr-row-error">
             <AlertCircle size={11} /> {rowState.msg}
