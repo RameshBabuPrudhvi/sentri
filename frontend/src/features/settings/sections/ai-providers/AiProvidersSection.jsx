@@ -285,7 +285,7 @@ function ProviderForm({
         </div>
       )}
 
-      <form onSubmit={onSave} className="st-ai-form">
+      <form onSubmit={onSave} className="st-ai-form" aria-label={form.id ? "Edit AI Provider" : "Add AI Provider"}>
         {/* Row 1: Name + Family + Protocol */}
         <div className="st-pr-form-grid">
           <label className="st-pr-field">
@@ -575,7 +575,7 @@ function ProviderRow({
   const usedByRoles = row.usedByRoles || [];
 
   return (
-    <div className={`card-padded-sm st-pr-row st-ai-row${!row.enabled ? " st-ai-row--disabled" : ""}`}>
+    <div className={`card-padded-sm st-pr-row st-ai-row${!row.enabled ? " st-ai-row--disabled" : ""}`} role="listitem" aria-label={`${row.name} — ${row.family}`}>
       <div className="st-pr-row-header">
         <div className="st-pr-row-name">
           <span className="st-ai-row-emoji">{familyEmoji(row)}</span>
@@ -691,11 +691,12 @@ function ProviderRow({
         >
           <KeyRound size={11} /> Rotate key
         </button>
-        <button className="btn btn-ghost btn-xs" onClick={() => onEdit(row)}>Edit</button>
+        <button className="btn btn-ghost btn-xs" onClick={() => onEdit(row)} aria-label={`Edit ${row.name}`}>Edit</button>
         <button
           className="btn btn-danger btn-xs"
           onClick={() => onDelete(row.id)}
           disabled={deleting}
+          aria-label={`Delete ${row.name}`}
         >
           {deleting ? <RefreshCw size={11} className="spin" /> : <Trash2 size={11} />}
           Delete
@@ -967,11 +968,14 @@ export default function AiProvidersSection() {
         }
       />
 
-      {/* Section tabs */}
-      <div className="st-pr-subtabs">
+      {/* Section tabs — WAI-ARIA tablist pattern (matches TestLab topbar). */}
+      <div className="st-pr-subtabs" role="tablist" aria-label="AI Providers sections">
         {TAB_LABELS.map((t) => (
           <button
             key={t.key}
+            role="tab"
+            aria-selected={activeTab === t.key}
+            aria-controls={`st-ai-tabpanel-${t.key}`}
             className={`btn btn-ghost btn-xs${activeTab === t.key ? " st-pr-subtab--active" : ""}`}
             onClick={() => setActiveTab(t.key)}
           >
@@ -982,7 +986,7 @@ export default function AiProvidersSection() {
 
       {/* ── AI Providers list tab ── */}
       {activeTab === "providers" && (
-        <div className="card card-padded">
+        <div className="card card-padded" id="st-ai-tabpanel-providers" role="tabpanel" aria-label="AI Providers">
           {error && (
             <div className="st-status-err st-ai-error">
               <AlertCircle size={12} /> {error}
@@ -1071,7 +1075,7 @@ export default function AiProvidersSection() {
 
           {/* Provider list */}
           {!loading && rows.length > 0 && (
-            <div className="st-ai-rows">
+            <div className="st-ai-rows" role="list" aria-label="Configured AI Providers">
               {rows.map((row) => (
                 <ProviderRow
                   key={row.id}
@@ -1102,9 +1106,9 @@ export default function AiProvidersSection() {
         </div>
       )}
 
-      {activeTab === "spend"    && <WorkspaceSpendCapsPanel />}
-      {activeTab === "audit"    && <AuditLogSubtab rows={rows} />}
-      {activeTab === "requests" && <AiRequestLogSubtab rows={rows} />}
+      {activeTab === "spend"    && <div id="st-ai-tabpanel-spend" role="tabpanel" aria-label="Spend Caps"><WorkspaceSpendCapsPanel /></div>}
+      {activeTab === "audit"    && <div id="st-ai-tabpanel-audit" role="tabpanel" aria-label="Audit Log"><AuditLogSubtab rows={rows} /></div>}
+      {activeTab === "requests" && <div id="st-ai-tabpanel-requests" role="tabpanel" aria-label="Request Log"><AiRequestLogSubtab rows={rows} /></div>}
     </div>
   );
 }
