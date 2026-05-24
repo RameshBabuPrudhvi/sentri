@@ -25,6 +25,11 @@ import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSe
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
+// B4.6 — read-only route-group surface for the TopBar dropdown +
+// future Settings subtab. Mutations live behind a separate roadmap item
+// (`docs/roadmap/ai-provider-bundle.md:397-405`); today this repo only
+// exposes `list` + `getById` + `listMembers`.
+import * as routeGroupRepo from "../database/repositories/routeGroupRepo.js";
 import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
 import * as providerRouteAuditRepo from "../database/repositories/providerRouteAuditRepo.js";
 import { resetRouteBreakers } from "../aiProvider/registry.js";
@@ -154,6 +159,15 @@ router.post("/settings", requireRole("admin"), async (req, res) => {
   // ── Quick-switch: frontend sends "__use_existing__" to activate a provider
   // that already has a saved key without re-entering it. Just set the
   // active-provider override — no key is written or validated.
+  //
+  // @deprecated Phase 3 of the route-based provider switcher rollout.
+  // The TopBar dropdown no longer fires this branch — it now calls
+  // `POST /settings/ai-providers/:id/default` which flips
+  // `provider_routes.isWorkspaceDefault`. The branch is retained for
+  // backward compat with the legacy Settings UI (ProvidersSection.jsx
+  // and CompatProviderForm.jsx call `saveApiKey()` on form save which
+  // still uses this flow). See `setActiveProvider` JSDoc in
+  // `backend/src/aiProvider/registry.js` for deletion criteria.
   if (apiKey === "__use_existing__" && provider !== "local") {
     const configured = getConfiguredKeys();
     const hasCompat = isCompat && configured.compatProviders?.some((p) => p.provider === provider);
@@ -1647,6 +1661,49 @@ router.post("/settings/ai-providers/:id/default", requireRole("admin"), (req, re
   } catch (err) {
     return handleProviderRouteError(err, res);
   }
+});
+
+/**
+ * B4.6 — Read-only route-groups listing for the TopBar AI Provider
+ * dropdown and the future Route Groups Settings subtab.
+ *
+ * Each row carries `memberCount` + `enabledMemberCount` aggregates so the
+ * frontend renders "Cheapest tier · 3 routes (2 healthy)" without a
+ * second round-trip per group. We also fold in `usedByRoles` (the same
+ * reverse-ref shape as `toDisplayRoute`) so operators see which agent
+ * roles dispatch through each group — groups are reachable today only
+ * via `agent_configs.routeId = "rg-..."`.
+ *
+ * Mutations (`POST/PATCH/DELETE`) intentionally NOT implemented here —
+ * the Settings UI for editing groups is a follow-up roadmap item
+ * (`docs/roadmap/ai-provider-bundle.md:397-405`). Today's surface is
+ * read-only so the dropdown can SHOW the operator-defined groups
+ * without claiming an editing affordance that doesn't exist yet.
+ */
+router.get("/settings/route-groups", requireRole("admin"), (req, res) => {
+  const groups = routeGroupRepo.list(req.workspaceId);
+  // Build a single reverse-ref map (routeId / groupId → role[]) so the
+  // N+1 from per-group reads is avoided. `agent_configs.routeId` carries
+  // both shapes; we partition by the `rg-` prefix.
+  const rolesByGroupId = new Map();
+  for (const cfg of agentConfigRepo.listByWorkspace(req.workspaceId)) {
+    if (!cfg.routeId) continue;
+    if (typeof cfg.routeId === "string" && cfg.routeId.startsWith("rg-")) {
+      const list = rolesByGroupId.get(cfg.routeId) || [];
+      list.push(cfg.role);
+      rolesByGroupId.set(cfg.routeId, list);
+    }
+  }
+  // Strategy → human label. Kept inline so the frontend doesn't have to
+  // duplicate the mapping — same convention as `FAMILY_DISPLAY_LABEL`.
+  const STRATEGY_LABEL = { weighted: "Weighted", latency: "Lowest latency", cost: "Cheapest" };
+  res.json({
+    groups: groups.map((g) => ({
+      ...g,
+      strategyLabel: STRATEGY_LABEL[g.strategy] || g.strategy,
+      usedByRoles: rolesByGroupId.get(g.id) || [],
+    })),
+  });
 });
 
 /** Rotate API key for an AI Provider — identical logic to provider-routes rotate-key. */

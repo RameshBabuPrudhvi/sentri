@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Brain, ChevronDown, AlertTriangle, Check, RefreshCw, Settings, CircleSlash } from "lucide-react";
+import { Brain, ChevronDown, AlertTriangle, Check, RefreshCw, Settings, CircleSlash, Layers } from "lucide-react";
 import { api } from "../../api.js";
 
 // ── Module-level cache ────────────────────────────────────────────────────────
@@ -8,16 +8,19 @@ import { api } from "../../api.js";
 // gate. `_routesCache` keeps `GET /settings/ai-providers` — the list of every
 // `provider_routes` row in the workspace, which is the canonical "switch
 // target" set per the multi-route routing model (Phase 1 of the route-based
-// switcher rollout — see PR discussion). `_settingsCache` is intentionally
+// switcher rollout). `_groupsCache` keeps `GET /settings/route-groups` — B4.6
+// route groups surfaced read-only (Phase 2). `_settingsCache` is intentionally
 // retained so the legacy env-only Ollama detection path keeps working until
 // every workspace has migrated to row-based dispatch.
 let _configCache   = null;
 let _routesCache   = null;
+let _groupsCache   = null;
 let _settingsCache = null;
 
 export function invalidateConfigCache() {
   _configCache   = null;
   _routesCache   = null;
+  _groupsCache   = null;
   _settingsCache = null;
 }
 
@@ -71,6 +74,7 @@ function routeHealth(route) {
 export default function ProviderBadge({ style }) {
   const [config,   setConfig]   = useState(_configCache);
   const [routes,   setRoutes]   = useState(_routesCache);
+  const [groups,   setGroups]   = useState(_groupsCache);
   const [settings, setSettings] = useState(_settingsCache);
   const [open,     setOpen]     = useState(false);
   // `switching` holds the *route id* currently being pinned. Was previously
@@ -86,23 +90,31 @@ export default function ProviderBadge({ style }) {
   // the route-based switcher). `getConfig` / `getSettings` stay around for
   // the legacy fallback when a workspace has zero configured routes.
   const load = useCallback(async () => {
-    if (_configCache && _routesCache && _settingsCache) {
+    if (_configCache && _routesCache && _groupsCache && _settingsCache) {
       setConfig(_configCache);
       setRoutes(_routesCache);
+      setGroups(_groupsCache);
       setSettings(_settingsCache);
       return;
     }
     try {
-      const [cfg, routesResp, sett] = await Promise.all([
+      // `listRouteGroups` / `listAiProviders` / `getSettings` are all
+      // wrapped in `.catch()` so a single endpoint failure (older backend,
+      // RBAC mismatch, network blip) degrades to an empty array without
+      // breaking the whole badge. `getConfig` is the only required call.
+      const [cfg, routesResp, groupsResp, sett] = await Promise.all([
         api.getConfig(),
         api.listAiProviders().catch(() => ({ routes: [] })),
+        api.listRouteGroups().catch(() => ({ groups: [] })),
         api.getSettings().catch(() => null),
       ]);
       _configCache   = cfg;
       _routesCache   = routesResp?.routes || [];
+      _groupsCache   = groupsResp?.groups || [];
       _settingsCache = sett;
       setConfig(cfg);
       setRoutes(_routesCache);
+      setGroups(_groupsCache);
       setSettings(sett);
     } catch { /* silent — badge degrades gracefully */ }
   }, []);
@@ -149,16 +161,19 @@ export default function ProviderBadge({ style }) {
       // `isWorkspaceDefault` flag from `/settings/ai-providers` and the new
       // active-provider name from `/config`.
       invalidateConfigCache();
-      const [freshCfg, freshRoutes, freshSett] = await Promise.all([
+      const [freshCfg, freshRoutes, freshGroups, freshSett] = await Promise.all([
         api.getConfig(),
         api.listAiProviders().catch(() => ({ routes: [] })),
+        api.listRouteGroups().catch(() => ({ groups: [] })),
         api.getSettings().catch(() => null),
       ]);
       _configCache   = freshCfg;
       _routesCache   = freshRoutes?.routes || [];
+      _groupsCache   = freshGroups?.groups || [];
       _settingsCache = freshSett;
       setConfig(freshCfg);
       setRoutes(_routesCache);
+      setGroups(_groupsCache);
       setSettings(freshSett);
       setOpen(false);
     } catch (err) {
@@ -198,6 +213,7 @@ export default function ProviderBadge({ style }) {
   // matching route by family when one exists; otherwise a synthetic shape
   // good enough to colour the chip.
   const allRoutes = Array.isArray(routes) ? routes : [];
+  const allGroups = Array.isArray(groups) ? groups : [];
   const activeRoute =
     allRoutes.find((r) => r.isWorkspaceDefault) ||
     allRoutes.find((r) => r.family === config.provider) ||
@@ -255,6 +271,73 @@ export default function ProviderBadge({ style }) {
               <Settings size={10} /> Manage keys
             </button>
           </div>
+
+          {/* ── B4.6 — Route groups (read-only) ──
+              Surfaced ABOVE the per-route list so operators see at a
+              glance which groups exist and which agent roles dispatch
+              through them. Pinning a group as workspace default is NOT
+              available — the schema's `isWorkspaceDefault` column lives
+              on `provider_routes`, not `route_groups`. Groups are
+              reachable today only via `agent_configs.routeId = "rg-..."`,
+              so the per-row CTA links to Agent Roles Settings as the
+              assignment surface. Mutations (create/edit/delete) are a
+              follow-up roadmap item per
+              `docs/roadmap/ai-provider-bundle.md:397-405`. */}
+          {allGroups.length > 0 && (
+            <div style={{ padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ padding: "6px 13px 4px", fontSize: "0.67rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.07em", display: "flex", alignItems: "center", gap: 5 }}>
+                <Layers size={10} />
+                Route Groups
+              </div>
+              {allGroups.map((group) => {
+                // Active = at least one agent role currently dispatches
+                // through this group. We can't tell "primary" from the
+                // routes list, so the indicator is binary: in use or not.
+                const inUse = (group.usedByRoles || []).length > 0;
+                const healthLabel = group.enabledMemberCount === group.memberCount
+                  ? `${group.memberCount} route${group.memberCount !== 1 ? "s" : ""}`
+                  : `${group.enabledMemberCount}/${group.memberCount} healthy`;
+                return (
+                  <button
+                    key={group.id}
+                    onClick={() => { setOpen(false); navigate("/settings"); }}
+                    title={inUse
+                      ? `In use by: ${group.usedByRoles.join(", ")}. Click to manage in Agent Roles.`
+                      : "Unassigned. Click to assign to an agent role in Settings."}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      width: "100%", padding: "7px 13px",
+                      background: "none", border: "none", cursor: "pointer",
+                      textAlign: "left", transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg2)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                  >
+                    <Layers size={12} color={inUse ? "var(--accent)" : "var(--text3)"} style={{ flexShrink: 0, opacity: inUse ? 1 : 0.55 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: "0.82rem", fontWeight: inUse ? 600 : 400,
+                        color: "var(--text)", lineHeight: 1.3,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {group.name}
+                      </div>
+                      <div style={{
+                        fontSize: "0.68rem", color: "var(--text3)", marginTop: 1,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {group.strategyLabel || group.strategy} · {healthLabel}
+                        {inUse ? ` · ${group.usedByRoles.length} role${group.usedByRoles.length !== 1 ? "s" : ""}` : ""}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: "0.67rem", color: "var(--text3)", flexShrink: 0 }}>
+                      {inUse ? "Manage" : "Assign"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* ── Configured routes — one-click pin-as-default ── */}
           {allRoutes.length > 0 ? (
