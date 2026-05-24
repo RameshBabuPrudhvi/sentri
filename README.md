@@ -116,7 +116,7 @@ For local development setup, optional Redis/PostgreSQL profiles, and Windows ins
 
 ## AI Providers
 
-Sentri ships per-workspace **Provider Routes** — each route bundles protocol + endpoint + model + encrypted API key + pricing + capabilities + rate limits + cache config. Create routes from **Settings → Provider Routes** and assign them to agent roles. Operators can also add custom OpenAI-compatible vendors (self-hosted vLLM, on-prem proxies, niche providers) with zero code edits — pick `family: "custom"`, fill in your baseUrl + model + key, save.
+Sentri ships per-workspace **AI Providers** (formerly "Provider Routes") — each provider bundles protocol + endpoint + model + encrypted API key + pricing + capabilities + rate limits + cache config. Add providers from **Settings → AI Providers** and either pin one as the workspace default (the ⭐ Set as default action — every agent role inherits it) or assign per-role in **Settings → Agent Roles** for cost-tuned multi-agent dispatch. Operators can also add custom OpenAI-compatible vendors (self-hosted vLLM, on-prem proxies, niche providers) with zero code edits — pick `family: "custom"`, fill in your baseUrl + model + key, save.
 
 | Provider | Environment Variable (single-tenant default) | Default Model |
 |---|---|---|
@@ -125,11 +125,11 @@ Sentri ships per-workspace **Provider Routes** — each route bundles protocol +
 | Google Gemini | `GOOGLE_API_KEY` | gemini-2.5-flash |
 | OpenRouter | `OPENROUTER_API_KEY` | openrouter/auto |
 | Ollama (local, free) | `AI_PROVIDER=local` | mistral:7b |
-| Anything OpenAI-compatible | Settings → Provider Routes → `family: "custom"` | operator-supplied |
+| Anything OpenAI-compatible | Settings → AI Providers → `family: "custom"` | operator-supplied |
 
-Single-tenant deployments without per-workspace routes auto-detect env keys in order: Anthropic → OpenAI → Google → OpenRouter → Ollama. Multi-tenant deployments should configure routes via Settings UI.
+Single-tenant deployments without managed AI Providers auto-detect env keys in order: Anthropic → OpenAI → Google → OpenRouter → Ollama. Multi-tenant deployments should add providers via the Settings UI and pin one as the workspace default.
 
-Operator guides: **[Provider Routes →](docs/guide/provider-routes.md)** · **[Quotas & caching →](docs/operations/quotas-and-caching.md)** · **[AI request log →](docs/operations/request-log.md)** · **[Setup guide →](https://rameshbabuprudhvi.github.io/sentri/docs/guide/ai-providers.html)**
+Operator guides: **[AI Providers →](docs/guide/provider-routes.md)** · **[Quotas & caching →](docs/operations/quotas-and-caching.md)** · **[AI request log →](docs/operations/request-log.md)** · **[Setup guide →](https://rameshbabuprudhvi.github.io/sentri/docs/guide/ai-providers.html)**
 
 ---
 
