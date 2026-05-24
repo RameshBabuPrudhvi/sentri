@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Activity, AlertCircle, Check, ChevronDown, ChevronUp,
-  Eye, EyeOff, KeyRound, Plus, RefreshCw, Trash2, X,
+  Eye, EyeOff, Info, KeyRound, Plus, RefreshCw, Trash2, X,
 } from "lucide-react";
 import { api } from "../../../../api.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
@@ -92,6 +92,60 @@ function numOrNull(v) {
   if (v === "" || v == null) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Translate the GET /settings response (env-detected provider keys + Ollama
+ * config + compat slots) into a flat list of read-only provider rows for the
+ * "Configured via .env" banner. Skips families that already have a
+ * provider_routes row (operator has migrated them) so we don't double-list.
+ *
+ * @param {Object|null} settings - GET /settings payload (`getConfiguredKeys()`).
+ * @param {Array} dbRows - Existing AI Providers (from listAiProviders()).
+ * @returns {Array<{family,label,emoji,detail}>}
+ */
+function buildEnvProviderList(settings, dbRows) {
+  if (!settings) return [];
+  const haveFamily = new Set(dbRows.map((r) => r.family));
+  const out = [];
+  // Cloud providers — `settings[family]` is a masked key string when set.
+  const CLOUD = [
+    { family: "anthropic",  label: "Anthropic",  emoji: "🔶", env: "ANTHROPIC_API_KEY" },
+    { family: "openai",     label: "OpenAI",     emoji: "🟢", env: "OPENAI_API_KEY" },
+    { family: "google",     label: "Google",     emoji: "🔷", env: "GOOGLE_API_KEY" },
+    { family: "openrouter", label: "OpenRouter", emoji: "🧭", env: "OPENROUTER_API_KEY" },
+  ];
+  for (const c of CLOUD) {
+    const masked = settings[c.family];
+    if (!masked || haveFamily.has(c.family)) continue;
+    out.push({
+      family: c.family,
+      label: c.label,
+      emoji: c.emoji,
+      detail: `${c.env} · ${masked}`,
+    });
+  }
+  // Ollama — env-driven via OLLAMA_BASE_URL + AI_PROVIDER=local.
+  if (settings.ollamaConfigured && !haveFamily.has("local")) {
+    out.push({
+      family: "local",
+      label: "Ollama (Local)",
+      emoji: "🦙",
+      detail: `${settings.ollamaBaseUrl || "http://localhost:11434"} · ${settings.ollamaModel || "model?"}`,
+    });
+  }
+  // Compat slots (any OpenAI-compatible endpoint persisted via the legacy
+  // compat form). These pre-date the merged section and remain visible here
+  // so operators don't lose sight of them.
+  for (const cp of settings.compatProviders || []) {
+    out.push({
+      family: "custom",
+      label: cp.displayName || cp.provider,
+      emoji: "🔧",
+      detail: `${cp.baseUrl || "—"} · ${cp.model || "model?"}`,
+    });
+  }
+  return out;
 }
 
 function buildPayload(form) {
@@ -516,13 +570,23 @@ export default function AiProvidersSection() {
   const [ioBusy, setIoBusy]       = useState(false);
   const [importMsg, setImportMsg] = useState(null);
   const [activeTab, setActiveTab] = useState("providers"); // "providers" | "spend" | "audit" | "requests"
+  // Env-injected providers (ANTHROPIC_API_KEY / GOOGLE_API_KEY / OLLAMA_BASE_URL,
+  // etc.) live outside `provider_routes` — they're surfaced via GET /settings
+  // (`getConfiguredKeys()` in backend/src/aiProvider/providerInfo.js). Fetched
+  // alongside the DB routes so operators see env-configured Gemini / Ollama in
+  // this section instead of wondering "why isn't my .env key showing up?".
+  const [envProviders, setEnvProviders] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await api.listAiProviders();
-      setRows(res?.routes || []);
+      const [routesRes, settingsRes] = await Promise.all([
+        api.listAiProviders(),
+        api.getSettings().catch(() => null),
+      ]);
+      setRows(routesRes?.routes || []);
+      setEnvProviders(buildEnvProviderList(settingsRes, routesRes?.routes || []));
     } catch (err) {
       setError(err.message || "Failed to load AI Providers.");
     } finally {
@@ -758,8 +822,48 @@ export default function AiProvidersSection() {
             </div>
           )}
 
+          {/* Env-injected providers (read-only) — surfaces ANTHROPIC_API_KEY /
+              GOOGLE_API_KEY / OLLAMA_BASE_URL / compat-slot configs that
+              aren't backed by a provider_routes row. Without this banner,
+              env-only deployments saw an empty section after the
+              providers ↔ provider_routes merge. */}
+          {!showForm && envProviders.length > 0 && (
+            <div className="st-ai-env-banner">
+              <div className="st-ai-env-banner-title">
+                <Info size={12} /> Configured via environment variables
+              </div>
+              <div className="st-ai-env-banner-sub">
+                These are detected from your <code>.env</code> file and used as
+                fallback providers. To assign them to specific Agent Roles or
+                set rate limits, click <strong>Adopt</strong> to create a
+                manageable AI Provider row.
+              </div>
+              <div className="st-ai-env-rows">
+                {envProviders.map((p, i) => (
+                  <div key={`${p.family}-${i}`} className="st-ai-env-row">
+                    <span className="st-ai-row-emoji">{p.emoji}</span>
+                    <span className="font-semi">{p.label}</span>
+                    <span className="text-xs text-muted st-pr-row-meta">
+                      {p.detail}
+                    </span>
+                    <span className="st-pr-badge st-ai-env-badge">from .env</span>
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => quickStart(
+                        QUICK_START.find((q) => q.family === p.family) || QUICK_START[0],
+                      )}
+                      title="Pre-fill the Add form with this family so you can save it as a managed AI Provider."
+                    >
+                      Adopt
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Empty state */}
-          {!loading && !showForm && rows.length === 0 && (
+          {!loading && !showForm && rows.length === 0 && envProviders.length === 0 && (
             <EmptyState onQuickStart={quickStart} />
           )}
 

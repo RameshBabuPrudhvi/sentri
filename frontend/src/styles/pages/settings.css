@@ -1368,6 +1368,55 @@
   margin-left: 8px;
 }
 
+/* Env-injected providers banner — read-only surface for ANTHROPIC_API_KEY /
+   GOOGLE_API_KEY / OLLAMA_BASE_URL / compat-slot configs that aren't backed
+   by a provider_routes row. Visually distinct from managed AI Provider rows
+   (dashed border + muted bg) so operators see at a glance that these come
+   from .env, not the DB. */
+.st-ai-env-banner {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--bg3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.st-ai-env-banner-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+.st-ai-env-banner-sub {
+  font-size: 11px;
+  color: var(--text3);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.st-ai-env-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.st-ai-env-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.st-ai-env-badge {
+  background: var(--bg3);
+  color: var(--text3);
+  border: 1px solid var(--border);
+  margin-left: auto;
+}
+
 /* Responsive: collapse quick-start to 2 columns on narrow viewports */
 @media (max-width: 640px) {
   .st-ai-qs-grid {
