@@ -43,10 +43,12 @@ Per-project columns on the `projects` table (migration `035`):
 | `visionHealMaxCallsPerDay`       | INTEGER | `100`   | Daily cap on stage-8 (LLM) calls. Stage 7 keeps running.        |
 | `visionHealMaxCostUsdPerMonth`   | REAL    | `50`    | Monthly USD cap on stage-8 spend. Stage 7 keeps running.        |
 
-Configured via the **Vision Healing** tab in the Quality card per project
-(`frontend/src/components/automation/ProjectQualityCard.jsx`). PATCHes to
-`/api/v1/projects/:id` accept these fields as a single-field bypass — same
-pattern as `strictPiiFirewall` (SEC-006) and `autoApproveThreshold` (AUTO-003b).
+Configured via the **Self-Healing** section in Project Settings at
+`/projects/:id/settings/self-healing`
+(`frontend/src/features/project-settings/sections/self-healing/VisionHealingPanel.jsx`).
+PATCHes to `/api/v1/projects/:id` accept these fields as a single-field
+bypass — same pattern as `strictPiiFirewall` (SEC-006) and
+`autoApproveThreshold` (AUTO-003b).
 
 The `pixelmatch_and_llm` option is server-gated: the route validator calls
 `aiProvider.hasVisionProvider()` and returns
@@ -157,8 +159,9 @@ edits invalidate stale baselines automatically.
 
 To disable quickly mid-incident:
 
-1. **Per-project** — set `visionHealing: "off"` via the Vision Healing
-   tab in Quality settings, or `PATCH /api/v1/projects/:id {visionHealing:"off"}`.
+1. **Per-project** — set `visionHealing: "off"` via Project Settings →
+   **Self-Healing** → **Healing mode → Off** (`/projects/:id/settings/self-healing`),
+   or `PATCH /api/v1/projects/:id {visionHealing:"off"}`.
    Existing runs unaffected; new runs skip stages 7-8.
 2. **Per-deployment** — unset `VISION_MODEL` (and ensure `AI_MODEL` is
    not vision-capable) so `hasVisionProvider()` returns false. Existing

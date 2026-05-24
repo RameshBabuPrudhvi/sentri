@@ -714,7 +714,7 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 **Preconditions:** Project exists with `qa_lead` or `admin` access. Endpoints documented in `backend/src/routes/projects.js` (PATCH threshold), `backend/src/routes/tests.js` (revoke + approval-stats), and `backend/src/middleware/permissions.json`.
 
-**Threshold configuration** (`/automation` → expand a project → **Auto-Approval** inner tab, `frontend/src/components/automation/ProjectQualityCard.jsx`):
+**Threshold configuration** (Project page → **Settings** → **Review** section at `/projects/:id/settings/review`, `frontend/src/features/project-settings/sections/review/AutoApprovalPanel.jsx`):
 1. Default state: `autoApproveThreshold` is `null` → all generated tests still land in **Draft** (zero behaviour change for projects that haven't opted in).
 2. Enter a threshold of `0.8` and click **Save** → since this is the *first* enable, a confirmation modal appears showing how many of the last 30 generated tests would have been auto-approved at this threshold (`getTests()` + client-side filter on `confidenceScore >= threshold`).
 3. Click **Enable auto-approval** in the modal → `PATCH /api/v1/projects/:id` with body `{ autoApproveThreshold: 0.8 }` → toast "Auto-approval threshold set to 0.8".
@@ -1024,9 +1024,9 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 The Quality Gates and Web Vitals Budgets panels live exclusively on the `/automation` page now. The legacy ProjectDetail → Settings tab was removed in this PR (see the comment at `frontend/src/pages/ProjectDetail.jsx:601-603`); do not look for it.
 
-- **`/automation` → Quality Gates tab** (sole surface, PR #6) — per-project accordion (`ProjectQualityCard`) with inner tab bar switching between **Quality Gates** and **Web Vitals**. Collapsed header shows status chips (`Gates configured` / `No gates`, `Budgets set` / `No budgets`).
+- **Project page → Settings → Quality Gates section** (sole surface, post-PR #28) — `/projects/:id/settings/quality-gates` renders three stacked blocks under `<h2>` headers: **Quality Gates**, **Web Vitals Budgets** (with per-metric trend charts), and **Coverage**. Status chips moved to the project Settings sidebar entry. Previously lived as a per-project accordion (`ProjectQualityCard`) on `/automation` → **Quality Gates** tab with an inner tab bar — both the outer tab and the inner accordion were retired in the Project Settings restructure. Legacy `?tab=quality&project=:id` deep-links redirect to the new URL.
 
-20. On `/automation` → **Quality Gates** tab, expand a project → inner tab **Quality Gates** active by default → form renders. As `qa_lead`/`admin`, the form is editable; as `viewer`, fields are disabled and a "Read-only" hint shows.
+20. Open a project → click **Settings** in the project header → the Quality Gates section opens by default at `/projects/:id/settings/quality-gates` → form renders. As `qa_lead`/`admin`, the form is editable; as `viewer`, fields are disabled and a "Read-only" hint shows.
 21. Configure thresholds and click **Save** → toast "Quality gates saved"; reload tab → values persist.
 22. Click **Clear all** → confirmation prompt → on confirm, gates removed; toast "Quality gates cleared"; subsequent runs report `gateResult: null`.
 23. Enter all-blank fields and click Save → server-side `DELETE` is sent (config cleared) instead of saving an empty object — toast reads "Quality gates cleared".
