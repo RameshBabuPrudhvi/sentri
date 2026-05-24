@@ -1,23 +1,29 @@
 /**
  * @module pages/Automation
- * @description Automation hub — CI/CD triggers, scheduled runs, quality gates,
- * integrations, and snippets across all projects.
+ * @description Automation hub — CI/CD triggers, scheduled runs, integrations,
+ * and snippets across all projects.
  *
- * Layout: four top-level tabs separate concerns so users never scroll past
+ * Layout: three top-level tabs separate concerns so users never scroll past
  * empty sections to reach what they need:
  *
  *   Triggers & Schedules — per-project CI/CD tokens + cron schedule
- *   Quality Gates         — pass-rate / failure / flaky gates + Web Vitals budgets
  *   Integrations          — integration card grid (GitHub Actions, GitLab, cURL…)
  *   Snippets              — copy-to-clipboard CI YAML/bash with project picker
  *
  * Each project renders inside its own accordion within the relevant tab.
+ *
+ * The former "Quality Gates" tab and its 7-tab inner accordion were moved
+ * to a dedicated Project Settings surface at `/projects/:id/settings/*`
+ * (May 2026 audit) — page name now matches contents, and project-scoped
+ * config lives where industry-standard tools put it (GitHub repo Settings,
+ * Vercel project Settings). Legacy `?tab=quality` deep-links are redirected
+ * below.
  */
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Zap, FolderOpen, ShieldCheck, Plug, Code2,
+  Zap, FolderOpen, Plug, Code2,
 } from "lucide-react";
 import useProjectData from "../hooks/useProjectData.js";
 import usePageTitle from "../hooks/usePageTitle.js";
@@ -25,16 +31,14 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { userHasRole } from "../utils/roles.js";
 import { useNotifications } from "../context/NotificationContext.jsx";
 import ProjectAutomationCard from "../components/automation/ProjectAutomationCard.jsx";
-import ProjectQualityCard from "../components/automation/ProjectQualityCard.jsx";
 import IntegrationCards from "../components/automation/IntegrationCards.jsx";
 import IntegrationSnippets from "../components/automation/IntegrationSnippets.jsx";
 import { isValidPageTab } from "../utils/automationStatus.js";
 
 const PAGE_TABS = [
-  { id: "triggers",     label: "Triggers & Schedules", icon: Zap,         emptyHint: "Create a project first, then configure CI/CD triggers and schedules here." },
-  { id: "quality",      label: "Quality Gates",        icon: ShieldCheck, emptyHint: "Create a project first, then configure quality gates and Web Vitals budgets here." },
-  { id: "integrations", label: "Integrations",         icon: Plug                                                                                                  },
-  { id: "snippets",     label: "Snippets",             icon: Code2                                                                                                 },
+  { id: "triggers",     label: "Triggers & Schedules", icon: Zap,   emptyHint: "Create a project first, then configure CI/CD triggers and schedules here." },
+  { id: "integrations", label: "Integrations",         icon: Plug                                                                                            },
+  { id: "snippets",     label: "Snippets",             icon: Code2                                                                                           },
 ];
 
 function EmptyProjects({ navigate, hint }) {
@@ -76,6 +80,27 @@ export default function Automation() {
   // the default "triggers" tab instead of rendering nothing.
   const tabParam = searchParams.get("tab");
   const activeTab = isValidPageTab(tabParam) ? tabParam : "triggers";
+
+  // Legacy deep-link compat — `?tab=quality&project=:id` used to land users
+  // on the inline Quality Gates accordion for the given project. That page
+  // moved to `/projects/:id/settings/quality-gates`; redirect existing
+  // bookmarks, in-app links, and any backend-generated URLs (PR check
+  // summary lines, scheduled-run failure notifications) to the new home.
+  // No-`project` callers fall through to the default tab — there's no
+  // workspace-wide quality surface, so dropping the param is the
+  // semantically correct outcome.
+  useEffect(() => {
+    if (tabParam !== "quality") return;
+    if (focusProjectId) {
+      navigate(`/projects/${focusProjectId}/settings/quality-gates`, { replace: true });
+    } else {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("tab");
+        return next;
+      }, { replace: true });
+    }
+  }, [tabParam, focusProjectId, navigate, setSearchParams]);
 
   const setActiveTab = useCallback((id) => {
     setSearchParams((prev) => {
@@ -164,29 +189,6 @@ export default function Automation() {
             ? <EmptyProjects navigate={navigate} hint={PAGE_TABS[0].emptyHint} />
             : projects.map((p, i) => (
                 <ProjectAutomationCard
-                  key={p.id}
-                  project={p}
-                  defaultExpanded={focusProjectId ? p.id === focusProjectId : i === 0}
-                  canEdit={canEdit}
-                  onToast={onPanelToast}
-                />
-              ))
-        )}
-      </div>
-
-      {/* ── Tab: Quality Gates ── */}
-      <div
-        className="auto-tab-body"
-        role="tabpanel"
-        id="auto-tabpanel-quality"
-        aria-labelledby="auto-tab-quality"
-        hidden={activeTab !== "quality"}
-      >
-        {activeTab === "quality" && (
-          projects.length === 0
-            ? <EmptyProjects navigate={navigate} hint={PAGE_TABS[1].emptyHint} />
-            : projects.map((p, i) => (
-                <ProjectQualityCard
                   key={p.id}
                   project={p}
                   defaultExpanded={focusProjectId ? p.id === focusProjectId : i === 0}

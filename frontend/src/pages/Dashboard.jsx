@@ -158,7 +158,7 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
       </div>
       {series.length === 0 ? (
         <div className="text-sm text-muted">
-          Enable coverage on a project to start tracking. Go to <strong>Automation → Quality → Coverage</strong> and toggle <em>Enable browser JS coverage capture</em>.
+          Enable coverage on a project to start tracking. Open a project and go to <strong>Settings → Quality Gates → Coverage</strong> to toggle <em>Enable browser JS coverage capture</em>.
         </div>
       ) : (
         <div className="flex-col gap-sm">
