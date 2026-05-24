@@ -854,6 +854,7 @@ export default function AiProvidersSection() {
     setRowState((s) => ({ ...s, [id]: { kind: "deleting" } }));
     try {
       await api.deleteAiProvider(id);
+      if (form.id === id) resetForm();
       await load();
     } catch (err) {
       setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message } }));

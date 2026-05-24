@@ -314,7 +314,15 @@ export function clearStickyFallback(agentRole = null) {
 export function stickyFallbackActive(agentRole = null) {
   sweepExpiredStickies();
   for (const [k, v] of stickyFallbacks) {
-    if ((agentRole ? keyHasRole(k, agentRole) : true) && Date.now() < v.expiry) return true;
+    // Same two-keyspace matching as `detectProvider` — roleless callers
+    // match only roleless stickies; role-scoped callers match only their
+    // own role's stickies. The pre-fix `(agentRole ? ... : true)` pattern
+    // matched every sticky when agentRole was null, leaking per-role
+    // recovery state into workspace-level `isProviderDegraded()` checks.
+    const idx = k.lastIndexOf("::");
+    const keyIsRoleless = idx < 0;
+    const matches = agentRole ? keyHasRole(k, agentRole) : keyIsRoleless;
+    if (matches && Date.now() < v.expiry) return true;
   }
   return false;
 }
@@ -417,12 +425,15 @@ export function isProviderUsable(provider) {
  *   2. **`agent_configs.routeId`** — explicit per-role route assignment
  *      written by the Settings UI. Honoured when the route is usable
  *      (`provider_routes.enabled = 1` and a decryptable secret exists).
- *   3. **Env-default transient route** — when no `routeId` is set on
- *      the agent_configs row (or no row exists), `detectProvider`
- *      identifies the workspace-default provider and we synthesise a
- *      transient route from it. Collapses `effectiveAgentRole` to
- *      `null` per AI-005c so single-agent workspaces share one
- *      breaker across stages.
+ *   3a. **Workspace-default `provider_routes` row** (Migration 059) —
+ *      the single row with `isWorkspaceDefault = 1`. Checked when no
+ *      `routeId` is set on the agent_configs row (or no row exists).
+ *      Disabled defaults fall through to env detection.
+ *   3b. **Env-default transient route** — `detectProvider` identifies
+ *      the first usable env-var provider and we synthesise a transient
+ *      route from it. Collapses `effectiveAgentRole` to `null` per
+ *      AI-005c so single-agent workspaces share one breaker across
+ *      stages.
  *   4. **`null`** — no provider configured at all. Caller surfaces a
  *      config error to the operator.
  *
