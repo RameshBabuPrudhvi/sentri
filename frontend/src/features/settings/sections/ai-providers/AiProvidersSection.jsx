@@ -343,7 +343,10 @@ function ProviderForm({
               suggestions. Uses the same useOllamaStatusQuery hook (GET /ollama/status). */}
           {form.family === "local" && <OllamaStatusHint form={form} setForm={setForm} />}
 
-          {/* Base URL — always shown for custom/openrouter/local; hidden-but-accessible for others */}
+          {/* Base URL — always shown for custom/openrouter/local; hidden-but-accessible for others.
+              name="ai-provider-base-url" + autoComplete="off" prevent password managers
+              from filling this with the user's email (Chrome/Safari/1Password all
+              match unlabelled inputs inside a <form> as login fields). */}
           <label className="st-pr-field st-pr-field--wide">
             <span className="st-pr-field-label">
               Base URL
@@ -353,6 +356,8 @@ function ProviderForm({
             </span>
             <input
               className="input"
+              name="ai-provider-base-url"
+              autoComplete="off"
               value={form.baseUrl}
               onChange={(e) => setForm((s) => ({ ...s, baseUrl: e.target.value }))}
               placeholder={
@@ -365,7 +370,11 @@ function ProviderForm({
             />
           </label>
 
-          {/* API key — hidden for Ollama */}
+          {/* API key — hidden for Ollama.
+              autoComplete="new-password" is the WHATWG-recommended value for
+              one-off secret entry — it suppresses the "Save password?" prompt
+              that fires on plain autoComplete="off" in Chrome and prevents
+              password managers from autofilling stored credentials. */}
           {form.family !== "local" && (
             <label className="st-pr-field st-pr-field--wide">
               <span className="st-pr-field-label">
@@ -387,8 +396,9 @@ function ProviderForm({
               <div className="st-key-input-wrap">
                 <input
                   className="input"
+                  name="ai-provider-api-key"
                   type={showKey ? "text" : "password"}
-                  autoComplete="off"
+                  autoComplete="new-password"
                   value={form.apiKey}
                   onChange={(e) => setForm((s) => ({ ...s, apiKey: e.target.value }))}
                   placeholder={form.id ? "•••• keep stored key" : (qs.placeholder || "sk-…")}
