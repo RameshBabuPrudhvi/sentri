@@ -41,6 +41,38 @@
   line-height: 1.5;
 }
 
+/* ps-tabs — inner tab strip for project-settings sections that have multiple
+   sub-panels (e.g. Quality Gates → Gates / Web Vitals / Coverage). Uses the
+   same underline-accent pattern as `.st-pr-subtabs` in settings.css so the
+   two settings pages feel like siblings. Scoped to `.ps-*` to avoid leaking
+   into workspace settings. */
+.ps-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.ps-tabs .btn {
+  border: none;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  color: var(--text2);
+  font-weight: 400;
+  background: transparent;
+}
+.ps-tabs .btn:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+.ps-tab--active {
+  color: var(--accent) !important;
+  font-weight: 600 !important;
+  border-bottom-color: var(--accent) !important;
+}
+
 /* Step-2 placeholder boxes — kept for now so any section that hasn't been
    wired to its real panel renders something visible instead of an empty
    block. Removed once step 6 deletes the legacy ProjectQualityCard. */
