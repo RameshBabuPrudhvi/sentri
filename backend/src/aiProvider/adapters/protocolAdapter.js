@@ -102,6 +102,19 @@ function buildOpts(route, callerOpts) {
     // Ollama-specific tuning passthrough (no-op for other protocols).
     timeoutMs: callerOpts.timeoutMs,
     maxPredict: callerOpts.maxPredict,
+    // PR #29 probe fast-fail knobs — capability probes pass
+    // `maxRetries: 0` + `attemptTimeoutMs: PROBE_ATTEMPT_TIMEOUT_MS` so a
+    // bad-key probe fails in seconds instead of burning the full 3-retry
+    // × 30s-backoff chain (~113s symptom that prompted this PR). Without
+    // forwarding them through `buildOpts`, every protocol module read
+    // `opts.attemptTimeoutMs === undefined` and fell back to the
+    // 120s `CLOUD_TIMEOUT_MS` + 3-retry defaults, defeating the whole
+    // fast-fail design in `capabilityProbe.js`. The protocol modules
+    // already gracefully degrade when these are undefined (they're
+    // optional — see `protocols/openai.js` and siblings), so non-probe
+    // dispatch behaviour is unchanged.
+    maxRetries: callerOpts.maxRetries,
+    attemptTimeoutMs: callerOpts.attemptTimeoutMs,
   };
 }
 

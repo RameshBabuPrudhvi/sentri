@@ -115,6 +115,12 @@ const files = [
   // Pins the recent-result skip, force: true bypass, concurrent-coalesce,
   // and the rotate-key gate's required force-skips-inflight semantics.
   "tests/probe-debounce.test.js",
+  // PR #29 — B4.6 read-only routeGroupRepo. Per REVIEW.md mandatory-test
+  // rule: covers list / getById / listMembers, member-count aggregates,
+  // LEFT-JOIN safety for empty groups, capabilities JSON hydration, and
+  // the workspace-scoping invariant (cross-workspace lookups return
+  // undefined / [] rather than leaking existence).
+  "tests/route-group-repo.test.js",
   // PR #28 — `getAiProviderState()` registry inspector backing the new
   // `GET /api/v1/system/ai-state` route + Systems page "AI provider state"
   // panel. Pins the snapshot shape (healthy + open-breaker + sticky cases),
