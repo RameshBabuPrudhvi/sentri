@@ -15,8 +15,8 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  Link2, Zap, Play, StopCircle, CheckCircle2, Clock,
-  ArrowRight, ChevronRight, RotateCcw, Atom, Video,
+  StopCircle, Clock,
+  ArrowRight, RotateCcw, Atom, Video,
   Copy, Check, RefreshCw,
 } from "lucide-react";
 import { api } from "../api.js";
@@ -46,11 +46,12 @@ import AgentConversation from "../components/ai/AgentConversation.jsx";
 // `frontend/src/utils/pipelineState.js` for status semantics.
 import { stageStatus } from "../utils/pipelineState.js";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
-// AGENT.md §40 — helpers used by ≥2 call sites live in `utils/`, not inline.
-// `TestLabTabs` + `RetryButton` extracted from the inline IIFE + duplicated
-// banner/panel JSX that previously lived in this file.
+// AGENT.md §40 — `TestLabTabs` extracted from the inline IIFE that
+// previously lived in this file. `RetryButton` is also extracted but
+// consumed only by `RunBanners.jsx` (which imports it directly) and
+// `TestLabLaunchPanel.jsx`'s inline retry CTA — this file no longer
+// references it.
 import TestLabTabs from "../components/test-lab/TestLabTabs.jsx";
-import RetryButton from "../components/test-lab/RetryButton.jsx";
 // QueueTab extraction (AGENT.md §40) — the ~96-line inline Queue block
 // previously lived in this file; now owned by its own component. Reads
 // the same `activeQueueRuns` / `recentQueueRuns` / `queueFilter` props
@@ -532,7 +533,7 @@ export default function TestLab() {
   // would race against the single-run driver if they shared a runId.
   // Once the migration completes, the single-run hook is removed and
   // every active run subscribes through this pool.
-  const multiSse = useMultiRunSSE();
+  useMultiRunSSE();
 
   // ── Queue state ──
   const [queueFilter, setQueueFilter]   = useState("all");
