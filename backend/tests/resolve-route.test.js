@@ -43,17 +43,19 @@ function seedWorkspace() {
   return wsId;
 }
 function upsertAgent(workspaceId, role, overrides = {}) {
+  // Note: migrations 048 + 053 dropped `provider`, `model`, and
+  // `fallbackRole` from agent_configs. The repo's MUTABLE_FIELDS silently
+  // ignores them now — kept in overrides only so the legacy sticky-fallback
+  // tests below stay readable (they want to express "this role used to be
+  // pinned to provider X" even though the column no longer persists).
   return agentConfigRepo.upsert({
     id: `cfg-${randomUUID().slice(0, 8)}`,
     workspaceId,
     role,
-    provider: overrides.provider ?? null,
     routeId: overrides.routeId ?? null,
-    model: overrides.model ?? null,
     systemPromptOverride: null,
     temperature: 0.2,
     maxTokens: null,
-    fallbackRole: null,
     createdAt: now(),
     updatedAt: now(),
   });
@@ -79,23 +81,12 @@ test("(2) agent_configs.routeId → real provider_routes row", () => {
   assert.equal(got._transient, undefined, "real routes have no _transient marker");
   assert.equal(effectiveAgentRole, "planner");
 });
-test("(3) provider-column shim → synthetic transient route", () => {
-  const ws = seedWorkspace();
-  upsertAgent(ws, "author", { provider: "anthropic" });
-  const { route, effectiveAgentRole } = resolveRoute({ agentRole: "author", workspaceId: ws });
-  assert.equal(route._transient, true, "shim path yields a transient route");
-  assert.equal(route._transientProvider, "anthropic");
-  assert.equal(route.protocol, "anthropic");
-  assert.equal(route.id, "provider:anthropic");
-  assert.equal(effectiveAgentRole, "author");
-});
-// B2.1 — Migration 048 dropped `agent_configs.provider` + `model`, so
-// the pre-existing "provider-column shim" path the next two tests
-// exercised (set `cfg.provider` → `resolveRoute` reads it and
-// synthesises a transient route) no longer exists at the schema level.
-// `agentConfigRepo.upsert` silently drops the `provider` / `model`
-// keys post-048 because they aren't in MUTABLE_FIELDS, and
-// `resolveRoute` reads `cfg.routeId` exclusively.
+// Migration 048 dropped `agent_configs.provider` + `model`, so the
+// pre-existing "provider-column shim" path (set `cfg.provider` →
+// `resolveRoute` reads it and synthesises a transient route) no longer
+// exists at the schema level. `agentConfigRepo.upsert` silently drops
+// the `provider` / `model` keys post-048 because they aren't in
+// MUTABLE_FIELDS, and `resolveRoute` reads `cfg.routeId` exclusively.
 //
 // The post-048 equivalent is: an admin assigns a routeId pointing at
 // a `provider_routes` row of the matching family. The tests below
@@ -123,13 +114,14 @@ test("(3) routeId → protocol=gemini for family=google", () => {
   assert.equal(got.protocol, "gemini");
   assert.equal(got.family, "google");
 });
-test("(4) no agent_configs row → AI-005c collapse (effectiveAgentRole=null)", () => {
+test("(4) no agent_configs row + no workspace default → env-detection fallback", () => {
   const ws = seedWorkspace();
   const { route, effectiveAgentRole, config } = resolveRoute({ agentRole: "planner", workspaceId: ws });
-  // No agent_configs row exists → AI-005c contract: collapse to bare-
-  // provider breaker namespace via effectiveAgentRole=null. Route is
-  // still synthesised from the workspace-default provider so the
-  // dispatch hot path still has a route to fire against.
+  // No agent_configs row AND no provider_routes row pinned as
+  // `isWorkspaceDefault` (Migration 059) → fall through to env
+  // detection. AI-005c contract: collapse to bare-provider breaker
+  // namespace via effectiveAgentRole=null. Route is still synthesised
+  // so the dispatch hot path has something to fire against.
   assert.equal(effectiveAgentRole, null, "single-agent workspaces must collapse to null");
   assert.equal(config, null, "no config row found");
   assert.ok(route, "transient route synthesised from env default");
@@ -138,24 +130,25 @@ test("(4) no agent_configs row → AI-005c collapse (effectiveAgentRole=null)", 
 test("(2) disabled target route → returns route:null (NOT silent shim)", () => {
   const ws = seedWorkspace();
   const route = makeRoute(ws, { name: "disabled", enabled: 0 });
-  upsertAgent(ws, "planner", { routeId: route.id, provider: "anthropic" });
+  upsertAgent(ws, "planner", { routeId: route.id });
   const result = resolveRoute({ agentRole: "planner", workspaceId: ws });
   // The spec contract: an explicit routeId pointing at a disabled row
   // surfaces as `route: null` so the caller can render a config error
-  // to the user. Silently falling back to the provider-column shim
-  // would hide the misconfiguration.
-  assert.equal(result.route, null, "disabled route MUST NOT silently fall back to shim");
+  // to the user. Silently falling back to env detection would hide
+  // the misconfiguration.
+  assert.equal(result.route, null, "disabled route MUST NOT silently fall back");
   assert.equal(result.config.role, "planner", "config still returned so UI can render the bad routeId");
 });
 console.log("\n🧪 sticky-fallback priority");
-test("(1) sticky fallback for the role wins over agent_configs", () => {
+test("(1) sticky fallback for the role wins over env-detection", () => {
   const ws = seedWorkspace();
-  upsertAgent(ws, "planner", { provider: "anthropic" });
+  // agent_configs row exists for `planner` but has no routeId, so dispatch
+  // would normally fall through to workspace default → env detection.
+  // The sticky-fallback pin for "openai" must override the env fallback.
+  upsertAgent(ws, "planner");
   setStickyFallback("openai", "planner");
   try {
     const { route } = resolveRoute({ agentRole: "planner", workspaceId: ws });
-    // Sticky-fallback for openai must beat the configured anthropic.
-    // Result is a transient route synthesised from the sticky entry.
     assert.equal(route._transientProvider, "openai");
     assert.equal(route.protocol, "openai");
   } finally {
@@ -164,14 +157,16 @@ test("(1) sticky fallback for the role wins over agent_configs", () => {
 });
 test("(1) sticky for a DIFFERENT role does not leak", () => {
   const ws = seedWorkspace();
-  upsertAgent(ws, "planner", { provider: "anthropic" });
-  upsertAgent(ws, "author", { provider: "openai" });
+  upsertAgent(ws, "planner");
+  upsertAgent(ws, "author");
   setStickyFallback("openai", "planner");
   try {
-    // author resolution must use its own configured provider, not be
-    // perturbed by planner's sticky-fallback.
+    // author resolution must use its own env-detection fallback, not be
+    // perturbed by planner's sticky-fallback. Both env keys are set in
+    // the test header (ANTHROPIC_API_KEY first in CLOUD_DETECT_ORDER),
+    // so author gets anthropic via env detection.
     const { route } = resolveRoute({ agentRole: "author", workspaceId: ws });
-    assert.equal(route._transientProvider, "openai", "author's own config wins");
+    assert.equal(route._transientProvider, "anthropic", "author falls to env detection");
     // and the planner sticky is still active
     const planner = resolveRoute({ agentRole: "planner", workspaceId: ws });
     assert.equal(planner.route._transientProvider, "openai", "planner sticky still active");
@@ -184,8 +179,9 @@ test("transient route collapses to bare provider id", () => {
   // The whole point of breakerDiscriminator: a synthetic provider:anthropic
   // route must produce the same breaker key as the legacy AI-005 path so
   // single-agent workspaces don't see their breaker state reset on B2 deploy.
+  // No agent_configs row → falls to env detection → anthropic (first in
+  // CLOUD_DETECT_ORDER with a key set in the test header).
   const ws = seedWorkspace();
-  upsertAgent(ws, "planner", { provider: "anthropic" });
   const { route } = resolveRoute({ agentRole: "planner", workspaceId: ws });
   assert.equal(breakerDiscriminator(route), "anthropic",
     "transient routes MUST collapse to the legacy bare-provider key");
