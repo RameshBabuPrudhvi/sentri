@@ -417,7 +417,7 @@
     "PATCH /api/v1/settings/ai-providers/:id": {
       "role": "admin",
       "source": "backend/src/routes/settings.js",
-      "$comment": "Rejects `apiKey` field (use /rotate-key) and `isWorkspaceDefault` field (use /default) — both have side effects that require dedicated audit shapes."
+      "$comment": "Rejects non-empty `apiKey` (use /rotate-key — empty string is the documented \"keep existing\" sentinel, no-op) and any `isWorkspaceDefault` field (use /default) — both have side effects that require dedicated audit shapes."
     },
     "DELETE /api/v1/settings/ai-providers/:id": {
       "role": "admin",

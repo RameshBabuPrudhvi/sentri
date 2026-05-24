@@ -1451,8 +1451,6 @@ router.post("/settings/ai-providers", requireRole("admin"), (req, res) => {
 router.patch("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
   const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
   if (!existing) return res.status(404).json({ error: "AI provider not found" });
-  if (req.body && "apiKey" in req.body)
-    return res.status(400).json({ error: "Use POST /settings/ai-providers/:id/rotate-key to change the API key" });
   // Migration 059 — `isWorkspaceDefault` has side effects on other rows
   // (clears any previous default in the same transaction). Force callers
   // through the dedicated endpoint so the audit row is correctly tagged.
@@ -1460,6 +1458,14 @@ router.patch("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
     return res.status(400).json({ error: "Use POST /settings/ai-providers/:id/default to pin as workspace default" });
   const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: false });
   if (error) return res.status(400).json({ error });
+  // Mirror the legacy `/provider-routes/:id` semantics — only reject when
+  // a non-empty key was supplied (which `buildProviderRoutePayload` would
+  // have encrypted into `payload.apiKeyEncrypted`). An empty string is the
+  // documented "keep existing key" sentinel and must be a no-op, matching
+  // the frontend's FORM_EMPTY shape and direct API callers that send
+  // `apiKey: ""` to express "no change". Lifeguard-flagged contract drift.
+  if (payload.apiKeyEncrypted)
+    return res.status(400).json({ error: "Use POST /settings/ai-providers/:id/rotate-key to change the API key" });
   try {
     const updated = providerRouteRepo.upsert({
       ...payload,
