@@ -119,6 +119,23 @@ function buildOpts(route, callerOpts) {
 }
 
 /**
+ * Test-only escape hatch — exposes `buildOpts` so the regression test in
+ * `backend/tests/protocol-adapter-opts.test.js` can pin the forwarded-
+ * field contract without spinning up real protocol modules. The `_`
+ * prefix mirrors `_resetProbeDebounceForTests` / `_setProtocolAdapterForTests`
+ * elsewhere in the aiProvider tree so the convention is uniform.
+ *
+ * Production code MUST NOT call this. The seam exists because PR #29's
+ * `buildOpts` silently dropped `maxRetries` + `attemptTimeoutMs` for
+ * every probe call (~113s wall-clock per probe instead of ~15s); a
+ * future refactor that touches the field list MUST keep this contract
+ * intact, and the test enforces it.
+ */
+export function _buildOptsForTests(route, callerOpts) {
+  return buildOpts(route, callerOpts);
+}
+
+/**
  * Non-streaming generate. Resolves the protocol module + decrypted
  * key, then delegates.
  *

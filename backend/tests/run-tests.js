@@ -121,6 +121,14 @@ const files = [
   // the workspace-scoping invariant (cross-workspace lookups return
   // undefined / [] rather than leaking existence).
   "tests/route-group-repo.test.js",
+  // PR #29 regression — protocolAdapter.buildOpts forwarded-field
+  // contract. Pins maxRetries + attemptTimeoutMs round-trip (the
+  // keystone bug this PR shipped + then fixed: probes silently fell
+  // back to 113s wall-clock because buildOpts dropped the fast-fail
+  // knobs), the derivation of useJson from responseFormat, and the
+  // no-leak invariant (caller fields outside the documented surface
+  // must NOT appear on the output bag).
+  "tests/protocol-adapter-opts.test.js",
   // PR #28 — `getAiProviderState()` registry inspector backing the new
   // `GET /api/v1/system/ai-state` route + Systems page "AI provider state"
   // panel. Pins the snapshot shape (healthy + open-breaker + sticky cases),
