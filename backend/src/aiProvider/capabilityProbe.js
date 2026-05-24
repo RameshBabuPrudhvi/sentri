@@ -54,6 +54,7 @@
  */
 import * as defaultProtocolAdapter from "./adapters/protocolAdapter.js";
 import { capabilitiesFor } from "./modelCatalog.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 // Probe timeout — capability probes (`/settings/ai-providers/:id/probe` and
 // the auto-probe-on-upsert in providerRouteRepo.upsert) abort after this
@@ -133,8 +134,14 @@ async function probeReachability(route, opts = {}) {
     });
     return { ok: true };
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn("[capabilityProbe] reachability failed", {
+    // AGENT.md / STANDARDS.md: never use bare `console.*` for application
+    // logging. Wrap through `formatLogLine` so structured-log pipelines
+    // (LOG_JSON mode) pick this up with timestamps + level metadata. The
+    // diagnostic context (status, elapsedMs, route attribution) is
+    // serialised into the message string because `formatLogLine` produces
+    // a single formatted string — matches the pattern used elsewhere in
+    // `aiProvider/` (dispatcher.js:617, retry.js:64, secrets.js:77).
+    const diag = {
       routeId: route?.id,
       family: route?.family,
       protocol: route?.protocol,
@@ -143,7 +150,9 @@ async function probeReachability(route, opts = {}) {
       elapsedMs: Date.now() - startedAt,
       status: err?.status ?? err?.statusCode ?? null,
       message: String(err?.message || err).slice(0, 300),
-    });
+    };
+    console.warn(formatLogLine("warn", null,
+      `[capabilityProbe] reachability failed ${JSON.stringify(diag)}`));
     return { ok: false, classification: classifyProbeError(err) };
   } finally {
     cancel();

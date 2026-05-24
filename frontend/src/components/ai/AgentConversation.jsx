@@ -125,8 +125,13 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
   // event-mode takes when a `finding`/`progress` event extends an open
   // `start` turn: same stable ID, longer `text`. Without (b), a finding
   // arriving after the start turn finished streaming would never reach
-  // the screen. Synthesizer-mode turns never grow (their text is fixed at
-  // synthesis time) so (b) is a no-op for that path.
+  // the screen. Synthesizer-mode also relies on (b) since PR #28 — the
+  // `explorer.finding.1` template now re-renders on every snapshot SSE
+  // tick to narrate per-page crawl progress ("Discovered Pricing. 5 pages
+  // found so far." → "Discovered About Us. 6 pages found so far."). Stable
+  // turn id (`1-explorer-finding`) + growing text matches the same
+  // extend-in-place contract event-mode uses, so this branch handles both
+  // modes uniformly.
   //
   // The dependency list intentionally omits `displayed` (stale-closure-safe
   // via the functional updater) — otherwise this effect would fire on every

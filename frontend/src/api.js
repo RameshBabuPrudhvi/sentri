@@ -37,6 +37,15 @@ const BASE = API_PATH;
 const TIMEOUT_DEFAULT = 30_000;
 /** @type {number} Extended timeout for long-running operations like crawl and test runs (5 minutes). */
 const TIMEOUT_LONG    = 300_000;
+/**
+ * @type {number} Probe timeout for `/settings/ai-providers/:id/probe` and
+ * `/rotate-key`. The backend caps per-route `probeTimeoutMs` at 10 minutes
+ * (`backend/src/routes/settings.js:572`, `providerRouteRepo.js:554`) — the
+ * documented use case is Ollama 70B+ models on CPU. We add a 60s margin so
+ * the client doesn't abort while the backend's own probe-after-persist DB
+ * write is still flushing.
+ */
+const TIMEOUT_PROBE   = 660_000;
 
 const BASE_URL = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ? import.meta.env.BASE_URL : "/";
 
@@ -182,18 +191,21 @@ export const api = {
   /** Delete an AI Provider (409 if any agent role references it). */
   deleteAiProvider:     (id) => req("DELETE", `/settings/ai-providers/${id}`),
   /**
-   * Network probe — reachability + auth + model check. Uses TIMEOUT_LONG
-   * because slow free-tier providers (OpenRouter `:free` models, Gemini
-   * free tier) routinely queue the first request 20–40s during peak load;
-   * the default 30s client timeout fires before the probe returns, even
-   * though the backend's own 30s probe-timeout eventually succeeds.
+   * Network probe — reachability + auth + model check. Uses TIMEOUT_PROBE
+   * (660s) instead of TIMEOUT_LONG (300s) because the backend allows per-
+   * route probe timeouts up to 600s (`backend/src/routes/settings.js:572`,
+   * the documented Ollama-70B-on-CPU use case). With TIMEOUT_LONG, an
+   * operator who set `probeTimeoutMs > 300_000` would see a misleading
+   * "Request timed out" error in the UI even though the backend probe
+   * eventually succeeds and persists its result.
    */
-  probeAiProvider:      (id) => req("POST", `/settings/ai-providers/${id}/probe`, undefined, TIMEOUT_LONG),
+  probeAiProvider:      (id) => req("POST", `/settings/ai-providers/${id}/probe`, undefined, TIMEOUT_PROBE),
   /**
    * Rotate API key for an AI Provider. Runs probe-before-persist on the
-   * server, so it inherits the same slow-free-tier latency as probe above.
+   * server, so it inherits the same per-route probe-timeout ceiling as
+   * `probeAiProvider` above — must use TIMEOUT_PROBE for the same reason.
    */
-  rotateAiProviderKey:  (id, apiKey) => req("POST", `/settings/ai-providers/${id}/rotate-key`, { apiKey }, TIMEOUT_LONG),
+  rotateAiProviderKey:  (id, apiKey) => req("POST", `/settings/ai-providers/${id}/rotate-key`, { apiKey }, TIMEOUT_PROBE),
   /**
    * Migration 059 — pin / unpin the workspace-default AI Provider. The
    * default handles every agent role that has no per-role override in
