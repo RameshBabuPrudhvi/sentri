@@ -405,6 +405,39 @@
       "source": "backend/src/routes/settings.js",
       "$comment": "B3.9 — paginated workspace-scoped audit log viewer. Filterable by routeId / action / since / before. Cursor pagination via `before` matching the AI request log endpoint. Retention sweep is daily at 05:00 UTC, configurable via AI_ROUTES_AUDIT_RETENTION_DAYS (default 90)."
     },
+    "GET /api/v1/settings/ai-providers": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "provider-rename refactor — renamed alias for /settings/provider-routes. Returns enriched rows with displayLabel, familyEmoji, costTier, usedByRoles (reverse ref from agent_configs)."
+    },
+    "POST /api/v1/settings/ai-providers": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "PATCH /api/v1/settings/ai-providers/:id": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "Rejects `apiKey` field (use /rotate-key) and `isWorkspaceDefault` field (use /default) — both have side effects that require dedicated audit shapes."
+    },
+    "DELETE /api/v1/settings/ai-providers/:id": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "Refuses with 409 ERR_ROUTE_IN_USE when any agent_configs row references the provider — operator must reassign those roles first."
+    },
+    "POST /api/v1/settings/ai-providers/:id/probe": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "POST /api/v1/settings/ai-providers/:id/rotate-key": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "Same probe-before-persist gate as the provider-routes equivalent — encrypts the new plaintext, runs a network probe against the candidate key, rolls back on probe failure. Audit row emitted as action=rotate_key."
+    },
+    "POST /api/v1/settings/ai-providers/:id/default": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "Migration 059 — pin / unpin the workspace-default AI Provider. Body: { default: true|false }. Dedicated endpoint (not part of PATCH) because setting a default has side effects on OTHER rows (clears the previous default in the same transaction) and the audit row needs a specific changed:[\"isWorkspaceDefault\"] shape so admins can filter for \"who pinned the default and when?\"."
+    },
     "GET /api/v1/settings/ai-requests": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"

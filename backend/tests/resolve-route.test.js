@@ -201,4 +201,133 @@ test("null route yields 'unknown' (defensive)", () => {
   assert.equal(breakerDiscriminator(undefined), "unknown");
   assert.equal(breakerDiscriminator({}), "unknown");
 });
+
+// ── Migration 059 — workspace-default provider flag ─────────────────────────
+//
+// Pins the new fallback layer between `agent_configs` and env detection:
+//   1. setWorkspaceDefault pins a route + clears any previous default in
+//      the same transaction (partial UNIQUE index never trips).
+//   2. resolveRoute returns the workspace-default route when no
+//      agent_configs row exists for the role.
+//   3. resolveRoute returns the workspace-default route when agent_configs
+//      row exists but has no routeId (per-role tuning only, no pin).
+//   4. A DISABLED workspace default falls through to env detection (so
+//      disabling can't be a foot-gun).
+//   5. setWorkspaceDefault(null) clears the workspace default.
+//   6. setWorkspaceDefault is scoped per-workspace (cross-tenant isolation).
+console.log("\n🧪 Migration 059 — workspace-default flag");
+
+test("setWorkspaceDefault pins isWorkspaceDefault=1 on the target row", () => {
+  const ws = seedWorkspace();
+  const route = makeRoute(ws, { name: "default-candidate" });
+  providerRouteRepo.setWorkspaceDefault(ws, route.id, { userId: null });
+  const pinned = providerRouteRepo.getWorkspaceDefault(ws);
+  assert.equal(pinned?.id, route.id, "getWorkspaceDefault returns the pinned row");
+  assert.equal(pinned.isWorkspaceDefault, 1, "isWorkspaceDefault is 1 on the row");
+});
+
+test("setWorkspaceDefault clears the previous default atomically", () => {
+  const ws = seedWorkspace();
+  const a = makeRoute(ws, { name: "first" });
+  const b = makeRoute(ws, { name: "second" });
+  providerRouteRepo.setWorkspaceDefault(ws, a.id);
+  providerRouteRepo.setWorkspaceDefault(ws, b.id);
+  // Partial UNIQUE index would have thrown if both rows had isWorkspaceDefault=1.
+  // The clear-then-pin transaction guarantees at most one default per workspace.
+  const pinned = providerRouteRepo.getWorkspaceDefault(ws);
+  assert.equal(pinned?.id, b.id, "newest pin wins");
+  // Re-read the original; its flag should now be NULL.
+  const aAfter = providerRouteRepo.getById(ws, a.id);
+  assert.notEqual(aAfter.isWorkspaceDefault, 1, "previous default cleared");
+});
+
+test("setWorkspaceDefault(null) clears the workspace default entirely", () => {
+  const ws = seedWorkspace();
+  const route = makeRoute(ws);
+  providerRouteRepo.setWorkspaceDefault(ws, route.id);
+  providerRouteRepo.setWorkspaceDefault(ws, null);
+  const pinned = providerRouteRepo.getWorkspaceDefault(ws);
+  assert.equal(pinned, undefined, "no row pinned after clear");
+});
+
+test("setWorkspaceDefault rejects route from a different workspace", () => {
+  const ws1 = seedWorkspace();
+  const ws2 = seedWorkspace();
+  const routeInWs1 = makeRoute(ws1);
+  assert.throws(
+    () => providerRouteRepo.setWorkspaceDefault(ws2, routeInWs1.id),
+    (err) => err.code === "ERR_ROUTE_MISSING_FIELD",
+    "must refuse cross-workspace pinning with the typed error code",
+  );
+});
+
+test("resolveRoute returns workspace-default when no agent_configs row exists", () => {
+  const ws = seedWorkspace();
+  const defaultRoute = makeRoute(ws, { name: "ws-default", family: "anthropic", model: "claude-3-5-sonnet" });
+  providerRouteRepo.setWorkspaceDefault(ws, defaultRoute.id);
+  // No agent_configs row for "explorer" → resolveRoute must hit step (3a)
+  // and return the workspace-default row instead of falling to env detection.
+  const { route, effectiveAgentRole, config } = resolveRoute({ agentRole: "explorer", workspaceId: ws });
+  assert.equal(route?.id, defaultRoute.id, "workspace default wins over env detection");
+  assert.equal(route._transient, undefined, "default route is real, not synthetic");
+  assert.equal(effectiveAgentRole, null, "AI-005c collapse still applies — no cfg row");
+  assert.equal(config, null);
+});
+
+test("resolveRoute uses workspace-default when agent_configs row exists but has no routeId", () => {
+  const ws = seedWorkspace();
+  const defaultRoute = makeRoute(ws, { name: "ws-default-2" });
+  providerRouteRepo.setWorkspaceDefault(ws, defaultRoute.id);
+  // cfg row exists for "planner" but its routeId is null (admin saved
+  // per-role tuning like systemPromptOverride / maxTokens but left
+  // routing to the workspace default). Migration 059 makes that path
+  // hit the workspace default before falling to env detection.
+  upsertAgent(ws, "planner");
+  const { route, effectiveAgentRole, config } = resolveRoute({ agentRole: "planner", workspaceId: ws });
+  assert.equal(route?.id, defaultRoute.id, "workspace default wins over env detection");
+  assert.equal(effectiveAgentRole, "planner", "role-keyed breakers/sticky still active (cfg row exists)");
+  assert.ok(config, "cfg row threaded through for systemPromptOverride / maxTokens");
+});
+
+test("DISABLED workspace-default falls through to env detection", () => {
+  const ws = seedWorkspace();
+  const disabledDefault = makeRoute(ws, { name: "ws-default-disabled", enabled: 0 });
+  providerRouteRepo.setWorkspaceDefault(ws, disabledDefault.id);
+  // Disabled default → step (3a) skips, falls through to env detection.
+  // Disabling a default must not be a foot-gun: the workspace keeps
+  // working via env keys instead of returning route:null.
+  const { route } = resolveRoute({ agentRole: "explorer", workspaceId: ws });
+  assert.ok(route, "transient route synthesised from env fallback");
+  assert.equal(route._transient, true);
+  assert.notEqual(route.id, disabledDefault.id, "disabled default NOT used");
+});
+
+test("workspace-default scoped per-workspace (cross-tenant isolation)", () => {
+  const ws1 = seedWorkspace();
+  const ws2 = seedWorkspace();
+  const defaultInWs1 = makeRoute(ws1, { name: "only-in-ws1" });
+  providerRouteRepo.setWorkspaceDefault(ws1, defaultInWs1.id);
+  // ws1 has a workspace default; ws2 has none. ws2 must NOT inherit ws1's default.
+  const ws1Default = providerRouteRepo.getWorkspaceDefault(ws1);
+  const ws2Default = providerRouteRepo.getWorkspaceDefault(ws2);
+  assert.equal(ws1Default?.id, defaultInWs1.id, "ws1 sees its own default");
+  assert.equal(ws2Default, undefined, "ws2 sees no default");
+  // resolveRoute for ws2 must NOT return ws1's default — falls to env.
+  const { route } = resolveRoute({ agentRole: "explorer", workspaceId: ws2 });
+  assert.notEqual(route.id, defaultInWs1.id, "cross-workspace leakage MUST NOT happen");
+  assert.equal(route._transient, true, "ws2 falls to env detection");
+});
+
+test("agent_configs.routeId still wins over workspace-default", () => {
+  const ws = seedWorkspace();
+  const explicit = makeRoute(ws, { name: "explicit", family: "openai" });
+  const defaultRoute = makeRoute(ws, { name: "default", family: "anthropic" });
+  providerRouteRepo.setWorkspaceDefault(ws, defaultRoute.id);
+  upsertAgent(ws, "author", { routeId: explicit.id });
+  // Per-role pin (step 2) MUST win over workspace default (step 3a).
+  const { route } = resolveRoute({ agentRole: "author", workspaceId: ws });
+  assert.equal(route.id, explicit.id, "per-role assignment beats workspace default");
+  assert.equal(route.family, "openai");
+});
+
 summary("Resolve route (B1.6)");
