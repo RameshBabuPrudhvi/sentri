@@ -50,8 +50,14 @@ function paletteStyle(id) {
 
 // Resolve the colour swatch for a route. Prefer the family-keyed style when
 // recognised; fall back to a deterministic palette colour keyed on route id.
+//
+// Returns `null` when `route` is null/undefined so callers can chain a `||`
+// fallback to `FAMILY_STYLES[config.provider]` for env-only workspaces (no
+// `provider_routes` rows yet). Returning a truthy `FAMILY_STYLES.custom`
+// here would shadow that fallback and paint the badge grey instead of the
+// provider's brand colour.
 function styleForRoute(route) {
-  if (!route) return FAMILY_STYLES.custom;
+  if (!route) return null;
   return FAMILY_STYLES[route.family] || paletteStyle(route.id || route.family || "?");
 }
 

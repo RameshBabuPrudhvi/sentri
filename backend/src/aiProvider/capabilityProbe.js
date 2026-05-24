@@ -289,6 +289,20 @@ function classifyProbeError(err) {
   if (status === 401 || status === 403 || /unauthorized|forbidden|invalid api key|incorrect api key/i.test(msg)) {
     return { reachable: true, auth: false, errorReason: "auth_failed" };
   }
+  // Rate limit — provider's there + key works, just throttled. Treat
+  // as reachable + auth ok; capability dimensions left unobserved.
+  //
+  // Checked BEFORE the 402 / quota_exhausted branch because providers
+  // (and our own `retry.js#isRateLimitError`, asserted by
+  // `backend/tests/ai-fallback.test.js:47`) commonly pair 429 with a
+  // "quota exhausted" message. If 402's `/quota.*exhaust/i` fallback
+  // ran first, a transient rate-limit would be misclassified as a
+  // permanent `model: false` quota failure — the ProbeBadge would
+  // show a misleading error and the rotation gate would reject a
+  // valid throttled key.
+  if (status === 429 || /rate limit|too many requests/i.test(msg)) {
+    return { reachable: true, auth: true, errorReason: "rate_limited" };
+  }
   // Payment required (402) — OpenRouter and several compat providers
   // return this when the workspace's free-tier quota is exhausted or
   // billing isn't set up. Key + endpoint are valid; the account just
@@ -303,11 +317,6 @@ function classifyProbeError(err) {
   // doesn't expose this model.
   if (status === 404 || /not found|model.*does not exist|no such model|unknown model/i.test(msg)) {
     return { reachable: true, auth: true, model: false, errorReason: "model_not_found" };
-  }
-  // Rate limit — provider's there + key works, just throttled. Treat
-  // as reachable + auth ok; capability dimensions left unobserved.
-  if (status === 429 || /rate limit|too many requests/i.test(msg)) {
-    return { reachable: true, auth: true, errorReason: "rate_limited" };
   }
   // Network / DNS / SSRF / timeout — provider unreachable. Only
   // classify here when the message text matches a network pattern OR
