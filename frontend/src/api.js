@@ -1338,6 +1338,19 @@ export const api = {
    * @returns {Promise<{available: boolean, model: string|null}>}
    */
   getVisionProviderStatus: () => req("GET", "/system/vision-provider-status"),
+  /**
+   * Read-only snapshot of AI dispatcher state — open circuit breakers +
+   * active sticky fallbacks. Admin-only. Powers the Systems page's "AI
+   * provider state" panel so operators can diagnose "tests stopped
+   * generating, what happened?" without grepping log lines.
+   *
+   * @returns {Promise<{
+   *   breakers: Array<{key: string, provider: string, agentRole: string|null, failures: number, disabledUntil: number, openNow: boolean, remainingMs: number}>,
+   *   stickyFallbacks: Array<{key: string, provider: string, agentRole: string|null, expiry: number, remainingMs: number}>,
+   *   constants: {CIRCUIT_BREAKER_THRESHOLD: number, CIRCUIT_BREAKER_COOLDOWN_MS: number, STICKY_FALLBACK_TTL_MS: number},
+   * }>}
+   */
+  getAiState: () => req("GET", "/system/ai-state"),
   /** @returns {Promise<{cleared: number}>} Clear all run history. */
   clearRuns:       () => req("DELETE", "/data/runs"),
   // NOTE: `getActivities` is defined once above (in the Test review actions

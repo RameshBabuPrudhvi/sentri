@@ -248,6 +248,11 @@
       "source": "backend/src/routes/system.js",
       "$comment": "SEC-007 \u2014 lists deployment-wide security events tagged with the SYSTEM_WORKSPACE_ID sentinel (chiefly auth.login.failed against unknown emails \u2014 credential-stuffing probes that fire before a tenant can be resolved). Cross-tenant by design; the workspace-scoped routes naturally exclude these rows. Defence-in-depth: rejects callers whose own workspaceId equals the sentinel."
     },
+    "GET /api/v1/system/ai-state": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "Read-only snapshot of AI dispatcher state \u2014 every open circuit breaker + active sticky fallback the registry is tracking. Powers the Systems page's \"AI provider state\" panel so admins can answer \"tests stopped generating, what happened?\" without grepping log lines. Pure inspection (no mutation), admin-gated to match the trust boundary on /settings/ai-providers."
+    },
     "GET /api/v1/workspaces/:workspaceId/audit-log": {
       "role": "admin",
       "source": "backend/src/routes/system.js",

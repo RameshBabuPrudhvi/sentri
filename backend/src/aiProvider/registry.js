@@ -780,6 +780,98 @@ export function getFallbackProviders(primaryProvider, agentRole = null) {
   );
 }
 
+// ── State inspection (read-only) ─────────────────────────────────────────────
+/**
+ * Read-only snapshot of every circuit breaker + sticky fallback in the
+ * registry. Powers `GET /api/v1/system/ai-state` so operators can see
+ * "tests stopped generating, what happened?" without grepping logs.
+ *
+ * Pure inspection — never mutates breaker / sticky state. Returned shape
+ * is intentionally JSON-safe (no Date objects, no Map references) so the
+ * route handler can pass it through `res.json()` unchanged.
+ *
+ * Sweeps expired stickies before snapshotting so the returned set
+ * matches what `detectProvider` would actually see — without this, an
+ * expired entry would surface in the UI for up to one TTL window after
+ * its real-world effect ended.
+ *
+ * @returns {{
+ *   breakers: Array<{
+ *     key: string,
+ *     provider: string,
+ *     agentRole: string|null,
+ *     failures: number,
+ *     disabledUntil: number,
+ *     openNow: boolean,
+ *     remainingMs: number,
+ *   }>,
+ *   stickyFallbacks: Array<{
+ *     key: string,
+ *     provider: string,
+ *     agentRole: string|null,
+ *     expiry: number,
+ *     remainingMs: number,
+ *   }>,
+ *   constants: {
+ *     CIRCUIT_BREAKER_THRESHOLD: number,
+ *     CIRCUIT_BREAKER_COOLDOWN_MS: number,
+ *     STICKY_FALLBACK_TTL_MS: number,
+ *   },
+ * }}
+ */
+export function getAiProviderState() {
+  sweepExpiredStickies();
+  const now = Date.now();
+
+  // Breakers: walk every entry. `splitKey` parses both bare-provider
+  // and `provider::role` keyspaces consistently with `keyHasRole` /
+  // `breakerKey` — see those JSDocs for why the split is `lastIndexOf`.
+  const splitKey = (key) => {
+    const idx = key.lastIndexOf("::");
+    if (idx < 0) return { provider: key, agentRole: null };
+    return { provider: key.slice(0, idx), agentRole: key.slice(idx + 2) };
+  };
+
+  const breakers = Object.entries(circuitBreakers).map(([key, value]) => {
+    const { provider, agentRole } = splitKey(key);
+    const openNow = value.disabledUntil > now;
+    return {
+      key,
+      provider,
+      agentRole,
+      failures: value.failures,
+      disabledUntil: value.disabledUntil,
+      openNow,
+      remainingMs: openNow ? value.disabledUntil - now : 0,
+    };
+  });
+
+  const stickies = [];
+  for (const [key, value] of stickyFallbacks) {
+    const { provider, agentRole } = splitKey(key);
+    stickies.push({
+      key,
+      // The sticky entry's stored `provider` is authoritative — it can
+      // differ from the key's primary discriminator when a route-shaped
+      // sticky is keyed by route id but stores the provider for display.
+      provider: value.provider || provider,
+      agentRole,
+      expiry: value.expiry,
+      remainingMs: Math.max(0, value.expiry - now),
+    });
+  }
+
+  return {
+    breakers,
+    stickyFallbacks: stickies,
+    constants: {
+      CIRCUIT_BREAKER_THRESHOLD,
+      CIRCUIT_BREAKER_COOLDOWN_MS,
+      STICKY_FALLBACK_TTL_MS,
+    },
+  };
+}
+
 // ── Database key persistence ─────────────────────────────────────────────────
 /**
  * Restore all persisted API keys and Ollama config from the DB into the
