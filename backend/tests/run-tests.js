@@ -111,6 +111,12 @@ const files = [
   // route.probeTimeoutMs → env default), and the [1s, 10min] defence-in-
   // depth clamp applied before reaching `runCapabilityProbe`.
   "tests/probe-timeout.test.js",
+  // PR #28 — `getAiProviderState()` registry inspector backing the new
+  // `GET /api/v1/system/ai-state` route + Systems page "AI provider state"
+  // panel. Pins the snapshot shape (healthy + open-breaker + sticky cases),
+  // per-role key splitting, expired-sticky sweep contract, and JSON-safe
+  // round-trip so `res.json()` never trips on a stray Map / Set reference.
+  "tests/ai-state.test.js",
   // B3.7 — Token-bucket reserve + spend-cap enforcement.
   "tests/quota-guard.test.js",
   // B3.8 — Exact-match response cache + thundering-herd coalescing + janitor.
