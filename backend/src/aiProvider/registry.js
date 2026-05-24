@@ -646,6 +646,17 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
   // `getCompatConfig().model` higher up the stack.
   let effectiveModel = model || null;
   let effectiveBaseUrl = null;
+  // Bug-fix (Open-router-key-leak): family="openrouter" routes synthesised
+  // from env detection had `baseUrl: null`, which made `protocols/openai.js`
+  // fall through to the OpenAI SDK's hardcoded `api.openai.com` default —
+  // the OpenRouter key would then be sent to OpenAI's servers (rejected
+  // 401, but the wire request still happened). Populate the canonical
+  // OpenRouter endpoint here so dispatch reaches the right host.
+  // Keep this in sync with `FAMILY_DEFAULT_BASE_URLS` in
+  // `backend/src/aiProvider/protocols/openai.js`.
+  if (provider === "openrouter") {
+    effectiveBaseUrl = "https://openrouter.ai/api/v1";
+  }
   if (isCompatProvider(provider)) {
     // Compat slots carry their own baseUrl + model on the slot config
     // (not in the env). The dispatcher's SSRF-guardedFetch is gated on

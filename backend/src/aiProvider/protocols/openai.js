@@ -53,15 +53,56 @@ import { throwIfAborted } from "../../utils/abortHelper.js";
 // UI-suggestion catalog for the Settings UI defaults (B3.1).
 
 /**
+ * Per-family default `baseURL`s for OpenAI-protocol routes whose row
+ * has no explicit `baseUrl` set. Without this map, a route with
+ * `family: "openrouter"` and `baseUrl: null` would fall through to the
+ * OpenAI SDK's hardcoded `api.openai.com` default and the OpenRouter
+ * API key would be sent to OpenAI's servers (rejected with a 401
+ * "Incorrect API key" — TLS protected, but the wire request still
+ * happened, which is a leak surface we don't want).
+ *
+ * `openai` is intentionally absent — `undefined` lets the SDK use its
+ * built-in `api.openai.com` default, which is correct for that family.
+ * Compat slots (`family` starting with `compat:`) carry their baseUrl
+ * on the slot config and must never reach here with a null baseUrl —
+ * `synthesiseTransientRoute` and the route repo both enforce that.
+ */
+const FAMILY_DEFAULT_BASE_URLS = Object.freeze({
+  openrouter: "https://openrouter.ai/api/v1",
+});
+
+/**
  * Build an OpenAI SDK client from a route + caller-supplied opts.
  * `baseUrl` is `undefined` for the canonical openai.com endpoint and
  * an explicit URL for openrouter / compat / self-hosted gateways —
  * the SDK treats `undefined` as "use default" so the same builder
  * handles every variant.
+ *
+ * When `route.baseUrl` is null/empty but the family has a known
+ * canonical endpoint (see {@link FAMILY_DEFAULT_BASE_URLS}), we
+ * resolve to that endpoint here rather than letting the SDK silently
+ * dispatch to `api.openai.com`. Any unknown family without an explicit
+ * baseUrl throws — failing closed is safer than leaking credentials to
+ * the wrong endpoint.
  */
 function mkClient(route, opts) {
   const config = { apiKey: opts.apiKey };
-  if (route.baseUrl) config.baseURL = route.baseUrl;
+  let baseUrl = route.baseUrl || null;
+  if (!baseUrl && route.family && FAMILY_DEFAULT_BASE_URLS[route.family]) {
+    baseUrl = FAMILY_DEFAULT_BASE_URLS[route.family];
+  }
+  // Fail closed: a family that isn't `openai` and has no baseUrl
+  // (explicit or default) would otherwise leak the apiKey to
+  // `api.openai.com`. Compat / self-hosted routes always require an
+  // explicit baseUrl; openrouter is handled by the default map above.
+  if (!baseUrl && route.family && route.family !== "openai") {
+    const err = new Error(
+      `OpenAI-protocol route missing baseUrl for family="${route.family}" (route.id=${route.id || "unknown"})`,
+    );
+    err.code = "ERR_ROUTE_MISSING_BASE_URL";
+    throw err;
+  }
+  if (baseUrl) config.baseURL = baseUrl;
   if (opts.defaultHeaders) config.defaultHeaders = opts.defaultHeaders;
   if (opts.guardedFetch) config.fetch = opts.guardedFetch;
   return new OpenAI(config);
