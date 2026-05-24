@@ -31,6 +31,25 @@ export const CLOUD_KEY_MAP = {
 // slots (handled by the orchestrator), then Ollama.
 export const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google", "openrouter"];
 
+/**
+ * Canonical default endpoint for OpenRouter dispatch. Single source of
+ * truth shared by:
+ *
+ *   • `dispatcher.js#OPENROUTER_BASE_URL` (legacy provider-driven path)
+ *   • `registry.js#synthesiseTransientRoute` (synthesised env-route baseUrl)
+ *   • `protocols/openai.js#getFamilyDefaultBaseUrl` (route-driven safety net)
+ *
+ * Reading `process.env.OPENROUTER_BASE_URL` at call time honours the
+ * documented self-hosted-proxy override (see `REFERENCE.md` +
+ * `docker-compose.yml`) without freezing the value at module load.
+ * Returning the URL string keeps every consumer's wiring identical.
+ *
+ * @returns {string} The OpenRouter API base URL.
+ */
+export function getOpenRouterBaseUrl() {
+  return process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+}
+
 // Per-provider default models — overridable via env vars. B4.1: the
 // `color` field is the brand-aligned hex for Settings UI / dropdowns.
 // Co-located here so `providerInfo.js#buildProviderMeta` derives the

@@ -27,7 +27,7 @@ import { logRequest } from "./requestLog.js";
 // is consulted ONLY when the route's pricing column is null, and only
 // to compute a non-null cost for the metric — never to overwrite an
 // operator-set route price. See `computeCostForRoute` JSDoc below.
-import { pricingFor, CLOUD_KEY_MAP } from "./modelCatalog.js";
+import { pricingFor, CLOUD_KEY_MAP, getOpenRouterBaseUrl } from "./modelCatalog.js";
 // B2.5 — Per-workspace request-log policy lookup. Hot-path read; the
 // repo's `getAiRequestLogSettings` returns `{ mode: "none", customRules: [] }`
 // for unknown workspace ids so callers always get a usable shape.
@@ -71,10 +71,11 @@ import { fireSpendAlert } from "./spendAlert.js";
 
 export const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 
-// OpenRouter base URL — overridable for self-hosted proxies. Stays in the
-// dispatcher (not modelCatalog.js) because it's instance-specific runtime
-// config used by buildAdapterOpts(), not catalog metadata.
-const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+// OpenRouter base URL — overridable for self-hosted proxies. Resolved
+// via `modelCatalog.getOpenRouterBaseUrl()` so the env-var read is
+// shared with `registry.synthesiseTransientRoute` and
+// `protocols/openai.getFamilyDefaultBaseUrl` (no more triple-hardcoding
+// of the literal endpoint).
 
 // ── Metric label helper ───────────────────────────────────────────────────────
 
@@ -204,7 +205,7 @@ export function buildAdapterOpts(provider, messages, maxTokens, signal, response
       ...base,
       model: buildProviderMeta().openrouter.model,
       apiKey: getKey("OPENROUTER_API_KEY"),
-      baseUrl: OPENROUTER_BASE_URL,
+      baseUrl: getOpenRouterBaseUrl(),
       defaultHeaders: {
         "HTTP-Referer": process.env.OPENROUTER_REFERER || "https://sentri.dev",
         "X-Title": process.env.OPENROUTER_APP_TITLE || "Sentri",
@@ -1027,7 +1028,8 @@ export async function _callProviderUnsafe(provider, promptOrMessages, maxTokens,
     // OpenRouter parity: real openrouter routes carry their `baseUrl` +
     // referer headers on the row itself (set via Settings UI on save).
     // Transient openrouter routes still need the `OPENROUTER_*` env-derived
-    // headers + `OPENROUTER_BASE_URL`, which `buildAdapterOpts` injects.
+    // headers + the canonical base URL (via `getOpenRouterBaseUrl()`),
+    // which `buildAdapterOpts` injects.
     //
     // Compat / custom-family routes: real routes get the `guardedFetch`
     // SSRF wrapper applied below so DNS-rebinding mitigation matches the

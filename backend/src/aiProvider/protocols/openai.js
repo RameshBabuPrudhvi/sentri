@@ -44,6 +44,7 @@
 import OpenAI from "openai";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 import { throwIfAborted } from "../../utils/abortHelper.js";
+import { getOpenRouterBaseUrl } from "../modelCatalog.js";
 
 // B2.4 — protocol modules return raw `{ input, output }` token usage
 // only. Cost is computed by the dispatcher's
@@ -78,9 +79,7 @@ import { throwIfAborted } from "../../utils/abortHelper.js";
  * @returns {string|null} Canonical endpoint, or null when unknown.
  */
 function getFamilyDefaultBaseUrl(family) {
-  if (family === "openrouter") {
-    return process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
-  }
+  if (family === "openrouter") return getOpenRouterBaseUrl();
   return null;
 }
 

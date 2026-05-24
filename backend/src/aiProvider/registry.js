@@ -15,7 +15,7 @@ import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER, getCloudModel } from "./modelCatalog.js";
+import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER, getCloudModel, getOpenRouterBaseUrl } from "./modelCatalog.js";
 import { protocolForProvider } from "./protocolForProvider.js";
 // B4.6 — route-group resolution. When `agent_configs.routeId` starts
 // with `"rg-"`, the id points at a `route_groups` row instead of a
@@ -656,12 +656,10 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
   // `backend/src/aiProvider/protocols/openai.js` — both must honour
   // the same `OPENROUTER_BASE_URL` env-var override.
   if (provider === "openrouter") {
-    // Honour the documented `OPENROUTER_BASE_URL` override (see
-    // `REFERENCE.md` + `docker-compose.yml`) — without it, deployments
-    // routing through a self-hosted OpenRouter proxy would have traffic
-    // silently dispatched to `openrouter.ai` instead. Mirrors the
-    // `dispatcher.js:77` pattern used by the legacy provider path.
-    effectiveBaseUrl = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+    // Single source of truth in `modelCatalog.getOpenRouterBaseUrl()` —
+    // honours the documented `OPENROUTER_BASE_URL` override (see
+    // `REFERENCE.md` + `docker-compose.yml`) for self-hosted proxies.
+    effectiveBaseUrl = getOpenRouterBaseUrl();
   }
   if (isCompatProvider(provider)) {
     // Compat slots carry their own baseUrl + model on the slot config
