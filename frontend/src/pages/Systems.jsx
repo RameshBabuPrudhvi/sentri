@@ -1,23 +1,28 @@
 /**
  * @module pages/Systems
- * @description System overview page — AI provider status, application
- * environments, and crawl context. Renamed from Context.jsx to align
- * with the sidebar label and route path.
+ * @description System overview page — runtime infrastructure telemetry.
+ *
+ * Scope (post-cleanup): worker pool telemetry + AI dispatcher state.
+ * The legacy AI-Provider summary card was removed because Settings →
+ * AI Providers is the canonical surface for that data; the per-project
+ * Application-Environments list was removed because Dashboard /
+ * Projects / ProjectDetail already render those stats.
+ *
+ * AI provider state panel (added post-restructure): surfaces every open
+ * circuit breaker + active sticky fallback the dispatcher's registry is
+ * tracking, so operators can answer "tests stopped generating, what
+ * happened?" without grepping log lines. Admin-only, fail-soft (panel
+ * just doesn't render for non-admins or on fetch failure).
  */
 
-import React, { useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import {
-  Globe, Cpu, ChevronRight, CheckCircle2,
-  XCircle, Settings as SettingsIcon,
-  RefreshCw, Shield, Server,
-} from "lucide-react";
-import { fmtRelativeDate } from "../utils/formatters";
-import useProjectData from "../hooks/useProjectData";
-import { useSettingsBundleQuery } from "../hooks/queries/useSettingsQueries.js";
+import React, { useEffect, useState } from "react";
+import { Server, Cpu, AlertTriangle, RefreshCw } from "lucide-react";
 import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import WorkerPoolPanel from "../components/shared/WorkerPoolPanel.jsx";
+import { api } from "../api.js";
+import { useAuth } from "../context/AuthContext.jsx";
+import { userHasRole } from "../utils/roles.js";
 
 function SectionHeader({ icon, title, sub }) {
   return (
@@ -31,21 +36,151 @@ function SectionHeader({ icon, title, sub }) {
   );
 }
 
-function InfoRow({ label, children }) {
+/**
+ * Format a millisecond duration as a compact human-readable string.
+ * `45_000` → `"45s"`, `120_000` → `"2m"`, `350_000` → `"5m 50s"`.
+ * Used by the AI state panel for "breaker reopens in 4m 12s" labels —
+ * full precision (`new Intl.DurationFormat`) would be overkill here.
+ */
+function fmtRemaining(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "0s";
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) return `${s}s`;
+  if (s === 0) return `${m}m`;
+  return `${m}m ${s}s`;
+}
+
+/**
+ * AI dispatcher state panel — open breakers + active sticky fallbacks.
+ *
+ * Refetches every 30s while mounted so the panel stays current during
+ * an active 429 incident without the operator hitting reload. Fail-soft
+ * on the API call: viewer / qa_lead see a 403 and the panel collapses
+ * to a muted "Admin-only" hint rather than rendering an error banner.
+ *
+ * Layout intent: green check when both lists are empty (healthy state),
+ * red AlertTriangle when any breaker is open or sticky is active.
+ */
+function AiStatePanel() {
+  const [state, setState] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
+  const [error, setError] = useState(null);
+
+  const reload = async () => {
+    setError(null);
+    try {
+      const data = await api.getAiState();
+      setState(data);
+      setForbidden(false);
+    } catch (err) {
+      // 403 → caller isn't admin; collapse the panel quietly. Any other
+      // error renders as a muted retry hint.
+      if (err?.status === 403) setForbidden(true);
+      else setError(err?.message || "Could not load AI state.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload();
+    // Auto-refresh every 30s. Matches the existing dashboard cadence
+    // (TanStack Query defaults to `staleTime: 0` + window-focus refetch
+    // there; we use a fixed interval here to keep the panel current
+    // even when the tab is in the background during an incident).
+    const id = setInterval(reload, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (forbidden) {
+    return (
+      <div className="card card-padded mb-md">
+        <SectionHeader
+          icon={<Cpu size={15} color="var(--accent)" />}
+          title="AI provider state"
+          sub="Admin-only — read-only diagnostic surface"
+        />
+        <div className="text-sm text-muted">
+          You need workspace-admin role to view dispatcher state.
+        </div>
+      </div>
+    );
+  }
+
+  const breakers = state?.breakers || [];
+  const stickies = state?.stickyFallbacks || [];
+  const openBreakers = breakers.filter((b) => b.openNow);
+  const hasIssues = openBreakers.length > 0 || stickies.length > 0;
+
   return (
-    <div className="sys-info-row">
-      <span className="sys-info-row__label">{label}</span>
-      <span className="sys-info-row__value">{children}</span>
+    <div className="card card-padded mb-md">
+      <SectionHeader
+        icon={hasIssues
+          ? <AlertTriangle size={15} color="var(--red)" />
+          : <Cpu size={15} color="var(--accent)" />}
+        title="AI provider state"
+        sub={hasIssues
+          ? `${openBreakers.length} open breaker${openBreakers.length !== 1 ? "s" : ""} · ${stickies.length} sticky fallback${stickies.length !== 1 ? "s" : ""}`
+          : "All circuits closed · no active fallbacks"}
+      />
+      {loading && !state ? (
+        <div className="text-sm text-muted">Loading dispatcher state…</div>
+      ) : error ? (
+        <div className="text-sm text-muted">
+          {error} <button className="btn btn-ghost btn-xs" onClick={reload}><RefreshCw size={11} /> Retry</button>
+        </div>
+      ) : !hasIssues ? (
+        <div className="text-sm text-muted">
+          The AI dispatcher has no open circuit breakers or sticky fallbacks. New
+          provider failures trip a breaker after {state?.constants?.CIRCUIT_BREAKER_THRESHOLD ?? "?"} consecutive
+          rate-limit errors and stay open for {fmtRemaining(state?.constants?.CIRCUIT_BREAKER_COOLDOWN_MS ?? 0)}.
+        </div>
+      ) : (
+        <div className="text-sm">
+          {openBreakers.length > 0 && (
+            <>
+              <div className="font-semi" style={{ marginBottom: 6 }}>Open breakers</div>
+              <ul style={{ paddingLeft: 18, margin: "0 0 12px" }}>
+                {openBreakers.map((b) => (
+                  <li key={b.key} style={{ marginBottom: 4 }}>
+                    <code>{b.provider}</code>
+                    {b.agentRole && <> · role <code>{b.agentRole}</code></>}
+                    {" — reopens in "}
+                    <strong>{fmtRemaining(b.remainingMs)}</strong>
+                    {" ("}{b.failures} failure{b.failures !== 1 ? "s" : ""}{")"}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {stickies.length > 0 && (
+            <>
+              <div className="font-semi" style={{ marginBottom: 6 }}>Sticky fallbacks</div>
+              <ul style={{ paddingLeft: 18, margin: 0 }}>
+                {stickies.map((s) => (
+                  <li key={s.key} style={{ marginBottom: 4 }}>
+                    <code>{s.provider}</code>
+                    {s.agentRole && <> · role <code>{s.agentRole}</code></>}
+                    {" — expires in "}
+                    <strong>{fmtRemaining(s.remainingMs)}</strong>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 export default function Systems() {
   usePageTitle("System");
-  //  useProjectData batches all project/run/test fetches in one pass (no N+1)
-  const { projects, allTests, allRuns, loading } = useProjectData();
-  const bundleQuery = useSettingsBundleQuery();
-  const config = bundleQuery.data?.config ?? null;
+  const { user } = useAuth();
+  const isAdmin = userHasRole(user, "admin");
   // DASH-003 (audit): worker-pool telemetry moved off the dashboard onto
   // this page. Reuses the dashboard query so a user navigating Dashboard
   // → System gets the cached payload immediately (TanStack Query caches
@@ -53,35 +188,15 @@ export default function Systems() {
   // cache entry).
   const dashboardQuery = useDashboardQuery();
   const workerPool = dashboardQuery.data?.workerPool ?? null;
-  const navigate = useNavigate();
 
-  // Build crawl summary per project from already-fetched allRuns and allTests
-  const crawlData = useMemo(() => {
-    const map = {};
-    projects.forEach(p => {
-      const projectRuns = allRuns.filter(r => r.projectId === p.id);
-      const lastCrawl = projectRuns
-        .filter(r => r.type === "crawl")
-        .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))[0] || null;
-      const tests = allTests.filter(t => t.projectId === p.id);
-      map[p.id] = { lastCrawl, tests };
-    });
-    return map;
-  }, [projects, allRuns, allTests]);
-
-  if (loading) return (
+  if (dashboardQuery.isLoading) return (
     <div className="page-container sys-page">
-      {/* Skeleton heights are genuinely continuous (60/200/200/180) and
-          drive layout shape — kept inline per AGENT.md §127's data-driven
-          carve-out. Everything else (border-radius, margin-bottom) lives
-          on `.sys-skeleton`. */}
-      {[60, 200, 200, 180].map((h, i) => (
-        <div key={i} className="skeleton sys-skeleton" style={{ height: h }} />
-      ))}
+      {/* Skeleton height drives layout shape — kept inline per AGENT.md
+          §127's data-driven carve-out. Everything else (border-radius,
+          margin-bottom) lives on `.sys-skeleton`. */}
+      <div className="skeleton sys-skeleton" style={{ height: 200 }} />
     </div>
   );
-
-  const hasProjects = projects.length > 0;
 
   return (
     <div className="fade-in page-container sys-page">
@@ -90,58 +205,14 @@ export default function Systems() {
       <div className="mb-lg">
         <h1 className="page-title">System</h1>
         <p className="page-subtitle">
-          Environment configuration, AI provider status, and crawl context for your applications
+          Worker pool telemetry and runtime infrastructure.
         </p>
-      </div>
-
-      {/* AI Provider — compact status with link to Settings */}
-      <div className="card card-padded mb-md">
-        <SectionHeader
-          icon={<Cpu size={15} color="var(--accent)" />}
-          title="AI Provider"
-          sub="Active model used for test generation and Playwright code synthesis"
-        />
-        {config ? (
-          <div>
-            <InfoRow label="Status">
-              {config.hasProvider ? (
-                <span className="badge badge-green"><CheckCircle2 size={10} /> Connected</span>
-              ) : (
-                <span className="badge badge-red"><XCircle size={10} /> Not configured</span>
-              )}
-            </InfoRow>
-            {config.hasProvider && (
-              <>
-                <InfoRow label="Provider">
-                  <span className="sys-info-row__provider">{config.providerName || "—"}</span>
-                </InfoRow>
-                {config.model && (
-                  <InfoRow label="Model">
-                    <span className="sys-info-row__model">{config.model}</span>
-                  </InfoRow>
-                )}
-              </>
-            )}
-            <div className="sys-provider-actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => navigate("/settings")}>
-                <SettingsIcon size={13} /> {config.hasProvider ? "Manage in Settings" : "Configure API Key"}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="sys-load-error">Could not load provider config.</div>
-        )}
       </div>
 
       {/* Worker pool telemetry (DASH-003, audit) — relocated from Dashboard.
           The /dashboard page now shows a single Platform Health card; the
           full 4-card breakdown lives here for operators who need the
-          actual queue depth / active worker count / failed job tally.
-          Uses the shared `.card-padded` + `.mb-md` utilities rather than
-          inline padding/margin (DS-001). The sibling AI-Provider and
-          Application-Environments sections in this file still use the
-          inline pattern — migrating them is tracked as a separate
-          page-level cleanup. */}
+          actual queue depth / active worker count / failed job tally. */}
       <div className="card card-padded mb-md">
         <SectionHeader
           icon={<Server size={15} color="var(--accent)" />}
@@ -161,95 +232,13 @@ export default function Systems() {
         )}
       </div>
 
-      {/* Applications context */}
-      <div className="card card-padded mb-md">
-        <SectionHeader
-          icon={<Globe size={15} color="var(--purple)" />}
-          title="Application Environments"
-          sub={`${projects.length} application${projects.length !== 1 ? "s" : ""} registered`}
-        />
+      {/* AI dispatcher state — admin-only, mounted via client-side gate.
+          The route is gated server-side too (admin-only); the client gate
+          here avoids firing the fetch for non-admins so a viewer doesn't
+          see a 403 flash in their network tab. Defence-in-depth, not
+          security boundary — the real ACL is the route. */}
+      {isAdmin && <AiStatePanel />}
 
-        {!hasProjects ? (
-          <div className="empty-state sys-empty">
-            <Globe size={32} color="var(--text3)" className="sys-empty__icon" />
-            <div className="empty-state-title">No applications registered</div>
-            <div className="empty-state-desc">
-              Add a project to see crawl context, test counts, and AI configuration for each application.
-            </div>
-            <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
-              Add First Project
-            </button>
-          </div>
-        ) : (
-          <div className="sys-app-list">
-            {projects.map(p => {
-              const cd = crawlData[p.id] || {};
-              const crawl = cd.lastCrawl;
-              const tests = cd.tests || [];
-              return (
-                <div
-                  key={p.id}
-                  className="sys-app-card"
-                  onClick={() => navigate(`/projects/${p.id}`)}
-                >
-                  <div className="sys-app-card__head">
-                    <div className="sys-app-card__head-left">
-                      <div className="sys-app-card__avatar">
-                        <Globe size={13} color="var(--purple)" />
-                      </div>
-                      <div>
-                        <div className="sys-app-card__name">{p.name}</div>
-                        <a
-                          href={p.url} target="_blank" rel="noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          className="sys-app-card__url"
-                        >
-                          {p.url}
-                        </a>
-                      </div>
-                    </div>
-                    <ChevronRight size={14} color="var(--text3)" />
-                  </div>
-
-                  <div className="sys-app-card__stats">
-                    {[
-                      { label: "Total Tests",  value: tests.length },
-                      { label: "Approved",     value: tests.filter(t => t.reviewStatus === "approved").length },
-                      { label: "Draft",        value: tests.filter(t => t.reviewStatus === "draft").length },
-                      { label: "Pages Found",  value: crawl?.pagesFound ?? "—" },
-                    ].map((item, i) => (
-                      <div key={i}>
-                        <div className="section-label sys-app-card__stat-label">
-                          {item.label}
-                        </div>
-                        <div className="sys-app-card__stat-value">{item.value}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Crawl row */}
-                  <div className="sys-app-card__crawl">
-                    <RefreshCw size={11} color="var(--text3)" />
-                    <span className="sys-app-card__crawl-text">
-                      Last crawl: <strong className="sys-app-card__crawl-time">{fmtRelativeDate(crawl?.startedAt, "Never")}</strong>
-                    </span>
-                    {crawl && (
-                      <span className={`badge ${crawl.status === "completed" ? "badge-green" : crawl.status === "failed" ? "badge-red" : "badge-amber"}`}>
-                        {crawl.status}
-                      </span>
-                    )}
-                    {p.credentials && (
-                      <span className="badge badge-gray sys-app-card__crawl-auth">
-                        <Shield size={9} /> Auth configured
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

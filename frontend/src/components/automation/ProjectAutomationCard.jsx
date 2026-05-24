@@ -8,8 +8,11 @@
  * Status chips in the collapsed header give at-a-glance config state
  * so users never need to expand a project just to see if it's configured.
  *
- * Quality Gates + Web Vitals Budgets have moved to the "Quality Gates"
- * top-level tab (ProjectQualityCard) to keep each accordion focused.
+ * Quality Gates + Web Vitals Budgets have moved to a dedicated Project
+ * Settings surface at `/projects/:id/settings/quality-gates`
+ * (`features/project-settings/sections/quality-gates/`) to keep each
+ * accordion focused and match how industry-standard tools split CI/CD
+ * triggers from project-scoped quality configuration.
  *
  * @param {{ project, defaultExpanded?, canEdit?, onToast? }} props
  */

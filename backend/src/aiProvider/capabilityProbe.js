@@ -54,8 +54,21 @@
  */
 import * as defaultProtocolAdapter from "./adapters/protocolAdapter.js";
 import { capabilitiesFor } from "./modelCatalog.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+// Probe timeout — capability probes (`/settings/ai-providers/:id/probe` and
+// the auto-probe-on-upsert in providerRouteRepo.upsert) abort after this
+// many ms. Defaults to 30s, overridable via `AI_PROBE_TIMEOUT_MS` env var
+// for deployments that depend on slow free-tier providers (OpenRouter
+// `:free` models, Gemini free tier can queue 30–90s during peak load).
+// Clamped to a sane [1s, 5min] window so a typo in `.env` can't disable
+// timeouts entirely or set a sub-second value that aborts before TLS
+// handshake completes.
+const DEFAULT_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.AI_PROBE_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) return 30_000;
+  return Math.min(Math.max(raw, 1_000), 300_000);
+})();
 
 // ── Test seam ─────────────────────────────────────────────────────────────────
 // `protocolAdapter` is held by mutable reference rather than a top-level
@@ -112,6 +125,7 @@ function withTimeout(timeoutMs) {
  */
 async function probeReachability(route, opts = {}) {
   const { signal, cancel } = withTimeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const startedAt = Date.now();
   try {
     await protocolAdapter.generate(route, buildProbeMessages(), {
       maxTokens: 4,
@@ -120,6 +134,25 @@ async function probeReachability(route, opts = {}) {
     });
     return { ok: true };
   } catch (err) {
+    // AGENT.md / STANDARDS.md: never use bare `console.*` for application
+    // logging. Wrap through `formatLogLine` so structured-log pipelines
+    // (LOG_JSON mode) pick this up with timestamps + level metadata. The
+    // diagnostic context (status, elapsedMs, route attribution) is
+    // serialised into the message string because `formatLogLine` produces
+    // a single formatted string — matches the pattern used elsewhere in
+    // `aiProvider/` (dispatcher.js:617, retry.js:64, secrets.js:77).
+    const diag = {
+      routeId: route?.id,
+      family: route?.family,
+      protocol: route?.protocol,
+      baseUrl: route?.baseUrl,
+      model: route?.model,
+      elapsedMs: Date.now() - startedAt,
+      status: err?.status ?? err?.statusCode ?? null,
+      message: String(err?.message || err).slice(0, 300),
+    };
+    console.warn(formatLogLine("warn", null,
+      `[capabilityProbe] reachability failed ${JSON.stringify(diag)}`));
     return { ok: false, classification: classifyProbeError(err) };
   } finally {
     cancel();

@@ -1,0 +1,58 @@
+/**
+ * Project Settings — section layout primitives.
+ *
+ * Companion to `frontend/src/styles/pages/settings.css` (the workspace
+ * Settings page). The page chrome (`.settings-shell`, `.settings-sidebar`,
+ * `.settings-main`, `.settings-header__title`, `.settings-header__sub`,
+ * `.settings-back`) is shared verbatim — the new layout deliberately reuses
+ * those class names so workspace and project settings render with identical
+ * chrome (industry pattern: GitHub repo Settings, Vercel project Settings,
+ * Linear project Settings all use the same chrome as workspace Settings).
+ *
+ * This file only adds the section-content primitives that the project
+ * sections (`features/project-settings/sections/*`) use. Each section
+ * stacks one or more `.ps-section__block` panels under `<h2>` headers —
+ * no inner tabs.
+ */
+
+.ps-section {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.ps-section__block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ps-section__title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 0;
+  color: var(--text);
+}
+
+.ps-section__desc {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+/* Step-2 placeholder boxes — kept for now so any section that hasn't been
+   wired to its real panel renders something visible instead of an empty
+   block. Removed once step 6 deletes the legacy ProjectQualityCard. */
+.ps-section__placeholder {
+  font-size: 0.85rem;
+  color: var(--text2);
+}
+.ps-section__placeholder code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg2);
+  color: var(--text);
+}

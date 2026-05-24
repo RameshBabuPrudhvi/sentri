@@ -82,6 +82,12 @@ const FORM_EMPTY = {
   cacheEnabled: false,
   cacheTtlSec: "",
   fallbackRouteId: "",
+  // Migration 060 — per-route probe timeout in seconds (the UI surface).
+  // Empty = use the workspace/env default (`AI_PROBE_TIMEOUT_MS` env var
+  // or the hard-coded 30s fallback). Stored on the DB row as
+  // `probeTimeoutMs` (milliseconds); `buildPayload` does the unit
+  // conversion on the way out.
+  probeTimeoutSec: "",
 };
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
@@ -165,6 +171,18 @@ function buildPayload(form) {
     fallbackRouteId: form.fallbackRouteId || null,
   };
   if (form.apiKey && form.apiKey.trim()) payload.apiKey = form.apiKey.trim();
+  // Migration 060 — convert seconds (UI) → milliseconds (DB). Mirror the
+  // `fallbackRouteId` pattern: always include the field with `null` when
+  // blank, regardless of create vs. update. The repo's `diffFields` sees
+  // null→null as a no-op on update, and on create the column defaults to
+  // NULL anyway — so we get a uniform wire contract without import/export
+  // round-trips emitting an asymmetric payload shape.
+  if (form.probeTimeoutSec !== "" && form.probeTimeoutSec != null) {
+    const sec = Number(form.probeTimeoutSec);
+    payload.probeTimeoutMs = Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : null;
+  } else {
+    payload.probeTimeoutMs = null;
+  }
   return payload;
 }
 
@@ -502,6 +520,33 @@ function ProviderForm({
               />
               <span className="st-pr-field-label">Enabled</span>
             </label>
+            {/* Migration 060 — per-route probe-timeout override (seconds).
+                Free-tier providers (OpenRouter `:free` models, Gemini free
+                tier) can queue 30–90s during peak load, and Ollama on CPU
+                can take 600s+ for large models. Empty = use the workspace
+                env default (`AI_PROBE_TIMEOUT_MS`, falls back to 30s).
+                Field placed last in the Advanced grid so it's discoverable
+                but doesn't crowd the more common rate-limit / cache knobs. */}
+            <label className="st-pr-field st-pr-field--wide">
+              <span className="st-pr-field-label">
+                Probe timeout (seconds)
+                <span className="text-xs text-muted"> — leave blank to use the workspace default; raise for slow free / local models</span>
+              </span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={600}
+                step={1}
+                value={form.probeTimeoutSec}
+                onChange={(e) => setForm((s) => ({ ...s, probeTimeoutSec: e.target.value }))}
+                placeholder={
+                  form.family === "local" ? "120 (Ollama default)"
+                  : form.family === "openrouter" && /:free$/.test(form.model) ? "90 (free tier)"
+                  : "30 (default)"
+                }
+              />
+            </label>
           </div>
         )}
 
@@ -823,6 +868,10 @@ export default function AiProvidersSection() {
       cacheEnabled:  row.cacheEnabled === 1 || row.cacheEnabled === true,
       cacheTtlSec:   row.cacheTtlSec ?? "",
       fallbackRouteId: row.fallbackRouteId || "",
+      // Migration 060 — render ms → seconds for the UI field. Backend
+      // returns null when no override is set; the empty string keeps the
+      // input blank and signals "use env default" on the next save.
+      probeTimeoutSec: row.probeTimeoutMs ? row.probeTimeoutMs / 1000 : "",
     });
     setShowForm(true);
   }

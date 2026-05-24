@@ -109,7 +109,7 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
       return haveEvents ? eventsToTurns(agentEvents) : synthesizeTurns(run, ctx);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [run?.id, run?.currentStep, run?.status, run?.pagesFound, run?.testsGenerated, ps, allTests, agentEvents],
+    [run?.id, run?.currentStep, run?.status, run?.pagesFound, run?.pages, run?.testsGenerated, ps, allTests, agentEvents],
   );
 
   // Displayed turns track render state. New turns enter as `streaming`
@@ -125,8 +125,13 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
   // event-mode takes when a `finding`/`progress` event extends an open
   // `start` turn: same stable ID, longer `text`. Without (b), a finding
   // arriving after the start turn finished streaming would never reach
-  // the screen. Synthesizer-mode turns never grow (their text is fixed at
-  // synthesis time) so (b) is a no-op for that path.
+  // the screen. Synthesizer-mode also relies on (b) since PR #28 — the
+  // `explorer.finding.1` template now re-renders on every snapshot SSE
+  // tick to narrate per-page crawl progress ("Discovered Pricing. 5 pages
+  // found so far." → "Discovered About Us. 6 pages found so far."). Stable
+  // turn id (`1-explorer-finding`) + growing text matches the same
+  // extend-in-place contract event-mode uses, so this branch handles both
+  // modes uniformly.
   //
   // The dependency list intentionally omits `displayed` (stale-closure-safe
   // via the functional updater) — otherwise this effect would fire on every
@@ -149,12 +154,32 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
         if (t.phase === "handoff") {
           return { ...t, text: target.text, renderedText: target.text };
         }
-        const stillStreaming = t.renderedText.length < target.text.length;
-        return {
-          ...t,
-          text: target.text,
-          status: stillStreaming ? "streaming" : t.status,
-        };
+        // Two cases for streaming turns when target text changes:
+        //   1. Pure extension (new text starts with the current rendered
+        //      prefix — e.g. event-mode finding extends an open start turn,
+        //      OR the count in step 1's narration grows from `5 pages` →
+        //      `15 pages`): keep the cursor where it is and let the
+        //      streamer tick onwards.
+        //   2. Replacement (different prefix — e.g. synthesizer-mode step 1
+        //      re-renders per crawl tick with a different page label:
+        //      `Discovered Pricing.` → `Discovered About Us.`): snap to
+        //      the new text in place and mark done, regardless of whether
+        //      the prior text was still streaming. Re-typing from scratch
+        //      on every tick (>>22ms apart in practice) is theatre — the
+        //      operator has already read the old text by the time the
+        //      next snapshot arrives. Instant replacement matches industry
+        //      conversational UI conventions (Claude / ChatGPT corrections,
+        //      Linear inline edits) and keeps the bubble readable.
+        const isExtension = target.text.startsWith(t.renderedText);
+        if (isExtension) {
+          const stillStreaming = t.renderedText.length < target.text.length;
+          return {
+            ...t,
+            text: target.text,
+            status: stillStreaming ? "streaming" : t.status,
+          };
+        }
+        return { ...t, text: target.text, renderedText: target.text, status: "done" };
       });
       const additions = targetTurns.filter(t => !byId.has(t.id));
       if (additions.length === 0) return mutated ? next : prev;

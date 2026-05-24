@@ -33,6 +33,7 @@ import { activeTaskCount } from "../scheduler.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { SYSTEM_WORKSPACE_ID } from "../constants/systemWorkspace.js";
 import { hasVisionProvider, resolveVisionModel } from "../aiProvider.js";
+import { getAiProviderState } from "../aiProvider/registry.js";
 
 const router = Router();
 
@@ -815,6 +816,50 @@ router.get("/system/vision-provider-status", (req, res) => {
     // would surface as a noisy error toast on every page load when the
     // aiProvider module has a transient issue (e.g. mid-config-reload).
     res.json({ available: false, model: null });
+  }
+});
+
+// ─── AI provider state (admin-only operational telemetry) ────────────────────
+/**
+ * GET /api/v1/system/ai-state
+ *
+ * Read-only snapshot of every circuit breaker + sticky fallback the AI
+ * dispatcher's registry is currently tracking. Surfaces the "tests
+ * stopped generating, what happened?" diagnostic that previously
+ * required grepping `[aiProvider] Circuit breaker tripped` log lines.
+ *
+ * Admin-only because the response carries provider names + per-role
+ * recovery state which an operator at qa_lead level shouldn't see (it's
+ * adjacent to the same trust boundary that gates `/settings/ai-providers`).
+ *
+ * Workspace-scope: registry state is process-wide (single-tenant in
+ * single-process mode; per-replica in distributed mode). The route is
+ * still admin-gated so every workspace's admins see the same shared
+ * dispatcher state — which IS the operationally correct view, since
+ * a tripped breaker on a shared key affects every workspace using it.
+ *
+ * Frontend consumer: `frontend/src/pages/Systems.jsx` Worker Pool section
+ * renders this alongside BullMQ telemetry.
+ *
+ * @route GET /api/v1/system/ai-state
+ */
+router.get("/system/ai-state", requireRole("admin"), (req, res) => {
+  try {
+    const state = getAiProviderState();
+    return res.json(state);
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[system/ai-state] ${err.message}`));
+    // Conservative fallback — same shape as a healthy response with
+    // empty arrays so the UI's render path never branches on `null`.
+    return res.json({
+      breakers: [],
+      stickyFallbacks: [],
+      constants: {
+        CIRCUIT_BREAKER_THRESHOLD: null,
+        CIRCUIT_BREAKER_COOLDOWN_MS: null,
+        STICKY_FALLBACK_TTL_MS: null,
+      },
+    });
   }
 });
 

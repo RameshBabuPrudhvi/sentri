@@ -1,0 +1,27 @@
+-- Migration 060 — per-route capability probe timeout (ms)
+--
+-- Adds `probeTimeoutMs` to `provider_routes` so operators can override the
+-- workspace-wide `AI_PROBE_TIMEOUT_MS` default on a per-provider basis.
+--
+-- ## Why per-route, not global
+--
+-- Different model families have wildly different latency profiles:
+--   • Anthropic / OpenAI paid: 1–3s ideal, 10s is generous.
+--   • OpenRouter `:free` models: 30–90s during peak (rate-limited free tier).
+--   • Ollama local: 30s for small models; 600s+ for 70B+ models on CPU.
+--
+-- A single global timeout forces a bad tradeoff — either too tight (free
+-- models fail) or too loose (paid model outages take minutes to surface).
+--
+-- ## Semantics
+--
+-- NULL → use the workspace/env default (`AI_PROBE_TIMEOUT_MS` env var, or
+-- the hardcoded 30s fallback in `capabilityProbe.js`).
+-- Integer → use this value (clamped to [1000, 600000] = 1s–10min at the
+-- repo / route layer, defence-in-depth against a runaway value).
+--
+-- ## Reversible
+--
+-- Drop the column to roll back; routes lose their override and fall back to
+-- the env default. Safe — this is purely an additive timeout knob.
+ALTER TABLE provider_routes ADD COLUMN probeTimeoutMs INTEGER;

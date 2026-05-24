@@ -37,11 +37,11 @@ import { getStageAgentRoles } from "../../config.js";
 // `agent_event` SSE lands, steps 1+2 stay synthesized client-side and
 // step 3 onwards swaps to real events.
 export const AGENT_PERSONAS = {
-  explorer: { icon: "🔍", label: "Explorer", color: "explorer", scope: "I find what users can do." },
-  planner:  { icon: "🧭", label: "Planner",  color: "planner",  scope: "I group actions into journeys." },
-  author:   { icon: "✍️", label: "Author",   color: "author",   scope: "I write the tests." },
-  oracle:   { icon: "🎯", label: "Oracle",   color: "oracle",   scope: "I strengthen assertions." },
-  reviewer: { icon: "🛡️", label: "Reviewer", color: "reviewer", scope: "I gate quality." },
+  explorer: { icon: "🔍", label: "Explorer", color: "explorer", scope: "I look around your site to see what users can do." },
+  planner:  { icon: "🧭", label: "Planner",  color: "planner",  scope: "I connect those actions into complete user journeys." },
+  author:   { icon: "✍️", label: "Author",   color: "author",   scope: "I write the tests, one journey at a time." },
+  oracle:   { icon: "🎯", label: "Oracle",   color: "oracle",   scope: "I make sure each test checks something meaningful." },
+  reviewer: { icon: "🛡️", label: "Reviewer", color: "reviewer", scope: "I do the final quality check before anything ships." },
 };
 
 // ── Per-step agent sequence ──────────────────────────────────────────────────
@@ -95,42 +95,74 @@ export const TURN_TEMPLATES = {
       : "Opening your homepage and following every link I can reach…";
   },
   "explorer.finding.1": (r, { ps }) => {
-    // `pagesFound` has a live top-level mirror (incremented per page
-    // snapshot at `crawlBrowser.js:338`), so prefer it over
+    // `pagesFound` + `pages` have a live top-level mirror (updated per
+    // page snapshot at `crawlBrowser.js:338-347`), so prefer them over
     // `pipelineStats.pagesFound` which only materialises at step 8.
+    //
+    // Step 1 is pre-LLM — the backend emits zero `agent_event` rows
+    // during the crawl loop (see comment at top of this file). To get
+    // Claude-style per-page narration ("just visited X… 5 pages mapped
+    // so far") we read `run.pages[-1]` directly from the snapshot SSE
+    // array. Each crawl tick re-renders this template and the streamer
+    // diffs the text by turn id (`1-explorer-finding`).
     const pages = r?.pagesFound ?? ps?.pagesFound;
     if (pages == null) return null;
     if (pages <= 0)    return "No reachable pages found on this site.";
-    return `Mapped ${pages} page${pages !== 1 ? "s" : ""}.`;
+
+    const list = Array.isArray(r?.pages) ? r.pages : [];
+    const last = list.length > 0 ? list[list.length - 1] : null;
+    const lastLabel = humanPageLabel(last);
+
+    // Verb choice — step 1 is the *crawl* phase (URL discovery only); the
+    // broader Explorer arc (steps 1-3) layers on element filtering + intent
+    // classification. Narration must reflect crawl semantics, not the full
+    // exploration. Constraints:
+    //   • Not "Explored" — that's the agent's whole arc, not step 1.
+    //   • Not "Visited" — too generic, doesn't convey "found a new URL".
+    //   • Not "Reviewed" — collides with step-7 Reviewer agent.
+    //   • Not "Crawled" — accurate but reads as technical jargon.
+    // "Discovered" fits: professional, conveys URL-finding, no collisions.
+    //
+    // `humanPageLabel` returns the page title or empty string — never a
+    // raw URL path. Title-less pages fall back to "another page" so
+    // non-technical users never see `/api/v2/users` in the bubble.
+    if (pages === 1) {
+      return lastLabel
+        ? `Discovered your homepage (${lastLabel}).`
+        : "Discovered your homepage.";
+    }
+    return lastLabel
+      ? `Discovered ${lastLabel}. ${pages} pages found so far.`
+      : `Discovered another page. ${pages} pages found so far.`;
   },
-  "explorer.doing.2":   () => "Scanning each page for buttons, inputs, forms — anything a user can act on. Skipping decorative content.",
+  "explorer.doing.2":   () => "Looking at each page for buttons, links, and forms — the things a real user can click, type into, or tap. Skipping anything purely decorative.",
   "explorer.finding.2": (r, { ps }) => {
     const kept = ps?.elementsKept;
     if (kept == null) return null;
-    if (kept <= 0)    return "No interactive elements found — the crawled pages have nothing to act on.";
-    return `Kept ${kept} interactive element${kept !== 1 ? "s" : ""}.`;
+    if (kept <= 0)    return "Couldn't find anything users can act on across these pages.";
+    return `Picked out ${kept} thing${kept !== 1 ? "s" : ""} a user can interact with.`;
   },
-  "explorer.doing.3":   () => "Reading the page structure to classify what each user action does — sign-up, search, checkout, navigation.",
+  "explorer.doing.3":   () => "Working out what each part of the site is for — signing up, searching, checking out, moving around.",
   "explorer.finding.3": (r, { ps }) => {
     // Suppressed mid-run — `pipelineStats.intentsClassified` is only set at
     // step-3 completion. Returning null keeps the conversation honest
     // instead of fabricating a "0 actions" finding before the stat arrives.
     const intents = ps?.intentsClassified;
     if (intents == null) return null;
-    if (intents <= 0)    return "Couldn't identify any user intents on the crawled pages.";
-    return `Identified ${intents} distinct user intent${intents !== 1 ? "s" : ""}.`;
+    if (intents <= 0)    return "Couldn't work out what users would typically do on these pages.";
+    return `Worked out ${intents} different thing${intents !== 1 ? "s" : ""} a user can do here.`;
   },
   "explorer.handoff":   () => "Handing off to Planner.",
 
   // ── Planner (step 3b) ──
-  "planner.onboard": () => "Planner here. Grouping these into end-to-end journeys.",
-  "planner.accept":  () => "Thanks Explorer. I'll group these into end-to-end journeys.",
-  "planner.doing":   () => "Tracing paths: sign-up flows, form submissions, cart to checkout…",
+  "planner.onboard": () => "Planner here. I'll connect what users can do into complete journeys — start to finish.",
+  "planner.accept":  () => "Thanks Explorer. I'll connect these into complete journeys — start to finish.",
+  "planner.doing":   () => "Joining the dots: how someone signs up, fills out a form, gets from the cart to a finished order…",
   "planner.finding": (r, { ps }) => {
     const j = ps?.journeysDetected;
     if (j == null) return null;
-    if (j <= 0)    return "No coherent journeys could be mapped from these actions.";
-    return `Mapped ${j} distinct user journey${j !== 1 ? "s" : ""} with clear starts and expected outcomes.`;
+    if (j <= 0)    return "Couldn't piece together any clear user journeys from what's here.";
+    return `Pieced together ${j} complete user journey${j !== 1 ? "s" : ""}, each with a clear start and finish.`;
   },
   "planner.handoff": () => "Handing off to Author.",
 
@@ -141,13 +173,13 @@ export const TURN_TEMPLATES = {
   // `resolveTemplate` falls back to the un-suffixed key — used by
   // `author.accept` (step 4 only — the one step where Author follows a
   // handoff in) and `author.onboard`.
-  "author.onboard":    () => "Author here. Writing tests, one journey at a time.",
-  "author.accept":     () => "Thanks Planner. Writing tests, one journey at a time.",
-  "author.doing.4":    () => "Picking stable selectors, adding wait conditions, capturing each step in plain English.",
+  "author.onboard":    () => "Author here. I'll turn each journey into a test, one at a time.",
+  "author.accept":     () => "Thanks Planner. I'll turn each journey into a test, one at a time.",
+  "author.doing.4":    () => "Writing each test in plain English — what to click, what to wait for, and what should happen next.",
   "author.finding.4":  (r, { ps, allTests }) => {
     const n = ps?.rawTestsGenerated;
     if (n == null) return null;
-    if (n <= 0)    return "No tests were generated — there were no viable journeys to encode.";
+    if (n <= 0)    return "Couldn't write any tests — there were no journeys clear enough to turn into one.";
     // Join `run.tests × allTests` to surface real test names. Falls back to
     // a bare count when the tests cache hasn't refreshed yet.
     const ids = Array.isArray(r?.tests) ? r.tests : [];
@@ -158,34 +190,34 @@ export const TURN_TEMPLATES = {
     const nameFrag = names.length
       ? ` (${names.join(", ")}${ids.length > names.length ? ", …" : ""})`
       : "";
-    return `Generated ${n} test${n !== 1 ? "s" : ""}${nameFrag}.`;
+    return `Wrote ${n} test${n !== 1 ? "s" : ""}${nameFrag}.`;
   },
-  "author.doing.5":    () => "Comparing all tests for overlapping scenarios.",
+  "author.doing.5":    () => "Looking through the tests for any that cover the same ground.",
   "author.finding.5":  (r, { ps }) => {
     const n = ps?.duplicatesRemoved;
     if (n == null) return null;
-    if (n <= 0)    return "No duplicates found — the suite is already lean.";
-    return `Removed ${n} duplicate${n !== 1 ? "s" : ""}.`;
+    if (n <= 0)    return "No overlap — every test covers something different.";
+    return `Removed ${n} test${n !== 1 ? "s" : ""} that covered the same ground as others.`;
   },
-  "author.doing.6":    () => "Reviewing assertions — upgrading weak page-load checks to meaningful behavioural ones.",
+  "author.doing.6":    () => "Making each test smarter — checking that something real actually happened, not just that the page loaded.",
   "author.finding.6":  (r, { ps }) => {
     const n = ps?.assertionsEnhanced;
     if (n == null) return null;
-    if (n <= 0)    return "No assertions needed upgrading.";
-    return `Enhanced ${n} test${n !== 1 ? "s" : ""} with stronger assertions.`;
+    if (n <= 0)    return "Every test was already checking the right things.";
+    return `Made ${n} test${n !== 1 ? "s" : ""} check something more meaningful.`;
   },
-  "author.doing.7":    () => "Final quality check — selector stability and assertion coverage.",
+  "author.doing.7":    () => "One last look — making sure each test reliably finds the right buttons, and that it's checking something worth checking.",
   "author.finding.7":  (r, { ps }) => {
     const n = ps?.validationRejected;
     if (n == null) return null;
-    if (n <= 0)    return "All tests passed quality review.";
-    return `Rejected ${n} test${n !== 1 ? "s" : ""} with brittle selectors or weak coverage.`;
+    if (n <= 0)    return "Every test passed the final review.";
+    return `Set aside ${n} test${n !== 1 ? "s" : ""} that looked unreliable or didn't check enough.`;
   },
   "author.wrapup":     (r) => {
     const total = r?.testsGenerated ?? 0;
-    if (total <= 0)  return "All done — no tests were generated for this run.";
-    if (total === 1) return "All done — 1 test ready for your review.";
-    return `All done — ${total} tests ready for your review.`;
+    if (total <= 0)  return "All done — nothing came out of this run.";
+    if (total === 1) return "All done — 1 test is ready for you to review.";
+    return `All done — ${total} tests are ready for you to review.`;
   },
   // AUTO-023 — Author hands off to Oracle at end of step 5 (dedup → assertion
   // strengthening). Pre-AUTO-023 Author owned steps 4-7 contiguously so no
@@ -207,23 +239,23 @@ export const TURN_TEMPLATES = {
   // `agent_event` arrives so the synthesizer's optimistic turn renders
   // but never advances past `doing`. Single-step agents — no `.N`-suffixed
   // variants needed (the un-suffixed key wins via `resolveTemplate`).
-  "oracle.onboard":   () => "Oracle here. I'll strengthen the assertions Author wrote.",
-  "oracle.accept":    () => "Thanks Author. I'll strengthen the assertions you wrote.",
-  "oracle.doing":     () => "Reviewing each test for assertion depth — cart counts, form errors, response codes.",
+  "oracle.onboard":   () => "Oracle here. I'll make sure each test is checking something real, not just that the page opened.",
+  "oracle.accept":    () => "Thanks Author. I'll make each of your tests check something more meaningful.",
+  "oracle.doing":     () => "Going through every test — looking for things like cart totals, error messages, and the right outcomes.",
   "oracle.finding":   (r, { ps }) => {
     const n = ps?.assertionsEnhanced;
     if (n == null || n <= 0) return null;
-    return `Upgraded ${n} assertion${n !== 1 ? "s" : ""}.`;
+    return `Strengthened the checks in ${n} test${n !== 1 ? "s" : ""}.`;
   },
   "oracle.handoff":   () => "Handing off to Reviewer.",
-  "reviewer.onboard": () => "Reviewer here. Running quality review now.",
-  "reviewer.accept":  () => "Thanks Oracle. Running quality review now.",
-  "reviewer.doing":   () => "Checking selector stability, coverage, and assertion depth across the suite.",
+  "reviewer.onboard": () => "Reviewer here. Doing the final quality check before anything ships.",
+  "reviewer.accept":  () => "Thanks Oracle. Doing the final quality check now.",
+  "reviewer.doing":   () => "Making sure every test will keep working — reliable steps, real checks, nothing flaky.",
   "reviewer.finding": (r, { ps }) => {
     const n = ps?.validationRejected;
     if (n == null) return null;
-    if (n <= 0)    return "All tests passed review.";
-    return `Rejected ${n} test${n !== 1 ? "s" : ""}. Author, please tighten and re-submit.`;
+    if (n <= 0)    return "Every test passed the final check.";
+    return `Sending ${n} test${n !== 1 ? "s" : ""} back to Author — they need a bit more work before they're ready.`;
   },
   "reviewer.handoff": () => "Handing off to Author.",
 };
@@ -306,11 +338,16 @@ export function synthesizeTurns(run, ctx) {
         pushTurn(turns, run, ctx, { agent, phase: "doing", step, prevAgent, nextAgent });
       }
 
-      // 3. Finding turn — only when step is done AND the template resolved
-      //    to a non-null string (the stat actually landed). The honesty
-      //    guard: mid-run we don't fabricate "0 X found" while the stat is
-      //    still arriving.
-      if (isDone) {
+      // 3. Finding turn — emit when active OR done, and only when the
+      //    template resolved to a non-null string (the stat actually
+      //    landed). Mid-run emission is safe because each template's
+      //    honesty guard returns null until its stat materialises — but
+      //    step 1 has a live `run.pagesFound` mirror that ticks per page
+      //    snapshot (`backend/src/pipeline/crawlBrowser.js:338`), so the
+      //    bubble grows from "Mapped 3 pages." → "Mapped 30 pages." as
+      //    crawling progresses instead of staying frozen on "Opening…"
+      //    until the step flips done.
+      if (isActive || isDone) {
         pushTurn(turns, run, ctx, { agent, phase: "finding", step, prevAgent, nextAgent });
       }
 
@@ -461,8 +498,13 @@ export function eventsToTurns(events) {
       // Open a new doing-style turn. Wording prefers the backend's
       // `message` (operator-controlled at the call site) and falls back
       // to a generic "<Agent> is working" so the turn never renders empty.
+      // Backend messages can embed full URLs (e.g. step 4 emits
+      // `Writing tests for ${classifiedPage.url}` per journey at
+      // `backend/src/pipeline/journeyGenerator.js:273-274`). Run them
+      // through `prettifyMessage` so encoded query strings and long paths
+      // don't dump into the bubble verbatim.
       const persona = AGENT_PERSONAS[evt.agent];
-      const text = evt.message || `${persona.label} is working…`;
+      const text = prettifyMessage(evt.message) || `${persona.label} is working…`;
       // Bug fix: when the same agent emits multiple start/done cycles for
       // the same step (e.g. Author writes tests per-page at step 4, or
       // Planner plans per-journey at step 3), a previous `done` event
@@ -533,7 +575,7 @@ export function eventsToTurns(events) {
       // snapshot was truncated or events arrived out of order), promote
       // the finding to a standalone turn so the user still sees it.
       const open = openByAgent.get(key);
-      const fragment = evt.message || formatScalarData(evt.data);
+      const fragment = prettifyMessage(evt.message) || formatScalarData(evt.data);
       if (!fragment) continue;
       if (open) {
         // Append to the existing turn's text on a new line so the finding
@@ -578,6 +620,94 @@ export function eventsToTurns(events) {
   }
 
   return turns;
+}
+
+/**
+ * Build a short human-readable label for a crawled page row from
+ * `run.pages` (`{ url, title, status, ... }` — see `crawlBrowser.js:340-345`).
+ * Used by `explorer.finding.1` to narrate per-page crawl progress.
+ *
+ * Preference order: `title` (if non-empty and not a URL fallback) wrapped
+ * in quotes, else the URL's path segment in backticks, else null. Trims
+ * to ~40 chars to keep the bubble compact.
+ */
+function humanPageLabel(page) {
+  if (!page || typeof page !== "object") return "";
+  const url = typeof page.url === "string" ? page.url : "";
+  const title = typeof page.title === "string" ? page.title.trim() : "";
+  // Prefer the real page title — that's what a non-technical user
+  // recognises ("Pricing", "About Us"). `crawlBrowser.js:340-345`
+  // falls back to `s.url` when title is empty, so reject titles that
+  // are just the URL string — they'd leak raw paths into the bubble.
+  if (title && title !== url) {
+    return title.length > 40 ? title.slice(0, 37) + "…" : title;
+  }
+  // No usable title. Industry-standard UX (Linear / Notion / Vercel)
+  // hides raw URL paths from end users — they read as a leak, especially
+  // for technical paths like `/api/v2/users` or query strings. Return an
+  // empty string so the template falls through to its title-less branch
+  // ("another page" / generic count) instead of dumping the path.
+  return "";
+}
+
+// Backend journey-type enum → human-readable label. The Planner emits
+// `Planning journey: ${journey.name}` where `journey.name` is generated
+// by `backend/src/pipeline/flowGraph.js:193` as `${type} Flow ${idx + 1}`
+// — e.g. "NAVIGATION Flow 1", "FORM_SUBMISSION Flow 2". Users don't know
+// what these enums mean, so we humanize the type and drop "Flow" (it
+// reads as internal jargon — "the navigation flow" → "navigation
+// journey"). The trailing index is kept (some users find it disambiguating
+// when multiple journeys of the same type exist).
+const JOURNEY_TYPE_LABELS = {
+  AUTH:             "sign-in",
+  FORM_SUBMISSION:  "form submission",
+  SEARCH:           "search",
+  NAVIGATION:       "navigation",
+  CRUD:             "data-entry",
+};
+
+/**
+ * Prettify a backend `agent_event.message` for display in the conversation
+ * bubble. Two transformations:
+ *   1. URLs → `host + truncated path` (max 40 chars). Step 4's `Writing
+ *      tests for ${classifiedPage.url}` per-journey events at
+ *      `backend/src/pipeline/journeyGenerator.js:273-274` embed full
+ *      encoded URLs that blow out the bubble.
+ *   2. Journey-type enums → readable labels. Step 3's `Planning journey:
+ *      NAVIGATION Flow 1` (from `flowGraph.js:193`) reads as internal
+ *      jargon — users don't know what `NAVIGATION Flow` means.
+ *
+ * Non-matching text passes through unchanged so other backend wording
+ * (e.g. "Comparing 12 tests…") stays intact.
+ */
+function prettifyMessage(message) {
+  if (!message || typeof message !== "string") return message || "";
+  let out = message;
+
+  // 1. URL truncation.
+  out = out.replace(/https?:\/\/\S+/g, (match) => {
+    try {
+      const u = new URL(match);
+      let path = decodeURIComponent(u.pathname || "");
+      if (u.search) path += u.search;
+      if (path.length > 40) path = path.slice(0, 37) + "…";
+      const tail = path && path !== "/" ? path : "";
+      return `${u.host}${tail}`;
+    } catch {
+      // Malformed URL — fall back to a hard length cap so the raw string
+      // can't blow out the bubble even when URL parsing fails.
+      return match.length > 60 ? match.slice(0, 57) + "…" : match;
+    }
+  });
+
+  // 2. Journey-type enum → readable label. Matches `TYPE Flow N` (the
+  // exact pattern `flowGraph.js:193` emits). Conservative: only the
+  // five known enum values are humanized; unknown types pass through so
+  // a future backend addition doesn't get silently mangled.
+  out = out.replace(/\b(AUTH|FORM_SUBMISSION|SEARCH|NAVIGATION|CRUD) Flow (\d+)\b/g,
+    (_m, type, idx) => `${JOURNEY_TYPE_LABELS[type] || type.toLowerCase()} journey #${idx}`);
+
+  return out;
 }
 
 /**

@@ -1,8 +1,5 @@
-import React from "react";
-import { NavLink } from "react-router-dom";
-import {
-  Bot, Cpu, Database, ExternalLink, KeyRound, Route as RouteIcon, Shield, Users, Zap,
-} from "lucide-react";
+import React, { useMemo } from "react";
+import SidebarShell from "../shared/components/SidebarShell.jsx";
 import { useSettingsSections } from "./hooks/useSettingsSections.js";
 
 /**
@@ -11,15 +8,12 @@ import { useSettingsSections } from "./hooks/useSettingsSections.js";
  * grouped semantically (Workspace vs Account), keyboard-accessible via
  * React Router's `NavLink` (gets `aria-current="page"` for free), with WCAG
  * 2.4.7 focus-visible ring from the global rule in components.css.
+ *
+ * Thin wrapper around the presentational `SidebarShell` so the same chrome
+ * is reused by project-scoped settings (`/projects/:id/settings/...`).
+ * This file owns the workspace-scope concerns: group-label mapping +
+ * `basePath` binding. The shell stays scope-agnostic.
  */
-
-// Icon lookup — the section config in `useSettingsSections.js` carries icon
-// names as plain strings to keep that module JSX-free. Resolve to lucide
-// components here.
-const ICONS = {
-  Zap, Route: RouteIcon, Bot, Users, Cpu, ExternalLink, Database, KeyRound, Shield,
-};
-
 const GROUP_LABELS = {
   workspace: "Workspace",
   account: "Account",
@@ -28,32 +22,19 @@ const GROUP_LABELS = {
 export default function SettingsSidebar() {
   const { groups } = useSettingsSections();
 
+  // Project the section-registry groups onto the shell's contract — fold the
+  // GROUP_LABELS lookup into a `label` field so the shell renders headings
+  // verbatim. Memoised on `groups` so a non-role render doesn't re-allocate.
+  const labelledGroups = useMemo(
+    () => groups.map((g) => ({ ...g, label: GROUP_LABELS[g.key] || g.label })),
+    [groups],
+  );
+
   return (
-    <nav className="settings-sidebar" aria-label="Settings sections">
-      {groups.map((group) => (
-        <div key={group.key} className="settings-sidebar__group">
-          <div className="settings-sidebar__group-label">
-            {GROUP_LABELS[group.key] || group.label}
-          </div>
-          {group.sections.map((section) => {
-            const Icon = ICONS[section.icon] || Shield;
-            return (
-              <NavLink
-                key={section.key}
-                to={`/settings/${section.key}`}
-                className={({ isActive }) =>
-                  `settings-nav-link${isActive ? " active" : ""}`
-                }
-              >
-                <span className="settings-nav-link__icon">
-                  <Icon size={14} />
-                </span>
-                {section.label}
-              </NavLink>
-            );
-          })}
-        </div>
-      ))}
-    </nav>
+    <SidebarShell
+      basePath="/settings"
+      ariaLabel="Settings sections"
+      groups={labelledGroups}
+    />
   );
 }

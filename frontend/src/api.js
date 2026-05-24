@@ -37,6 +37,15 @@ const BASE = API_PATH;
 const TIMEOUT_DEFAULT = 30_000;
 /** @type {number} Extended timeout for long-running operations like crawl and test runs (5 minutes). */
 const TIMEOUT_LONG    = 300_000;
+/**
+ * @type {number} Probe timeout for `/settings/ai-providers/:id/probe` and
+ * `/rotate-key`. The backend caps per-route `probeTimeoutMs` at 10 minutes
+ * (`backend/src/routes/settings.js:572`, `providerRouteRepo.js:554`) — the
+ * documented use case is Ollama 70B+ models on CPU. We add a 60s margin so
+ * the client doesn't abort while the backend's own probe-after-persist DB
+ * write is still flushing.
+ */
+const TIMEOUT_PROBE   = 660_000;
 
 const BASE_URL = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ? import.meta.env.BASE_URL : "/";
 
@@ -181,10 +190,22 @@ export const api = {
   updateAiProvider:     (id, payload) => req("PATCH", `/settings/ai-providers/${id}`, payload),
   /** Delete an AI Provider (409 if any agent role references it). */
   deleteAiProvider:     (id) => req("DELETE", `/settings/ai-providers/${id}`),
-  /** Network probe — reachability + auth + model check. */
-  probeAiProvider:      (id) => req("POST", `/settings/ai-providers/${id}/probe`),
-  /** Rotate API key for an AI Provider (probe-before-persist gate). */
-  rotateAiProviderKey:  (id, apiKey) => req("POST", `/settings/ai-providers/${id}/rotate-key`, { apiKey }),
+  /**
+   * Network probe — reachability + auth + model check. Uses TIMEOUT_PROBE
+   * (660s) instead of TIMEOUT_LONG (300s) because the backend allows per-
+   * route probe timeouts up to 600s (`backend/src/routes/settings.js:572`,
+   * the documented Ollama-70B-on-CPU use case). With TIMEOUT_LONG, an
+   * operator who set `probeTimeoutMs > 300_000` would see a misleading
+   * "Request timed out" error in the UI even though the backend probe
+   * eventually succeeds and persists its result.
+   */
+  probeAiProvider:      (id) => req("POST", `/settings/ai-providers/${id}/probe`, undefined, TIMEOUT_PROBE),
+  /**
+   * Rotate API key for an AI Provider. Runs probe-before-persist on the
+   * server, so it inherits the same per-route probe-timeout ceiling as
+   * `probeAiProvider` above — must use TIMEOUT_PROBE for the same reason.
+   */
+  rotateAiProviderKey:  (id, apiKey) => req("POST", `/settings/ai-providers/${id}/rotate-key`, { apiKey }, TIMEOUT_PROBE),
   /**
    * Migration 059 — pin / unpin the workspace-default AI Provider. The
    * default handles every agent role that has no per-role override in
@@ -758,9 +779,11 @@ export const api = {
   // ── Project metric samples (MET-001 / AUTO-017.3) ───────────────────────────
   /**
    * Read a project's time-series samples for a single `metricKey`. Powers
-   * the `<TrendChart>` instances in `ProjectQualityCard`'s Web Vitals tab
-   * (`webVitals.lcp` / `.cls` / `.inp` / `.ttfb`) and any future per-project
-   * trend surface. Server caps `limit` at 200; the chart slices to 30.
+   * the `<TrendChart>` instances in the Quality Gates section's Web Vitals
+   * block (`features/project-settings/sections/quality-gates/QualityGatesSection.jsx`)
+   * for `webVitals.lcp` / `.cls` / `.inp` / `.ttfb`, and any future
+   * per-project trend surface. Server caps `limit` at 200; the chart
+   * slices to 30.
    *
    * @param {string} projectId
    * @param {string} metricKey - e.g. `"webVitals.lcp"`.
@@ -840,11 +863,11 @@ export const api = {
    * Backed by `GET /api/v1/dashboard`'s `coverageTrend` block. The
    * `projectId` parameter narrows the series to one project client-side.
    *
-   * **Consumers:** `ProjectQualityCard.jsx` → Coverage tab (fetches the
-   * per-project series on mount to render a latest-% badge + text sparkline
-   * without navigating to the Dashboard). The Dashboard `CoveragePanel`
-   * reads `data.coverageTrend` directly from `getDashboard()` instead
-   * (avoids a second fetch for the workspace-wide view).
+   * **Consumers:** `features/project-settings/sections/quality-gates/CoveragePanel.jsx`
+   * (fetches the per-project series on mount to render a latest-% badge +
+   * text sparkline without navigating to the Dashboard). The Dashboard
+   * `CoveragePanel` reads `data.coverageTrend` directly from `getDashboard()`
+   * instead (avoids a second fetch for the workspace-wide view).
    *
    * @param {string} [projectId] — Narrow the series to one project.
    * @returns {Promise<Object|null>}
@@ -1315,6 +1338,19 @@ export const api = {
    * @returns {Promise<{available: boolean, model: string|null}>}
    */
   getVisionProviderStatus: () => req("GET", "/system/vision-provider-status"),
+  /**
+   * Read-only snapshot of AI dispatcher state — open circuit breakers +
+   * active sticky fallbacks. Admin-only. Powers the Systems page's "AI
+   * provider state" panel so operators can diagnose "tests stopped
+   * generating, what happened?" without grepping log lines.
+   *
+   * @returns {Promise<{
+   *   breakers: Array<{key: string, provider: string, agentRole: string|null, failures: number, disabledUntil: number, openNow: boolean, remainingMs: number}>,
+   *   stickyFallbacks: Array<{key: string, provider: string, agentRole: string|null, expiry: number, remainingMs: number}>,
+   *   constants: {CIRCUIT_BREAKER_THRESHOLD: number, CIRCUIT_BREAKER_COOLDOWN_MS: number, STICKY_FALLBACK_TTL_MS: number},
+   * }>}
+   */
+  getAiState: () => req("GET", "/system/ai-state"),
   /** @returns {Promise<{cleared: number}>} Clear all run history. */
   clearRuns:       () => req("DELETE", "/data/runs"),
   // NOTE: `getActivities` is defined once above (in the Test review actions

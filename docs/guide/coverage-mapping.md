@@ -4,9 +4,15 @@ AUTO-009 adds opt-in browser JavaScript coverage capture during Playwright runs.
 
 ## Enable / disable per project
 
-1. Go to **Automation → Quality → Coverage**.
-2. Toggle **Enable browser JS coverage capture**.
-3. Optionally set `sourcemapBaseUrl` if maps are hosted on a separate CDN.
+1. Open the project page and click **Settings** (top-right, alongside the **CI/CD** button).
+2. In the project-settings sidebar, click **Quality Gates** under the **Quality** group.
+3. Scroll to the **Coverage** section.
+4. Toggle **Enable browser JS coverage capture**.
+5. Optionally set the **Source-map base URL** field if maps are hosted on a separate CDN.
+
+> The Coverage configuration used to live at **Automation → Quality → Coverage**; it
+> moved to the project-scoped Settings surface (`/projects/:id/settings/quality-gates`)
+> in the May 2026 restructure. Legacy `?tab=quality` deep-links redirect automatically.
 
 ## How to interpret results
 

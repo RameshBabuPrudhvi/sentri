@@ -12,7 +12,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Play, RefreshCw, Globe, Sparkles, ArrowRight, Zap, Clock, Rocket,
+  Play, RefreshCw, Globe, Sparkles, ArrowRight, Zap, Clock, Rocket, Settings,
 } from "lucide-react";
 import { PARALLEL_WORKERS_TUNING } from "../../config/testDialsConfig.js";
 import { api } from "../../api.js";
@@ -104,13 +104,35 @@ export default function ProjectHeader({
         <div className="pd-header-actions">
           {/* ── Row 1: Generate link + workers + Run button ── */}
           <div className="pd-header-row">
+            {/* CI/CD — triggers, schedules, integrations, snippets. Narrower
+                label than the previous "Automation" because per-project
+                quality/security/healing config moved to Project Settings (the
+                button below). This one is now exclusively CI/CD entry points,
+                matching GitHub Actions / GitLab CI mental model. The query
+                param still drives Automation.jsx to scroll to this project's
+                accordion within the "Triggers & Schedules" tab. */}
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => navigate(`/automation?project=${projectId}`)}
               style={{ gap: 6 }}
             >
               <Zap size={13} />
-              Automation
+              CI/CD
+            </button>
+            {/* Project Settings — sidebar shell at `/projects/:id/settings/*`
+                hosts Quality Gates, Review (auto-approval), Execution
+                (iteration cap), Security (PII firewall), and Self-Healing
+                (vision healing). Previously these lived as a 7-tab accordion
+                under Automation's "Quality Gates" outer tab; the new layout
+                matches GitHub repo / Vercel project / Linear project
+                settings conventions. */}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => navigate(`/projects/${projectId}/settings`)}
+              style={{ gap: 6 }}
+            >
+              <Settings size={13} />
+              Settings
             </button>
             {nextRunAt && (
               <span

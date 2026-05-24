@@ -104,8 +104,12 @@ test("explorer step-1 finding renders the pages count once pagesFound lands", ()
   const turns = synthesizeTurns(run, { ps: { elementsKept: 24 }, allTests: [] });
   const finding = turns.find(t => t.id === "1-explorer-finding");
   assert.ok(finding, "expected a finding turn for step 1");
-  // Step 1 reports pages only (interactive elements live on step 2's finding).
-  assert.match(finding.text, /Mapped 7 pages\./);
+  // Step 1 reports the live pages count. The template prefers a per-page
+  // narration ("Discovered <title>. N pages found…") when `run.pages` has
+  // entries, falling back to "Discovered another page. N pages found…"
+  // when no title is available (this test doesn't seed `run.pages`).
+  // Match the stable suffix so this assertion survives copy refinements.
+  assert.match(finding.text, /7 pages found so far\./);
 });
 
 test("explorer continues across steps 1+2+3 without re-introducing itself", () => {
@@ -207,15 +211,19 @@ test("per-step finding templates are step-specific and route to the correct agen
     allTests: [],
   });
   const byId = Object.fromEntries(turns.map(t => [t.id, t.text]));
-  // Author's per-step variants still own steps 4 + 5.
-  assert.match(byId["4-author-finding"], /Generated 12 tests/);
-  assert.match(byId["5-author-finding"], /Removed 3 duplicates\./);
-  // Oracle's finding template (un-suffixed key) reports the upgraded
-  // assertion count.
-  assert.match(byId["6-oracle-finding"], /Upgraded 7 assertions?\./);
-  // Reviewer's finding template reports the rejection count + tighten-and-
-  // re-submit cue back to Author.
-  assert.match(byId["7-reviewer-finding"], /Rejected 1 test\b.*Author/);
+  // Author's per-step variants still own steps 4 + 5. Copy was rewritten
+  // (PR #28) to drop industry jargon — "Wrote N tests" replaces "Generated
+  // N tests", "Removed N tests that covered the same ground" replaces
+  // "Removed N duplicates". Assertions match the stable count + noun so
+  // they survive future wording polish.
+  assert.match(byId["4-author-finding"], /Wrote 12 tests?\b/);
+  assert.match(byId["5-author-finding"], /Removed 3 tests?\b/);
+  // Oracle's finding template now phrases assertion upgrades as
+  // "Strengthened the checks in N tests".
+  assert.match(byId["6-oracle-finding"], /Strengthened the checks in 7 tests?\./);
+  // Reviewer's finding template now phrases rejections as "Sending N
+  // tests back to Author…" — the Author handback cue is preserved.
+  assert.match(byId["7-reviewer-finding"], /Sending 1 test\b.*Author/);
 });
 
 test("step 8 wrapup fires only on `completed`, not on failed/aborted", () => {

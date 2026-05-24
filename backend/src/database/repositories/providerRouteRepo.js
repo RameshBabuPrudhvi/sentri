@@ -45,6 +45,8 @@ const SAFE_COLUMNS = [
   // Migration 059 — workspace-default flag. NULL on non-default rows, 1 on
   // the single default row enforced by `idx_provider_routes_workspace_default`.
   "isWorkspaceDefault",
+  // Migration 060 — per-route probe timeout (ms). NULL = use env default.
+  "probeTimeoutMs",
   "createdAt", "updatedAt",
 ];
 const SAFE_SELECT = SAFE_COLUMNS.join(", ");
@@ -56,6 +58,8 @@ const MUTABLE_FIELDS = Object.freeze([
   "cacheEnabled", "cacheTtlSec",
   "fallbackRouteId", "enabled",
   "isWorkspaceDefault",
+  // Migration 060 — per-route probe timeout override.
+  "probeTimeoutMs",
 ]);
 const REQUIRED_INSERT_FIELDS = Object.freeze(["name", "family", "protocol", "model"]);
 // ── JSON helpers ──────────────────────────────────────────────────────────────
@@ -538,8 +542,19 @@ export function upsert(input) {
 export async function probeAndPersist(workspaceId, routeId, { userId = null, timeoutMs } = {}) {
   const route = getById(workspaceId, routeId);
   if (!route) return null;
+  // Migration 060 — per-route probe-timeout override. Precedence:
+  //   1. Explicit `timeoutMs` arg (test seam / future per-call override).
+  //   2. `route.probeTimeoutMs` column (operator-set via Settings UI).
+  //   3. `runCapabilityProbe`'s env-driven default (`AI_PROBE_TIMEOUT_MS`).
+  // Clamp to [1s, 10min] as a defence-in-depth check against a runaway
+  // value — the migration's documented range, repeated here so a stale
+  // pre-migration row can't break things.
+  let effectiveTimeoutMs = timeoutMs;
+  if (effectiveTimeoutMs == null && Number.isFinite(route.probeTimeoutMs) && route.probeTimeoutMs > 0) {
+    effectiveTimeoutMs = Math.min(Math.max(route.probeTimeoutMs, 1_000), 600_000);
+  }
   // Probe runs OUTSIDE the transaction — see JSDoc.
-  const capabilities = await runCapabilityProbe(route, { timeoutMs });
+  const capabilities = await runCapabilityProbe(route, { timeoutMs: effectiveTimeoutMs });
   const db = getDatabase();
   const now = new Date().toISOString();
   const tx = db.transaction(() => {

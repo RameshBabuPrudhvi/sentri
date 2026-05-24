@@ -51,8 +51,13 @@ export function parseHasBudgets(data) {
 /**
  * Page-tab id whitelist used by `Automation.jsx` setActiveTab().
  * Exported so tests (and future deep-link parsers) share the same source of truth.
+ *
+ * The legacy `"quality"` tab was removed when project-scoped quality config
+ * moved to `/projects/:id/settings/quality-gates`. `Automation.jsx` redirects
+ * old `?tab=quality` deep-links to the new URL before this whitelist check
+ * runs, so unknown ids still fall back cleanly to the default "triggers" tab.
  */
-export const PAGE_TAB_IDS = ["triggers", "quality", "integrations", "snippets"];
+export const PAGE_TAB_IDS = ["triggers", "integrations", "snippets"];
 
 export function isValidPageTab(id) {
   return PAGE_TAB_IDS.includes(id);

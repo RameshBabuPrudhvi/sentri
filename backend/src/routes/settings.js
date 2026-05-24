@@ -562,6 +562,19 @@ function buildProviderRoutePayload(body, { isCreate }) {
   if (body && "cacheEnabled" in body) payload.cacheEnabled = !!body.cacheEnabled;
   if (body && "cacheTtlSec" in body) payload.cacheTtlSec = numOrNull(body.cacheTtlSec) ?? 0;
   if (body && "fallbackRouteId" in body) payload.fallbackRouteId = body.fallbackRouteId || null;
+  // Migration 060 — per-route probe-timeout override (ms). NULL clears the
+  // override and falls back to the env-driven default. Clamped to a sane
+  // [1s, 10min] range so a UI typo can't disable timeouts or set sub-
+  // second values that would abort before TLS handshake completes.
+  if (body && "probeTimeoutMs" in body) {
+    const n = numOrNull(body.probeTimeoutMs);
+    if (n == null) payload.probeTimeoutMs = null;
+    else if (n < 1_000 || n > 600_000) {
+      return { error: "probeTimeoutMs must be between 1000 and 600000 (1s–10min)" };
+    } else {
+      payload.probeTimeoutMs = n;
+    }
+  }
 
   // apiKey — plaintext on the wire, encrypted before the repo sees it.
   // Empty string MUST be treated as "no change" (the create+edit form
@@ -939,6 +952,14 @@ function serialiseRouteForExport(row) {
     cacheEnabled: row.cacheEnabled === 1 || row.cacheEnabled === true,
     cacheTtlSec: row.cacheTtlSec ?? 0,
     fallbackRouteId: row.fallbackRouteId ?? null,
+    // Migration 060 — preserve per-route probe-timeout override across
+    // export/import round-trips. Matches the rpmLimit / tpmLimit pattern
+    // (operator-set numeric override, NULL = use the workspace/env
+    // default). Without this an operator who configures a 120s probe
+    // timeout for an Ollama provider loses that setting when exporting
+    // from workspace A and importing into workspace B (or reimporting
+    // into the same workspace after disaster recovery).
+    probeTimeoutMs: row.probeTimeoutMs ?? null,
     capabilities: row.capabilities ?? null,
     pricing: row.pricing ?? null,
   };
@@ -1143,6 +1164,13 @@ router.post("/settings/provider-routes/import", requireRole("admin"), async (req
       // fallbackRouteId is rewired in phase 2 — leave it null on the
       // first pass so the cycle check can't trip on a forward reference.
       fallbackRouteId: null,
+      // Migration 060 — pass the per-route probe-timeout override through
+      // `buildProviderRoutePayload` so the validator enforces the
+      // [1000, 600000] range automatically. A hand-edited bundle with an
+      // out-of-range value lands in `stats.errors` rather than silently
+      // persisting; absent / null values fall through to the env default
+      // post-import, matching create semantics.
+      probeTimeoutMs: incoming.probeTimeoutMs ?? null,
       // apiKey is NEVER in the export, so the import never carries one.
       // The route lands keyless and the operator re-supplies via
       // rotate-key after import.
