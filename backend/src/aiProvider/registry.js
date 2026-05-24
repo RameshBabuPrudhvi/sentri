@@ -314,7 +314,15 @@ export function clearStickyFallback(agentRole = null) {
 export function stickyFallbackActive(agentRole = null) {
   sweepExpiredStickies();
   for (const [k, v] of stickyFallbacks) {
-    if ((agentRole ? keyHasRole(k, agentRole) : true) && Date.now() < v.expiry) return true;
+    // Same two-keyspace matching as `detectProvider` — roleless callers
+    // match only roleless stickies; role-scoped callers match only their
+    // own role's stickies. The pre-fix `(agentRole ? ... : true)` pattern
+    // matched every sticky when agentRole was null, leaking per-role
+    // recovery state into workspace-level `isProviderDegraded()` checks.
+    const idx = k.lastIndexOf("::");
+    const keyIsRoleless = idx < 0;
+    const matches = agentRole ? keyHasRole(k, agentRole) : keyIsRoleless;
+    if (matches && Date.now() < v.expiry) return true;
   }
   return false;
 }
@@ -417,12 +425,15 @@ export function isProviderUsable(provider) {
  *   2. **`agent_configs.routeId`** — explicit per-role route assignment
  *      written by the Settings UI. Honoured when the route is usable
  *      (`provider_routes.enabled = 1` and a decryptable secret exists).
- *   3. **Env-default transient route** — when no `routeId` is set on
- *      the agent_configs row (or no row exists), `detectProvider`
- *      identifies the workspace-default provider and we synthesise a
- *      transient route from it. Collapses `effectiveAgentRole` to
- *      `null` per AI-005c so single-agent workspaces share one
- *      breaker across stages.
+ *   3a. **Workspace-default `provider_routes` row** (Migration 059) —
+ *      the single row with `isWorkspaceDefault = 1`. Checked when no
+ *      `routeId` is set on the agent_configs row (or no row exists).
+ *      Disabled defaults fall through to env detection.
+ *   3b. **Env-default transient route** — `detectProvider` identifies
+ *      the first usable env-var provider and we synthesise a transient
+ *      route from it. Collapses `effectiveAgentRole` to `null` per
+ *      AI-005c so single-agent workspaces share one breaker across
+ *      stages.
  *   4. **`null`** — no provider configured at all. Caller surfaces a
  *      config error to the operator.
  *
@@ -522,12 +533,18 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
         // caller surfaces a config error to the user.
         return { route: null, config: cfg, effectiveAgentRole: agentRole };
       }
-      // No routeId — fall through to (3) but keep `cfg` so any per-role
-      // overrides on the row (systemPromptOverride, maxTokens) still
-      // apply. We return `effectiveAgentRole: agentRole` (not null)
-      // because the admin DID configure something for this role, even
-      // if not the route itself — breakers / sticky / metrics use the
-      // per-role keyspace.
+      // No routeId — fall through to workspace default (Migration 059)
+      // then env detection. Keep `cfg` so any per-role overrides on the
+      // row (systemPromptOverride, maxTokens) still apply. We return
+      // `effectiveAgentRole: agentRole` (not null) because the admin DID
+      // configure something for this role, even if not the route itself
+      // — breakers / sticky / metrics use the per-role keyspace.
+      let defaultRoute = null;
+      try { defaultRoute = providerRouteRepo.getWorkspaceDefault(workspaceId); }
+      catch { /* DB unavailable — fall through to env detection */ }
+      if (defaultRoute && defaultRoute.enabled) {
+        return { route: defaultRoute, config: cfg, effectiveAgentRole: agentRole };
+      }
       const fallbackProvider = detectProvider();
       if (!fallbackProvider) return { route: null, config: cfg, effectiveAgentRole: agentRole };
       return {
@@ -538,11 +555,33 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
     }
   }
 
-  // (3) No agent_configs row → AI-005c single-agent collapse. Return
-  // a route synthesised from the workspace-default provider so
-  // dispatch can still go through the protocol adapter, but collapse
-  // `effectiveAgentRole` to null so breakers / sticky / metrics use
-  // the bare-discriminator path.
+  // (3a) Migration 059 — workspace-default `provider_routes` row.
+  //
+  // Industry-standard pattern for autonomous multi-agent platforms
+  // (Vercel AI Gateway, LangSmith, Mastra): a DB-stored "default" row
+  // wins over env detection so operators see the runtime behaviour in
+  // the AI Providers UI without needing to know about env vars. Env
+  // detection still runs as the final safety net for dev environments
+  // and freshly-provisioned workspaces with no default pinned yet.
+  //
+  // Visible in dispatch only when the route is enabled — a disabled
+  // default falls through to env detection so disabling can't be a
+  // foot-gun. Workspace-scoped, so a workspace with no default + valid
+  // env keys behaves exactly the same as before this migration.
+  if (workspaceId) {
+    let defaultRoute = null;
+    try { defaultRoute = providerRouteRepo.getWorkspaceDefault(workspaceId); }
+    catch { /* DB unavailable — fall through to env detection */ }
+    if (defaultRoute && defaultRoute.enabled) {
+      return { route: defaultRoute, config: null, effectiveAgentRole: null };
+    }
+  }
+
+  // (3b) No agent_configs row AND no workspace default → AI-005c
+  // single-agent collapse. Return a route synthesised from env-detected
+  // provider so dispatch can still go through the protocol adapter, but
+  // collapse `effectiveAgentRole` to null so breakers / sticky / metrics
+  // use the bare-discriminator path.
   const provider = detectProvider();
   if (!provider) return { route: null, config: null, effectiveAgentRole: null };
   return {
@@ -662,9 +701,42 @@ export function detectProvider({ agentRole = null } = {}) {
   // Sticky fallback first — a successful rate-limit fallback pins the working
   // provider until the TTL expires, even if the user has the original
   // (rate-limited) provider selected in the dropdown.
+  //
+  // Role isolation: stickies live in two keyspaces depending on workspace
+  // mode at the time `setStickyFallback` was called:
+  //   • `"provider::role"` — multi-agent workspace, per-role pin.
+  //   • `"provider"`       — single-agent workspace (AI-005c collapsed
+  //                          `effectiveAgentRole` to null on dispatch).
+  //
+  // The previous `agentRole && !keyHasRole(...)` guard short-circuited
+  // the role check on `null` agentRole and matched **every** sticky
+  // regardless of which role pinned it (Lifeguard detect-provider
+  // sticky-leak). When `detectProvider` is called WITH an `agentRole`
+  // we must only match that specific role's stickies — NOT another
+  // role's, and NOT a single-agent roleless sticky (which would leak
+  // single-agent state into a multi-agent role's resolution). When
+  // called WITHOUT an `agentRole` we may only match roleless stickies
+  // (legitimate single-agent recovery state). `keyHasRole` already
+  // returns false for keys without `::`, so the matching predicate is
+  // simply: roleless callers want roleless keys; role-scoped callers
+  // want their own role's keys.
   sweepExpiredStickies();
   for (const [key, entry] of stickyFallbacks) {
-    if (agentRole && !keyHasRole(key, agentRole)) continue;
+    // A key is roleless when it has no `::` separator — i.e. it was
+    // stored via `breakerKey(provider, null)`. Compat slot IDs are
+    // validated as `/^[a-z0-9_-]+$/` at the HTTP boundary
+    // (`backend/src/routes/settings.js:132`), so `:` never appears in
+    // a compat provider name and `compat:foo::bar` is not a reachable
+    // state. Cloud provider names (`anthropic`, `openai`, etc.) also
+    // never contain `::`. The `lastIndexOf` check is therefore
+    // equivalent to `includes` for all reachable keys, but we use
+    // `lastIndexOf` to stay consistent with `keyHasRole`'s split.
+    const idx = key.lastIndexOf("::");
+    const keyIsRoleless = idx < 0;
+    const matches = agentRole
+      ? keyHasRole(key, agentRole)
+      : keyIsRoleless;
+    if (!matches) continue;
     if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) return entry.provider;
   }
 

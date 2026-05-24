@@ -11,7 +11,7 @@ import { useSettingsSections, SETTINGS_SECTIONS } from "./hooks/useSettingsSecti
  *      install callback) → rewrite to `/settings/<key>` while preserving
  *      sibling query params (e.g. `?github=installed`).
  *   2. Bare `/settings` (no tab, no section) → role-aware fallback section
- *      (admins → `providers`, non-admins → `execution`).
+ *      (admins → `ai_providers`, non-admins → `execution`).
  *
  * Lives at the route layer rather than in `SettingsLayout`'s `useEffect` so
  * the redirect fires synchronously on first paint — no empty-Outlet flash,
@@ -50,14 +50,14 @@ function SettingsIndexRedirect() {
  * additions edit this file plus add their own section folder; App.jsx
  * never needs to change.
  *
- * The two largest tabs (`providers`, `provider_routes`) defer their
- * internal decomposition to GAP-002b — they currently render via a thin
- * wrapper around the legacy Settings.jsx component, but they ship with
- * the same URL contract, lazy boundary, and sidebar wayfinding as the
- * fully-extracted sections.
+ * The old `providers` (family key cards) and `provider_routes` (named
+ * model CRUD) sections were merged into the unified `ai_providers`
+ * surface in the provider-rename refactor. The legacy section files
+ * under `sections/providers/` and `sections/provider-routes/ProviderRoutesSection.jsx`
+ * have been deleted; the URL paths still resolve via `<Navigate>` below
+ * for deep-link compatibility.
  */
-const ProvidersSection      = lazy(() => import("./sections/providers/ProvidersSection.jsx"));
-const ProviderRoutesSection = lazy(() => import("./sections/provider-routes/ProviderRoutesSection.jsx"));
+const AiProvidersSection    = lazy(() => import("./sections/ai-providers/AiProvidersSection.jsx"));
 const AgentRolesSection     = lazy(() => import("./sections/agent-roles/AgentRolesSection.jsx"));
 const MembersSection        = lazy(() => import("./sections/members/MembersSection.jsx"));
 const ExecutionSection      = lazy(() => import("./sections/execution/ExecutionSection.jsx"));
@@ -78,14 +78,23 @@ function withSuspense(Component) {
  * Child route definitions for the Settings parent route in App.jsx. Renders
  * inside SettingsLayout's `<Outlet />`. The index route delegates to
  * `SettingsIndexRedirect` so the fallback section is role-aware: admins land
- * on `providers`, non-admins on `execution`. Synchronous redirect on first
+ * on `ai_providers`, non-admins on `execution`. Synchronous redirect on first
  * paint — no empty-Outlet flash.
  */
 export const settingsRoutes = (
   <>
     <Route index element={<SettingsIndexRedirect />} />
-    <Route path="providers"       element={withSuspense(ProvidersSection)} />
-    <Route path="provider_routes" element={withSuspense(ProviderRoutesSection)} />
+    {/* New unified AI Providers section (replaces separate providers + provider_routes tabs). */}
+    <Route path="ai_providers"    element={withSuspense(AiProvidersSection)} />
+    {/*
+      Deep-link compat: /settings/providers and /settings/provider_routes
+      redirect to ai_providers so existing bookmarks, the onboarding wizard's
+      emitTourEvent("provider-saved") deep-link, and the GitHub App install
+      callback all land on the right page. The legacy section components
+      have been deleted — only the redirect routes remain.
+    */}
+    <Route path="providers"       element={<Navigate to="/settings/ai_providers" replace />} />
+    <Route path="provider_routes" element={<Navigate to="/settings/ai_providers" replace />} />
     <Route path="agent_roles"     element={withSuspense(AgentRolesSection)} />
     <Route path="members"         element={withSuspense(MembersSection)} />
     <Route path="execution"       element={withSuspense(ExecutionSection)} />

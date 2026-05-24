@@ -179,6 +179,45 @@ export function pricingFor(model) {
 }
 
 /**
+ * Brand emoji for each provider family. Used by the Settings UI → AI Providers
+ * section and Agent Roles dropdown to give operators instant visual recognition
+ * without relying on colour alone (accessibility). Kept here as a pure-data
+ * constant so the UI and any future CLI surface share one definition.
+ *
+ * @type {Record<string, string>}
+ */
+export const FAMILY_EMOJI = {
+  anthropic:  "🔶",
+  openai:     "🟢",
+  google:     "🔷",
+  openrouter: "🧭",
+  local:      "🦙",
+  custom:     "🔧",
+};
+
+/**
+ * Produce a human-readable cost-tier string for a model, suitable for
+ * compact display in dropdowns and badges (e.g. "$3 / $15 per M tokens").
+ * Returns "Free" for Ollama local models, "Variable" for OpenRouter auto,
+ * and "Unknown pricing" when the model isn't in the catalog.
+ *
+ * @param {string} model
+ * @returns {string}
+ */
+export function formatCostTier(model) {
+  const p = pricingFor(model);
+  if (!p) return "Unknown pricing";
+  if (p.inputPer1k === 0 && p.outputPer1k === 0) return "Free (local)";
+  if (p.inputPer1k == null || p.outputPer1k == null) return "Variable";
+  const fmt = (n) => {
+    if (n == null) return "?";
+    const perM = n * 1000;
+    return perM < 1 ? `$${(perM).toFixed(2)}` : `$${perM % 1 === 0 ? perM.toFixed(0) : perM.toFixed(1)}`;
+  };
+  return `${fmt(p.inputPer1k)} / ${fmt(p.outputPer1k)} per M`;
+}
+
+/**
  * AI-003 — Compute the USD cost for a single LLM call from the catalog. The
  * shared formula sits here so adapters and the orchestrator never disagree
  * on rounding / unit conventions, and the planner (AI-005) plus the budget

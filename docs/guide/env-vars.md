@@ -88,9 +88,9 @@ Sentri persists per-call AI request metadata to the `ai_request_log` table on ev
 
 **Built-in PII redactors:** email, phone (international + national), US SSN, credit-card (13–19 digits). Workspace-supplied custom rules apply AFTER the built-ins. Malformed custom regex is silently skipped — built-in redactors still fire.
 
-### Provider Routes Audit Log (B3.9)
+### AI Providers Audit Log (B3.9)
 
-Sentri appends a `provider_route_audit` row on every mutation to a `provider_routes` row (create / update / delete / rotate_key / probe / export / import). Retention is operator-tunable so compliance windows can be longer than the default 90 days. See [`backend/src/database/repositories/providerRouteAuditRepo.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/database/repositories/providerRouteAuditRepo.js#L92) for the sweep query.
+Sentri appends a `provider_route_audit` row on every mutation to a `provider_routes` row (create / update / delete / rotate_key / probe / export / import / workspace-default pin via Migration 059). Retention is operator-tunable so compliance windows can be longer than the default 90 days. Surfaced via **Settings → AI Providers → Audit Log** (renamed from "Provider Routes Audit Log" in PR #28; the underlying `provider_route_audit` table is unchanged). See [`backend/src/database/repositories/providerRouteAuditRepo.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/database/repositories/providerRouteAuditRepo.js#L92) for the sweep query.
 
 | Variable | Default | Description |
 |---|---|---|

@@ -4,11 +4,15 @@
  *
  * Covers the registry / dispatcher behaviour added in PR #22:
  *   1. agentRole + workspaceId routing reads `agent_configs`
- *   2. Unconfigured role falls back to env detection
- *   3. fallbackRole cycle rejected at upsert (`ERR_AGENT_FALLBACK_CYCLE`)
- *   4. Per-(provider, role) circuit breakers don't leak across roles
- *   5. Sticky-fallback wins over agentRole resolution (tripwire #1)
- *   6. resetCircuitBreaker clears every `provider::role` variant
+ *   2. Unconfigured role falls back to workspace default → env detection
+ *   3. Per-(provider, role) circuit breakers don't leak across roles
+ *   4. Sticky-fallback wins over agentRole resolution (tripwire #1)
+ *   5. resetCircuitBreaker clears every `provider::role` variant
+ *
+ * The `fallbackRole` cycle guard listed in earlier revisions of this file
+ * was removed in B4.3 when migration 053 dropped that column — the
+ * canonical per-route fallback now lives on `provider_routes.fallbackRouteId`
+ * and is pinned by `tests/provider-routes-repo.test.js`.
  *
  * The pipeline-shape e2e (planner=A + author=B → both providers called) is
  * pinned in tests/agent-dispatch-pipeline.test.js.
@@ -116,9 +120,9 @@ function ensureRouteForFamily(workspaceId, family) {
 }
 
 function upsertConfig(workspaceId, role, overrides = {}) {
-  // `provider`/`model` columns are gone post-048. Tests that pass
-  // `{ provider: "openai" }` now produce a routeId pointing at an
-  // openai-family `provider_routes` row.
+  // `provider`/`model` columns are gone post-048 (and `fallbackRole`
+  // post-053). Tests that pass `{ provider: "openai" }` now produce a
+  // routeId pointing at an openai-family `provider_routes` row.
   const family = overrides.provider ?? overrides.family ?? "anthropic";
   const routeId = overrides.routeId ?? ensureRouteForFamily(workspaceId, family);
   return agentConfigRepo.upsert({
@@ -129,7 +133,6 @@ function upsertConfig(workspaceId, role, overrides = {}) {
     systemPromptOverride: overrides.systemPromptOverride ?? null,
     temperature: overrides.temperature ?? 0.2,
     maxTokens: overrides.maxTokens ?? null,
-    fallbackRole: overrides.fallbackRole ?? null,
     createdAt: now(),
     updatedAt: now(),
   });

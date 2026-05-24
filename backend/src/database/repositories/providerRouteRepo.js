@@ -42,6 +42,9 @@ const SAFE_COLUMNS = [
   "rpmLimit", "tpmLimit",
   "cacheEnabled", "cacheTtlSec",
   "fallbackRouteId", "enabled",
+  // Migration 059 — workspace-default flag. NULL on non-default rows, 1 on
+  // the single default row enforced by `idx_provider_routes_workspace_default`.
+  "isWorkspaceDefault",
   "createdAt", "updatedAt",
 ];
 const SAFE_SELECT = SAFE_COLUMNS.join(", ");
@@ -52,6 +55,7 @@ const MUTABLE_FIELDS = Object.freeze([
   "rpmLimit", "tpmLimit",
   "cacheEnabled", "cacheTtlSec",
   "fallbackRouteId", "enabled",
+  "isWorkspaceDefault",
 ]);
 const REQUIRED_INSERT_FIELDS = Object.freeze(["name", "family", "protocol", "model"]);
 // ── JSON helpers ──────────────────────────────────────────────────────────────
@@ -112,6 +116,109 @@ export function listByFamily(workspaceId, family) {
     `SELECT ${SAFE_SELECT} FROM provider_routes WHERE workspaceId = ? AND family = ? ORDER BY name ASC`
   ).all(workspaceId, family).map(hydrate);
 }
+/**
+ * Migration 059 — fetch the workspace-default route, or `undefined` when
+ * no row has been pinned as default. Used by `resolveRoute` (registry.js)
+ * as the layer between `agent_configs` and env detection.
+ *
+ * Note: returns the SAFE_SELECT shape (no secret blob). Dispatch resolves
+ * the decrypted secret via `secrets.getDecryptedKey(workspaceId, routeId)`
+ * separately, same as any other route.
+ *
+ * @param {string} workspaceId
+ * @returns {Object|undefined}
+ */
+export function getWorkspaceDefault(workspaceId) {
+  return hydrate(getDatabase().prepare(
+    `SELECT ${SAFE_SELECT} FROM provider_routes
+     WHERE workspaceId = ? AND isWorkspaceDefault = 1`,
+  ).get(workspaceId));
+}
+
+/**
+ * Migration 059 — clear the `isWorkspaceDefault` flag on every row in the
+ * workspace EXCEPT `keepId`. Called inside `setWorkspaceDefault`'s
+ * transaction so the partial UNIQUE index never trips. NULLs out the
+ * column rather than setting `0` because the partial index relies on
+ * NULL ≠ 1 (see migration JSDoc).
+ *
+ * @param {string} workspaceId
+ * @param {string|null} keepId - Row to preserve; pass null to clear ALL flags.
+ * @returns {number} Rows updated.
+ */
+function clearOtherDefaults(workspaceId, keepId) {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const result = keepId
+    ? db.prepare(
+        `UPDATE provider_routes
+         SET isWorkspaceDefault = NULL, updatedAt = ?
+         WHERE workspaceId = ? AND isWorkspaceDefault = 1 AND id != ?`,
+      ).run(now, workspaceId, keepId)
+    : db.prepare(
+        `UPDATE provider_routes
+         SET isWorkspaceDefault = NULL, updatedAt = ?
+         WHERE workspaceId = ? AND isWorkspaceDefault = 1`,
+      ).run(now, workspaceId);
+  return result.changes;
+}
+
+/**
+ * Migration 059 — set `id` as the workspace's default provider. Clears any
+ * previous default in the same transaction so the partial UNIQUE index never
+ * trips. Audits the change as a single "update" row with `changed:
+ * ["isWorkspaceDefault"]` so the audit log reflects the intent.
+ *
+ * Passing `null` clears the default entirely (resolveRoute will then fall
+ * back to env detection for unconfigured roles, same as pre-migration-059).
+ *
+ * @param {string} workspaceId
+ * @param {string|null} id - Route to pin, or null to clear the default.
+ * @param {Object} [opts]
+ * @param {string|null} [opts.userId] - Audit actor.
+ * @returns {Object|null} The pinned route (or null when cleared).
+ * @throws {Error} `ERR_ROUTE_MISSING_FIELD` when id isn't in the workspace.
+ */
+export function setWorkspaceDefault(workspaceId, id, { userId = null } = {}) {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const tx = db.transaction(() => {
+    if (id) {
+      const existing = getById(workspaceId, id);
+      if (!existing) {
+        const err = new Error(`workspace-default route not found: ${id}`);
+        err.code = "ERR_ROUTE_MISSING_FIELD";
+        throw err;
+      }
+      clearOtherDefaults(workspaceId, id);
+      db.prepare(
+        `UPDATE provider_routes
+         SET isWorkspaceDefault = 1, updatedAt = ?
+         WHERE id = ? AND workspaceId = ?`,
+      ).run(now, id, workspaceId);
+      auditRepo.append({
+        workspaceId, routeId: id, userId,
+        action: "update",
+        metadata: { changed: ["isWorkspaceDefault"], isWorkspaceDefault: true },
+      });
+    } else {
+      // Clear-all path — no specific route to audit against. Audit at the
+      // workspace level (routeId: null) so the operator-facing log still
+      // captures the policy change.
+      const cleared = clearOtherDefaults(workspaceId, null);
+      if (cleared > 0) {
+        auditRepo.append({
+          workspaceId, routeId: null, userId,
+          action: "update",
+          metadata: { changed: ["isWorkspaceDefault"], isWorkspaceDefault: false, cleared },
+        });
+      }
+    }
+  });
+  tx();
+  return id ? getById(workspaceId, id) : null;
+}
+
 /**
  * Fetch encrypted secret material for a single route. Dedicated helper so
  * dispatch (B2+) explicitly opts into reading the secret blob; never

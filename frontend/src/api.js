@@ -162,51 +162,39 @@ export const api = {
    */
   testAgentRole: (role) => req("POST", `/settings/agent-roles/${role}/test`),
 
-  // ── Provider Routes (B2/B3 — Settings UI) ──────────────────────────────────
-  // Backend endpoints assumed per the B3.1 spec; companion PR adds them.
-  // Until that lands, every call here returns a 404 and the tab renders its
-  // empty / error state — no other surface depends on these helpers.
-  /**
-   * List every `provider_routes` row in the current workspace. Secret
-   * blobs (`apiKeyEncrypted`, `apiKeyNonce`) are omitted by the repo's
-   * default SELECT — only `apiKeyLastFour` comes back for UI display.
-   * @returns {Promise<{routes: Array<Object>}>}
-   */
+  // ── AI Providers (= provider_routes) ──────────────────────────────────────
+  // The old "Provider Routes" name was merged into "AI Providers" in the
+  // provider-rename refactor. Each row returned includes three extra display
+  // fields: displayLabel, familyEmoji, costTier — computed server-side so the
+  // UI never has to re-derive them. `listProviderRoutes` is retained as a
+  // fallback path for graceful degradation when the new endpoint isn't
+  // available (e.g. older backend versions); the create/update/delete/probe/
+  // rotate-key mutation helpers were dropped because the legacy
+  // ProviderRoutesSection.jsx that consumed them has been deleted.
+  /** List AI Providers (= provider_routes) with display enrichment. */
+  listAiProviders:      () => req("GET", "/settings/ai-providers"),
+  /** Legacy fallback — used by AgentRolesSection if listAiProviders 404s. */
   listProviderRoutes:   () => req("GET", "/settings/provider-routes"),
+  /** Create a new AI Provider. */
+  createAiProvider:     (payload) => req("POST", "/settings/ai-providers", payload),
+  /** Partial-update an AI Provider. Omit apiKey — use rotateAiProviderKey. */
+  updateAiProvider:     (id, payload) => req("PATCH", `/settings/ai-providers/${id}`, payload),
+  /** Delete an AI Provider (409 if any agent role references it). */
+  deleteAiProvider:     (id) => req("DELETE", `/settings/ai-providers/${id}`),
+  /** Network probe — reachability + auth + model check. */
+  probeAiProvider:      (id) => req("POST", `/settings/ai-providers/${id}/probe`),
+  /** Rotate API key for an AI Provider (probe-before-persist gate). */
+  rotateAiProviderKey:  (id, apiKey) => req("POST", `/settings/ai-providers/${id}/rotate-key`, { apiKey }),
   /**
-   * Create a new provider route. `apiKey` is plaintext on the wire,
-   * encrypted server-side via `secrets.encryptKey` before persist.
-   * @param {{name: string, family: string, protocol: string, baseUrl?: string|null, model: string, apiKey?: string|null, enabled?: boolean, rpmLimit?: number|null, tpmLimit?: number|null, cacheEnabled?: boolean, cacheTtlSec?: number, fallbackRouteId?: string|null}} payload
-   */
-  createProviderRoute:  (payload) => req("POST", "/settings/provider-routes", payload),
-  /**
-   * Partial-patch an existing route. Omit `apiKey` to keep the stored
-   * key intact — rotation MUST go through `rotateProviderRouteKey`
-   * (B3.6) so the audit row is tagged `action: "rotate_key"`.
+   * Migration 059 — pin / unpin the workspace-default AI Provider. The
+   * default handles every agent role that has no per-role override in
+   * Agent Roles. Pass `true` to pin, `false` to clear the workspace's
+   * default entirely (dispatch then falls back to env detection).
    * @param {string} id
-   * @param {Object} payload
+   * @param {boolean} isDefault
    */
-  updateProviderRoute:  (id, payload) => req("PATCH", `/settings/provider-routes/${id}`, payload),
-  /** @param {string} id */
-  deleteProviderRoute:  (id) => req("DELETE", `/settings/provider-routes/${id}`),
-  /**
-   * B2.2 — Run a real network capability probe and persist the result
-   * to `provider_routes.capabilities`. Response carries the updated
-   * row regardless of probe outcome — caller inspects
-   * `capabilities.reachable` to render the badge.
-   * @param {string} id
-   * @returns {Promise<{ok: boolean, route: Object, capabilities: Object}>}
-   */
-  probeProviderRoute:   (id) => req("POST", `/settings/provider-routes/${id}/probe`),
-  /**
-   * B3.6 — Rotate the route's API key. New plaintext on the wire,
-   * encrypted server-side. Server is expected to gate on a probe pass
-   * before accepting the rotation (B3.6 "rejects on probe fail").
-   * @param {string} id
-   * @param {string} apiKey
-   * @returns {Promise<{ok: boolean, lastFour: string}>}
-   */
-  rotateProviderRouteKey: (id, apiKey) => req("POST", `/settings/provider-routes/${id}/rotate-key`, { apiKey }),
+  setAiProviderDefault: (id, isDefault) =>
+    req("POST", `/settings/ai-providers/${id}/default`, { default: !!isDefault }),
   /**
    * B3.5 — Download a schema-v1 JSON dump of every provider_routes row
    * in the current workspace. Secrets are NEVER in the payload (only
