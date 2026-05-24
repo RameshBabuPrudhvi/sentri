@@ -36,6 +36,7 @@
 @import "./styles/pages/dashboard.css";
 @import "./styles/pages/tests.css";
 @import "./styles/pages/settings.css";
+@import "./styles/pages/project-settings.css";
 @import "./styles/pages/test-detail.css";
 @import "./styles/pages/project-detail.css";
 @import "./styles/pages/reports.css";

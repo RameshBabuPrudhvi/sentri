@@ -8,6 +8,7 @@ import Layout from "./components/layout/Layout.jsx";
 import ErrorBoundary from "./components/layout/ErrorBoundary.jsx";
 import PageSkeleton from "./components/layout/PageSkeleton.jsx";
 import { settingsRoutes } from "./features/settings/routes.jsx";
+import { projectSettingsRoutes } from "./features/project-settings/routes.jsx";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
@@ -23,6 +24,12 @@ const TestDetail = lazy(() => import("./pages/TestDetail.jsx"));
 // `<SettingsLayout>` parent route + `settingsRoutes` child collection own
 // the URL contract; App.jsx never needs to change for new sections.
 const SettingsLayout = lazy(() => import("./features/settings/SettingsLayout.jsx"));
+// Project Settings — feature-folder mirror of the workspace Settings layout,
+// scoped to one project at `/projects/:id/settings/*`. Same sidebar chrome
+// (`SidebarShell`), same per-section lazy chunks, same `<Outlet />` pattern.
+// Replaces the per-project accordion-of-tabs that previously lived inside
+// `pages/Automation.jsx → ProjectQualityCard`'s "Quality Gates" sub-tab.
+const ProjectSettingsLayout = lazy(() => import("./features/project-settings/components/ProjectSettingsLayout.jsx"));
 const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
@@ -82,6 +89,17 @@ export default function App() {
                 <Route path="/tests" element={<Tests />} />
                 <Route path="/projects/new" element={<NewProject />} />
                 <Route path="/projects/:id" element={<ProjectDetail />} />
+                {/* Per-project settings shell — mirrors the workspace
+                    Settings layout (`/settings/*`) at project scope. Lazy
+                    section chunks declared inside `projectSettingsRoutes`
+                    (`features/project-settings/routes.jsx`); ProjectSettingsLayout
+                    hydrates the project and provides it via React context so
+                    each section is a thin pass-through to its panel
+                    component. Industry pattern — GitHub `repo/settings`,
+                    Vercel project settings, Linear project settings. */}
+                <Route path="/projects/:id/settings" element={<ProjectSettingsLayout />}>
+                  {projectSettingsRoutes}
+                </Route>
                 <Route path="/runs/:runId" element={<RunDetail />} />
                 <Route path="/tests/:testId" element={<TestDetail />} />
                 {/* GAP-002 (audit): Settings shell + per-section lazy children.
