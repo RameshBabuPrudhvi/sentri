@@ -109,7 +109,7 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
       return haveEvents ? eventsToTurns(agentEvents) : synthesizeTurns(run, ctx);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [run?.id, run?.currentStep, run?.status, run?.pagesFound, run?.testsGenerated, ps, allTests, agentEvents],
+    [run?.id, run?.currentStep, run?.status, run?.pagesFound, run?.pages, run?.testsGenerated, ps, allTests, agentEvents],
   );
 
   // Displayed turns track render state. New turns enter as `streaming`
