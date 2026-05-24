@@ -112,10 +112,34 @@ function buildProbeMessages() {
  * stale timers leak memory + keep the event loop alive past process
  * shutdown.
  */
-function withTimeout(timeoutMs) {
+function withTimeout(timeoutMs, externalSignal = null) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(new Error("probe timeout")), timeoutMs);
-  return { signal: ac.signal, cancel: () => clearTimeout(timer) };
+  // Composed-signal forwarding: when the caller's overall deadline fires
+  // (or the operator cancels the probe via a future cancel endpoint),
+  // propagate the abort to this step. Mirrors `retry.js#composeSignal`'s
+  // pattern. Cleanup removes the listener so a slow probe doesn't keep
+  // the external signal pinned past the step's lifetime.
+  let onExternal = null;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timer);
+      ac.abort(externalSignal.reason || new Error("probe deadline exceeded"));
+    } else {
+      onExternal = () => {
+        clearTimeout(timer);
+        ac.abort(externalSignal.reason || new Error("probe deadline exceeded"));
+      };
+      externalSignal.addEventListener("abort", onExternal, { once: true });
+    }
+  }
+  return {
+    signal: ac.signal,
+    cancel: () => {
+      clearTimeout(timer);
+      if (onExternal && externalSignal) externalSignal.removeEventListener("abort", onExternal);
+    },
+  };
 }
 
 /**
@@ -124,7 +148,12 @@ function withTimeout(timeoutMs) {
  * is the `classifyProbeError` output (or `null` when ok).
  */
 async function probeReachability(route, opts = {}) {
-  const { signal, cancel } = withTimeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  // When `opts.deadlineSignal` is supplied (the caller-imposed overall
+  // budget — see `runCapabilityProbe`), thread it through `withTimeout`
+  // so abort propagates from the budget to the in-flight SDK call.
+  // Without this, a 90s overall budget could only cancel the SLEEP
+  // between retries, not the request itself.
+  const { signal, cancel } = withTimeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, opts.deadlineSignal);
   const startedAt = Date.now();
   try {
     await protocolAdapter.generate(route, buildProbeMessages(), {
@@ -169,7 +198,7 @@ async function probeReachability(route, opts = {}) {
  * that charge per token bill <$0.0001 for it.
  */
 async function probeJsonMode(route, opts = {}) {
-  const { signal, cancel } = withTimeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const { signal, cancel } = withTimeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, opts.deadlineSignal);
   try {
     await protocolAdapter.generate(
       route,
@@ -260,6 +289,16 @@ function classifyProbeError(err) {
   if (status === 401 || status === 403 || /unauthorized|forbidden|invalid api key|incorrect api key/i.test(msg)) {
     return { reachable: true, auth: false, errorReason: "auth_failed" };
   }
+  // Payment required (402) — OpenRouter and several compat providers
+  // return this when the workspace's free-tier quota is exhausted or
+  // billing isn't set up. Key + endpoint are valid; the account just
+  // can't pay for the call. Flag `auth: true, model: false` so the
+  // ProbeBadge surfaces this as a non-green state with a clear
+  // errorReason ("quota_exhausted") rather than the previous catch-all
+  // path which left `auth: null` and the badge incorrectly green.
+  if (status === 402 || /payment required|insufficient credit|insufficient_quota|quota.*exhaust/i.test(msg)) {
+    return { reachable: true, auth: true, model: false, errorReason: "quota_exhausted" };
+  }
   // Model not found — model id wrong, or operator's compat endpoint
   // doesn't expose this model.
   if (status === 404 || /not found|model.*does not exist|no such model|unknown model/i.test(msg)) {
@@ -313,6 +352,22 @@ export async function runCapabilityProbe(route, opts = {}) {
   const fam = route?.family === "custom" ? "openai" : route?.family;
   const catalogFloor = capabilitiesFor(fam) || {};
   const probedAt = new Date().toISOString();
+  // Migration 060 hard ceiling. `opts.timeoutMs` is meant to be a wall-clock
+  // budget for the WHOLE probe (reachability + jsonMode + retries + sleep),
+  // not a per-attempt timeout. We enforce it here by:
+  //   (a) opening one `AbortController` ("deadline") that fires at the
+  //       budget, AND
+  //   (b) racing the probe pipeline against a deadline Promise so even a
+  //       hung `await sleep(delay)` in retry.js can't extend the budget.
+  // Per-step `withTimeout()` calls receive the deadline signal so an
+  // in-flight SDK request also aborts when the budget expires.
+  const overallTimeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const deadlineAc = new AbortController();
+  const deadlineTimer = setTimeout(
+    () => deadlineAc.abort(new Error("probe deadline exceeded")),
+    overallTimeoutMs,
+  );
+  const stepOpts = { ...opts, deadlineSignal: deadlineAc.signal };
   // Defensive: if the route is missing required dispatch fields,
   // probe can't even attempt a network call. Persist the catalog
   // floor with a synthetic errorReason so the operator knows why.
@@ -332,14 +387,68 @@ export async function runCapabilityProbe(route, opts = {}) {
       errorReason: "route_missing_dispatch_fields",
     };
   }
-  // Step 1 — reachability + auth + model (one tiny call covers all three).
-  const reach = await probeReachability(route, opts);
-  if (!reach.ok) {
-    const cls = reach.classification;
+  // Build a deadline-rejection promise so the overall budget is a hard
+  // ceiling even if the inner pipeline gets stuck in retry.js's
+  // `await sleep(delay)` (which doesn't honour an AbortSignal). When the
+  // deadline fires we reject with a synthetic error that classifies as
+  // a network/timeout failure.
+  const deadlinePromise = new Promise((_, reject) => {
+    deadlineAc.signal.addEventListener("abort", () => {
+      reject(deadlineAc.signal.reason || new Error("probe deadline exceeded"));
+    }, { once: true });
+  });
+  const pipeline = (async () => {
+    // Step 1 — reachability + auth + model (one tiny call covers all three).
+    const reach = await probeReachability(route, stepOpts);
+    if (!reach.ok) {
+      const cls = reach.classification;
+      return {
+        reachable: cls.reachable !== false,
+        auth: cls.auth !== false ? cls.auth ?? null : false,
+        model: cls.model !== false ? cls.model ?? null : false,
+        vision: Boolean(catalogFloor.supportsVision),
+        jsonMode: Boolean(catalogFloor.supportsJsonMode),
+        tools: false,
+        streaming: Boolean(catalogFloor.supportsStreaming),
+        contextWindow: Number.isFinite(catalogFloor.contextWindow) ? catalogFloor.contextWindow : null,
+        maxOutputTokens: Number.isFinite(catalogFloor.maxOutputTokens) ? catalogFloor.maxOutputTokens : null,
+        probedAt,
+        source: "network",
+        errorReason: cls.errorReason,
+      };
+    }
+    // Step 2 — JSON mode probe (only worth it if step 1 passed).
+    let jsonMode = await probeJsonMode(route, stepOpts);
+    if (jsonMode === null) jsonMode = Boolean(catalogFloor.supportsJsonMode);
+    // Step 3 — vision (catalog only, see probeVision JSDoc).
+    const vision = probeVision(route);
     return {
-      reachable: cls.reachable !== false,
-      auth: cls.auth !== false ? cls.auth ?? null : false,
-      model: cls.model !== false ? cls.model ?? null : false,
+      reachable: true,
+      auth: true,
+      model: true,
+      vision,
+      jsonMode,
+      tools: false, // B4.6 (advanced routing) territory — not probed here.
+      streaming: Boolean(catalogFloor.supportsStreaming),
+      contextWindow: Number.isFinite(catalogFloor.contextWindow) ? catalogFloor.contextWindow : null,
+      maxOutputTokens: Number.isFinite(catalogFloor.maxOutputTokens) ? catalogFloor.maxOutputTokens : null,
+      probedAt,
+      source: "network",
+    };
+  })();
+  try {
+    return await Promise.race([pipeline, deadlinePromise]);
+  } catch (err) {
+    // Deadline expired (or pipeline threw unexpectedly — the inner probes
+    // already classify their own failures, so reaching this catch implies
+    // either a budget overrun or a defect we want logged). Return the
+    // catalog floor with a `probe_deadline_exceeded` errorReason so the
+    // operator + the ProbeBadge see a clear failed-but-not-green state.
+    const msg = String(err?.message || err || "probe_deadline_exceeded").slice(0, 200);
+    return {
+      reachable: false,
+      auth: null,
+      model: null,
       vision: Boolean(catalogFloor.supportsVision),
       jsonMode: Boolean(catalogFloor.supportsJsonMode),
       tools: false,
@@ -348,27 +457,13 @@ export async function runCapabilityProbe(route, opts = {}) {
       maxOutputTokens: Number.isFinite(catalogFloor.maxOutputTokens) ? catalogFloor.maxOutputTokens : null,
       probedAt,
       source: "network",
-      errorReason: cls.errorReason,
+      errorReason: msg.includes("deadline") || msg.includes("timeout") ? "probe_deadline_exceeded" : msg,
     };
+  } finally {
+    clearTimeout(deadlineTimer);
+    // Make sure no dangling AbortController keeps any listener pinned.
+    if (!deadlineAc.signal.aborted) deadlineAc.abort(new Error("probe complete"));
   }
-  // Step 2 — JSON mode probe (only worth it if step 1 passed).
-  let jsonMode = await probeJsonMode(route, opts);
-  if (jsonMode === null) jsonMode = Boolean(catalogFloor.supportsJsonMode);
-  // Step 3 — vision (catalog only, see probeVision JSDoc).
-  const vision = probeVision(route);
-  return {
-    reachable: true,
-    auth: true,
-    model: true,
-    vision,
-    jsonMode,
-    tools: false, // B4.6 (advanced routing) territory — not probed here.
-    streaming: Boolean(catalogFloor.supportsStreaming),
-    contextWindow: Number.isFinite(catalogFloor.contextWindow) ? catalogFloor.contextWindow : null,
-    maxOutputTokens: Number.isFinite(catalogFloor.maxOutputTokens) ? catalogFloor.maxOutputTokens : null,
-    probedAt,
-    source: "network",
-  };
 }
 
 /**

@@ -792,9 +792,22 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
     // Settings UI can show the operator what went wrong.
     const probed = await providerRouteRepo.probeAndPersist(req.workspaceId, existing.id, {
       userId: req.authUser?.sub || null,
+      // Rotation gate MUST run a fresh probe — the debounce window must
+      // not let a stale "reachable" verdict greenlight a newly-rotated
+      // bad key.
+      force: true,
     });
     const caps = probed?.capabilities;
-    const probeOk = caps && caps.reachable && caps.auth !== false && caps.model !== false;
+    // Bug 2 — strict truthiness + errorReason gate (same as ProbeBadge).
+    // Previously `caps.auth !== false` treated `null` as a pass, so a 402
+    // / unknown_error response from the candidate key could pass the
+    // rotation gate. Inverting to require explicit positive evidence
+    // closes that hole.
+    const probeOk = caps
+      && caps.reachable === true
+      && caps.auth === true
+      && caps.model === true
+      && !caps.errorReason;
     if (!probeOk) {
       // Roll back to the snapshot captured BEFORE the upsert. The
       // repo's diff-based audit emits ANOTHER rotate_key row pointing
@@ -861,8 +874,13 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
 });
 
 router.post("/settings/provider-routes/:id/probe", requireRole("admin"), async (req, res) => {
+  // `force: true` bypasses the in-flight + recent-result debounce in
+  // `probeAndPersist`. An admin clicking "Re-probe" is explicitly asking
+  // for a fresh network call — the debounce only suppresses incidental
+  // duplicate auto-probes from UI mount loops, not operator-driven ones.
   const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
     userId: req.authUser?.sub || null,
+    force: true,
   });
   if (!updated) return res.status(404).json({ error: "Route not found" });
   return res.json({ ok: true, route: updated, capabilities: updated.capabilities });
@@ -1576,8 +1594,11 @@ router.delete("/settings/ai-providers/:id", requireRole("admin"), (req, res) => 
 
 /** Probe an AI Provider (network reachability + auth + model check). */
 router.post("/settings/ai-providers/:id/probe", requireRole("admin"), async (req, res) => {
+  // See `/settings/provider-routes/:id/probe` for why `force: true` —
+  // operator-driven probes bypass the debounce that guards auto-probes.
   const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
     userId: req.authUser?.sub || null,
+    force: true,
   });
   if (!updated) return res.status(404).json({ error: "AI provider not found" });
   return res.json({ ok: true, route: toDisplayRoute(updated), capabilities: updated.capabilities });
@@ -1653,9 +1674,16 @@ router.post("/settings/ai-providers/:id/rotate-key", requireRole("admin"), async
     });
     const probed = await providerRouteRepo.probeAndPersist(req.workspaceId, existing.id, {
       userId: req.authUser?.sub || null,
+      // Rotation gate — see /settings/provider-routes/:id/rotate-key.
+      force: true,
     });
     const caps = probed?.capabilities;
-    const probeOk = caps && caps.reachable && caps.auth !== false && caps.model !== false;
+    // Strict gate — see /settings/provider-routes/:id/rotate-key (Bug 2).
+    const probeOk = caps
+      && caps.reachable === true
+      && caps.auth === true
+      && caps.model === true
+      && !caps.errorReason;
     if (!probeOk) {
       providerRouteRepo.upsert({
         id: existing.id, workspaceId: req.workspaceId,

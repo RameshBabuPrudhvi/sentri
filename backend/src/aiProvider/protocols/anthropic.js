@@ -54,7 +54,7 @@ export async function generate(route, messages, opts) {
         },
       };
     } finally { cleanup(); }
-  }, label);
+  }, label, opts.signal);
 }
 
 export async function stream(route, messages, opts) {

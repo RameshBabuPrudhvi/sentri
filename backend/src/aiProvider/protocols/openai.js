@@ -135,6 +135,11 @@ function toOpenAiMessages(messages) {
 export async function generate(route, messages, opts) {
   const client = mkClient(route, opts);
   const label = `OpenAI-protocol (${route.family || "openai"}/${route.name || route.id})`;
+  // Thread `opts.signal` through `withRetry` so the inter-attempt backoff
+  // sleep also aborts when the caller's signal fires. Without this, a
+  // probe / dispatch call with a 90s wall-clock budget could stretch
+  // past the budget because `await sleep(delay)` ignored aborts —
+  // surfaced by Bug 3 (probe ran 117s under a 90s `probeTimeoutMs`).
   return withRetry(async () => {
     const { signal: composedSignal, cleanup } = composeSignal(opts.signal, CLOUD_TIMEOUT_MS);
     try {
@@ -153,7 +158,7 @@ export async function generate(route, messages, opts) {
         },
       };
     } finally { cleanup(); }
-  }, label);
+  }, label, opts.signal);
 }
 
 /**

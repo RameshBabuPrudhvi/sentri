@@ -5,7 +5,41 @@ export const BASE_DELAY_MS = parseInt(process.env.LLM_BASE_DELAY_MS, 10) || 2000
 export const MAX_BACKOFF_MS = parseInt(process.env.LLM_MAX_BACKOFF_MS, 10) || 30000;
 export const CLOUD_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 120_000;
 
-export function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+/**
+ * Sleep for `ms`, but reject early if `signal` aborts. Without the signal
+ * branch, an in-flight `withRetry` chain could hold the event loop for
+ * the full backoff window after the caller had already abandoned the
+ * call — see `capabilityProbe.runCapabilityProbe`'s overall-deadline
+ * race for the symptom (probe wall-clock exceeded `probeTimeoutMs`
+ * because the inter-attempt sleep ignored aborts).
+ *
+ * Rejects with the signal's `reason` (or `new Error("aborted")`) when
+ * the signal fires; resolves normally on the timeout. The timer is
+ * cleared either way so a long sleep can't keep the process alive
+ * past shutdown.
+ *
+ * @param {number} ms
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<void>}
+ */
+export function sleep(ms, signal) {
+  if (!signal) return new Promise((r) => setTimeout(r, ms));
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason || new Error("aborted"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason || new Error("aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 export function isRateLimitError(err) {
   const msg = (err?.message || "").toLowerCase();
@@ -50,7 +84,23 @@ function extractRetryAfter(err) {
   return match[2].toLowerCase() === "ms" ? val : val * 1000;
 }
 
-export async function withRetry(fn, label = "") {
+/**
+ * Run `fn` with exponential-backoff retries on rate-limit / 5xx errors.
+ *
+ * When `signal` is supplied (typically the same signal threaded into
+ * `fn` via `composeSignal`), the inter-attempt sleep aborts early on
+ * signal fire. This makes `withRetry` honour caller-imposed wall-clock
+ * budgets — without it, a `probeTimeoutMs: 90000` budget could stretch
+ * to 117s because the 30s+ backoff sleep ignored the abort signal.
+ *
+ * @param {Function} fn - The work function. Receives no args; must
+ *   handle its own per-attempt signal composition.
+ * @param {string} [label] - Diagnostic label for retry log lines.
+ * @param {AbortSignal} [signal] - Optional signal that cancels the
+ *   inter-attempt sleep. Does NOT cancel `fn` itself — `fn` is
+ *   responsible for honouring its own signal.
+ */
+export async function withRetry(fn, label = "", signal = undefined) {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       return await fn();
@@ -62,7 +112,11 @@ export async function withRetry(fn, label = "") {
         : Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
       const reason = isRateLimitError(err) ? "Rate limit" : "Transient server error (5xx)";
       console.warn(formatLogLine("warn", null, `${reason} hit${label ? " for " + label : ""}: ${err.message?.slice(0, 120)}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
-      await sleep(delay);
+      // Honour the caller's abort signal during the backoff sleep so
+      // a budget overrun cancels the retry chain instead of waiting
+      // out the full delay. `sleep` rejects when the signal fires;
+      // re-throw so callers see the abort (not a stale retryable err).
+      await sleep(delay, signal);
     }
   }
 }

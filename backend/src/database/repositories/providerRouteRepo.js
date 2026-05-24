@@ -539,9 +539,39 @@ export function upsert(input) {
  *   `null` when the routeId doesn't exist in this workspace (caller
  *   should 404).
  */
-export async function probeAndPersist(workspaceId, routeId, { userId = null, timeoutMs } = {}) {
+// Bug 4 — in-flight + recent-result debounce. Without this guard, the
+// Settings UI firing a probe on every mount (or an operator clicking
+// Re-probe rapidly) burns a free-tier quota in seconds. We keep a small
+// per-route map of `{ inflight, lastCompletedAt }` so:
+//   • A second call while one is in flight returns the in-flight promise.
+//   • A call within `PROBE_DEBOUNCE_MS` of a completed probe is skipped
+//     and the existing capabilities are returned unchanged.
+// The map is process-local — adequate for single-node deployments and a
+// best-effort guard at scale (the per-route hot key contention makes
+// cross-node duplication rare in practice).
+const PROBE_DEBOUNCE_MS = 5_000;
+const probeInflight = new Map();   // routeId → Promise<route>
+const probeLastDone  = new Map();  // routeId → epoch ms
+
+export async function probeAndPersist(workspaceId, routeId, { userId = null, timeoutMs, force = false } = {}) {
   const route = getById(workspaceId, routeId);
   if (!route) return null;
+  // Coalesce concurrent probes on the same route. Two upserts firing in
+  // the same tick used to schedule two `setImmediate` probes; now the
+  // second one rides on the first's promise.
+  if (probeInflight.has(routeId)) {
+    return probeInflight.get(routeId);
+  }
+  if (!force) {
+    const last = probeLastDone.get(routeId) || 0;
+    if (Date.now() - last < PROBE_DEBOUNCE_MS) {
+      // Recent probe — return the persisted row unchanged. Caller code
+      // (UI / audit) sees the same shape as a successful probe, just no
+      // new network call. Force=true skips this check for the explicit
+      // Re-probe button.
+      return route;
+    }
+  }
   // Migration 060 — per-route probe-timeout override. Precedence:
   //   1. Explicit `timeoutMs` arg (test seam / future per-call override).
   //   2. `route.probeTimeoutMs` column (operator-set via Settings UI).
@@ -553,32 +583,44 @@ export async function probeAndPersist(workspaceId, routeId, { userId = null, tim
   if (effectiveTimeoutMs == null && Number.isFinite(route.probeTimeoutMs) && route.probeTimeoutMs > 0) {
     effectiveTimeoutMs = Math.min(Math.max(route.probeTimeoutMs, 1_000), 600_000);
   }
-  // Probe runs OUTSIDE the transaction — see JSDoc.
-  const capabilities = await runCapabilityProbe(route, { timeoutMs: effectiveTimeoutMs });
-  const db = getDatabase();
-  const now = new Date().toISOString();
-  const tx = db.transaction(() => {
-    db.prepare(
-      "UPDATE provider_routes SET capabilities = ?, updatedAt = ? WHERE id = ? AND workspaceId = ?",
-    ).run(stringifyJson(capabilities), now, routeId, workspaceId);
-    auditRepo.append({
-      workspaceId,
-      routeId,
-      userId,
-      action: "probe",
-      metadata: {
-        capabilities,
-        // Surface probe outcome at the top level of metadata too so
-        // audit-log filters (B3.9) can `WHERE metadata LIKE '%"reachable":false%'`
-        // without parsing the nested `capabilities` JSON.
-        reachable: capabilities.reachable,
-        source: capabilities.source,
-        errorReason: capabilities.errorReason || null,
-      },
+  // Probe runs OUTSIDE the transaction — see JSDoc. Wrap the entire
+  // probe-then-persist flow in a promise we stash in `probeInflight` so
+  // concurrent callers ride the same network call instead of issuing
+  // duplicates. The map entry is cleared in finally regardless of outcome.
+  const work = (async () => {
+    const capabilities = await runCapabilityProbe(route, { timeoutMs: effectiveTimeoutMs });
+    const db = getDatabase();
+    const now = new Date().toISOString();
+    const tx = db.transaction(() => {
+      db.prepare(
+        "UPDATE provider_routes SET capabilities = ?, updatedAt = ? WHERE id = ? AND workspaceId = ?",
+      ).run(stringifyJson(capabilities), now, routeId, workspaceId);
+      auditRepo.append({
+        workspaceId,
+        routeId,
+        userId,
+        action: "probe",
+        metadata: {
+          capabilities,
+          // Surface probe outcome at the top level of metadata too so
+          // audit-log filters (B3.9) can `WHERE metadata LIKE '%"reachable":false%'`
+          // without parsing the nested `capabilities` JSON.
+          reachable: capabilities.reachable,
+          source: capabilities.source,
+          errorReason: capabilities.errorReason || null,
+        },
+      });
     });
-  });
-  tx();
-  return getById(workspaceId, routeId);
+    tx();
+    return getById(workspaceId, routeId);
+  })();
+  probeInflight.set(routeId, work);
+  try {
+    return await work;
+  } finally {
+    probeInflight.delete(routeId);
+    probeLastDone.set(routeId, Date.now());
+  }
 }
 
 export function remove(workspaceId, id, { userId } = {}) {

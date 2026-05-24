@@ -53,7 +53,7 @@ export async function generate(route, messages, opts) {
         },
       };
     } finally { cleanup(); }
-  }, label);
+  }, label, opts.signal);
 }
 
 /**

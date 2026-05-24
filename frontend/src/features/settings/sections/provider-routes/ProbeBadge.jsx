@@ -12,7 +12,20 @@ import { AlertCircle, Check } from "lucide-react";
 export default function ProbeBadge({ capabilities, live }) {
   const caps = live || capabilities;
   if (!caps) return <span className="st-pr-badge st-pr-badge--unprobed">Unprobed</span>;
-  if (caps.reachable && caps.auth !== false && caps.model !== false) {
+  // Green only when EVERY dimension is positively true AND no errorReason
+  // was recorded. Previously this checked `caps.auth !== false` etc., which
+  // treated `null` (unobserved / classification-fallthrough) as a pass — so
+  // a 402 / rate_limited / unknown_error response stamped the route green
+  // because the classifier left `auth: null`. Inverting to a strict
+  // truthiness check + errorReason gate plugs that hole: any backend signal
+  // that something went wrong forces the red badge, not just the explicit
+  // `auth: false` / `model: false` paths.
+  const allGreen =
+    caps.reachable === true
+    && caps.auth === true
+    && caps.model === true
+    && !caps.errorReason;
+  if (allGreen) {
     return (
       <span className="st-status-ok st-pr-badge" title={`Probed at ${caps.probedAt || "unknown"}`}>
         <Check size={11} /> Reachable

@@ -38,7 +38,7 @@ export async function generate({ messages, maxTokens, signal, useJson, model, ap
         usage: { input: um?.promptTokenCount, output: um?.candidatesTokenCount },
       };
     } finally { cleanup(); }
-  }, "Google Gemini");
+  }, "Google Gemini", signal);
 }
 
 // Gemini does not expose incremental streaming via this SDK. Returning null
