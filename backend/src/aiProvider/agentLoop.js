@@ -1,6 +1,6 @@
 import { emitAgentMessage, emitAgentEvent } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
-import { agentReviewRoundsTotal } from "../utils/metrics.js";
+import { agentReviewRounds } from "../utils/metrics.js";
 import { readSpendCaps, evaluateSpendCap } from "./quotaGuard.js";
 import { getMaxReviewRounds } from "../database/repositories/agentConfigRepo.js";
 import { resolveRoute } from "./registry.js";
@@ -89,7 +89,7 @@ function nowIso() {
 
 function observeLoopOutcome(outcome, round) {
   try {
-    agentReviewRoundsTotal.observe({ outcome }, Math.max(0, Number(round) || 0));
+    agentReviewRounds.observe({ outcome }, Math.max(0, Number(round) || 0));
   } catch { /* best-effort */ }
 }
 

@@ -276,11 +276,6 @@ export const agentReviewRounds = new client.Histogram({
   registers: [register],
 });
 
-// Back-compat alias for callers that imported the original name. Slated for
-// removal once Bundle 4's orchestrator-wiring PR lands and every consumer
-// has migrated to `agentReviewRounds`.
-export const agentReviewRoundsTotal = agentReviewRounds;
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
