@@ -325,11 +325,24 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     }
 
     const reviewer = await runReviewer({ round, artifact: authorArtifact });
-    const intent = normalizeVerdict(reviewer);
+    let intent = normalizeVerdict(reviewer);
     let artifact = reviewer?.artifact ?? null;
     if (intent === "request_revision") {
       const safeIssues = validateRevisionIssues(artifact?.issues, authorArtifact);
-      artifact = { ...(artifact || {}), issues: safeIssues };
+      // Safety downgrade: if the reviewer asked for a revision but
+      // every issue referenced a testId not in the author's artifact,
+      // `safeIssues` is now empty. Continuing as `request_revision`
+      // would call the author again with `reviewerIssues: []` — no
+      // actionable signal, just a burned round. Mirror the prompt-
+      // helper `normalizeReviewerVerdict`'s contract (it does the same
+      // downgrade at the prompt-parse boundary) so direct callers of
+      // `runReviewerAuthorLoop` get the same safety net.
+      if (safeIssues.length === 0) {
+        intent = "accept";
+        artifact = null;
+      } else {
+        artifact = { ...(artifact || {}), issues: safeIssues };
+      }
     }
     const reviewerMsg = toMessage({
       runId, threadId, workspaceId,

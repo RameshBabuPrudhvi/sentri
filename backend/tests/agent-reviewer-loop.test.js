@@ -44,9 +44,15 @@ test("loop accepts reviewer verdict schema and maps verdict=revise to request_re
   assert.equal(out.round, 1);
 });
 
-test("loop drops reviewer issues that do not reference latest author tests", async () => {
+test("loop drops reviewer issues that do not reference latest author tests (downgrades to accept, no burned round)", async () => {
+  // Safety contract: when every issue references a testId the author
+  // never produced, the loop must NOT call the author again with empty
+  // feedback. Mirrors `normalizeReviewerVerdict`'s prompt-parse-boundary
+  // downgrade so callers using the runner directly get the same safety
+  // net as callers using the reviewer-prompt helper.
+  let authorCalls = 0;
   const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
-    runAuthor: async ({ artifact }) => artifact,
+    runAuthor: async ({ artifact }) => { authorCalls += 1; return artifact; },
     runReviewer: async ({ round }) => {
       if (round === 0) return { verdict: "revise", artifact: { issues: [{ testId: "missing", problem: "bad id" }] } };
       return { verdict: "accept" };
@@ -54,6 +60,8 @@ test("loop drops reviewer issues that do not reference latest author tests", asy
     maxReviewRounds: 2,
   });
   assert.equal(out.outcome, "accept");
+  assert.equal(out.round, 0, "accepted on round 0 (the empty-issues revise was downgraded)");
+  assert.equal(authorCalls, 1, "no second author call with empty feedback");
 });
 
 test("loop terminates at max rounds", async () => {
