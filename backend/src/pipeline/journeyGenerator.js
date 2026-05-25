@@ -17,6 +17,7 @@ import { formatLogLine } from "../utils/logFormatter.js";
 // second round-trip. `runId` is threaded through every public generator on
 // this module; when null (eval-harness, CLI), emitAgentEvent is a no-op.
 import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
+import { emitHandoffEnvelope, mainThreadId, readLatestEnvelope } from "../aiProvider/agentHandoff.js";
 import { withDials } from "./promptHelpers.js";
 import { extractTestsArray, sanitiseSteps } from "./stepSanitiser.js";
 import { buildJourneyPrompt } from "./prompts/journeyPrompt.js";
@@ -167,6 +168,8 @@ function parseEndpointHints(description, appUrl) {
  * which generates Playwright `request` API tests instead of UI tests.
  */
 export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
+  const threadId = runId ? mainThreadId(runId) : null;
+  readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
   const apiIntent = isApiIntent(name, description);
 
   let prompt;
@@ -221,6 +224,10 @@ export async function generateFromDescription(name, description, appUrl, onToken
 
   // Convert Playwright code steps to human-readable descriptions (Mistral/small LLMs)
   sanitiseSteps(tests);
+  emitHandoffEnvelope({
+    runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+    artifact: { tests }, rationale: "Author generated tests",
+  });
 
   return tests;
 }
@@ -232,6 +239,8 @@ export async function generateFromDescription(name, description, appUrl, onToken
  */
 export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   try {
+    const threadId = runId ? mainThreadId(runId) : null;
+    readLatestEnvelope({ threadId, workspaceId, toRole: "planner" });
     const prompt = withDials(buildJourneyPrompt(journey, snapshotsByUrl, { testCount }), dialsPrompt);
     // Step 3 — Classify / Map journeys. `planner` decomposes a journey
     // (start page → expected outcome) into the test scaffolding the
@@ -250,6 +259,10 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
     if (tests.length === 0) return [];
 
     sanitiseSteps(tests);
+    emitHandoffEnvelope({
+      runId, threadId, workspaceId, fromRole: "planner", toRole: "author",
+      artifact: { journey: journey?.name || null, tests }, rationale: "Planner journey decomposition",
+    });
     return tests;
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;

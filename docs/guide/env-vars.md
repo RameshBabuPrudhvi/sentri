@@ -110,6 +110,7 @@ Sentri persists thread-scoped agent-to-agent envelopes to the `agent_messages` t
 
 | Variable | Default | Description |
 |---|---|---|
+| `SENTRI_AGENT_MODE` | `pipeline` | Agent orchestration mode switch (AUTO-023 Bundle 2). `pipeline` = legacy linear stage-return flow (default), `envelope` = same linear DAG but reads + writes handoff envelopes (`agent_messages`) at each stage boundary, `autonomous` = reserved for supervisor orchestration bundles (currently treated as non-default advanced mode). |
 | `AGENT_MESSAGE_RETENTION_DAYS` | `90` | Daily 05:15 UTC sweep deletes `agent_messages` rows older than this many days. Set `0` to disable the retention sweep entirely (rows accumulate forever). |
 
 ### AI Spend Alert Webhook (B4.0.1)
