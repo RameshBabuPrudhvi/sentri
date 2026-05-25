@@ -67,6 +67,30 @@ test("supervisor can loop author when reviewer requests revision", async () => {
   assert.equal(out.steps, 4);
 });
 
+// AUTO-023 B4.2 — built-in `checkQuota` callback short-circuits the
+// thread via the new `outcome: "quota_exhausted"` terminal path.
+// Pins that the orchestrator HONOURS an injected `checkQuota` arg
+// (production wires this to `quotaGuard.evaluateSpendCap`) and that
+// the quota check fires BEFORE the supervisor LLM call so a capped
+// workspace doesn't burn a supervisor dispatch.
+test("injected checkQuota terminates thread with quota_exhausted outcome", async () => {
+  let supervisorCalls = 0;
+  const out = await runAutonomousThread({ artifact: { seed: true } }, {
+    workspaceId: null,
+    checkQuota: ({ step }) => (step >= 1 ? { ok: false, reason: "spend_cap_day" } : { ok: true }),
+    supervisorDecision: async () => {
+      supervisorCalls += 1;
+      return { nextRole: "author", instruction: "go" };
+    },
+    runAgent: async () => ({ fromRole: "author", intent: "handoff", artifact: { ok: true } }),
+  });
+  assert.equal(out.outcome, "quota_exhausted");
+  assert.equal(out.reason, "spend_cap_day");
+  // Round 0's supervisor call ran (quota OK); round 1's did NOT (quota
+  // gate fired BEFORE supervisor dispatch).
+  assert.equal(supervisorCalls, 1);
+});
+
 // AUTO-023 B4.2 — caller-injected quota gate short-circuits the thread.
 // The orchestrator surface exposes the supervisorDecision callback as
 // the gate point (a caller can return `{ terminate: true, rationale:

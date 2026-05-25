@@ -61,6 +61,11 @@ const files = [
   // branch coverage (terminate vs. route, missing instruction, empty
   // nextRole fallback).
   "tests/supervisor-prompt.test.js",
+  // AUTO-023 B4.1 — supervisor LLM bridge (generateText → parseJSON →
+  // normalizeSupervisorDecision). Pins happy-path JSON, parse-error
+  // termination, dispatch-error termination (never re-thrown), and
+  // the one-shot weak-supervisor-model advisory.
+  "tests/supervisor-agent.test.js",
   "tests/reviewer-prompt.test.js",
   // AUTO-023 B3.3 — per-workspace `agent_configs.maxReviewRounds` override
   // (migration 059). Pins the repo-layer `[1, 10]` clamp + the loop's
