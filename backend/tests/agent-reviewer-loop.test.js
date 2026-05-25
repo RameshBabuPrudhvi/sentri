@@ -157,6 +157,61 @@ test("loop exits early when quota check fails and reports quota_exhausted", asyn
   assert.equal(authorCalls, 1, "ships last author artifact without entering next round");
 });
 
+test("loop wires real quotaGuard (readSpendCaps + evaluateSpendCap) when checkQuota is omitted", async () => {
+  // The fail-open contract masks any wiring mistake — if `evaluateSpendCap`
+  // disappeared, had a different signature, or threw, the try/catch in
+  // `makeDefaultQuotaCheck` would silently return `{ ok: true }` and the
+  // loop would run unbounded against a workspace that's already over
+  // its spend cap. Pin the real wiring by seeding a workspace with a
+  // cap of $0.01 and a fake `ai_request_log` row that exceeds it.
+  //
+  // If `evaluateSpendCap` is missing or broken, the loop returns
+  // `outcome: "max_rounds"` (the budget gate silently fail-opened).
+  // If it's wired correctly, the loop terminates on round 0 with
+  // `outcome: "quota_exhausted"`.
+  const { randomUUID } = await import("node:crypto");
+  const { getDatabase } = await import("../src/database/sqlite.js");
+  const db = getDatabase();
+  const wsId = `ws-${randomUUID().slice(0, 8)}`;
+  const userId = `usr-${randomUUID().slice(0, 8)}`;
+  const now = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO users (id, name, email, passwordHash, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(userId, `Test ${userId}`, `${userId}@test.local`, "x", now, now);
+  // Seed workspace with a $0.01 daily cap. Schema: `workspaces` has
+  // optional `dailySpendCapUsd` / `monthlySpendCapUsd` columns added by
+  // an earlier migration; `null` means uncapped.
+  db.prepare(
+    "INSERT INTO workspaces (id, name, slug, ownerId, dailySpendCapUsd, monthlySpendCapUsd, spendAlertThresholdPct, createdAt, updatedAt) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(wsId, `ws-${wsId}`, wsId, userId, 0.01, null, 80, now, now);
+  // Seed an ai_request_log row that pushes the workspace over its cap.
+  // The row needs to land in the rolling 24h window the spend-cap sums
+  // (`createdAt >= now - 24h`).
+  db.prepare(
+    "INSERT INTO ai_request_log (id, workspaceId, agentRole, provider, model, " +
+    "promptTokens, completionTokens, totalTokens, costUsd, outcome, latencyMs, createdAt) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    `req-${randomUUID().slice(0, 8)}`, wsId, "author", "openai", "gpt-4",
+    100, 200, 300, 1.00, "success", 1500, now,
+  );
+
+  let authorCalls = 0;
+  const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    workspaceId: wsId,
+    runAuthor: async ({ artifact }) => { authorCalls += 1; return artifact; },
+    runReviewer: async () => ({ intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "x" }] } }),
+    maxReviewRounds: 3,
+    // No `checkQuota` — must use the real `makeDefaultQuotaCheck`
+    // wired to `readSpendCaps` + `evaluateSpendCap` in `quotaGuard.js`.
+  });
+  assert.equal(out.outcome, "quota_exhausted",
+    "real quotaGuard wiring must reject when workspace spend exceeds cap");
+  assert.equal(authorCalls, 0,
+    "quota gate fires BEFORE round 0's author call — no LLM cost on an already-exhausted workspace");
+});
+
 test("onOutcome callback fires on every terminal path (accept, max_rounds, timeout, quota_exhausted, reject_final)", async () => {
   // Symmetry contract — operators / orchestrators that hook `onOutcome`
   // expect EVERY terminal path to surface, including `reject_final`

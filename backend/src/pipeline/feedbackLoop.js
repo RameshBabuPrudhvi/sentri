@@ -589,7 +589,17 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     // pre-loop path.
     let firstAuthorStartFired = false;
     let finalCandidate = null;
-    const out = await runReviewerAuthorLoop(
+    // Hoisted so the `finally` block below can fire the done event +
+    // audit-trail bridge on EVERY terminal path, including
+    // `ReviewRejection`. Pre-fix, the done event + bridge envelope only
+    // fired when the loop returned normally — `reject_final` left an
+    // asymmetric audit trail (author started + per-round agent_messages,
+    // but no done event + no bridge handoff) that contradicted the
+    // loop's `onOutcome` symmetry contract.
+    let loopOutcome = null;
+    let loopThrew = false;
+    try {
+    loopOutcome = await runReviewerAuthorLoop(
       // Initial artifact carries the failing test as a single-test
       // collection so the loop's `validateRevisionIssues` can match
       // reviewer issues back to the right test by id on round 1+.
@@ -669,40 +679,64 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
       },
     );
 
-    // Done event fires ONCE after the loop terminates (mirror of the
-    // single start event above) so the NarrativeFeed shows one
-    // start/done pair per regeneration, not one per round.
-    emitAgentEvent(_runId, { step: PIPELINE_STEPS.REVIEW, agent: "author", phase: "done", workspaceId });
+    } catch (err) {
+      // `ReviewRejection` lands here; flag it so the finally block can
+      // tag the audit trail with `outcome: "reject_final"`. Any other
+      // throw (AbortError, generic) is re-raised by the outer catch.
+      if (err instanceof ReviewRejection) {
+        loopThrew = true;
+      } else {
+        throw err;
+      }
+    } finally {
+      // Done event + audit-trail bridge fire on every terminal path:
+      //   • normal returns (accept / max_rounds / timeout / quota_exhausted)
+      //   • throws (reject_final via ReviewRejection)
+      // Both are best-effort — wrapped in try/catch so observability
+      // hiccups can never mask a legitimate ReviewRejection re-throw
+      // from the outer catch block.
+      try {
+        // Done event mirrors the single start event so the NarrativeFeed
+        // shows one start/done pair per regeneration regardless of how
+        // the loop terminated.
+        emitAgentEvent(_runId, { step: PIPELINE_STEPS.REVIEW, agent: "author", phase: "done", workspaceId });
+      } catch { /* best-effort */ }
+      try {
+        // Bundle 2 audit-trail bridge: anchors the loop's per-round
+        // `agent_message` chain to the inbound envelope's `replyToId`
+        // so the run-detail page renders the entire conversation as a
+        // single thread. The bridge fires for `reject_final` too —
+        // operators auditing "why didn't this test ship?" need a
+        // structured handoff record carrying the outcome, not just
+        // a thrown error in the logs.
+        const bridgeOutcome = loopThrew ? "reject_final" : (loopOutcome?.outcome || null);
+        emitHandoffEnvelope({
+          runId: _runId, threadId, workspaceId,
+          fromRole: "author", toRole: "reviewer",
+          replyToId: inbound?.id || null,
+          artifact: {
+            testId: test?.id || null,
+            failureCategory,
+            outcome: bridgeOutcome,
+            roundsCompleted: loopOutcome?.roundsCompleted || 0,
+            improved: { name: finalCandidate?.name, description: finalCandidate?.description },
+          },
+          rationale: "Author regenerated failing test (B3 loop outcome: " + (bridgeOutcome || "unknown") + ")",
+        });
+      } catch { /* best-effort */ }
+    }
 
-    // Bundle 2 audit-trail bridge: the loop wrote its own author/reviewer
-    // envelopes internally, but the captured `inbound` envelope's reply
-    // chain expects ONE explicit author→reviewer handoff bridging the
-    // stage entry. Emit it once after the loop terminates so the chain
-    // anchors to the inbound envelope's id — preserves the pre-PR
-    // audit-trail shape that downstream consumers (NarrativeFeed, audit
-    // export) already key on.
-    emitHandoffEnvelope({
-      runId: _runId, threadId, workspaceId,
-      fromRole: "author", toRole: "reviewer",
-      replyToId: inbound?.id || null,
-      artifact: {
-        testId: test?.id || null,
-        failureCategory,
-        outcome: out?.outcome || null,
-        roundsCompleted: out?.roundsCompleted || 0,
-        improved: { name: finalCandidate?.name, description: finalCandidate?.description },
-      },
-      rationale: "Author regenerated failing test (B3 loop outcome: " + (out?.outcome || "unknown") + ")",
-    });
+    // `reject_final` is unrecoverable — keep the original test rather
+    // than ship a reviewer-flagged candidate as a regenerated draft.
+    if (loopThrew) return null;
 
     // Return the final candidate. The loop's `artifact` field carries
     // the latest tests collection regardless of `outcome` (accept /
     // max_rounds / timeout / quota_exhausted) — we always ship the
     // best attempt the author produced.
-    return finalCandidate || (out?.artifact?.tests?.[0] || null);
+    return finalCandidate || (loopOutcome?.artifact?.tests?.[0] || null);
   } catch (err) {
     if (err.name === "AbortError") throw err; // propagate abort
-    if (err instanceof ReviewRejection) return null; // unrecoverable — keep original
     return null; // Regeneration failed — keep original
   }
 }

@@ -255,7 +255,7 @@ an assembly line.
 - [x] `MAX_REVIEW_ROUNDS` defaults to **3** — exposed via
       `agent_configs.maxReviewRounds` per workspace (migration 059)
 - [x] Termination metric:
-      `app_agent_review_rounds_total{outcome=accept|max_rounds|timeout|quota_exhausted|reject_final}`
+      `app_agent_review_rounds{outcome=accept|max_rounds|timeout|quota_exhausted|reject_final}`
       with a 4-bucket histogram on `round` index ([0, 1, 2, 3])
 
 ## B3.4 — Per-`(route, role)` quota awareness
