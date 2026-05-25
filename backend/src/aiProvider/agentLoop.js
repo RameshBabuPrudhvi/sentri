@@ -17,6 +17,19 @@ export class ReviewRejection extends Error {
   }
 }
 
+// Closed-set of reviewer intents the loop's terminal/branch checks
+// understand. Any `reviewer.intent` outside this set normalises to
+// "accept" — the same safe default the verdict path uses below. Without
+// this gate, a reviewer callback returning a valid envelope INTENT that
+// isn't loop vocabulary (e.g. `"handoff"`, `"question"`, `"final"`,
+// `"tool_call"`, `"tool_result"`) would fall through ALL three terminal
+// branches AND skip `request_revision`'s `validateRevisionIssues`
+// sanitisation, looping silently with raw caller-supplied issues until
+// `maxRounds`. Six of the ten `INTENTS` enum values from
+// `agentEnvelope.js` are not loop vocabulary, so the unsafe pass-through
+// was the common case for any non-conformant reviewer wrapper.
+const LOOP_INTENT_VOCAB = new Set(["accept", "request_revision", "reject_final"]);
+
 function normalizeVerdict(reviewer) {
   if (!reviewer) return "accept";
   if (reviewer.intent) {
@@ -25,10 +38,11 @@ function normalizeVerdict(reviewer) {
     // i.e. `reject_final`. Without this remap a reviewer callback
     // returning `{ intent: "reject" }` would silently fall through to
     // the revision/continue path (neither `accept` nor `reject_final`
-    // matched the terminal checks at lines 195–200), looping until
-    // `maxRounds`. Map it explicitly so the terminal check fires.
+    // matched the terminal checks), looping until `maxRounds`. Map it
+    // explicitly so the terminal check fires.
     if (reviewer.intent === "reject") return "reject_final";
-    return reviewer.intent;
+    if (LOOP_INTENT_VOCAB.has(reviewer.intent)) return reviewer.intent;
+    return "accept";
   }
   const verdict = String(reviewer.verdict || "").toLowerCase();
   if (verdict === "accept") return "accept";

@@ -37,11 +37,21 @@ import { getStageAgentRoles } from "../../config.js";
 // `agent_event` SSE lands, steps 1+2 stay synthesized client-side and
 // step 3 onwards swaps to real events.
 export const AGENT_PERSONAS = {
-  explorer: { icon: "🔍", label: "Explorer", color: "explorer", scope: "I look around your site to see what users can do." },
-  planner:  { icon: "🧭", label: "Planner",  color: "planner",  scope: "I connect those actions into complete user journeys." },
-  author:   { icon: "✍️", label: "Author",   color: "author",   scope: "I write the tests, one journey at a time." },
-  oracle:   { icon: "🎯", label: "Oracle",   color: "oracle",   scope: "I make sure each test checks something meaningful." },
-  reviewer: { icon: "🛡️", label: "Reviewer", color: "reviewer", scope: "I do the final quality check before anything ships." },
+  explorer:   { icon: "🔍", label: "Explorer",   color: "explorer", scope: "I look around your site to see what users can do." },
+  planner:    { icon: "🧭", label: "Planner",    color: "planner",  scope: "I connect those actions into complete user journeys." },
+  author:     { icon: "✍️", label: "Author",     color: "author",   scope: "I write the tests, one journey at a time." },
+  oracle:     { icon: "🎯", label: "Oracle",     color: "oracle",   scope: "I make sure each test checks something meaningful." },
+  reviewer:   { icon: "🛡️", label: "Reviewer",   color: "reviewer", scope: "I do the final quality check before anything ships." },
+  // AUTO-023 Bundle 2 added envelope emit sites for `supervisor` (chat
+  // route — bidirectional pair per request) and `healer` (vision-heal
+  // outcomes). Without entries here, `messagesToTurns`'s
+  // `AGENT_PERSONAS[m.fromRole]` filter silently dropped every envelope
+  // those roles produced and the operator never saw them in the
+  // conversation feed. Reuse the explorer / oracle palettes so we don't
+  // invent new CSS variables for roles that share the same visual tier
+  // (planner-adjacent supervision vs. assertion-tier healing).
+  supervisor: { icon: "🧠", label: "Supervisor", color: "planner",  scope: "I decide who speaks next." },
+  healer:     { icon: "🩹", label: "Healer",     color: "oracle",   scope: "I patch broken locators when a test can't find an element." },
 };
 
 // ── Per-step agent sequence ──────────────────────────────────────────────────

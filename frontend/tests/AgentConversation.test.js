@@ -424,6 +424,23 @@ test("request_revision includes round badge narration", () => {
   assert.match(reviseTurns[1].text, /~1 updated/);
 });
 
+test("supervisor + healer envelopes render (not silently dropped by persona filter)", () => {
+  // Bundle 2 added envelope emit sites for `supervisor` (chat route) and
+  // `healer` (vision-heal). Pre-fix, `messagesToTurns`'s
+  // `AGENT_PERSONAS[m.fromRole]` filter dropped both because neither key
+  // existed in the persona table. Pin both render now so a future
+  // refactor that re-narrows the persona table fails this assertion.
+  const turns = messagesToTurns([
+    { id: "s1", fromRole: "supervisor", toRole: "author", intent: "handoff", round: 0, rationale: "Edit this test", createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "h1", fromRole: "healer", toRole: "reviewer", intent: "handoff", round: 0, rationale: "Repaired locator", createdAt: "2026-01-01T00:00:01.000Z" },
+  ]);
+  assert.equal(turns.length, 2, "both envelopes survive the persona-table filter");
+  assert.equal(turns[0].agent, "supervisor");
+  assert.equal(turns[1].agent, "healer");
+  assert.match(turns[0].text, /Supervisor/);
+  assert.match(turns[1].text, /Healer/);
+});
+
 process.on("beforeExit", () => {
   console.log(`\n  ${passed} passed, ${failed} failed\n`);
   if (failed > 0) process.exit(1);

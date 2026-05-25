@@ -160,6 +160,23 @@ test("loop records termination metric with bounded outcome label", async () => {
   assert.equal(sawAccept, true);
 });
 
+test("loop normalises unrecognized reviewer.intent values to accept (no silent unsanitized loop)", async () => {
+  // Closed-set guard: the six envelope INTENTS that aren't loop
+  // vocabulary (`handoff`, `question`, `answer`, `final`, `tool_call`,
+  // `tool_result`) MUST default to "accept" rather than fall through
+  // and continue the loop with raw, unsanitised reviewer feedback.
+  for (const badIntent of ["handoff", "question", "answer", "final", "tool_call", "tool_result"]) {
+    let authorCalls = 0;
+    const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+      runAuthor: async ({ artifact }) => { authorCalls += 1; return artifact; },
+      runReviewer: async () => ({ intent: badIntent, artifact: { issues: [{ testId: "anything", problem: "x" }] } }),
+      maxReviewRounds: 3,
+    });
+    assert.equal(out.outcome, "accept", `${badIntent} → accept`);
+    assert.equal(authorCalls, 1, `${badIntent} terminates after one round (no continuation)`);
+  }
+});
+
 // B3.8 — Golden-fixture regression: a known-bad test with a brittle CSS-
 // hashed selector ships strengthened after one revision round. Pre-fix
 // (no loop) the test went out as-is; with the loop the reviewer flags
