@@ -24,6 +24,7 @@ import { throwIfAborted } from "../utils/abortHelper.js";
 // so we emit start/done on step 7 — the "Validate / quality check" stage
 // users see in the NarrativeFeed.
 import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
+import { emitHandoffEnvelope, mainThreadId, readLatestEnvelope } from "../aiProvider/agentHandoff.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
@@ -544,6 +545,8 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     // (selector brittleness, weak assertions, etc.) so the post-run feedback
     // loop has signal to surface in the NarrativeFeed's quality-review entry.
     const _runId = options.runId || null;
+    const threadId = _runId ? mainThreadId(_runId) : null;
+    readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
     emitAgentEvent(_runId, { step: 7, agent: "author", phase: "start", workspaceId,
       message: `Repairing ${test?.name || "failing test"} (${failureCategory})` });
     let text;
@@ -553,6 +556,12 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
       emitAgentEvent(_runId, { step: 7, agent: "author", phase: "done", workspaceId });
     }
     const improved = parseJSON(text);
+    emitHandoffEnvelope({
+      runId: _runId, threadId, workspaceId,
+      fromRole: "author", toRole: "reviewer",
+      artifact: { testId: test?.id || null, failureCategory, improved: { name: improved?.name, description: improved?.description } },
+      rationale: "Author regenerated failing test",
+    });
 
     // Only pick safe fields from the AI response — never let the LLM
     // override critical DB fields like id, projectId, or reviewStatus.

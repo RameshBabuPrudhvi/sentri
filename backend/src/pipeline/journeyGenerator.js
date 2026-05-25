@@ -280,6 +280,8 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
  */
 export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   try {
+    const threadId = runId ? mainThreadId(runId) : null;
+    readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
     const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot, { testCount }), dialsPrompt);
     // Step 4 — Generate. `author` writes per-page intent tests for each
     // high-priority classified page.
@@ -296,6 +298,11 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
     if (tests.length === 0) return [];
 
     sanitiseSteps(tests);
+    emitHandoffEnvelope({
+      runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+      artifact: { url: classifiedPage?.url || null, intent: classifiedPage?.dominantIntent || null, tests },
+      rationale: "Author generated intent tests",
+    });
     return tests;
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
@@ -504,6 +511,8 @@ export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "",
 
   try {
     throwIfAborted(signal);
+    const threadId = runId ? mainThreadId(runId) : null;
+    readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
     const prompt = withDials(buildApiTestPrompt(apiEndpoints, appUrl, { testCount }), dialsPrompt);
     // Step 4 — Generate. `author` writes Playwright `request` API tests from
     // HAR-captured endpoint summaries (mirrors the UI test path).
@@ -531,6 +540,11 @@ export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "",
     }
 
     sanitiseSteps(tests);
+    emitHandoffEnvelope({
+      runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+      artifact: { appUrl, endpointCount: apiEndpoints.length, tests },
+      rationale: "Author generated API tests",
+    });
     return tests;
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
