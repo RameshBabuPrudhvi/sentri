@@ -55,6 +55,7 @@ const files = [
   "tests/agent-envelope.test.js",
   "tests/agent-message-repo.test.js",
   "tests/agent-message-emitter.test.js",
+  "tests/agent-reviewer-loop.test.js",
   "tests/webhook-token.test.js",
   "tests/scheduler.test.js",
   "tests/trigger-api.test.js",
