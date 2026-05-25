@@ -30,6 +30,31 @@ test("loop revises once then accepts", async () => {
   assert.equal(out.round, 1);
 });
 
+test("loop accepts reviewer verdict schema and maps verdict=revise to request_revision", async () => {
+  const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async ({ round }) => {
+      if (round === 0) return { verdict: "revise", artifact: { issues: [{ testId: "t1", problem: "weak assertion" }] } };
+      return { verdict: "accept" };
+    },
+    maxReviewRounds: 3,
+  });
+  assert.equal(out.outcome, "accept");
+  assert.equal(out.round, 1);
+});
+
+test("loop drops reviewer issues that do not reference latest author tests", async () => {
+  const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async ({ round }) => {
+      if (round === 0) return { verdict: "revise", artifact: { issues: [{ testId: "missing", problem: "bad id" }] } };
+      return { verdict: "accept" };
+    },
+    maxReviewRounds: 2,
+  });
+  assert.equal(out.outcome, "accept");
+});
+
 test("loop terminates at max rounds", async () => {
   const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
     runAuthor: async ({ artifact }) => artifact,
@@ -49,4 +74,3 @@ test("loop throws ReviewRejection on reject_final", async () => {
     (err) => err instanceof ReviewRejection && err.code === "ERR_REVIEW_REJECT_FINAL",
   );
 });
-

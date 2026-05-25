@@ -13,6 +13,24 @@ export class ReviewRejection extends Error {
   }
 }
 
+function normalizeVerdict(reviewer) {
+  if (!reviewer) return "accept";
+  if (reviewer.intent) return reviewer.intent;
+  const verdict = String(reviewer.verdict || "").toLowerCase();
+  if (verdict === "accept") return "accept";
+  if (verdict === "revise") return "request_revision";
+  if (verdict === "reject") return "reject_final";
+  return "accept";
+}
+
+function validateRevisionIssues(issues, authorArtifact) {
+  const list = Array.isArray(issues) ? issues : [];
+  const tests = Array.isArray(authorArtifact?.tests) ? authorArtifact.tests : [];
+  if (list.length === 0) return [];
+  const validIds = new Set(tests.map((t) => t?.id).filter(Boolean));
+  return list.filter((i) => validIds.has(i?.testId));
+}
+
 function clampReviewRounds(value) {
   const parsed = Number.parseInt(String(value ?? DEFAULT_MAX_REVIEW_ROUNDS), 10);
   if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MAX_REVIEW_ROUNDS;
@@ -81,8 +99,12 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     });
 
     const reviewer = await runReviewer({ round, artifact: authorArtifact });
-    const intent = reviewer?.intent || "accept";
-    const artifact = reviewer?.artifact ?? null;
+    const intent = normalizeVerdict(reviewer);
+    let artifact = reviewer?.artifact ?? null;
+    if (intent === "request_revision") {
+      const safeIssues = validateRevisionIssues(artifact?.issues, authorArtifact);
+      artifact = { ...(artifact || {}), issues: safeIssues };
+    }
     const reviewerMsg = toMessage({
       runId, threadId, workspaceId,
       fromRole: "reviewer",
@@ -107,4 +129,3 @@ export async function runReviewerAuthorLoop(initialArtifact, {
 
   return { outcome: "max_rounds", round: maxRounds - 1, artifact: lastAuthorArtifact };
 }
-

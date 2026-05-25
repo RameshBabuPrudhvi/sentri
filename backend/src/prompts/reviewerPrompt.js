@@ -10,18 +10,17 @@
  *
  * ### Output contract
  *
- *   { "decision": "approve" | "reject",
+ *   { "verdict": "accept" | "revise" | "reject",
  *     "rationale": "<one sentence>",
- *     "issues": [{ "severity": "high" | "low",
+ *     "issues": [{ "testId": "<id from author artifact>",
+ *                  "severity": "high" | "low",
  *                  "category": "<...>",
  *                  "message": "..." }] }
  *
- * - `decision: "approve"` → test ships to draft as usual. `issues[]` MAY
+ * - `verdict: "accept"` → test ships to draft as usual. `issues[]` MAY
  *   contain low-severity advisory notes the operator can review later.
- * - `decision: "reject"` → test is marked rejected, surfaces in
- *   `pipelineStats.validationRejected`, and the existing feedback-loop
- *   path (`feedbackLoop.regenerateFailingTest`) picks it up for
- *   regeneration. `issues[]` MUST be non-empty when decision is "reject".
+ * - `verdict: "revise"` → reviewer asks author for another round.
+ * - `verdict: "reject"` → unrecoverable final rejection.
  *
  * ### Failure modes
  *
@@ -45,7 +44,7 @@
 export function buildReviewerPrompt({ test, classifiedPage }) {
   return `You are the Reviewer agent — the final quality gate before tests reach the user.
 
-Review this test and decide: approve or reject?
+Review this test and decide: accept, revise, or reject?
 
 \`\`\`
 Test name: ${test?.name || "unnamed"}
@@ -76,10 +75,11 @@ Respond with valid JSON only — no prose around it.
 
 \`\`\`json
 {
-  "decision": "approve" | "reject",
+  "verdict": "accept" | "revise" | "reject",
   "rationale": "<one sentence>",
   "issues": [
     {
+      "testId": "<must match this test id when present>",
       "severity": "high" | "low",
       "category": "brittle_selector" | "race_condition" | "weak_assertion" | "wrong_intent" | "other",
       "message": "<specific actionable description>"
@@ -89,8 +89,9 @@ Respond with valid JSON only — no prose around it.
 \`\`\`
 
 ### Rules
-- If \`decision\` is \`"reject"\`, \`issues\` MUST be non-empty and contain at least one \`severity: "high"\` entry.
-- If \`decision\` is \`"approve"\`, \`issues\` MAY be empty or contain only low-severity advisory notes.
+- If \`verdict\` is \`"revise"\`, \`issues\` MUST be non-empty and contain at least one \`severity: "high"\` entry.
+- If \`verdict\` is \`"accept"\`, \`issues\` MAY be empty or contain only low-severity advisory notes.
+- If \`verdict\` is \`"reject"\`, include a short rationale and any critical issues that made the test unrecoverable.
 - Be strict but fair — reject only when a real reviewer would. Stylistic preferences (formatting, naming style) are NEVER grounds for rejection.
 - Each issue's \`message\` must be specific enough to act on (e.g. "selector \`.css-1a2b3c\` is auto-generated — use \`getByRole('button', { name: 'Submit' })\`"). Vague messages like "selector is bad" are not useful.
 `;
