@@ -158,6 +158,8 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
 export const api = {
   
   getAgentRoles: () => req("GET", "/settings/agent-roles"),
+  getAgentMode: () => req("GET", "/settings/agent-mode"),
+  setAgentMode: (mode) => req("PATCH", "/settings/agent-mode", { mode }),
   createAgentRole: (data) => req("POST", "/settings/agent-roles", data),
   updateAgentRole: (role, data) => req("PATCH", `/settings/agent-roles/${role}`, data),
   deleteAgentRole: (role) => req("DELETE", `/settings/agent-roles/${role}`),

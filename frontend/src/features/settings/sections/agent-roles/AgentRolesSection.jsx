@@ -58,16 +58,19 @@ export default function AgentRolesSection() {
   const [error, setError]         = useState("");
   const [busy, setBusy]           = useState(false);
   const [probes, setProbes]       = useState({});
+  const [agentMode, setAgentMode] = useState("envelope");
 
   const load = useCallback(async () => {
     try {
-      const [r, provRes] = await Promise.all([
+      const [r, modeRes, provRes] = await Promise.all([
         api.getAgentRoles(),
+        api.getAgentMode().catch(() => ({ mode: "envelope" })),
         // Prefer the enriched ai-providers endpoint (displayLabel, familyEmoji,
         // costTier). Fall back to the old provider-routes endpoint gracefully.
         api.listAiProviders().catch(() => api.listProviderRoutes().catch(() => ({ routes: [] }))),
       ]);
       setRows(r.roles || []);
+      setAgentMode(modeRes?.mode || "envelope");
       setProviders((provRes?.routes || []).filter((p) => p.enabled !== false && p.enabled !== 0));
     } catch (err) {
       setError(err.message || "Failed to load agent roles.");
@@ -153,6 +156,19 @@ export default function AgentRolesSection() {
     }
   }
 
+
+  async function saveMode(nextMode) {
+    try {
+      setBusy(true);
+      const res = await api.setAgentMode(nextMode);
+      setAgentMode(res?.mode || nextMode);
+    } catch (err) {
+      setError(err.message || "Failed to save agent mode.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Roles available for new assignment (unassigned, or the one being edited)
   const availableRoles = AGENT_ROLES.filter(
     (r) => !configuredRoles.has(r) || r === editingRole,
@@ -168,6 +184,23 @@ export default function AgentRolesSection() {
           "Each AI Provider is configured under AI Providers."
         }
       />
+
+
+      <div className="card card-padded" style={{ marginBottom: 12 }}>
+        <label className="st-pr-field">
+          <span className="st-pr-field-label">Mode</span>
+          <select
+            className="input"
+            value={agentMode}
+            onChange={(e) => saveMode(e.target.value)}
+            title="Autonomous mode enables supervisor-driven orchestration (higher cost/latency, stronger adaptive routing)."
+          >
+            <option value="pipeline">Pipeline</option>
+            <option value="envelope">Envelope</option>
+            <option value="autonomous">Autonomous</option>
+          </select>
+        </label>
+      </div>
 
       <div className="card card-padded">
         {error && (

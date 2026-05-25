@@ -148,6 +148,20 @@ export function getAiRequestLogSettings(workspaceId) {
   };
 }
 
+export function getAgentMode(workspaceId) {
+  if (!workspaceId) return "envelope";
+  const row = getDatabase().prepare("SELECT agentMode FROM workspaces WHERE id = ?").get(workspaceId);
+  return row?.agentMode || "envelope";
+}
+
+export function setAgentMode(workspaceId, mode) {
+  const allowed = new Set(["pipeline", "envelope", "autonomous"]);
+  const next = allowed.has(mode) ? mode : "envelope";
+  getDatabase().prepare("UPDATE workspaces SET agentMode = ?, updatedAt = ? WHERE id = ?")
+    .run(next, new Date().toISOString(), workspaceId);
+  return getAgentMode(workspaceId);
+}
+
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 /**

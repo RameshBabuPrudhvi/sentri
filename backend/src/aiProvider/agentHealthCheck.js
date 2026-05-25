@@ -48,6 +48,7 @@ import { resolveRoute } from "./registry.js";
  * @type {string[]}
  */
 export const AGENT_ROLES = Object.freeze([
+  "supervisor",
   "explorer",
   "planner",
   "author",
