@@ -163,6 +163,10 @@ provider routing, per-role circuit breakers, per-role metrics, fallbackRole
 cycle guard, pre-flight health check).
 
 The structured **agent handshake envelope** (`{ fromRole, toRole, artifact,
-traceId }`) and the **DAG runner** that lets the planner's output flow into
-the author's prompt land in **AUTO-023**. Per-`(workspace, role)` API keys
-land in **AI-005b**. See `ROADMAP.md` for sequencing.
+traceId }`) lands in **AUTO-023 Bundle 1** (`agent_messages` schema +
+envelope validator + emitter). The **supervisor orchestrator** that lets
+agents dynamically decide who speaks next — replacing the previously
+planned LangGraph-style DAG runner — lands in **AUTO-023 Bundle 4**. See
+[`docs/roadmap/autonomous-multi-agent.md`](../roadmap/autonomous-multi-agent.md)
+for the full 5-bundle plan. Per-`(workspace, role)` API keys land in
+**AI-005b**. See `ROADMAP.md` for sequencing.
