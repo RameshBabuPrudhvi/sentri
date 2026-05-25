@@ -37,11 +37,21 @@ import { getStageAgentRoles } from "../../config.js";
 // `agent_event` SSE lands, steps 1+2 stay synthesized client-side and
 // step 3 onwards swaps to real events.
 export const AGENT_PERSONAS = {
-  explorer: { icon: "🔍", label: "Explorer", color: "explorer", scope: "I look around your site to see what users can do." },
-  planner:  { icon: "🧭", label: "Planner",  color: "planner",  scope: "I connect those actions into complete user journeys." },
-  author:   { icon: "✍️", label: "Author",   color: "author",   scope: "I write the tests, one journey at a time." },
-  oracle:   { icon: "🎯", label: "Oracle",   color: "oracle",   scope: "I make sure each test checks something meaningful." },
-  reviewer: { icon: "🛡️", label: "Reviewer", color: "reviewer", scope: "I do the final quality check before anything ships." },
+  explorer:   { icon: "🔍", label: "Explorer",   color: "explorer", scope: "I look around your site to see what users can do." },
+  planner:    { icon: "🧭", label: "Planner",    color: "planner",  scope: "I connect those actions into complete user journeys." },
+  author:     { icon: "✍️", label: "Author",     color: "author",   scope: "I write the tests, one journey at a time." },
+  oracle:     { icon: "🎯", label: "Oracle",     color: "oracle",   scope: "I make sure each test checks something meaningful." },
+  reviewer:   { icon: "🛡️", label: "Reviewer",   color: "reviewer", scope: "I do the final quality check before anything ships." },
+  // AUTO-023 Bundle 2 added envelope emit sites for `supervisor` (chat
+  // route — bidirectional pair per request) and `healer` (vision-heal
+  // outcomes). Without entries here, `messagesToTurns`'s
+  // `AGENT_PERSONAS[m.fromRole]` filter silently dropped every envelope
+  // those roles produced and the operator never saw them in the
+  // conversation feed. Reuse the explorer / oracle palettes so we don't
+  // invent new CSS variables for roles that share the same visual tier
+  // (planner-adjacent supervision vs. assertion-tier healing).
+  supervisor: { icon: "🧠", label: "Supervisor", color: "planner",  scope: "I decide who speaks next." },
+  healer:     { icon: "🩹", label: "Healer",     color: "oracle",   scope: "I patch broken locators when a test can't find an element." },
 };
 
 // ── Per-step agent sequence ──────────────────────────────────────────────────
@@ -569,6 +579,30 @@ export function eventsToTurns(events) {
       continue;
     }
 
+    // AUTO-023 B3.4 — single-agent-collapse advisory. Backend's
+    // `maybeWarnSingleAgentCollapse` emits an `agent_event` with
+    // `phase: "finding"` + `data.kind === "single_agent_collapse"` once
+    // per run when author + reviewer share the same routeId. Render it
+    // as a standalone, instant-display turn flagged `_warning: true` so
+    // `AgentConversation.jsx` can apply a distinct (warning-tier) style
+    // — without this branch it would silently merge into whichever
+    // doing turn was open for the reviewer, which buries the operator
+    // signal under regular narration.
+    if (evt.phase === "finding" && evt.data?.kind === "single_agent_collapse") {
+      const text = prettifyMessage(evt.message)
+        || `Single-agent collapse on route ${evt.data.routeId}.`;
+      turns.push({
+        id: `evt-${key}-collapse-${turns.length}`,
+        agent: evt.agent,
+        phase: "finding",
+        step,
+        text,
+        ts,
+        _complete: true,
+        _warning: true,
+      });
+      continue;
+    }
     if (evt.phase === "finding" || evt.phase === "progress") {
       // Merge into the open doing turn for this (step, agent). When no
       // start preceded this event (orphan finding — possible if the SSE
@@ -624,21 +658,99 @@ export function eventsToTurns(events) {
 
 export function messagesToTurns(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return [];
-  return messages
+  const ordered = messages
     .filter((m) => m && AGENT_PERSONAS[m.fromRole])
+    .sort((a, b) => {
+      const at = Date.parse(a?.createdAt || "") || 0;
+      const bt = Date.parse(b?.createdAt || "") || 0;
+      if (at !== bt) return at - bt;
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
+  const roundAuthorTests = new Map();
+  // Cheap content digest for the round-diff `updated` check. The full-string
+  // fingerprint (`id|name|playwrightCode`) was correct but allocated a fresh
+  // ~2KB string per test per render; at a 50-test suite × ~5 re-renders per
+  // SSE tick that's ~500KB/sec of throwaway strings + Map-key comparisons.
+  // FNV-1a 32-bit hash over `playwrightCode` is O(n) once per fingerprint
+  // computation but produces a tiny integer that hashes in O(1) — net win
+  // since `roundAuthorTests` is consulted on every `request_revision` turn.
+  // Collision risk is acceptable for a visual diff hint: the worst case is
+  // a turn shows "no artifact diff captured" when one test's code happened
+  // to collide with the prior version, which downgrades to the same wording
+  // the empty-diff branch already uses. Length-prefix keeps collisions in
+  // the rare "two strings of different length hash to the same 32-bit value"
+  // class instead of the common "same length, same hash" class.
+  const fnv1a32 = (s) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  };
+  const fingerprint = (t) => {
+    const code = t?.playwrightCode || "";
+    return `${t?.id || ""}|${t?.name || ""}|${code.length}:${fnv1a32(code).toString(16)}`;
+  };
+  return ordered
     .map((m, idx) => {
       const toLabel = m.toRole && AGENT_PERSONAS[m.toRole] ? AGENT_PERSONAS[m.toRole].label : "All";
       const intent = m.intent || "handoff";
-      const detail = m.rationale || formatScalarData(m.artifact) || "";
+      const round = Number(m.round) || 0;
+      if (m.fromRole === "author" && intent === "handoff") {
+        const map = new Map();
+        for (const t of (m.artifact?.tests || [])) {
+          if (t?.id) map.set(t.id, fingerprint(t));
+        }
+        roundAuthorTests.set(round, map);
+      }
+      let detail = m.rationale || formatScalarData(m.artifact) || "";
+      if (intent === "request_revision") {
+        // Per-round diff is only meaningful when there's a PRIOR round
+        // to compare against. On round 0 (the very first revision request)
+        // every test is "new" relative to nothing — printing "+N added"
+        // reads as "the author created N tests this round" when they were
+        // actually the initial submission. Suppress the diff fragment on
+        // round 0; on round 1+ compute against the previous round's
+        // author handoff. `roundAuthorTests.get(-1)` would otherwise
+        // return `undefined` and fall through to the empty-Map default,
+        // producing the misleading "+N added".
+        let diffFragment = "";
+        if (round > 0) {
+          const prev = roundAuthorTests.get(round - 1) || new Map();
+          const curr = roundAuthorTests.get(round) || new Map();
+          const added = [...curr.keys()].filter((id) => !prev.has(id));
+          const removed = [...prev.keys()].filter((id) => !curr.has(id));
+          const updated = [...curr.keys()].filter((id) => prev.has(id) && prev.get(id) !== curr.get(id));
+          const pieces = [];
+          if (added.length) pieces.push(`+${added.length} added`);
+          if (updated.length) pieces.push(`~${updated.length} updated`);
+          if (removed.length) pieces.push(`-${removed.length} removed`);
+          const diffLabel = pieces.length ? pieces.join(", ") : "no artifact diff captured";
+          diffFragment = ` (${diffLabel})`;
+        }
+        detail = `Round ${round + 1} — Reviewer rejected ${(m.artifact?.issues || []).length || 0} issues → Author fixing${diffFragment}`;
+      }
       const text = `[${intent}] ${AGENT_PERSONAS[m.fromRole].label} → ${toLabel}${detail ? ` — ${detail}` : ""}`;
+      // B3.5 — surface the round index on every loop-vocabulary turn so
+      // `AgentConversation.jsx` can render the "Round N" badge. We
+      // expose `_round` on `request_revision`, `accept`, and `reject_final`
+      // (the three Bundle 3 intents from `agentEnvelope.js#INTENTS`) plus
+      // any `handoff` whose round > 0, which is what an author revision
+      // looks like. Round-0 handoffs (the initial author submission)
+      // intentionally don't get a badge — the operator doesn't need
+      // "Round 1" noise on the very first turn.
+      const isLoopIntent = intent === "request_revision" || intent === "accept" || intent === "reject_final";
+      const showRoundBadge = isLoopIntent || (intent === "handoff" && round > 0);
       return {
         id: `msg-${m.id || idx}`,
         agent: m.fromRole,
         phase: "handoff",
-        step: Number(m.round) || 0,
+        step: round,
         text,
         ts: m.createdAt ? Date.parse(m.createdAt) || Date.now() : Date.now(),
         _complete: true,
+        _round: showRoundBadge ? round : undefined,
       };
     });
 }

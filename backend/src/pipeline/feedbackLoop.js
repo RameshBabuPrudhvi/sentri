@@ -25,6 +25,17 @@ import { throwIfAborted } from "../utils/abortHelper.js";
 // users see in the NarrativeFeed.
 import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
 import { emitHandoffEnvelope, mainThreadId, readLatestEnvelope } from "../aiProvider/agentHandoff.js";
+// AUTO-023 B3 — reviewer↔author loop runner. Wires the post-run quality-fix
+// regenerator through `runReviewerAuthorLoop` so a regenerated test that
+// STILL fails heuristic validation (brittle selectors, unbalanced brackets,
+// unknown matchers, secret-scan hits) gets one more author pass to fix the
+// specific issues the heuristic reviewer flagged — rather than shipping a
+// "fixed" test that still has the same shape of bug. The reviewer is the
+// existing `validateTest` heuristic — **zero extra LLM cost**: an `accept`
+// on round 0 short-circuits identically to pre-loop behaviour.
+import { runReviewerAuthorLoop, ReviewRejection } from "../aiProvider/agentLoop.js";
+import { validateTest } from "./testValidator.js";
+import { PIPELINE_STEPS } from "../utils/pipelineState.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
@@ -521,63 +532,242 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
   try {
     throwIfAborted(signal);
     const tier = getTier();
-    const prompt = buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier);
-    // AI-005 — resolve workspaceId from the project row. The `tests` table
-    // has no `workspaceId` column (it's keyed by `projectId`), so the
-    // previous `test.workspaceId || test.projectWorkspaceId || null`
-    // expression always evaluated to `null` — the agentRole label still
-    // flowed through metrics but `resolveProvider`/`resolveRoute` never
-    // saw a workspace and silently fell back to env detection, ignoring
-    // any per-role `author` agent_config the admin configured.
+    // AI-005 — resolve workspaceId from the project row.
     let workspaceId = null;
     if (test.projectId) {
       try { workspaceId = projectRepo.getById(test.projectId)?.workspaceId || null; }
       catch { /* DB unavailable — fall back to env-default routing */ }
     }
-    // GAP-005 (migration 056): thread the originating runId (from
-    // `options.runId`) so the AI request log row is correlated to the
-    // run that triggered the regeneration. Was previously written as
-    // `run?.id` referencing an undefined `run` variable — that threw a
-    // ReferenceError on every regeneration, which the surrounding
-    // try/catch swallowed and returned `null`, silently breaking the
-    // feedback loop's auto-fix path on this PR.
-    // Step 7 — Quality check. `author` rewrites a test that failed validation
-    // (selector brittleness, weak assertions, etc.) so the post-run feedback
-    // loop has signal to surface in the NarrativeFeed's quality-review entry.
+    // Project URL: needed by `validateTest` for placeholder-URL detection.
+    // Best-effort — missing project just loosens that one check; syntax /
+    // selector / secret-scan gates remain intact.
+    let projectUrl = "";
+    if (test.projectId) {
+      try { projectUrl = projectRepo.getById(test.projectId)?.url || ""; }
+      catch { /* see above */ }
+    }
+    // Step 7 — Quality check. GAP-005 (migration 056) threads `runId`
+    // through `generateText` so the AI request log row correlates to the
+    // originating run. `_runId === null` (eval harness, CLI, standalone
+    // tests) silently no-ops every envelope + agent_event emit downstream.
     const _runId = options.runId || null;
     const threadId = _runId ? mainThreadId(_runId) : null;
+    // Bundle 2 contract — read the inbound envelope addressed to `author`
+    // at stage entry. Pinned by the pipeline-driven spy test in
+    // `backend/tests/agent-pipeline-envelope.test.js`. The result feeds
+    // the first author handoff inside the loop via the captured
+    // `inbound.id` (threaded through the per-round emit on the
+    // round-0 author handoff envelope).
     const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
-    emitAgentEvent(_runId, { step: 7, agent: "author", phase: "start", workspaceId,
-      message: `Repairing ${test?.name || "failing test"} (${failureCategory})` });
-    let text;
-    try {
-      text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: _runId });
-    } finally {
-      emitAgentEvent(_runId, { step: 7, agent: "author", phase: "done", workspaceId });
-    }
-    const improved = parseJSON(text);
-    emitHandoffEnvelope({
-      runId: _runId, threadId, workspaceId,
-      fromRole: "author", toRole: "reviewer",
-      replyToId: inbound?.id || null,
-      artifact: { testId: test?.id || null, failureCategory, improved: { name: improved?.name, description: improved?.description } },
-      rationale: "Author regenerated failing test",
-    });
 
-    // Only pick safe fields from the AI response — never let the LLM
-    // override critical DB fields like id, projectId, or reviewStatus.
-    return {
-      ...test,
-      name: improved.name || test.name,
-      description: improved.description || test.description,
-      priority: improved.priority || test.priority,
-      type: improved.type || test.type,
-      steps: Array.isArray(improved.steps) ? improved.steps : test.steps,
-      playwrightCode: improved.playwrightCode || test.playwrightCode,
-      _regenerated: true,
-      _regenerationReason: failureCategory,
-      _originalCode: test.playwrightCode,
-    };
+    // ──────────────────────────────────────────────────────────────────
+    // AUTO-023 B3 — runReviewerAuthorLoop wire-up
+    // ──────────────────────────────────────────────────────────────────
+    //
+    // Reviewer is the existing `testValidator.validateTest` heuristic —
+    // NOT an LLM call. Worst-case cost is `DEFAULT_MAX_REVIEW_ROUNDS` (3)
+    // author LLM calls (one initial fix + up to two retries on heuristic-
+    // detected residual issues — ceiling is per-workspace configurable).
+    // Best-case is one author call — byte-identical to the pre-loop
+    // single-call path. Zero extra LLM cost on accept.
+    //
+    // Why heuristic-only reviewer: the pre-loop regenerator silently
+    // shipped tests that STILL had brittle selectors / unbalanced
+    // brackets / placeholder URLs / secret-scan hits because the
+    // validator's signal arrived AFTER the LLM call. Surfacing those
+    // issues to a second author pass closes the "we regenerated, but
+    // the regenerated test is also broken" gap.
+    //
+    // Bundle 2 contract preserved: the loop emits author→reviewer +
+    // reviewer→author handoff envelopes via its own `agent_message`
+    // writes with `replyToId` threading the chain. The captured
+    // `inbound` envelope's id is used to seed the first author message's
+    // `replyToId` so the audit chain remains intact whether one or two
+    // rounds run.
+    //
+    // `runId === null` callers (eval harness, CLI, standalone tests):
+    // every envelope/event emit no-ops; behaviour is identical to the
+    // pre-loop path.
+    let firstAuthorStartFired = false;
+    let finalCandidate = null;
+    // Hoisted so the `finally` block below can fire the done event +
+    // audit-trail bridge on EVERY terminal path, including
+    // `ReviewRejection`. Pre-fix, the done event + bridge envelope only
+    // fired when the loop returned normally — `reject_final` left an
+    // asymmetric audit trail (author started + per-round agent_messages,
+    // but no done event + no bridge handoff) that contradicted the
+    // loop's `onOutcome` symmetry contract.
+    let loopOutcome = null;
+    let loopThrew = false;
+    try {
+    loopOutcome = await runReviewerAuthorLoop(
+      // Initial artifact carries the failing test as a single-test
+      // collection so the loop's `validateRevisionIssues` can match
+      // reviewer issues back to the right test by id on round 1+.
+      { tests: [{ ...test, _regenerationReason: failureCategory }] },
+      {
+        runId: _runId,
+        threadId,
+        workspaceId,
+        // Round ceiling is intentionally NOT pinned by this call site —
+        // we let the loop's resolution order (caller > per-workspace
+        // `agent_configs.maxReviewRounds` > `DEFAULT_MAX_REVIEW_ROUNDS=3`)
+        // apply, so operators who configured a different ceiling via the
+        // Settings → Agent Roles UI actually get it. Previous code passed
+        // `maxReviewRounds: 2` and silently overrode the workspace setting,
+        // making the new override column inert on the post-run regen path.
+        // The hard cap `HARD_MAX_REVIEW_ROUNDS=10` + per-round
+        // `defaultQuotaCheck` (workspace spend cap) + wall-clock
+        // `loopTimeoutMs` still bound worst-case cost — no need for a
+        // call-site-pinned ceiling here.
+
+        runAuthor: async ({ round, artifact, reviewerIssues }) => {
+          throwIfAborted(signal);
+          // Round 0: prompt is the original failure context — the LLM
+          // has never seen the test before. Round 1+: prompt MUST use
+          // the previous round's `playwrightCode` (carried on `artifact`
+          // by the loop runner), not the original failing code. The
+          // reviewer issues being appended below reference the round-0
+          // LLM output's bugs, so showing the original code alongside
+          // would make the issue list incoherent ("the previous attempt
+          // STILL has these issues" while showing code that's not the
+          // previous attempt). Cite: `runReviewerAuthorLoop` always
+          // forwards the most recent author artifact onto the next
+          // round's `runAuthor({ artifact })` — see `agentLoop.js`'s
+          // round-trip closure for the contract.
+          const priorCandidate = round > 0 ? artifact?.tests?.[0] : null;
+          const promptTest = priorCandidate
+            ? { ...test, playwrightCode: priorCandidate.playwrightCode || test.playwrightCode }
+            : test;
+          let prompt = buildImprovementPrompt(promptTest, failureCategory, errorMessage, snapshot, tier);
+          if (round > 0 && Array.isArray(reviewerIssues) && reviewerIssues.length > 0) {
+            const issueLines = reviewerIssues
+              .slice(0, 8)
+              .map((i) => "- " + i.problem + (i.suggestion ? " (try: " + i.suggestion + ")" : ""))
+              .join("\n");
+            prompt = prompt + "\n\nROUND " + (round + 1) + " — the previous attempt STILL has these issues per heuristic review:\n" + issueLines + "\n\nFIX THESE SPECIFIC ISSUES. Keep the rest of the test unchanged.";
+          }
+          // The B2.2 `emitAgentEvent` start/done bracket on step 7 fires
+          // ONCE on round 0 to preserve the pre-loop NarrativeFeed log
+          // shape. The loop itself emits richer per-round `agent_message`
+          // envelopes — the operator sees iteration via the
+          // AgentConversation feed, not via repeated step-7 start events.
+          if (!firstAuthorStartFired) {
+            emitAgentEvent(_runId, { step: PIPELINE_STEPS.REVIEW, agent: "author", phase: "start", workspaceId,
+              message: "Repairing " + (test?.name || "failing test") + " (" + failureCategory + ")" });
+            firstAuthorStartFired = true;
+          }
+          const text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId: _runId });
+          const improved = parseJSON(text);
+          // Project safe fields onto a fresh copy of the ORIGINAL test
+          // (never let the LLM override id / projectId / reviewStatus).
+          const candidate = {
+            ...test,
+            name: improved?.name || test.name,
+            description: improved?.description || test.description,
+            priority: improved?.priority || test.priority,
+            type: improved?.type || test.type,
+            steps: Array.isArray(improved?.steps) ? improved.steps : test.steps,
+            playwrightCode: improved?.playwrightCode || test.playwrightCode,
+            _regenerated: true,
+            _regenerationReason: failureCategory,
+            _originalCode: test.playwrightCode,
+          };
+          finalCandidate = candidate;
+          return { tests: [candidate] };
+        },
+
+        runReviewer: async ({ artifact }) => {
+          throwIfAborted(signal);
+          const candidate = artifact?.tests?.[0];
+          if (!candidate) return { verdict: "accept" };
+          const issues = validateTest(candidate, projectUrl) || [];
+          if (issues.length === 0) return { verdict: "accept" };
+          // Cap at 5 issues — the prompt-side `runAuthor` already slices
+          // to 8 as defence-in-depth. validateTest's issue strings embed
+          // the suggested fix inline (e.g. "use getByRole instead of CSS
+          // selector"), so we don't need a separate `suggestion` field.
+          const shaped = issues.slice(0, 5).map((problem) => ({
+            testId: candidate.id,
+            problem,
+          }));
+          return { verdict: "revise", artifact: { issues: shaped } };
+        },
+      },
+    );
+
+    } catch (err) {
+      // `ReviewRejection` lands here; flag it so the finally block can
+      // tag the audit trail with `outcome: "reject_final"`. Any other
+      // throw (AbortError, generic) is re-raised by the outer catch.
+      if (err instanceof ReviewRejection) {
+        loopThrew = true;
+      } else {
+        throw err;
+      }
+    } finally {
+      // Done event + audit-trail bridge fire on every terminal path:
+      //   • normal returns (accept / max_rounds / timeout / quota_exhausted)
+      //   • throws (reject_final via ReviewRejection)
+      // Both are best-effort — wrapped in try/catch so observability
+      // hiccups can never mask a legitimate ReviewRejection re-throw
+      // from the outer catch block.
+      try {
+        // Done event mirrors the single start event so the NarrativeFeed
+        // shows one start/done pair per regeneration regardless of how
+        // the loop terminated. Only fires when the start event actually
+        // fired — if the loop exited before round 0's `runAuthor` call
+        // (quota_exhausted / timeout on the pre-round gate), emitting a
+        // "done" without a preceding "start" creates an orphan row in
+        // `run_agent_events`. The frontend's `eventsToTurns` handles
+        // orphan dones gracefully (no-ops), but the audit trail should
+        // not contain asymmetric start/done pairs.
+        if (firstAuthorStartFired) {
+          emitAgentEvent(_runId, { step: PIPELINE_STEPS.REVIEW, agent: "author", phase: "done", workspaceId });
+        }
+      } catch { /* best-effort */ }
+      try {
+        // Bundle 2 audit-trail bridge: anchors the loop's per-round
+        // `agent_message` chain to the inbound envelope's `replyToId`
+        // so the run-detail page renders the entire conversation as a
+        // single thread. The bridge fires for `reject_final` too —
+        // operators auditing "why didn't this test ship?" need a
+        // structured handoff record carrying the outcome, not just
+        // a thrown error in the logs.
+        const bridgeOutcome = loopThrew ? "reject_final" : (loopOutcome?.outcome || null);
+        emitHandoffEnvelope({
+          runId: _runId, threadId, workspaceId,
+          fromRole: "author", toRole: "reviewer",
+          replyToId: inbound?.id || null,
+          artifact: {
+            testId: test?.id || null,
+            failureCategory,
+            outcome: bridgeOutcome,
+            roundsCompleted: loopOutcome?.roundsCompleted || 0,
+            improved: { name: finalCandidate?.name, description: finalCandidate?.description },
+          },
+          rationale: "Author regenerated failing test (B3 loop outcome: " + (bridgeOutcome || "unknown") + ")",
+        });
+      } catch { /* best-effort */ }
+    }
+
+    // `reject_final` is unrecoverable — keep the original test rather
+    // than ship a reviewer-flagged candidate as a regenerated draft.
+    if (loopThrew) return null;
+
+    // Return the final candidate ONLY if the author actually ran.
+    // `finalCandidate` is set inside `runAuthor` — if the loop exited
+    // before round 0's author call (quota_exhausted / timeout on the
+    // pre-round gate), `finalCandidate` is still `null`. Falling
+    // through to `loopOutcome?.artifact?.tests?.[0]` would return the
+    // ORIGINAL unchanged test (the loop's `lastAuthorArtifact` equals
+    // `initialArtifact` when no author call ran), which
+    // `applyFeedbackLoop` would then treat as regenerated — resetting
+    // `reviewStatus` to draft, clearing approval provenance, and
+    // writing "Auto-regenerated by feedback loop" on a test whose code
+    // hasn't changed. Return `null` instead so the caller keeps the
+    // original test untouched.
+    return finalCandidate || null;
   } catch (err) {
     if (err.name === "AbortError") throw err; // propagate abort
     return null; // Regeneration failed — keep original

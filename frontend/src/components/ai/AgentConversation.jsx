@@ -382,8 +382,9 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
             key={turn.id}
             className={`ac-turn ac-turn--${persona.color} ac-turn--${turn.phase}${
               isHandoff ? " ac-turn--handoff" : ""
-            }`}
-            aria-label={`${persona.label} — ${turn.phase}`}
+            }${turn._warning ? " ac-turn--warning" : ""}`}
+            aria-label={`${persona.label} — ${turn.phase}${turn._round != null ? ` — round ${turn._round + 1}` : ""}${turn._warning ? " — warning" : ""}`}
+            role={turn._warning ? "alert" : undefined}
           >
             <div
               className={`ac-avatar ac-avatar--${persona.color}`}
@@ -393,9 +394,36 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
               {persona.icon}
             </div>
             <div className="ac-bubble">
-              {!isHandoff && (
+              {/* Meta line renders when:
+                  - the turn is NOT a handoff (the regular case: doing /
+                    finding / onboard / accept turns from `eventsToTurns`
+                    and the synthesizer), OR
+                  - the turn IS a handoff BUT carries a `_round` index
+                    (envelope-derived loop turns from `messagesToTurns`,
+                    which hardcode `phase: "handoff"` — without this
+                    branch the B3.5 round badge would never render
+                    because the entire `.ac-meta` container was gated
+                    off for handoff turns). The handoff variant's
+                    italic-muted styling (`.ac-turn--handoff .ac-text`)
+                    still applies to the bubble body; only the meta
+                    line is restored so the round badge has somewhere
+                    to live. */}
+              {(!isHandoff || turn._round != null) && (
                 <div className="ac-meta">
                   <span className="ac-agent-label">{persona.label}</span>
+                  {/* B3.5 — Round badge for reviewer↔author loop turns.
+                      `_round` is set by `messagesToTurns` on every envelope-
+                      derived turn that carries a non-zero round index OR
+                      whose intent is part of the loop vocabulary
+                      (`request_revision` / `accept` / `reject_final`). The
+                      badge surfaces "Round N" so operators can see at a
+                      glance which reviewer↔author iteration a turn belongs
+                      to without parsing the bubble text. */}
+                  {turn._round != null && (
+                    <span className="ac-round-badge" aria-label={`Round ${turn._round + 1}`}>
+                      Round {turn._round + 1}
+                    </span>
+                  )}
                   {model && turn.phase !== "onboard" && turn.phase !== "accept" && turn.phase !== "handoff" && (
                     <span className="ac-model">· {model}</span>
                   )}

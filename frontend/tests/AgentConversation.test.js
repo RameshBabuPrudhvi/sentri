@@ -22,6 +22,7 @@ import {
   synthesizeTurns,
   getStepAgentSequence,
   eventsToTurns,
+  messagesToTurns,
 } from "../src/components/ai/agentConversationSynth.js";
 
 let passed = 0;
@@ -402,6 +403,99 @@ test("turn IDs are stable across calls with the same event sequence", () => {
   const a = eventsToTurns(events).map(t => t.id);
   const b = eventsToTurns(events).map(t => t.id);
   assert.deepEqual(a, b);
+});
+
+console.log("\n── messagesToTurns ──");
+test("request_revision includes round badge narration", () => {
+  const turns = messagesToTurns([
+    { id: "1", fromRole: "author", toRole: "reviewer", intent: "handoff", round: 0, artifact: { tests: [{ id: "t1", name: "A", playwrightCode: "code-v1" }] }, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "1.5", fromRole: "author", toRole: "reviewer", intent: "handoff", round: 1, artifact: { tests: [{ id: "t1", name: "A", playwrightCode: "code-v2" }, { id: "t2", name: "B", playwrightCode: "code-v1" }] }, createdAt: "2026-01-01T00:00:00.500Z" },
+    { id: "2", fromRole: "reviewer", toRole: "author", intent: "request_revision", round: 0, artifact: { issues: [{ testId: "t1" }] }, createdAt: "2026-01-01T00:00:01.000Z" },
+    { id: "3", fromRole: "reviewer", toRole: "author", intent: "request_revision", round: 1, artifact: { issues: [{ testId: "t1" }, { testId: "t2" }] }, createdAt: "2026-01-01T00:00:02.000Z" },
+  ]);
+  assert.equal(turns.length, 4);
+  const reviseTurns = turns.filter((t) => /\[request_revision\]/.test(t.text));
+  assert.equal(reviseTurns.length, 2);
+  assert.match(reviseTurns[0].text, /Round 1/);
+  assert.match(reviseTurns[0].text, /Reviewer rejected 1 issues/);
+  // Round-0 revision: no prior round to diff against. The "+N added" /
+  // "~N updated" fragment is intentionally suppressed because every test
+  // would otherwise read as "added" relative to nothing, which misleads
+  // operators into thinking the author created N tests on round 0 when
+  // they're actually the initial submission.
+  assert.ok(!/\+\d+ added/.test(reviseTurns[0].text),
+    "round-0 revision must NOT carry +N added (no prior round to diff)");
+  assert.ok(!/~\d+ updated/.test(reviseTurns[0].text),
+    "round-0 revision must NOT carry ~N updated (no prior round to diff)");
+  assert.match(reviseTurns[1].text, /Round 2/);
+  assert.match(reviseTurns[1].text, /Reviewer rejected 2 issues/);
+  // Round-1 revision DOES have round-0 as the diff baseline — "+1 added"
+  // (test t2 didn't exist on round 0) + "~1 updated" (t1's code changed
+  // from v1 to v2) are both meaningful here.
+  assert.match(reviseTurns[1].text, /\+1 added/);
+  assert.match(reviseTurns[1].text, /~1 updated/);
+
+  // B3.5 render-predicate pin — every loop-vocabulary turn MUST carry a
+  // `_round` field, because `AgentConversation.jsx`'s `.ac-meta` block
+  // is gated on `(!isHandoff || turn._round != null)`. Every turn from
+  // `messagesToTurns` is hardcoded `phase: "handoff"`, so without the
+  // `_round` field the entire meta line (label + round badge + model
+  // chip) would never render for these envelope-derived turns and the
+  // operator-visible "Round N" badge would be invisible.
+  for (const t of reviseTurns) {
+    assert.equal(typeof t._round, "number", `request_revision turn must carry numeric _round (got ${typeof t._round})`);
+  }
+  // The round-0 author handoff (the initial submission) intentionally
+  // does NOT get a badge — pin that too so a future refactor can't
+  // accidentally surface "Round 1" on the very first turn.
+  const initialAuthorHandoff = turns.find((t) => t.id === "msg-1");
+  assert.ok(initialAuthorHandoff, "expected the round-0 author handoff turn");
+  assert.equal(initialAuthorHandoff._round, undefined,
+    "round-0 handoffs must NOT carry _round (no Round 1 noise on initial submission)");
+});
+
+test("single_agent_collapse advisory emits a standalone warning turn (not merged into doing)", () => {
+  // Backend's `maybeWarnSingleAgentCollapse` emits one `agent_event` per
+  // run with `phase: "finding"` + `data.kind === "single_agent_collapse"`
+  // when author + reviewer share the same routeId. Without the dedicated
+  // branch in `eventsToTurns`, the warning would be silently merged into
+  // the reviewer's open `doing` turn (or dropped as an orphan finding).
+  // Pin the standalone-turn shape + the `_warning: true` flag the
+  // component keys its alert styling on.
+  const turns = eventsToTurns([
+    { step: 7, agent: "reviewer", phase: "start", message: "Reviewing" },
+    { step: 7, agent: "reviewer", phase: "finding", message: "Author and reviewer share the same provider route — review loop runs but cannot catch model-specific blind spots.", data: { kind: "single_agent_collapse", routeId: "pr-abc", model: "claude-3-5-sonnet" } },
+  ]);
+  // Two turns: the doing (from start) + the standalone warning. The
+  // warning MUST NOT have merged into the doing turn's text.
+  assert.equal(turns.length, 2, "warning is a separate turn, not merged");
+  const warning = turns.find(t => t._warning === true);
+  assert.ok(warning, "expected a turn flagged `_warning: true`");
+  assert.equal(warning.agent, "reviewer");
+  assert.equal(warning._complete, true, "warning renders instantly");
+  assert.match(warning.text, /share the same provider route/);
+  // The doing turn text must NOT have absorbed the warning.
+  const doing = turns.find(t => t.id === "evt-7-reviewer-doing");
+  assert.ok(doing, "doing turn still present");
+  assert.ok(!/share the same provider route/.test(doing.text),
+    "warning text must not leak into the doing turn");
+});
+
+test("supervisor + healer envelopes render (not silently dropped by persona filter)", () => {
+  // Bundle 2 added envelope emit sites for `supervisor` (chat route) and
+  // `healer` (vision-heal). Pre-fix, `messagesToTurns`'s
+  // `AGENT_PERSONAS[m.fromRole]` filter dropped both because neither key
+  // existed in the persona table. Pin both render now so a future
+  // refactor that re-narrows the persona table fails this assertion.
+  const turns = messagesToTurns([
+    { id: "s1", fromRole: "supervisor", toRole: "author", intent: "handoff", round: 0, rationale: "Edit this test", createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "h1", fromRole: "healer", toRole: "reviewer", intent: "handoff", round: 0, rationale: "Repaired locator", createdAt: "2026-01-01T00:00:01.000Z" },
+  ]);
+  assert.equal(turns.length, 2, "both envelopes survive the persona-table filter");
+  assert.equal(turns[0].agent, "supervisor");
+  assert.equal(turns[1].agent, "healer");
+  assert.match(turns[0].text, /Supervisor/);
+  assert.match(turns[1].text, /Healer/);
 });
 
 process.on("beforeExit", () => {
