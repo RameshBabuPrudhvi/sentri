@@ -22,3 +22,5 @@ spec:
             httpGet: { path: /healthz, port: {{ .Values.worker.healthPort }} }
           livenessProbe:
             httpGet: { path: /healthz, port: {{ .Values.worker.healthPort }} }
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}

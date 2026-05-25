@@ -1,10 +1,16 @@
 backend:
   image: ghcr.io/example/sentri-backend:latest
   replicas: 1
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
 worker:
   image: ghcr.io/example/sentri-worker:latest
   replicas: 1
   healthPort: 3002
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: "2",  memory: 2Gi }
 postgres:
   image: postgres:16
   storage: 10Gi
