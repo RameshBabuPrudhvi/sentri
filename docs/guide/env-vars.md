@@ -104,6 +104,14 @@ Sentri appends a `provider_route_audit` row on every mutation to a `provider_rou
 |---|---|---|
 | `AI_ROUTES_AUDIT_RETENTION_DAYS` | `90` | Daily 05:00 UTC sweep deletes `provider_route_audit` rows older than this many days. Set `0` to disable retention entirely (rows accumulate forever). Distinct from `AUDIT_RETENTION_DAYS` (SEC-007 `activities` table) — the two audit logs serve different compliance scopes and are tuned independently. |
 
+### Agent Messages Retention (AUTO-023 B1.1)
+
+Sentri persists thread-scoped agent-to-agent envelopes to the `agent_messages` table on every `emitAgentMessage(envelope)` call — see [`backend/src/aiProvider/agentEventEmitter.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/aiProvider/agentEventEmitter.js). Append-only, workspace-scoped, mirrors the `run_agent_events` retention posture.
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_MESSAGE_RETENTION_DAYS` | `90` | Daily 05:15 UTC sweep deletes `agent_messages` rows older than this many days. Set `0` to disable the retention sweep entirely (rows accumulate forever). |
+
 ### AI Spend Alert Webhook (B4.0.1)
 
 The B3.7 spend-cap path can deliver a Slack-compatible webhook payload to `workspaces.spendAlertWebhookUrl` when current spend crosses `cap × spendAlertThresholdPct / 100`. A cooldown prevents flooding when sustained-high-spend workspaces re-cross the threshold on every AI call — see [`backend/src/aiProvider/spendAlert.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/aiProvider/spendAlert.js).

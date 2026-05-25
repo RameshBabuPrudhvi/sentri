@@ -12,6 +12,28 @@
 // intentionally not user-configurable (it's a Prometheus catch-all).
 export const AGENT_ROLES = ["explorer", "planner", "author", "oracle", "reviewer", "healer", "triager"];
 
+// AUTO-023 Bundle 1: mirrors the canonical envelope intent enum in
+// `backend/src/aiProvider/agentEnvelope.js#INTENTS`. Same byte-for-byte
+// sync contract as AGENT_ROLES above — the frontend can't import from
+// backend, so the two lists are kept in lockstep. Drift surfaces as an
+// `ERR_AGENT_ENVELOPE_INVALID` rejection from `validateEnvelope(msg)` on
+// the first emit that uses a frontend-only intent.
+//
+// Consumers (landing in Bundle 2 / 3): `AgentConversation.jsx` round
+// badges, `request_revision` rendering, supervisor-decision rendering.
+export const AGENT_INTENTS = [
+  "handoff",
+  "request_revision",
+  "accept",
+  "reject",
+  "question",
+  "answer",
+  "final",
+  "tool_call",
+  "tool_result",
+  "reject_final",
+];
+
 // Provider-family emoji map. Mirrors `backend/src/aiProvider/modelCatalog.js#FAMILY_EMOJI`.
 // Used by AiProvidersSection + AgentRolesSection as a client-side fallback
 // when the server response doesn't include `familyEmoji` (older backend).
