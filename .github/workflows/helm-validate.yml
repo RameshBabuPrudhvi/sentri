@@ -1,0 +1,22 @@
+name: Helm Validate
+on:
+  pull_request:
+    paths:
+      - 'helm/**'
+      - '.github/workflows/helm-validate.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm template helm/sentri --values tests/helm/values-overrides.yaml > /tmp/rendered.yaml
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp
+          sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+      - name: Validate rendered manifests
+        run: kubeconform -strict -kubernetes-version 1.30.0 -schema-location default /tmp/rendered.yaml

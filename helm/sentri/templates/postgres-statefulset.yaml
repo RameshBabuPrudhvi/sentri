@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sentri-postgres
+spec:
+  serviceName: sentri-postgres
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: sentri-secrets, key: POSTGRES_USER }
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef: { name: sentri-secrets, key: POSTGRES_DB }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: sentri-secrets, key: POSTGRES_PASSWORD }
+            # Force PGDATA into a subdirectory of the PVC mount. Most
+            # ext4-backed dynamically-provisioned PVCs ship with a
+            # `lost+found` directory at the root, which makes Postgres's
+            # initdb fail with "directory is not empty". Bitnami /
+            # CrunchyData / Zalando charts all use this pattern. Cannot
+            # use `subPath:` on the volumeMount because StatefulSet PVCs
+            # with subPath don't auto-create the subdirectory on first
+            # boot — the official Postgres image's entrypoint creates
+            # whatever path `PGDATA` points at.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: {{ .Values.postgres.storage }} } }

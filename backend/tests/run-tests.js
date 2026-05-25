@@ -211,6 +211,11 @@ const files = [
   "tests/source-map-resolver.test.js",
   "tests/server-coverage-proxy.test.js", // AUTO-009h — server-side coverage capture for API tests
   "tests/observability.test.js",
+  "tests/health-routes.test.js",
+  // INF-009 — Worker /healthz endpoint 200/503 contract. Reconstructs the
+  // http.createServer handler from `backend/src/worker.js` so we can pin
+  // the kubelet probe shape without booting BullMQ/Redis/Postgres.
+  "tests/worker-health.test.js",
   // AUTO-022 — AI eval harness scorer + regression-detection + metric_samples persistence.
   "tests/eval-pipeline.test.js",
   "tests/eval-regression.test.js",
