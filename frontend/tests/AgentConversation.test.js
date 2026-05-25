@@ -424,6 +424,33 @@ test("request_revision includes round badge narration", () => {
   assert.match(reviseTurns[1].text, /~1 updated/);
 });
 
+test("single_agent_collapse advisory emits a standalone warning turn (not merged into doing)", () => {
+  // Backend's `maybeWarnSingleAgentCollapse` emits one `agent_event` per
+  // run with `phase: "finding"` + `data.kind === "single_agent_collapse"`
+  // when author + reviewer share the same routeId. Without the dedicated
+  // branch in `eventsToTurns`, the warning would be silently merged into
+  // the reviewer's open `doing` turn (or dropped as an orphan finding).
+  // Pin the standalone-turn shape + the `_warning: true` flag the
+  // component keys its alert styling on.
+  const turns = eventsToTurns([
+    { step: 7, agent: "reviewer", phase: "start", message: "Reviewing" },
+    { step: 7, agent: "reviewer", phase: "finding", message: "Author and reviewer share the same provider route — review loop runs but cannot catch model-specific blind spots.", data: { kind: "single_agent_collapse", routeId: "pr-abc", model: "claude-3-5-sonnet" } },
+  ]);
+  // Two turns: the doing (from start) + the standalone warning. The
+  // warning MUST NOT have merged into the doing turn's text.
+  assert.equal(turns.length, 2, "warning is a separate turn, not merged");
+  const warning = turns.find(t => t._warning === true);
+  assert.ok(warning, "expected a turn flagged `_warning: true`");
+  assert.equal(warning.agent, "reviewer");
+  assert.equal(warning._complete, true, "warning renders instantly");
+  assert.match(warning.text, /share the same provider route/);
+  // The doing turn text must NOT have absorbed the warning.
+  const doing = turns.find(t => t.id === "evt-7-reviewer-doing");
+  assert.ok(doing, "doing turn still present");
+  assert.ok(!/share the same provider route/.test(doing.text),
+    "warning text must not leak into the doing turn");
+});
+
 test("supervisor + healer envelopes render (not silently dropped by persona filter)", () => {
   // Bundle 2 added envelope emit sites for `supervisor` (chat route) and
   // `healer` (vision-heal). Pre-fix, `messagesToTurns`'s

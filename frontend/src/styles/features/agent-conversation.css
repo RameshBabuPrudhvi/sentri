@@ -134,6 +134,24 @@
  * from `.ac-model` so the operator can scan iteration count without
  * conflating it with the provider attribution chip. */
 
+/* ─── Warning turn (B3.4 single-agent collapse advisory) ──────────────────────
+ * Used by the AI-005c surface — when author + reviewer resolve to the
+ * same routeId, the loop emits a one-shot `agent_event` flagged
+ * `_warning: true` so the operator sees a visually distinct alert
+ * inside the conversation feed. Amber palette echoes the audit + alert-
+ * banner conventions used elsewhere in the app (Dashboard HealthBanner,
+ * QualityGates badge). The `--warning` modifier OVERRIDES the per-agent
+ * palette intentionally — the signal is "something off about the
+ * configuration", not "something specific to this agent". */
+.ac-turn--warning .ac-text {
+  background: rgba(245, 158, 11, 0.10);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #92400e;
+}
+.ac-turn--warning .ac-agent-label {
+  color: #92400e;
+}
+
 .ac-round-badge {
   display: inline-flex;
   align-items: center;

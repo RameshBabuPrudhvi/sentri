@@ -1,8 +1,9 @@
-import { emitAgentMessage } from "./agentEventEmitter.js";
+import { emitAgentMessage, emitAgentEvent } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { agentReviewRoundsTotal } from "../utils/metrics.js";
 import { checkSpendCap } from "./quotaGuard.js";
 import { getMaxReviewRounds } from "../database/repositories/agentConfigRepo.js";
+import { resolveRoute } from "./registry.js";
 
 const HARD_MAX_REVIEW_ROUNDS = 10;
 const DEFAULT_MAX_REVIEW_ROUNDS = 3;
@@ -127,6 +128,51 @@ function resolveMaxReviewRounds(callerValue, workspaceId) {
   return override == null ? DEFAULT_MAX_REVIEW_ROUNDS : override;
 }
 
+/**
+ * AI-005c surface — emit a one-shot warning when author + reviewer
+ * resolve to the SAME `routeId`. The loop still runs both calls (the
+ * collapse rule preserves single-agent dispatch correctness — same
+ * provider gets ONE breaker, both calls share it), but the operator
+ * needs to know that the "two-agent" review loop is, in this workspace,
+ * actually one model talking to itself. Symptoms when undiagnosed: the
+ * reviewer never disagrees with the author, accept-on-round-1 rate hits
+ * 100%, and review rounds stop catching brittle selectors.
+ *
+ * Best-effort and silent on every failure path — `resolveRoute` may
+ * throw on a corrupted `agent_configs` row; `emitAgentEvent` is already
+ * best-effort by contract; `runId === null` (smoke-test path) silently
+ * skips the emit because `emitAgentEvent` no-ops on null runId.
+ *
+ * The warning is emitted via the same `agent_event` channel the run-
+ * detail page already renders (per the Task 2 NarrativeFeed contract),
+ * so it surfaces inside the conversation feed without a new UI surface.
+ * `phase: "finding"` is the documented phase for advisory notes; the
+ * `data` payload carries structured fields the UI can key on if a
+ * future PR wants a dedicated badge.
+ */
+function maybeWarnSingleAgentCollapse({ runId, workspaceId }) {
+  if (!runId || !workspaceId) return;
+  try {
+    const author = resolveRoute({ agentRole: "author", workspaceId });
+    const reviewer = resolveRoute({ agentRole: "reviewer", workspaceId });
+    const aId = author?.route?.id;
+    const rId = reviewer?.route?.id;
+    if (!aId || !rId || aId !== rId) return;
+    emitAgentEvent(runId, {
+      step: 7,
+      agent: "reviewer",
+      phase: "finding",
+      message: "Author and reviewer share the same provider route — review loop runs but cannot catch model-specific blind spots.",
+      data: {
+        kind: "single_agent_collapse",
+        routeId: aId,
+        model: reviewer?.route?.model || author?.route?.model || null,
+      },
+      workspaceId,
+    });
+  } catch { /* best-effort */ }
+}
+
 function toMessage({ runId, threadId, workspaceId, fromRole, toRole, intent, artifact, rationale, round, replyToId }) {
   // Omit `id` — `emitAgentMessage` assigns a monotonic id via its internal
   // sequence so `(createdAt ASC, id ASC)` tiebreaks preserve insertion
@@ -207,6 +253,12 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   // cap fires too late — by then a reviewer or author LLM call already
   // burned tokens).
   const effectiveQuotaCheck = typeof checkQuota === "function" ? checkQuota : defaultQuotaCheck;
+  // AI-005c — fire the single-agent-collapse advisory once per loop
+  // before round 0. Idempotent + best-effort: missing runId / workspaceId
+  // skips silently (smoke-test path), and resolveRoute / emitAgentEvent
+  // failures are swallowed so the loop never fails because of an
+  // observability hiccup.
+  maybeWarnSingleAgentCollapse({ runId, workspaceId });
   const maxElapsedMs = clampLoopTimeoutMs(loopTimeoutMs);
   const deadline = Date.now() + maxElapsedMs;
   const maxReplyChainDepth = maxRounds * 2;

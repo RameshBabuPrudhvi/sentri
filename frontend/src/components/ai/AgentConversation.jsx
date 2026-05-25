@@ -382,8 +382,9 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
             key={turn.id}
             className={`ac-turn ac-turn--${persona.color} ac-turn--${turn.phase}${
               isHandoff ? " ac-turn--handoff" : ""
-            }`}
-            aria-label={`${persona.label} — ${turn.phase}${turn._round != null ? ` — round ${turn._round + 1}` : ""}`}
+            }${turn._warning ? " ac-turn--warning" : ""}`}
+            aria-label={`${persona.label} — ${turn.phase}${turn._round != null ? ` — round ${turn._round + 1}` : ""}${turn._warning ? " — warning" : ""}`}
+            role={turn._warning ? "alert" : undefined}
           >
             <div
               className={`ac-avatar ac-avatar--${persona.color}`}

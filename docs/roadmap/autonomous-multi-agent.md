@@ -241,12 +241,15 @@ an assembly line.
       USD spend cap terminates early with `outcome=quota_exhausted` and
       ships the last accepted artifact (`defaultQuotaCheck` in
       `agentLoop.js`)
-- [ ] AI-005c single-agent collapse rule preserved: when author + reviewer
-      share the same `routeId`, loop still runs (both calls happen) but
-      a warning surfaces on the run detail page (deferred to the
-      orchestrator-wiring follow-up — the loop runner itself doesn't
-      yet have a UI surface to emit the warning into; tracked under
-      `AUTO-023-B3-FOLLOWUP-SINGLE-AGENT-WARNING`)
+- [x] AI-005c single-agent collapse rule preserved: when author + reviewer
+      share the same `routeId`, loop still runs (both calls happen) and
+      a warning surfaces on the run detail page —
+      `maybeWarnSingleAgentCollapse` in `agentLoop.js` resolves both
+      roles via `resolveRoute`, compares `route.id`, and emits a one-
+      shot `agent_event` with `phase: "finding"` + `data.kind =
+      "single_agent_collapse"`; `eventsToTurns` renders it as a
+      standalone `_warning: true` turn and `AgentConversation.jsx`
+      paints it with `.ac-turn--warning` (amber) + `role="alert"`
 
 ## B3.5 — UI: round indicator + diff view
 - [x] `frontend/src/components/ai/AgentConversation.jsx`:

@@ -579,6 +579,30 @@ export function eventsToTurns(events) {
       continue;
     }
 
+    // AUTO-023 B3.4 — single-agent-collapse advisory. Backend's
+    // `maybeWarnSingleAgentCollapse` emits an `agent_event` with
+    // `phase: "finding"` + `data.kind === "single_agent_collapse"` once
+    // per run when author + reviewer share the same routeId. Render it
+    // as a standalone, instant-display turn flagged `_warning: true` so
+    // `AgentConversation.jsx` can apply a distinct (warning-tier) style
+    // — without this branch it would silently merge into whichever
+    // doing turn was open for the reviewer, which buries the operator
+    // signal under regular narration.
+    if (evt.phase === "finding" && evt.data?.kind === "single_agent_collapse") {
+      const text = prettifyMessage(evt.message)
+        || `Single-agent collapse on route ${evt.data.routeId}.`;
+      turns.push({
+        id: `evt-${key}-collapse-${turns.length}`,
+        agent: evt.agent,
+        phase: "finding",
+        step,
+        text,
+        ts,
+        _complete: true,
+        _warning: true,
+      });
+      continue;
+    }
     if (evt.phase === "finding" || evt.phase === "progress") {
       // Merge into the open doing turn for this (step, agent). When no
       // start preceded this event (orphan finding — possible if the SSE
