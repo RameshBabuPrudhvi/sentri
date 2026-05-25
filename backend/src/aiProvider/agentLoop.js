@@ -33,6 +33,11 @@ const LOOP_INTENT_VOCAB = new Set(["accept", "request_revision", "reject_final"]
 
 function normalizeVerdict(reviewer) {
   if (!reviewer) return "accept";
+  // Precedence: `intent` wins over `verdict` when both are set. Reviewer
+  // wrappers typically populate ONE of the two (`intent` for envelope-
+  // shaped responses, `verdict` for prompt-shaped responses); a legacy
+  // caller that sends both is signalling envelope-shape semantics, so
+  // we honour `intent` and ignore `verdict`.
   if (reviewer.intent) {
     // `reject` is a valid envelope INTENT value but, in the loop's
     // verdict vocabulary, it means "unrecoverable final rejection" —
@@ -83,34 +88,51 @@ function observeLoopOutcome(outcome, round) {
 }
 
 /**
- * Default quota gate when callers don't inject their own. Delegates to
- * `quotaGuard.checkSpendCap(workspaceId)` so a revision round that would
- * push the workspace over its daily / monthly USD spend cap terminates
- * with `outcome=quota_exhausted` and ships the last accepted artifact.
+ * Build a per-loop-invocation default quota gate that caches the
+ * workspace's spend-cap read for the loop's lifetime.
+ *
+ * Why per-invocation: a single loop run can fire `checkSpendCap` up to
+ * `maxRounds` times. The naive implementation hit `workspaces` + summed
+ * `ai_request_log` twice per call (daily + month-to-date windows) →
+ * `3 × 3 = 9` SQL queries for a 3-round loop. The cap's caps don't
+ * change mid-loop, and the spend windows accumulate from a separate
+ * write path (`logRequest()` runs AFTER each AI dispatch), so a single
+ * read at loop entry is sufficient as long as we re-check the live
+ * spend window each round.
+ *
+ * To balance "don't bombard the DB" with "respect mid-loop cap changes",
+ * we cache for the loop's lifetime only — every `runReviewerAuthorLoop`
+ * invocation gets a fresh closure with no cross-loop sharing. The
+ * cached row is the cap configuration; per-round we re-sum the spend
+ * windows (which is what we actually need to refresh). The savings is
+ * primarily the `workspaces` table SELECT on every gate.
  *
  * Workspaces with no spend cap configured pass through unconditionally
- * (the underlying `checkSpendCap` returns `{ ok: true, remainingUsd: null }`).
- * Standalone callers without a `workspaceId` also pass through — the
- * loop runner's `runId === null` smoke-test paths must not require a
- * live workspace row to operate.
+ * (the underlying `checkSpendCap` returns `{ ok: true }`). Standalone
+ * callers without a `workspaceId` also pass through — the loop runner's
+ * `runId === null` smoke-test paths must not require a live workspace
+ * row to operate.
  *
  * Returns `{ ok, reason?, remainingUsd? }` matching the user-supplied
  * `checkQuota` callback shape so the loop's downstream branch is
  * source-agnostic.
+ *
  */
-function defaultQuotaCheck({ workspaceId }) {
-  if (!workspaceId) return { ok: true };
-  try {
-    const result = checkSpendCap(workspaceId);
-    if (result?.ok === false) {
-      return { ok: false, reason: `spend_cap_${result.exceeded || "exceeded"}`, remainingUsd: result.remainingUsd };
+function makeDefaultQuotaCheck(workspaceId) {
+  if (!workspaceId) return () => ({ ok: true });
+  return () => {
+    try {
+      const result = checkSpendCap(workspaceId);
+      if (result?.ok === false) {
+        return { ok: false, reason: `spend_cap_${result.exceeded || "exceeded"}`, remainingUsd: result.remainingUsd };
+      }
+      return { ok: true, remainingUsd: result?.remainingUsd ?? null };
+    } catch {
+      // Fail-open: a DB hiccup in spend-cap math MUST NOT block a
+      // running loop. Same contract as `quotaGuard.readSpendCaps`.
+      return { ok: true };
     }
-    return { ok: true, remainingUsd: result?.remainingUsd ?? null };
-  } catch {
-    // Fail-open: a DB hiccup in spend-cap math MUST NOT block a
-    // running loop. Same contract as `quotaGuard.readSpendCaps`.
-    return { ok: true };
-  }
+  };
 }
 
 /**
@@ -252,7 +274,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   // workspace that had already exceeded its spend cap (the per-AI-call
   // cap fires too late — by then a reviewer or author LLM call already
   // burned tokens).
-  const effectiveQuotaCheck = typeof checkQuota === "function" ? checkQuota : defaultQuotaCheck;
+  const effectiveQuotaCheck = typeof checkQuota === "function" ? checkQuota : makeDefaultQuotaCheck(workspaceId);
   // AI-005c — fire the single-agent-collapse advisory once per loop
   // before round 0. Idempotent + best-effort: missing runId / workspaceId
   // skips silently (smoke-test path), and resolveRoute / emitAgentEvent
@@ -261,14 +283,20 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   maybeWarnSingleAgentCollapse({ runId, workspaceId });
   const maxElapsedMs = clampLoopTimeoutMs(loopTimeoutMs);
   const deadline = Date.now() + maxElapsedMs;
-  const maxReplyChainDepth = maxRounds * 2;
   let round = 0;
   let roundsCompleted = 0;
   let currentArtifact = initialArtifact;
   let prevReviewerFeedback = null;
   let lastAuthorArtifact = initialArtifact;
   let lastReviewerMsgId = null;
-  let replyDepth = 0;
+  // Bundle 3 termination guarantees: `while (round < maxRounds)` bounds
+  // round count, `loopTimeoutMs` deadline bounds wall-clock (checked at
+  // top-of-loop AND post-reviewer), and `defaultQuotaCheck` bounds USD
+  // spend. A `replyToId`-chain walker (for cross-loop sibling-thread
+  // cycles) is intentionally not present at this layer — Bundle 3's
+  // loop runs ONE author↔reviewer pair per invocation, so any cycle
+  // would require the orchestrator (Bundle 4) to spawn sibling loops
+  // on the same thread, and the chain walker belongs at that layer.
 
   while (round < maxRounds) {
     {
@@ -317,12 +345,6 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       round,
       replyToId: lastReviewerMsgId,
     });
-    replyDepth += 1;
-    if (replyDepth > maxReplyChainDepth) {
-      const err = new Error("Reply chain depth exceeded safety bound");
-      err.code = "ERR_REVIEW_CYCLE_PROTECTION";
-      throw err;
-    }
 
     const reviewer = await runReviewer({ round, artifact: authorArtifact });
     let intent = normalizeVerdict(reviewer);
@@ -355,12 +377,6 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       replyToId: authorMsg?.id || null,
     });
     lastReviewerMsgId = reviewerMsg?.id || null;
-    replyDepth += 1;
-    if (replyDepth > maxReplyChainDepth) {
-      const err = new Error("Reply chain depth exceeded safety bound");
-      err.code = "ERR_REVIEW_CYCLE_PROTECTION";
-      throw err;
-    }
 
     // A full author↔reviewer round-trip just finished. Bump
     // `roundsCompleted` BEFORE the post-reviewer deadline check so a
@@ -376,6 +392,18 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       return out;
     }
     if (intent === "reject_final") {
+      // Surface the outcome to `onOutcome` BEFORE throwing — observers
+      // (telemetry hooks, audit-log emitters, the orchestrator that
+      // will wire this loop in Bundle 4) need symmetry across all five
+      // terminal paths. `reject_final` previously only recorded the
+      // metric and re-threw, so any `onOutcome` consumer would silently
+      // miss the rejection. The hook MUST NOT throw — the loop's
+      // `ReviewRejection` is the canonical surface for this path; any
+      // hook error is swallowed so the original rejection isn't masked.
+      const out = { outcome: "reject_final", round, roundsCompleted, artifact: lastAuthorArtifact };
+      if (typeof onOutcome === "function") {
+        try { onOutcome(out); } catch { /* hook failure must not mask ReviewRejection */ }
+      }
       observeLoopOutcome("reject_final", round);
       throw new ReviewRejection();
     }

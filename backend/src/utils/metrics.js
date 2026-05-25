@@ -250,15 +250,36 @@ export const activeRuns = new client.Gauge({
 });
 
 // AUTO-023 B3.3 — reviewer↔author loop termination visibility.
+//
 // `outcome` is the bounded terminal enum from `agentLoop.js`:
-// accept | max_rounds | timeout | quota_exhausted.
-export const agentReviewRoundsTotal = new client.Histogram({
-  name: "app_agent_review_rounds_total",
-  help: "Reviewer↔author loop rounds completed before termination. `round` index is 0-based and bucketed 0..3 to mirror Bundle-3 defaults. Labelled by terminal outcome for operator debugging.",
+// `accept` | `max_rounds` | `timeout` | `quota_exhausted` | `reject_final`.
+//
+// Naming: Prometheus convention reserves the `_total` suffix for Counters
+// (so `*_total_bucket` / `*_total_sum` / `*_total_count` series read
+// cleanly when histograms auto-expand). This is a Histogram, so the
+// metric name is `app_agent_review_rounds` (no `_total`). The JS export
+// keeps a literal name match.
+//
+// Observation contract: the loop calls `observe({ outcome }, round)` once
+// per terminal path with the 0-indexed round (-1 sentinel for "timeout /
+// quota_exhausted fired before round 0 completed"). The metric clamps
+// `round` into the `[0, 1, 2, 3]` bucket range via `Math.max(0, …)` at
+// the call site (`agentLoop.js#observeLoopOutcome`), so the `-1`
+// sentinel collapses into the same bucket as "accept on round 0" in
+// the histogram. The structured `round` field on `runReviewerAuthorLoop`'s
+// return value preserves the distinction for callers that need it.
+export const agentReviewRounds = new client.Histogram({
+  name: "app_agent_review_rounds",
+  help: "Reviewer↔author loop rounds completed before termination. `round` index is 0-based and bucketed 0..3 to mirror Bundle-3 defaults. Labelled by terminal outcome (`accept` / `max_rounds` / `timeout` / `quota_exhausted` / `reject_final`) for operator debugging.",
   labelNames: ["outcome"],
   buckets: REVIEW_ROUND_BUCKETS,
   registers: [register],
 });
+
+// Back-compat alias for callers that imported the original name. Slated for
+// removal once Bundle 4's orchestrator-wiring PR lands and every consumer
+// has migrated to `agentReviewRounds`.
+export const agentReviewRoundsTotal = agentReviewRounds;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

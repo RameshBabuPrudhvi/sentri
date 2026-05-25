@@ -162,7 +162,7 @@ test("loop records termination metric with bounded outcome label", async () => {
     runAuthor: async ({ artifact }) => artifact,
     runReviewer: async () => ({ intent: "accept" }),
   });
-  const metric = register.getSingleMetric("app_agent_review_rounds_total");
+  const metric = register.getSingleMetric("app_agent_review_rounds");
   const json = await metric.get();
   const sawAccept = json.values.some((v) => v.labels?.outcome === "accept");
   assert.equal(sawAccept, true);

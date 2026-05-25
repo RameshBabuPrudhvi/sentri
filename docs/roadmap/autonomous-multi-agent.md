@@ -198,12 +198,22 @@ groundwork for loops + branches in Bundle 3.
 
 # Bundle 3 — Reviewer ↔ Author feedback loop (first real conversation) ✅ COMPLETED
 
-**Status:** shipped in PR #35. Loop runner + per-workspace
-`maxReviewRounds` override (migration 059) + real `quotaGuard`
-integration + AI-005c single-agent-collapse warning + termination
-metric + UI round badge & per-round artifact diff + golden-fixture
-regression all live. See `docs/changelog.md` "AUTO-023 Bundle 3" entry
-for the full enumeration.
+**Status:** shipped in PR #35. Loop substrate + production wiring +
+per-workspace `maxReviewRounds` override (migration 059) + real
+`quotaGuard.checkSpendCap` integration + AI-005c single-agent-collapse
+warning + `app_agent_review_rounds` termination metric + UI round
+badge & per-round artifact diff + golden-fixture regression test +
+**production wire-up in `feedbackLoop.regenerateFailingTest`** with
+a heuristic-only reviewer (`testValidator.validateTest`) so every
+post-run regeneration goes through up to 2 author rounds before
+shipping. The heuristic reviewer adds zero LLM cost on the happy path
+(accept on round 0 is byte-identical to the pre-loop single-call
+flow); the second round only fires when the regenerated test still
+trips heuristic checks (brittle selectors, unbalanced brackets,
+placeholder URLs, secret-scan hits).
+
+See `docs/changelog.md` "AUTO-023 Bundle 3" entry for the full
+enumeration.
 
 **Goal:** the smallest possible real multi-agent interaction — `reviewer`
 can reject and force `author` to revise. This is where Sentri stops being
