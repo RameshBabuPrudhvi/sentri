@@ -56,6 +56,7 @@ const files = [
   "tests/agent-message-repo.test.js",
   "tests/agent-message-emitter.test.js",
   "tests/agent-reviewer-loop.test.js",
+  "tests/reviewer-prompt.test.js",
   // AUTO-023 B2.6 — envelope-mode pipeline handoff smoke test. Pins the
   // ordered explorer→planner→author thread, workspace scoping on
   // `listByThread`, the envelope-vs-pipeline read-mode gate, and the

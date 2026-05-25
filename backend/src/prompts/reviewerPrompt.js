@@ -96,3 +96,28 @@ Respond with valid JSON only — no prose around it.
 - Each issue's \`message\` must be specific enough to act on (e.g. "selector \`.css-1a2b3c\` is auto-generated — use \`getByRole('button', { name: 'Submit' })\`"). Vague messages like "selector is bad" are not useful.
 `;
 }
+
+/**
+ * Parse + normalize reviewer JSON output into the Bundle-3 verdict shape.
+ *
+ * @param {unknown} raw
+ * @param {Set<string>} validTestIds
+ * @returns {{ verdict: "accept"|"revise"|"reject", issues: Array<{testId:string, problem:string, suggestion?:string}> }}
+ */
+export function normalizeReviewerVerdict(raw, validTestIds = new Set()) {
+  const verdictRaw = String(raw?.verdict || raw?.intent || "accept").toLowerCase();
+  const verdict = verdictRaw === "revise" || verdictRaw === "reject" ? verdictRaw : "accept";
+  const issuesIn = Array.isArray(raw?.issues) ? raw.issues : [];
+  const issues = issuesIn
+    .map((i) => ({
+      testId: String(i?.testId || "").trim(),
+      problem: String(i?.problem || i?.message || "").trim(),
+      suggestion: i?.suggestion ? String(i.suggestion).trim() : undefined,
+    }))
+    .filter((i) => i.testId && i.problem)
+    .filter((i) => validTestIds.size === 0 || validTestIds.has(i.testId));
+  if (verdict === "revise" && issues.length === 0) {
+    return { verdict: "accept", issues: [] };
+  }
+  return { verdict, issues };
+}
