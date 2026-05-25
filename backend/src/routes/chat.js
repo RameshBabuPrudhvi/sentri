@@ -20,6 +20,7 @@
  */
 
 import { Router } from "express";
+import { randomUUID } from "crypto";
 import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
@@ -29,6 +30,15 @@ import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
 import { MAX_CONVERSATION_TURNS } from "../runner/config.js";
 import { hasActiveRunForProvider } from "../utils/activeRuns.js";
 import { buildTestEditPrompt } from "./testEdit.js";
+// AUTO-023 Bundle 2 — chat is the `author` conversational editor call site.
+// Each `/chat` request is its own short-lived conversation; we synthesise a
+// per-request `runId` / `threadId` so the envelope row is schema-valid
+// (`agentEnvelope.js` requires non-empty `runId` + `workspaceId`) and the
+// conversation surfaces in `agent_messages` alongside pipeline runs. There
+// is no FK from `agent_messages.runId` → `runs.id`, so synthetic ids are
+// safe and the retention janitor sweeps them on the same 90-day schedule
+// as run-scoped rows.
+import { emitHandoffEnvelope } from "../aiProvider/agentHandoff.js";
 
 const router = Router();
 
@@ -456,12 +466,50 @@ router.post("/chat", async (req, res) => {
   };
   if (isLocal) streamOpts.maxTokens = 2048;
 
+  // AUTO-023 Bundle 2 — synthesise a per-request thread so the conversation
+  // surfaces in `agent_messages` alongside pipeline runs. `runId` uses a
+  // `CHAT-` prefix so the retention janitor + audit-trail consumers can
+  // distinguish chat threads from real-run threads at a glance; `threadId`
+  // follows the same `${runId}-main` convention as `mainThreadId(runId)` so
+  // a future Bundle 4 supervisor that promotes chat to multi-agent can reuse
+  // the existing thread without reformatting. The envelope skips entirely
+  // when `workspaceId` is missing — `emitHandoffEnvelope` already no-ops on
+  // missing required fields, so this stays best-effort and never breaks the
+  // chat reply.
+  const chatRunId = `CHAT-${randomUUID()}`;
+  const chatThreadId = `${chatRunId}-main`;
+  const chatWorkspaceId = req.workspaceId || null;
+  let tokenCount = 0;
+
   try {
     const startMs = Date.now();
+    // Emit the inbound handoff (user → author) at request entry so the
+    // thread has a starting message the author's outbound envelope can
+    // `replyToId`-link back to. `fromRole: "supervisor"` is the closest
+    // canonical role for a user-driven request in the closed-set enum
+    // (`agentEnvelope.js#ROLES` — supervisor stands in for "the entity
+    // orchestrating this turn") until Bundle 4 adds an explicit `user`
+    // role; pre-Bundle-4 envelope-mode consumers already render it.
+    const inboundMsg = emitHandoffEnvelope({
+      runId: chatRunId,
+      threadId: chatThreadId,
+      workspaceId: chatWorkspaceId,
+      fromRole: "supervisor",
+      toRole: "author",
+      artifact: {
+        kind: "chat_request",
+        userMessage: lastMessage.content.slice(0, 500),
+        mode: context?.mode || "general",
+        local: isLocal,
+      },
+      rationale: "User chat request received",
+    });
+
     await streamText(
       { system: systemPrompt, user: userContent },
       (token) => {
         if (!res.writableEnded) {
+          tokenCount += 1;
           res.write(`data: ${JSON.stringify({ token })}\n\n`);
         }
       },
@@ -469,6 +517,26 @@ router.post("/chat", async (req, res) => {
     );
 
     console.log(formatLogLine("info", null, `[chat] completed in ${((Date.now() - startMs) / 1000).toFixed(1)}s`));
+
+    // Emit the outbound handoff (author → supervisor) at request completion
+    // so the thread has a paired close. `replyToId` threads back to the
+    // inbound envelope so the conversation reads as a coherent reply chain
+    // (matches the bidirectional contract enforced in `agentLoop.js`).
+    emitHandoffEnvelope({
+      runId: chatRunId,
+      threadId: chatThreadId,
+      workspaceId: chatWorkspaceId,
+      fromRole: "author",
+      toRole: "supervisor",
+      replyToId: inboundMsg?.id || null,
+      artifact: {
+        kind: "chat_reply",
+        tokensStreamed: tokenCount,
+        durationMs: Date.now() - startMs,
+      },
+      rationale: "Author streamed chat reply",
+    });
+
     if (!res.writableEnded) {
       res.write("data: [DONE]\n\n");
       res.end();

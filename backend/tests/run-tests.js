@@ -55,6 +55,16 @@ const files = [
   "tests/agent-envelope.test.js",
   "tests/agent-message-repo.test.js",
   "tests/agent-message-emitter.test.js",
+  "tests/agent-reviewer-loop.test.js",
+  // AUTO-023 B2.6 — envelope-mode pipeline handoff smoke test. Pins the
+  // ordered explorer→planner→author thread, workspace scoping on
+  // `listByThread`, the envelope-vs-pipeline read-mode gate, and the
+  // emitter no-op contract on missing runId/threadId.
+  "tests/agent-pipeline-envelope.test.js",
+  // AUTO-023 Bundle 2 — unit coverage for `agentHandoff.js` thread-id
+  // formatters + `agentMode.js` env-driven mode switch. Closes the
+  // REVIEW.md mandatory-test gap on the two new helper modules.
+  "tests/agent-handoff-mode.test.js",
   "tests/webhook-token.test.js",
   "tests/scheduler.test.js",
   "tests/trigger-api.test.js",

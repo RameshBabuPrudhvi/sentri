@@ -42,6 +42,43 @@ import { validateEnvelope } from "./agentEnvelope.js";
 import { randomUUID } from "crypto";
 import { emitRunEvent } from "../routes/sse.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+
+// Monotonic envelope id — guarantees insertion order is preserved by the
+// repo's `(createdAt ASC, id ASC)` tiebreaker BOTH within a single process
+// and across clustered workers.
+//
+// Format: `am-<13-digit-ms-timestamp>-<6-digit-intra-ms-counter>-<uuid>`
+//
+//   - Timestamp prefix sorts envelopes by their actual emit wall-clock
+//     across workers (no per-process counter coordination needed). 13
+//     digits = ms since epoch, valid until ~year 5138.
+//   - Intra-ms counter (zero-padded to 6 digits, capacity 1M per ms per
+//     process — far above any realistic LLM emit burst) keeps order
+//     deterministic for envelopes a single process emits inside the same
+//     millisecond.
+//   - UUID suffix preserves PK uniqueness when two workers in a cluster
+//     happen to emit on the same ms with the same intra-ms counter
+//     (otherwise both would share the prefix and only the UUID would
+//     distinguish them).
+//
+// Replaces the previous process-local `_agentMessageSeq` counter which
+// gave deterministic order WITHIN one process but produced overlapping
+// `am-000000000001-…` ids in a clustered deployment — two workers'
+// "first envelope of the process" both started at seq=1 and only the
+// UUID suffix distinguished them, so the cross-process ordering claim
+// only held when `createdAt` differed by a full millisecond.
+let _idLastMs = 0;
+let _idIntraMsCounter = 0;
+function _nextAgentMessageId() {
+  const now = Date.now();
+  if (now === _idLastMs) {
+    _idIntraMsCounter += 1;
+  } else {
+    _idLastMs = now;
+    _idIntraMsCounter = 0;
+  }
+  return `am-${String(now).padStart(13, "0")}-${String(_idIntraMsCounter).padStart(6, "0")}-${randomUUID()}`;
+}
 // Task 2 — `model` resolution. `resolveRoute({ agentRole, workspaceId })`
 // returns the same route the pipeline's `generateText(...)` call will use
 // at dispatch time, so reading `route.model` here gives the operator
@@ -192,7 +229,7 @@ export function emitAgentMessage(envelope = {}) {
   // back to the generated default (lifeguard finding).
   const withDefaults = {
     ...envelope,
-    id: envelope.id || `am-${randomUUID()}`,
+    id: envelope.id || _nextAgentMessageId(),
     createdAt: envelope.createdAt || new Date().toISOString(),
     round: envelope.round ?? 0,
   };

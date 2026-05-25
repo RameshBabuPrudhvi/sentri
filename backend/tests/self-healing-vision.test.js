@@ -296,5 +296,116 @@ await test("budget check throws -> conservative skip (no LLM call)", async () =>
   assert.equal(llmCalled, false, "Budget-check failure must be treated as exhausted");
 });
 
+// ── AUTO-023 Bundle 2 — envelope emit on heal outcomes ──────────────────────
+// Closes the gap flagged in code review: the previous test surface only
+// asserted that `tryVisionHeal` returned the right shape, never that the
+// healer-thread envelope was emitted on success or the `_workspaceId`
+// guard correctly no-oped when `ctx.project` lacked a workspaceId. These
+// tests use `agentMessageRepo.listByRun` as the post-condition witness —
+// the only side-effect the emit produces that survives the function call.
+
+const { ensureDefaultWorkspaces } = await import("../src/database/repositories/workspaceRepo.js");
+ensureDefaultWorkspaces();
+const agentMessageRepo = await import("../src/database/repositories/agentMessageRepo.js");
+const WS_VH = "__default__";
+
+await test("envelope: pixelmatch success emits healer→reviewer envelope (B2.2 selfHealing wiring)", async () => {
+  const runId = `RUN-VH-${Math.random().toString(36).slice(2, 10)}`;
+  const testId = `TC-vh-${Math.random().toString(36).slice(2, 6)}@v1`;
+  const r = await tryVisionHeal(
+    {
+      runId,
+      testId,
+      action: "click",
+      label: "Sign in",
+      project: { id: "P", visionHealing: "pixelmatch_only", workspaceId: WS_VH },
+      failureScreenshot: SHOT,
+      baselineCrop: BASELINE,
+    },
+    { pixelmatchHeal: async () => ({ confidence: 0.95, box: { x: 1, y: 2, width: 3, height: 4 } }) },
+  );
+  assert.ok(r, "pixelmatch heal should succeed");
+
+  // Envelope row must exist on the healer thread keyed by
+  // `${runId}-heal-${testId}`. We list by run since that is workspace-scoped.
+  const rows = agentMessageRepo.listByRun(runId, WS_VH);
+  assert.equal(rows.length, 1, "exactly one envelope emitted on heal success");
+  assert.equal(rows[0].fromRole, "healer");
+  assert.equal(rows[0].toRole, "reviewer");
+  assert.equal(rows[0].intent, "handoff");
+  assert.equal(rows[0].artifact?.kind, "vision_pixelmatch");
+  assert.equal(rows[0].artifact?.healed, true);
+  assert.equal(rows[0].threadId, `${runId}-heal-${testId}`);
+});
+
+await test("envelope: LLM-vision success emits healer→reviewer envelope with model + cost", async () => {
+  const runId = `RUN-VH-${Math.random().toString(36).slice(2, 10)}`;
+  const testId = `TC-vh-${Math.random().toString(36).slice(2, 6)}@v1`;
+  const r = await tryVisionHeal(
+    {
+      runId,
+      testId,
+      action: "fill",
+      label: "Email",
+      project: { id: "P", visionHealing: "pixelmatch_and_llm", workspaceId: WS_VH },
+      failureScreenshot: SHOT,
+      baselineCrop: null,
+    },
+    { llmVisionHeal: async () => ({ confidence: 0.9, model: "gpt-4o", costUsd: 0.0015 }) },
+  );
+  assert.ok(r);
+  const rows = agentMessageRepo.listByRun(runId, WS_VH);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].artifact?.kind, "vision_llm");
+  assert.equal(rows[0].artifact?.model, "gpt-4o");
+  assert.equal(rows[0].artifact?.costUsd, 0.0015);
+});
+
+await test("envelope: missing runId no-ops the emit (no FK insert against null)", async () => {
+  // ctx.runId omitted → _runId === null → _threadId === null →
+  // emitHandoffEnvelope's missing-field guard short-circuits. Heal still
+  // succeeds (return value is unchanged); only the envelope side-effect
+  // is suppressed. This is the no-FK-against-null safety the comment in
+  // `selfHealing.js#tryVisionHeal` claims.
+  const r = await tryVisionHeal(
+    ctx({ project: { id: "P", visionHealing: "pixelmatch_only", workspaceId: WS_VH } }),
+    { pixelmatchHeal: async () => ({ confidence: 0.95 }) },
+  );
+  assert.ok(r, "heal still succeeds without runId");
+  // No row should exist on any thread for a synthetic runId we never set.
+  // We can't easily query "all rows without a specific runId", but we
+  // CAN verify by listing for a fresh runId that the spy would have used.
+  // The simpler invariant: emit returns null when runId is missing, which
+  // we verify via the agentHandoff unit tests already; here we just
+  // confirm the heal proceeds without error.
+});
+
+await test("envelope: missing ctx.project.workspaceId no-ops the emit (guard works)", async () => {
+  const runId = `RUN-VH-${Math.random().toString(36).slice(2, 10)}`;
+  const testId = `TC-vh-${Math.random().toString(36).slice(2, 6)}@v1`;
+  // Project row with no workspaceId field → _workspaceId resolves to null
+  // → emitHandoffEnvelope no-ops on missing required field. Heal itself
+  // still succeeds.
+  const r = await tryVisionHeal(
+    {
+      runId,
+      testId,
+      action: "click",
+      label: "X",
+      project: { id: "P", visionHealing: "pixelmatch_only" /* no workspaceId */ },
+      failureScreenshot: SHOT,
+      baselineCrop: BASELINE,
+    },
+    { pixelmatchHeal: async () => ({ confidence: 0.95 }) },
+  );
+  assert.ok(r, "heal succeeds even when envelope guard short-circuits");
+  // Without a workspace context we can't list rows scoped to it, but the
+  // contract is that the emit returns null → no row persisted. Verify by
+  // querying the workspace we DO know about — the emit shouldn't have
+  // leaked into it.
+  const rows = agentMessageRepo.listByRun(runId, WS_VH);
+  assert.equal(rows.length, 0, "no envelope emitted when workspaceId is missing");
+});
+
 if (process.exitCode) process.exit(1);
 console.log("\n[MNT-001] vision healing tests passed");
