@@ -6,6 +6,8 @@
 
 ---
 
+> **Heads up — parallel track available:** [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md) (AUTO-023 reframed as multi-agent collaboration: envelope schema → reviewer↔author loop → supervisor orchestrator → tool calling). Bundle 1 (foundations: `agent_messages` schema + envelope validator + emitter) is purely additive and touches **zero files** in MNT-015's surface (browser pool / rate-limiter middleware / graceful-shutdown). Safe to start in parallel — MNT-015 is **not** a blocker.
+
 ## Bundling guidance
 
 Flag adjacent items as bundling candidates in your PR description rather than expanding scope mid-flight. Good signals: items touch the same module, one validates the other end-to-end, or both are S/XS effort and skipping a handoff saves more than it costs in review surface. Bad signals: different phases, M+ effort expansion, or the candidate surfaces after CI is already green. When in doubt, comment on the PR and let the human decide — never silently expand beyond the Current PR checklist.

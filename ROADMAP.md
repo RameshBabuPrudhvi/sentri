@@ -15,6 +15,8 @@
 >
 > **AI-provider routes — Bundles 1–4 shipped.** PR #22 landed B1.x foundation; PR #23 landed B2 + B3 + B4. The full plan, schema, exit criteria, cross-bundle invariants, and risk register live in [`docs/roadmap/ai-provider-bundle.md`](./docs/roadmap/ai-provider-bundle.md) for reference. Operators adopting Provider Routes — see [`docs/guide/provider-routes.md`](./docs/guide/provider-routes.md).
 >
+> **Autonomous multi-agent collaboration — parallel track.** [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md) reframes AUTO-023 as a 5-bundle multi-agent system (envelope schema → linear handoff → reviewer↔author loop → supervisor orchestrator → tool calling). Bundle 1 is purely additive and parallelisable with MNT-015 — no shared files, no blocker dependency.
+>
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
 > **Current sprint:** MNT-015 (Browser pool reuse + per-tenant AI rate limiting) — promoted after INF-009 (Helm chart + K8s readiness/liveness + DR playbook) landed in PR #30. MNT-015 clears the last hard dependency on AUTO-023 (`ROADMAP.md:1028`), unblocking the LangGraph-style DAG runner next. Queue: AUTO-023 (DAG pipeline runner — scaffolding already shipped via migration 058 + Task 2/Task 3 conversation feed) slot 1, AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 2, AUTO-014 (test dependency + execution ordering) slot 3, DIF-008 (Jira / Linear issue sync) slot 4. AI-provider routes Bundles 2 / 3 / 4 landed in PR #23 and are no longer queued.
