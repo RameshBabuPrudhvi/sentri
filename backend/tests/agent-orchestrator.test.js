@@ -25,3 +25,16 @@ test("enforces max steps", async () => {
   });
   assert.equal(out.outcome, "max_steps");
 });
+
+test("ineligible role triggers fallback callback", async () => {
+  const out = await runAutonomousThread({ artifact: { seed: true } }, {
+    workspaceId: "ws-missing",
+    supervisorDecision: async () => ({ nextRole: "oracle", instruction: "x" }),
+    runAgent: async () => ({ fromRole: "oracle", intent: "handoff", artifact: { ok: true } }),
+    runLinearFallback: async ({ reason, nextRole, lastArtifact }) => ({ outcome: "fallback_linear", reason, nextRole, artifact: lastArtifact }),
+  });
+  assert.equal(out.outcome, "fallback_linear");
+  assert.equal(out.reason, "ineligible_role");
+  assert.equal(out.nextRole, "oracle");
+  assert.deepEqual(out.artifact, { seed: true });
+});
