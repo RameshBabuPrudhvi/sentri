@@ -101,7 +101,15 @@ async function main() {
     });
 
     await test("repo layer: getAgentMode round-trips through setAgentMode", async () => {
-      const ws = a.workspaceId;
+      // `registerAndLogin` returns `{ token, userId, payload }` — no
+      // workspaceId on the result. Resolve the auto-created personal
+      // workspace via the JWT payload's `workspaceId` (or fall back to
+      // a DB lookup by `ownerId`). This mirrors how routes resolve the
+      // active workspace in `workspaceScope` middleware.
+      const db = t.getDatabase();
+      const row = db.prepare("SELECT id FROM workspaces WHERE ownerId = ?").get(a.userId);
+      const ws = a.payload?.workspaceId || row?.id;
+      assert.ok(ws, "expected to resolve admin A's workspace id");
       workspaceRepo.setAgentMode(ws, "envelope");
       assert.equal(workspaceRepo.getAgentMode(ws), "envelope");
       workspaceRepo.setAgentMode(ws, "autonomous");
