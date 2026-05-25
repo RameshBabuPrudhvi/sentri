@@ -134,24 +134,6 @@
  * from `.ac-model` so the operator can scan iteration count without
  * conflating it with the provider attribution chip. */
 
-/* ─── Warning turn (B3.4 single-agent collapse advisory) ──────────────────────
- * Used by the AI-005c surface — when author + reviewer resolve to the
- * same routeId, the loop emits a one-shot `agent_event` flagged
- * `_warning: true` so the operator sees a visually distinct alert
- * inside the conversation feed. Amber palette echoes the audit + alert-
- * banner conventions used elsewhere in the app (Dashboard HealthBanner,
- * QualityGates badge). The `--warning` modifier OVERRIDES the per-agent
- * palette intentionally — the signal is "something off about the
- * configuration", not "something specific to this agent". */
-.ac-turn--warning .ac-text {
-  background: rgba(245, 158, 11, 0.10);
-  border-color: rgba(245, 158, 11, 0.45);
-  color: #92400e;
-}
-.ac-turn--warning .ac-agent-label {
-  color: #92400e;
-}
-
 .ac-round-badge {
   display: inline-flex;
   align-items: center;
@@ -182,6 +164,35 @@
 .ac-turn--author   .ac-text { background: var(--ac-author-bg);   border-color: var(--ac-author-border); }
 .ac-turn--oracle   .ac-text { background: var(--ac-oracle-bg);   border-color: var(--ac-oracle-border); }
 .ac-turn--reviewer .ac-text { background: var(--ac-reviewer-bg); border-color: var(--ac-reviewer-border); }
+
+/* ─── Warning turn (B3.4 single-agent collapse advisory) ──────────────────────
+ * Used by the AI-005c surface — when author + reviewer resolve to the
+ * same routeId, the loop emits a one-shot `agent_event` flagged
+ * `_warning: true` so the operator sees a visually distinct alert
+ * inside the conversation feed. Amber palette echoes the audit + alert-
+ * banner conventions used elsewhere in the app (Dashboard HealthBanner,
+ * QualityGates badge). The `--warning` modifier OVERRIDES the per-agent
+ * palette intentionally — the signal is "something off about the
+ * configuration", not "something specific to this agent".
+ *
+ * CSS specificity note: both `.ac-turn--reviewer .ac-text` and
+ * `.ac-turn--warning .ac-text` are (0,2,0). Source order is the
+ * tie-breaker, so the warning rules MUST live below the per-agent
+ * `.ac-text` rules above (and the per-agent `.ac-agent-label` rules at
+ * the top of the file). Lifeguard / review-thread regression: when
+ * these blocks were declared earlier in the file the reviewer's green
+ * palette won, leaving the warning visually indistinguishable from a
+ * normal reviewer turn. Pinned by the
+ * `single_agent_collapse advisory emits a standalone warning turn`
+ * test in `frontend/tests/AgentConversation.test.js`. */
+.ac-turn--warning .ac-text {
+  background: rgba(245, 158, 11, 0.10);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #92400e;
+}
+.ac-turn--warning .ac-agent-label {
+  color: #92400e;
+}
 
 /* ─── Handoff variant ─────────────────────────────────────────────────────────
  * Handoff turns are visually slimmer than findings/doing turns — the
