@@ -633,21 +633,31 @@ export function messagesToTurns(messages) {
       return String(a?.id || "").localeCompare(String(b?.id || ""));
     });
   const roundAuthorTests = new Map();
+  const fingerprint = (t) => `${t?.id || ""}|${t?.name || ""}|${t?.playwrightCode || ""}`;
   return ordered
     .map((m, idx) => {
       const toLabel = m.toRole && AGENT_PERSONAS[m.toRole] ? AGENT_PERSONAS[m.toRole].label : "All";
       const intent = m.intent || "handoff";
       const round = Number(m.round) || 0;
       if (m.fromRole === "author" && intent === "handoff") {
-        const ids = new Set((m.artifact?.tests || []).map((t) => t?.id).filter(Boolean));
-        roundAuthorTests.set(round, ids);
+        const map = new Map();
+        for (const t of (m.artifact?.tests || [])) {
+          if (t?.id) map.set(t.id, fingerprint(t));
+        }
+        roundAuthorTests.set(round, map);
       }
       let detail = m.rationale || formatScalarData(m.artifact) || "";
       if (intent === "request_revision") {
-        const prev = roundAuthorTests.get(round - 1) || new Set();
-        const curr = roundAuthorTests.get(round) || new Set();
-        const changed = [...curr].filter((id) => !prev.has(id));
-        const diffLabel = changed.length > 0 ? `changed tests: ${changed.join(", ")}` : "no test-id diff captured";
+        const prev = roundAuthorTests.get(round - 1) || new Map();
+        const curr = roundAuthorTests.get(round) || new Map();
+        const added = [...curr.keys()].filter((id) => !prev.has(id));
+        const removed = [...prev.keys()].filter((id) => !curr.has(id));
+        const updated = [...curr.keys()].filter((id) => prev.has(id) && prev.get(id) !== curr.get(id));
+        const pieces = [];
+        if (added.length) pieces.push(`+${added.length} added`);
+        if (updated.length) pieces.push(`~${updated.length} updated`);
+        if (removed.length) pieces.push(`-${removed.length} removed`);
+        const diffLabel = pieces.length ? pieces.join(", ") : "no artifact diff captured";
         detail = `Round ${round + 1} — Reviewer rejected ${(m.artifact?.issues || []).length || 0} issues → Author fixing (${diffLabel})`;
       }
       const text = `[${intent}] ${AGENT_PERSONAS[m.fromRole].label} → ${toLabel}${detail ? ` — ${detail}` : ""}`;

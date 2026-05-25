@@ -408,12 +408,20 @@ test("turn IDs are stable across calls with the same event sequence", () => {
 console.log("\n── messagesToTurns ──");
 test("request_revision includes round badge narration", () => {
   const turns = messagesToTurns([
-    { id: "1", fromRole: "author", toRole: "reviewer", intent: "handoff", round: 0, artifact: { tests: [{ id: "t1" }] }, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "1", fromRole: "author", toRole: "reviewer", intent: "handoff", round: 0, artifact: { tests: [{ id: "t1", name: "A", playwrightCode: "code-v1" }] }, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "1.5", fromRole: "author", toRole: "reviewer", intent: "handoff", round: 1, artifact: { tests: [{ id: "t1", name: "A", playwrightCode: "code-v2" }, { id: "t2", name: "B", playwrightCode: "code-v1" }] }, createdAt: "2026-01-01T00:00:00.500Z" },
     { id: "2", fromRole: "reviewer", toRole: "author", intent: "request_revision", round: 0, artifact: { issues: [{ testId: "t1" }] }, createdAt: "2026-01-01T00:00:01.000Z" },
+    { id: "3", fromRole: "reviewer", toRole: "author", intent: "request_revision", round: 1, artifact: { issues: [{ testId: "t1" }, { testId: "t2" }] }, createdAt: "2026-01-01T00:00:02.000Z" },
   ]);
-  assert.equal(turns.length, 2);
-  assert.match(turns[1].text, /Round 1/);
-  assert.match(turns[1].text, /Reviewer rejected 1 issues/);
+  assert.equal(turns.length, 4);
+  const reviseTurns = turns.filter((t) => /\[request_revision\]/.test(t.text));
+  assert.equal(reviseTurns.length, 2);
+  assert.match(reviseTurns[0].text, /Round 1/);
+  assert.match(reviseTurns[0].text, /Reviewer rejected 1 issues/);
+  assert.match(reviseTurns[1].text, /Round 2/);
+  assert.match(reviseTurns[1].text, /Reviewer rejected 2 issues/);
+  assert.match(reviseTurns[1].text, /\+1 added/);
+  assert.match(reviseTurns[1].text, /~1 updated/);
 });
 
 process.on("beforeExit", () => {
