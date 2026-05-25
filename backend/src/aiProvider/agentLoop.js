@@ -5,16 +5,21 @@ import { readSpendCaps, evaluateSpendCap } from "./quotaGuard.js";
 import { getMaxReviewRounds } from "../database/repositories/agentConfigRepo.js";
 import { resolveRoute } from "./registry.js";
 import { PIPELINE_STEPS } from "../utils/pipelineState.js";
+// Loop ceilings live in a leaf constants module (no imports of its own)
+// so `agentLoop.js` and `agentConfigRepo.js` can both reference
+// `HARD_MAX_REVIEW_ROUNDS` without forming a circular import. See the
+// docblock at the top of `agentLoopConstants.js` for the full rationale.
+import {
+  HARD_MAX_REVIEW_ROUNDS,
+  DEFAULT_MAX_REVIEW_ROUNDS,
+  DEFAULT_LOOP_TIMEOUT_MS,
+  HARD_MAX_LOOP_TIMEOUT_MS,
+} from "./agentLoopConstants.js";
 
-// Exported so callers + repo-layer clamps share a single source of truth.
-// Bumping the ceiling now only requires editing this file. `agentConfigRepo`
-// imports this constant to clamp its `maxReviewRounds` writes — previously
-// the value was duplicated in both files and silently drifted apart on
-// any future change.
-export const HARD_MAX_REVIEW_ROUNDS = 10;
-const DEFAULT_MAX_REVIEW_ROUNDS = 3;
-const DEFAULT_LOOP_TIMEOUT_MS = 5 * 60 * 1000;
-const HARD_MAX_LOOP_TIMEOUT_MS = 30 * 60 * 1000;
+// Re-export so external callers that previously imported
+// `HARD_MAX_REVIEW_ROUNDS` from this module's public surface keep
+// working without touching their imports.
+export { HARD_MAX_REVIEW_ROUNDS };
 
 export class ReviewRejection extends Error {
   constructor(message = "Reviewer rejected final artifact") {

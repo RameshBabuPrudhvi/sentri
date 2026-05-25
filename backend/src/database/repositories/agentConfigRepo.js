@@ -9,9 +9,12 @@
 import { getDatabase } from "../sqlite.js";
 import * as providerRouteRepo from "./providerRouteRepo.js";
 // AUTO-023 B3.3 — single source of truth for the reviewer↔author loop's
-// hard round ceiling. Imported here so a future bump in `agentLoop.js`
-// flows through the repo-layer clamp without drift.
-import { HARD_MAX_REVIEW_ROUNDS } from "../../aiProvider/agentLoop.js";
+// hard round ceiling. Imported from the leaf constants module (NOT from
+// `agentLoop.js`) to avoid a circular import: the loop also imports
+// `getMaxReviewRounds` from this repo, and routing the constant through
+// `agentLoop.js` would close the cycle. See `agentLoopConstants.js`'s
+// docblock for the full ES-modules / TDZ rationale.
+import { HARD_MAX_REVIEW_ROUNDS } from "../../aiProvider/agentLoopConstants.js";
 
 /**
  * Fetch a single role config for a workspace.
