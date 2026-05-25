@@ -342,8 +342,13 @@ export function classifyAiError(err) {
 const AUTONOMOUS_STEP_BUCKETS = [1, 2, 3, 5, 8, 13, 20];
 const AUTONOMOUS_DURATION_BUCKETS = [1, 3, 5, 10, 30, 60, 120, 300, 600];
 
+// Naming: Prometheus convention reserves the `_total` suffix for Counters
+// (so `*_total_bucket` / `*_total_sum` / `*_total_count` series read
+// cleanly when histograms auto-expand). This is a Histogram, so the
+// metric name is `app_agent_thread_steps` (no `_total`). Mirrors the
+// `app_agent_review_rounds` convention documented above.
 export const agentThreadStepsTotal = new client.Histogram({
-  name: "app_agent_thread_steps_total",
+  name: "app_agent_thread_steps",
   help: "AUTO-023 B4.5 — autonomous thread step count per terminal outcome.",
   labelNames: ["outcome"],
   buckets: AUTONOMOUS_STEP_BUCKETS,

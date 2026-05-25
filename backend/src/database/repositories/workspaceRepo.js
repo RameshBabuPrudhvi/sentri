@@ -148,15 +148,20 @@ export function getAiRequestLogSettings(workspaceId) {
   };
 }
 
+// AUTO-023 B4.4 — per-workspace orchestrator mode getter/setter. The
+// default `"pipeline"` matches the env-var default in
+// `backend/src/aiProvider/agentMode.js#getAgentMode()`; diverging would
+// cause the Settings UI to show a mode different from what the
+// dispatcher actually runs in.
 export function getAgentMode(workspaceId) {
-  if (!workspaceId) return "envelope";
+  if (!workspaceId) return "pipeline";
   const row = getDatabase().prepare("SELECT agentMode FROM workspaces WHERE id = ?").get(workspaceId);
-  return row?.agentMode || "envelope";
+  return row?.agentMode || "pipeline";
 }
 
 export function setAgentMode(workspaceId, mode) {
   const allowed = new Set(["pipeline", "envelope", "autonomous"]);
-  const next = allowed.has(mode) ? mode : "envelope";
+  const next = allowed.has(mode) ? mode : "pipeline";
   getDatabase().prepare("UPDATE workspaces SET agentMode = ?, updatedAt = ? WHERE id = ?")
     .run(next, new Date().toISOString(), workspaceId);
   return getAgentMode(workspaceId);

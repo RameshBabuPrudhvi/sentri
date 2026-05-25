@@ -33,6 +33,7 @@ function resolveProviderLabel(routeId, providerMap) {
 }
 
 const ROLE_DESCRIPTIONS = {
+  supervisor: "Orchestrate autonomous-mode handoffs",
   explorer: "Crawl & classify pages",
   planner:  "Map user journeys",
   author:   "Write test code",
@@ -42,8 +43,15 @@ const ROLE_DESCRIPTIONS = {
   triager:  "Classify failures",
 };
 
+// AUTO-023 B4.1 — `supervisor` is a specialized orchestration role used
+// only in autonomous mode. Default the "new role" form to the first
+// non-supervisor role (`explorer`) so admins configuring per-role routes
+// for the first time aren't dropped on a role most workspaces never
+// configure explicitly.
+const DEFAULT_NEW_ROLE = AGENT_ROLES.find((r) => r !== "supervisor") || AGENT_ROLES[0];
+
 const EMPTY_FORM = {
-  role: AGENT_ROLES[0],
+  role: DEFAULT_NEW_ROLE,
   routeId: "",
   systemPromptOverride: "",
   temperature: 0.2,
@@ -58,19 +66,19 @@ export default function AgentRolesSection() {
   const [error, setError]         = useState("");
   const [busy, setBusy]           = useState(false);
   const [probes, setProbes]       = useState({});
-  const [agentMode, setAgentMode] = useState("envelope");
+  const [agentMode, setAgentMode] = useState("pipeline");
 
   const load = useCallback(async () => {
     try {
       const [r, modeRes, provRes] = await Promise.all([
         api.getAgentRoles(),
-        api.getAgentMode().catch(() => ({ mode: "envelope" })),
+        api.getAgentMode().catch(() => ({ mode: "pipeline" })),
         // Prefer the enriched ai-providers endpoint (displayLabel, familyEmoji,
         // costTier). Fall back to the old provider-routes endpoint gracefully.
         api.listAiProviders().catch(() => api.listProviderRoutes().catch(() => ({ routes: [] }))),
       ]);
       setRows(r.roles || []);
-      setAgentMode(modeRes?.mode || "envelope");
+      setAgentMode(modeRes?.mode || "pipeline");
       setProviders((provRes?.routes || []).filter((p) => p.enabled !== false && p.enabled !== 0));
     } catch (err) {
       setError(err.message || "Failed to load agent roles.");

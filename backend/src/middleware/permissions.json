@@ -370,6 +370,16 @@
       "source": "backend/src/routes/settings.js",
       "$comment": "AI-005 \u2014 Settings UI \"Test agent\" button. Probes the configured (provider, role) pair via the same 1-token health-check helper the crawler pre-flight uses. Returns { role, ok, reason, provider }."
     },
+    "GET /api/v1/settings/agent-mode": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "AUTO-023 B4.4 \u2014 read the per-workspace orchestrator mode (pipeline | envelope | autonomous). Backed by workspaces.agentMode (migration 062)."
+    },
+    "PATCH /api/v1/settings/agent-mode": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "AUTO-023 B4.4 \u2014 flip the per-workspace orchestrator mode. Body: { mode: \"pipeline\"|\"envelope\"|\"autonomous\" }."
+    },
     "GET /api/v1/settings/provider-routes": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"

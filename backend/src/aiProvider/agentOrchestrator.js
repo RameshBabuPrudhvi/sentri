@@ -1,6 +1,7 @@
 import { emitAgentEvent, emitAgentMessage } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { resolveRoute } from "./registry.js";
+import { logActivity } from "../utils/activityLogger.js";
 import {
   agentThreadStepsTotal,
   agentSupervisorDecisionsTotal,
@@ -43,6 +44,17 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
     const decision = await supervisorDecision({ thread, lastArtifact, step, workspaceId });
     if (decision?.terminate) {
       emitAgentEvent(runId, { step: 7, agent: "supervisor", phase: "done", message: "Supervisor terminated autonomous thread", workspaceId, data: { threadId, step } });
+      // AUTO-023 B4.5 — audit-log every supervisor.terminate so admins
+      // can answer "why did the orchestrator stop here?" without
+      // grepping log lines. Best-effort: a logger hiccup must never
+      // break the thread's return path.
+      try {
+        logActivity({
+          type: "agent.supervisor.terminate",
+          workspaceId,
+          meta: { threadId, runId, steps: step, rationale: decision?.rationale || null },
+        });
+      } catch { /* best-effort */ }
       try { agentThreadStepsTotal.observe({ outcome: "terminate" }, Math.max(1, step + 1)); } catch {}
       try { agentThreadDurationSeconds.observe({ outcome: "terminate" }, Math.max(0.001, (Date.now() - startedAt) / 1000)); } catch {}
       return { outcome: "terminate", artifact: decision.finalArtifact ?? lastArtifact, steps: step };
