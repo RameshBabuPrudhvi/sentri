@@ -502,20 +502,23 @@ export function initScheduler() {
   // B3.9 provider-routes audit sweep (05:00) so all four daily AI
   // maintenance tasks stay staggered on a single SQLite writer and
   // never contend for the write lock on the same minute.
-  // Honours `AI_REQUEST_LOG_RETENTION_DAYS`:
-  //   • unset / empty → default 30 days
-  //   • 0            → never delete (task is armed but is a no-op)
-  //   • > 0          → delete rows older than the configured window
-  //
-  // Bugfix from the original B2.5 wiring: this block previously called
-  // `schedules.push(schedule(...))` which threw `ReferenceError:
-  // schedule is not defined` at boot (no such helper exists in this
-  // module — `schedules` at this scope is the SQL result array from
-  // `scheduleRepo.getAllEnabled`, not a task registry). Converted to
-  // the same `cron.schedule()` shape as the sibling daily tasks above
-  // and stored on `_aiRequestLogRetentionTask` so graceful shutdown
-  // can stop it via `stopAllTasks()` below.
-    // AUTO-023 B1.1 — daily agent-message retention sweep (90d default),
+  _aiRequestLogRetentionTask = cron.schedule("45 4 * * *", () => {
+    try {
+      const raw = process.env.AI_REQUEST_LOG_RETENTION_DAYS;
+      const days = raw === undefined || raw === "" ? 30 : Number.parseInt(raw, 10);
+      if (!Number.isFinite(days) || days <= 0) return;
+      const deleted = aiRequestLogRepo.purgeOlderThan(days);
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] AI request-log retention sweep deleted ${deleted} row(s) older than ${days} days`));
+      }
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[scheduler] AI request-log retention sweep failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
+  // AUTO-023 B1.1 — daily agent-message retention sweep (90d default),
   // mirroring run_agent_events retention posture.
   _agentMessageRetentionTask = cron.schedule("15 5 * * *", () => {
     try {
@@ -530,22 +533,6 @@ export function initScheduler() {
     } catch (err) {
       console.warn(formatLogLine("warn", null,
         `[scheduler] Agent-message retention sweep failed: ${err.message}`));
-    }
-  }, { timezone: "UTC", scheduled: true });
-
-_aiRequestLogRetentionTask = cron.schedule("45 4 * * *", () => {
-    try {
-      const raw = process.env.AI_REQUEST_LOG_RETENTION_DAYS;
-      const days = raw === undefined || raw === "" ? 30 : Number.parseInt(raw, 10);
-      if (!Number.isFinite(days) || days <= 0) return; // disabled
-      const deleted = aiRequestLogRepo.purgeOlderThan(days);
-      if (deleted > 0) {
-        console.log(formatLogLine("info", null,
-          `[scheduler] AI request-log retention sweep deleted ${deleted} row(s) older than ${days} days`));
-      }
-    } catch (err) {
-      console.warn(formatLogLine("warn", null,
-        `[scheduler] AI request-log retention sweep failed: ${err.message}`));
     }
   }, { timezone: "UTC", scheduled: true });
 
