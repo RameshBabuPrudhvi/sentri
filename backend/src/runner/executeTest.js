@@ -830,6 +830,11 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
               action, label, project,
               failureScreenshot: failureShot,
               baselineCrop,
+              // AUTO-023 Bundle 2 — thread the originating `runId` so
+              // `tryVisionHeal` can emit a healer-thread envelope keyed by
+              // `healingThreadId(runId, testId)` on every heal outcome.
+              // Missing runId falls through harmlessly (envelope no-ops).
+              runId,
             }, {
               pixelmatchHeal,
               llmVisionHeal,

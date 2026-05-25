@@ -105,7 +105,12 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       reviewerIssues: prevReviewerFeedback,
     });
     lastAuthorArtifact = authorArtifact;
-    toMessage({
+    // Capture the author envelope's id so the reviewer's reply below can
+    // thread `replyToId` back to it — completes the bidirectional chain
+    // (devin-ai-integration review thread #2). Pre-fix the return value was
+    // discarded and the reviewer envelope persisted `replyToId: null`,
+    // breaking thread reconstruction in the UI.
+    const authorMsg = toMessage({
       runId, threadId, workspaceId,
       fromRole: "author", toRole: "reviewer",
       intent: "handoff", artifact: authorArtifact,
@@ -135,6 +140,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       artifact,
       rationale: reviewer?.rationale || null,
       round,
+      replyToId: authorMsg?.id || null,
     });
     lastReviewerMsgId = reviewerMsg?.id || null;
     replyDepth += 1;

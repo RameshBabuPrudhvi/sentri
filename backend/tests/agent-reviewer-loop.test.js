@@ -76,10 +76,25 @@ test("loop throws ReviewRejection on reject_final", async () => {
 });
 
 test("loop terminates with timeout outcome when wall-clock budget is exceeded", async () => {
+  // The deadline check fires at the TOP of each while-iteration, BEFORE
+  // `runAuthor` runs. So for `maxReviewRounds: N` and `loopTimeoutMs: B`,
+  // the reviewer's per-round latency must satisfy
+  //   `(N - 1) * latency > B`
+  // for the check to fire on iteration N-1 instead of the loop exiting
+  // naturally via `round < N`. With N=2 and B=1005ms, latency > 1005ms
+  // suffices. We use 600ms per round across 2 rounds — round 0 finishes
+  // at ~600ms, top-of-loop check at round 1 sees 600 < 1005 (passes),
+  // round 1 finishes at ~1200ms, top-of-loop check that WOULD start
+  // round 2 (but the loop already exited at `round < 2`) — so we set
+  // N=3 and use 600ms so round 1's top-check is 600ms (pass), round 2's
+  // top-check is 1200ms (FAIL → timeout). Pre-fix this used 15ms × 3,
+  // total ~45ms vs 1005ms budget — the check never fired and the loop
+  // returned `max_rounds` instead of `timeout` (devin-ai-integration
+  // review thread #1).
   const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
     runAuthor: async ({ artifact }) => artifact,
     runReviewer: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
+      await new Promise((resolve) => setTimeout(resolve, 600));
       return { intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "retry" }] } };
     },
     maxReviewRounds: 3,
