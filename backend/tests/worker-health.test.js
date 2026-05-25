@@ -1,11 +1,17 @@
 /**
  * @module tests/worker-health
- * @description Unit test for the worker /healthz endpoint contract.
+ * @description Unit test for the worker /healthz + /livez endpoint contract.
  *
  * Mirrors the http.createServer handler in `backend/src/worker.js` so we can
  * exercise the 200/503 contract without booting BullMQ, ioredis, or the
  * database (the spec at NEXT.md:59 requires test coverage for the new
  * worker health endpoint).
+ *
+ * Two-endpoint contract:
+ *   - /livez   → always 200 (process-alive; used by livenessProbe).
+ *   - /healthz → 200 iff worker is ready AND Redis is reachable
+ *                (dependency check; used by readinessProbe). Default
+ *                handler for any non-/livez path mirrors the worker.
  */
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -15,7 +21,12 @@ import http from "node:http";
 // we re-construct the handler under test rather than booting the whole
 // process. The shape MUST stay in sync with `backend/src/worker.js`.
 function buildHealthServer({ readyRef, redisAvailableRef }) {
-  return http.createServer((_req, res) => {
+  return http.createServer((req, res) => {
+    if (req.url === "/livez") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
     if (readyRef.value && redisAvailableRef.value) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
@@ -73,6 +84,28 @@ async function main() {
       redisAvailableRef.value = false;
       const res = await fetch(`${base}/healthz`);
       assert.match(res.headers.get("content-type") || "", /application\/json/);
+    });
+
+    // /livez contract: MUST always return 200 regardless of Redis or
+    // ready state. A failed livenessProbe causes kubelet to KILL and
+    // restart the pod — pinning these so a future regression that
+    // accidentally re-couples /livez to isRedisAvailable() fails CI.
+    await run("/livez returns 200 even when Redis is unavailable", async () => {
+      readyRef.value = true;
+      redisAvailableRef.value = false;
+      const res = await fetch(`${base}/livez`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+    });
+
+    await run("/livez returns 200 even when worker is not yet ready", async () => {
+      readyRef.value = false;
+      redisAvailableRef.value = false;
+      const res = await fetch(`${base}/livez`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
     });
   } finally {
     await new Promise((r) => server.close(r));

@@ -18,9 +18,18 @@ spec:
           envFrom:
             - configMapRef: { name: sentri-config }
             - secretRef: { name: sentri-secrets }
+          # readinessProbe gates job dispatch on Redis reachability + the
+          # BullMQ worker being booted. A failed readiness probe only
+          # stops new traffic — it does NOT restart the pod.
           readinessProbe:
             httpGet: { path: /healthz, port: {{ .Values.worker.healthPort }} }
+          # livenessProbe MUST be dependency-free. `/livez` (defined in
+          # backend/src/worker.js) returns 200 unconditionally if the
+          # Node process is responsive. Pointing this at `/healthz` would
+          # make kubelet restart the worker pod every time Redis blips,
+          # turning a transient outage into a thundering-herd restart
+          # loop that masks the actual problem.
           livenessProbe:
-            httpGet: { path: /healthz, port: {{ .Values.worker.healthPort }} }
+            httpGet: { path: /livez, port: {{ .Values.worker.healthPort }} }
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}

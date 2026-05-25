@@ -36,11 +36,24 @@ Once all pods are `Ready`, validate the probes:
 
 ```bash
 kubectl port-forward svc/sentri-backend 3001:3001
+curl -fsS http://localhost:3001/health          # → 200 (liveness — process alive, no dep checks)
 curl -fsS http://localhost:3001/api/v1/health   # → 200 { ok: true, checks: { database: true, redis: true } }
 
 kubectl port-forward deploy/sentri-worker 3002:3002
-curl -fsS http://localhost:3002/healthz         # → 200 { ok: true }
+curl -fsS http://localhost:3002/livez           # → 200 (liveness — process alive)
+curl -fsS http://localhost:3002/healthz         # → 200 { ok: true } (readiness — Redis reachable)
 ```
+
+### Probe split rationale
+
+The chart deliberately uses **different endpoints for readiness vs liveness**:
+
+| Probe | Backend path | Worker path | Behavior on failure |
+|---|---|---|---|
+| `readinessProbe` | `/api/v1/health` | `/healthz` | Pod removed from Service endpoints; no restart |
+| `livenessProbe` | `/health` | `/livez` | Pod killed and restarted by kubelet |
+
+Readiness probes check downstream dependencies (Postgres + Redis) so kubelet stops routing traffic to a pod that can't serve requests. Liveness probes only check that the Node process is responsive — restarting the pod doesn't fix a Redis outage, it just amplifies a transient blip into a thundering-herd restart loop across every replica.
 
 ## Services created by the chart
 
