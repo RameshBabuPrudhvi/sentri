@@ -66,6 +66,16 @@ const files = [
   // termination, dispatch-error termination (never re-thrown), and
   // the one-shot weak-supervisor-model advisory.
   "tests/supervisor-agent.test.js",
+  // AUTO-023 B4.3 / B4.6 — dedicated coverage for the orchestrator's
+  // ineligible-role fallback path. The roadmap lists this as a
+  // separate file so a regression in the fallback hook surfaces in
+  // isolation from the happy-path / max-steps cases.
+  "tests/agent-orchestrator-fallback.test.js",
+  // AUTO-023 B4.6 — role dispatcher + linear-fallback closure
+  // (`makeRoleDispatcher` / `makeLinearFallback`). Pins reviewer
+  // verdict → envelope intent mapping, oracle handoff round-trip,
+  // unavailable-role envelopes, and dispatch-error containment.
+  "tests/autonomous-dispatch.test.js",
   "tests/reviewer-prompt.test.js",
   // AUTO-023 B3.3 — per-workspace `agent_configs.maxReviewRounds` override
   // (migration 059). Pins the repo-layer `[1, 10]` clamp + the loop's

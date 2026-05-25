@@ -32,6 +32,17 @@ import { getProviderName } from "./aiProvider.js";
 // AI-005 tripwire #4: pre-flight probe so a misconfigured agent role fails
 // at minute 0 instead of minute 9 after planner + codegen already burned spend.
 import { assertAgentConfigsHealthy } from "./aiProvider/agentHealthCheck.js";
+// AUTO-023 Bundle 4 — autonomous-mode dispatch. `agentMode` resolves
+// per-workspace ('pipeline' | 'envelope' | 'autonomous'); when
+// `'autonomous'` is set, the orchestrator drives role selection
+// instead of the hard-coded pipeline DAG. Falls back to the linear
+// path on `outcome: "linear_fallback"` so a misconfigured workspace
+// never gets a worse experience than `pipeline` mode.
+import { runAutonomousThread } from "./aiProvider/agentOrchestrator.js";
+import { supervisorDecisionFromLLM } from "./aiProvider/supervisorAgent.js";
+import { makeRoleDispatcher, makeLinearFallback } from "./aiProvider/autonomousDispatch.js";
+import { getAgentMode as getWorkspaceAgentMode } from "./database/repositories/workspaceRepo.js";
+import { mainThreadId } from "./aiProvider/agentHandoff.js";
 import { throwIfAborted, finalizeRunIfNotAborted } from "./utils/abortHelper.js";
 import { trackTelemetry } from "./utils/telemetry.js";
 import { filterElements, filterStats } from "./pipeline/elementFilter.js";
@@ -324,9 +335,71 @@ export async function generateFromUserDescription(project, run, { name, descript
   log(run, `Name: "${name}"`);
   if (description) log(run, `Description: "${description.slice(0, 100)}${description.length > 100 ? "…" : ""}"`);
 
-  const rawTests = await generateFromDescription(name, description, project.url, (token) => {
-    emitRunEvent(run.id, "llm_token", { token });
-  }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
+  // AUTO-023 B4.4 — per-workspace `autonomous` mode dispatches the
+  // run through the supervisor orchestrator instead of the linear
+  // pipeline. The orchestrator's `runAgent` callback wraps the same
+  // `generateFromDescription` / `generateIntentTests` / etc. call
+  // sites used below, so quality + cost match `pipeline` mode for
+  // single-turn runs. Multi-turn runs (supervisor loops author when
+  // reviewer rejects) only fire when the supervisor decides to —
+  // matching the LangGraph/AutoGen pattern.
+  //
+  // Fail-OPEN: any failure mode (orchestrator throw, ineligible role,
+  // supervisor parse error, fallback sentinel) collapses to the
+  // legacy linear path so a misconfigured autonomous workspace never
+  // produces a WORSE experience than `pipeline` mode.
+  const agentMode = project.workspaceId
+    ? (() => { try { return getWorkspaceAgentMode(project.workspaceId); } catch { return "pipeline"; } })()
+    : "pipeline";
+  let rawTests;
+  if (agentMode === "autonomous") {
+    log(run, `🤖 Autonomous mode — supervisor will orchestrate role handoffs.`);
+    const threadId = mainThreadId(run.id);
+    let out;
+    try {
+      out = await runAutonomousThread(
+        { artifact: { name, description, appUrl: project.url, tests: [] } },
+        {
+          runId: run.id,
+          workspaceId: project.workspaceId || null,
+          threadId,
+          supervisorDecision: supervisorDecisionFromLLM,
+          runAgent: makeRoleDispatcher({ project, run, signal }),
+          runLinearFallback: makeLinearFallback({ project, run }),
+        },
+      );
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted) throw err;
+      logWarn(run, `Autonomous orchestrator failed (${err.message?.slice(0, 120) || "unknown"}); falling back to linear pipeline.`);
+      out = { outcome: "linear_fallback", artifact: null };
+    }
+    if (out?.outcome === "linear_fallback") {
+      log(run, `↩️  Linear fallback (${out.reason || "unspecified"}) — using legacy description path.`);
+      rawTests = await generateFromDescription(name, description, project.url, (token) => {
+        emitRunEvent(run.id, "llm_token", { token });
+      }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
+    } else {
+      // Orchestrator-produced artifact carries the author's tests as
+      // the last accepted artifact regardless of terminal outcome
+      // (accept / max_steps / timeout / quota_exhausted).
+      const artifactTests = Array.isArray(out?.artifact?.tests) ? out.artifact.tests : [];
+      rawTests = artifactTests;
+      log(run, `🤖 Autonomous outcome: ${out?.outcome} after ${out?.steps ?? 0} step(s); ${rawTests.length} test(s) produced.`);
+      // Safety: if the autonomous thread terminated with zero tests
+      // (supervisor parse-error, all roles ineligible, etc.), fall
+      // back to linear so the user still gets output.
+      if (rawTests.length === 0) {
+        log(run, `↩️  Autonomous produced 0 tests — falling back to linear pipeline.`);
+        rawTests = await generateFromDescription(name, description, project.url, (token) => {
+          emitRunEvent(run.id, "llm_token", { token });
+        }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
+      }
+    }
+  } else {
+    rawTests = await generateFromDescription(name, description, project.url, (token) => {
+      emitRunEvent(run.id, "llm_token", { token });
+    }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
+  }
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Steps 5-7: Dedup → Enhance → Validate (shared pipeline) ────────────
