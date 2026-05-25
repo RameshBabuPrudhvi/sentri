@@ -89,17 +89,53 @@ export function upsert(config) {
   // `provider` + `model` were already dropped in migration 048.
   // Only `routeId`, `systemPromptOverride`, `temperature`, and
   // `maxTokens` remain as mutable fields on agent_configs.
+  // B3.3 — clamp `maxReviewRounds` to `[1, HARD_MAX_REVIEW_ROUNDS]` at
+  // the repo layer so a bad write (operator UI, JSON import, future
+  // admin script) can never exceed the loop's server-side ceiling. NULL
+  // is preserved as "no override" — the loop reads `DEFAULT_MAX_REVIEW_ROUNDS`
+  // for those rows.
+  const HARD_MAX_REVIEW_ROUNDS = 10;
+  let mrr = config.maxReviewRounds;
+  if (mrr === undefined || mrr === null) {
+    mrr = null;
+  } else {
+    const n = Number.parseInt(String(mrr), 10);
+    mrr = Number.isFinite(n) ? Math.min(Math.max(n, 1), HARD_MAX_REVIEW_ROUNDS) : null;
+  }
   db.prepare(`
-    INSERT INTO agent_configs (id, workspaceId, role, routeId, systemPromptOverride, temperature, maxTokens, createdAt, updatedAt)
-    VALUES (@id, @workspaceId, @role, @routeId, @systemPromptOverride, @temperature, @maxTokens, @createdAt, @updatedAt)
+    INSERT INTO agent_configs (id, workspaceId, role, routeId, systemPromptOverride, temperature, maxTokens, maxReviewRounds, createdAt, updatedAt)
+    VALUES (@id, @workspaceId, @role, @routeId, @systemPromptOverride, @temperature, @maxTokens, @maxReviewRounds, @createdAt, @updatedAt)
     ON CONFLICT(workspaceId, role) DO UPDATE SET
       routeId=excluded.routeId,
       systemPromptOverride=excluded.systemPromptOverride,
       temperature=excluded.temperature,
       maxTokens=excluded.maxTokens,
+      maxReviewRounds=excluded.maxReviewRounds,
       updatedAt=excluded.updatedAt
-  `).run({ ...config, routeId: config.routeId ?? null });
+  `).run({ ...config, routeId: config.routeId ?? null, maxReviewRounds: mrr });
   return getByRole(config.workspaceId, config.role);
+}
+
+/**
+ * Resolve the `maxReviewRounds` override for a (workspace, role) pair.
+ * Returns `null` when no row exists or the column is NULL — callers
+ * should fall through to the loop's `DEFAULT_MAX_REVIEW_ROUNDS`.
+ *
+ * @param {string} workspaceId
+ * @param {string} role
+ * @returns {number|null}
+ */
+export function getMaxReviewRounds(workspaceId, role) {
+  if (!workspaceId || !role) return null;
+  try {
+    const row = getDatabase().prepare(
+      "SELECT maxReviewRounds FROM agent_configs WHERE workspaceId = ? AND role = ?",
+    ).get(workspaceId, role);
+    const v = row?.maxReviewRounds;
+    return v == null ? null : Number(v);
+  } catch {
+    return null;
+  }
 }
 
 /**

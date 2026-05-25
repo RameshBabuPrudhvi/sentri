@@ -57,6 +57,10 @@ const files = [
   "tests/agent-message-emitter.test.js",
   "tests/agent-reviewer-loop.test.js",
   "tests/reviewer-prompt.test.js",
+  // AUTO-023 B3.3 — per-workspace `agent_configs.maxReviewRounds` override
+  // (migration 059). Pins the repo-layer `[1, 10]` clamp + the loop's
+  // resolution order (caller > workspace override > default).
+  "tests/agent-config-max-review-rounds.test.js",
   // AUTO-023 B2.6 — envelope-mode pipeline handoff smoke test. Pins the
   // ordered explorer→planner→author thread, workspace scoping on
   // `listByThread`, the envelope-vs-pipeline read-mode gate, and the

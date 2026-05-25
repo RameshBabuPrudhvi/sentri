@@ -1,6 +1,8 @@
 import { emitAgentMessage } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { agentReviewRoundsTotal } from "../utils/metrics.js";
+import { checkSpendCap } from "./quotaGuard.js";
+import { getMaxReviewRounds } from "../database/repositories/agentConfigRepo.js";
 
 const HARD_MAX_REVIEW_ROUNDS = 10;
 const DEFAULT_MAX_REVIEW_ROUNDS = 3;
@@ -65,6 +67,52 @@ function observeLoopOutcome(outcome, round) {
   } catch { /* best-effort */ }
 }
 
+/**
+ * Default quota gate when callers don't inject their own. Delegates to
+ * `quotaGuard.checkSpendCap(workspaceId)` so a revision round that would
+ * push the workspace over its daily / monthly USD spend cap terminates
+ * with `outcome=quota_exhausted` and ships the last accepted artifact.
+ *
+ * Workspaces with no spend cap configured pass through unconditionally
+ * (the underlying `checkSpendCap` returns `{ ok: true, remainingUsd: null }`).
+ * Standalone callers without a `workspaceId` also pass through — the
+ * loop runner's `runId === null` smoke-test paths must not require a
+ * live workspace row to operate.
+ *
+ * Returns `{ ok, reason?, remainingUsd? }` matching the user-supplied
+ * `checkQuota` callback shape so the loop's downstream branch is
+ * source-agnostic.
+ */
+function defaultQuotaCheck({ workspaceId }) {
+  if (!workspaceId) return { ok: true };
+  try {
+    const result = checkSpendCap(workspaceId);
+    if (result?.ok === false) {
+      return { ok: false, reason: `spend_cap_${result.exceeded || "exceeded"}`, remainingUsd: result.remainingUsd };
+    }
+    return { ok: true, remainingUsd: result?.remainingUsd ?? null };
+  } catch {
+    // Fail-open: a DB hiccup in spend-cap math MUST NOT block a
+    // running loop. Same contract as `quotaGuard.readSpendCaps`.
+    return { ok: true };
+  }
+}
+
+/**
+ * Resolve the effective `maxReviewRounds` ceiling for this loop. Caller-
+ * supplied value wins (explicit opt-in); otherwise look up the per-
+ * workspace `agent_configs.maxReviewRounds` for the reviewer role; else
+ * fall through to `DEFAULT_MAX_REVIEW_ROUNDS`. The `clampReviewRounds`
+ * call at the loop entry then enforces the `[1, HARD_MAX_REVIEW_ROUNDS]`
+ * hard bound regardless of source.
+ */
+function resolveMaxReviewRounds(callerValue, workspaceId) {
+  if (callerValue != null) return callerValue;
+  if (!workspaceId) return DEFAULT_MAX_REVIEW_ROUNDS;
+  const override = getMaxReviewRounds(workspaceId, "reviewer");
+  return override == null ? DEFAULT_MAX_REVIEW_ROUNDS : override;
+}
+
 function toMessage({ runId, threadId, workspaceId, fromRole, toRole, intent, artifact, rationale, round, replyToId }) {
   // Omit `id` — `emitAgentMessage` assigns a monotonic id via its internal
   // sequence so `(createdAt ASC, id ASC)` tiebreaks preserve insertion
@@ -124,13 +172,27 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   runId = null,
   threadId = null,
   workspaceId = null,
-  maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
+  maxReviewRounds = null,
   loopTimeoutMs = DEFAULT_LOOP_TIMEOUT_MS,
 } = {}) {
   if (typeof runAuthor !== "function" || typeof runReviewer !== "function") {
     throw new Error("runReviewerAuthorLoop requires runAuthor + runReviewer functions");
   }
-  const maxRounds = clampReviewRounds(maxReviewRounds);
+  // B3.3 — resolution order: caller-supplied > per-workspace
+  // `agent_configs.maxReviewRounds` override > `DEFAULT_MAX_REVIEW_ROUNDS`.
+  // `clampReviewRounds` then enforces the `[1, HARD_MAX_REVIEW_ROUNDS]`
+  // hard bound regardless of source so a corrupted workspace row can't
+  // exceed the server-side ceiling.
+  const resolvedMax = resolveMaxReviewRounds(maxReviewRounds, workspaceId);
+  const maxRounds = clampReviewRounds(resolvedMax);
+  // B3.4 — when the caller doesn't inject a quota check, default to the
+  // workspace's spend-cap gate so a revision round that would breach the
+  // workspace's daily/monthly USD budget terminates early with
+  // `outcome=quota_exhausted`. Pre-fix the loop ran unbounded against a
+  // workspace that had already exceeded its spend cap (the per-AI-call
+  // cap fires too late — by then a reviewer or author LLM call already
+  // burned tokens).
+  const effectiveQuotaCheck = typeof checkQuota === "function" ? checkQuota : defaultQuotaCheck;
   const maxElapsedMs = clampLoopTimeoutMs(loopTimeoutMs);
   const deadline = Date.now() + maxElapsedMs;
   const maxReplyChainDepth = maxRounds * 2;
@@ -143,8 +205,8 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   let replyDepth = 0;
 
   while (round < maxRounds) {
-    if (typeof checkQuota === "function") {
-      const quota = await checkQuota({ round, runId, threadId, workspaceId });
+    {
+      const quota = await effectiveQuotaCheck({ round, runId, threadId, workspaceId });
       if (quota?.ok === false) {
         const out = {
           outcome: "quota_exhausted",

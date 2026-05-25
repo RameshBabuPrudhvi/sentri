@@ -661,6 +661,16 @@ export function messagesToTurns(messages) {
         detail = `Round ${round + 1} — Reviewer rejected ${(m.artifact?.issues || []).length || 0} issues → Author fixing (${diffLabel})`;
       }
       const text = `[${intent}] ${AGENT_PERSONAS[m.fromRole].label} → ${toLabel}${detail ? ` — ${detail}` : ""}`;
+      // B3.5 — surface the round index on every loop-vocabulary turn so
+      // `AgentConversation.jsx` can render the "Round N" badge. We
+      // expose `_round` on `request_revision`, `accept`, and `reject_final`
+      // (the three Bundle 3 intents from `agentEnvelope.js#INTENTS`) plus
+      // any `handoff` whose round > 0, which is what an author revision
+      // looks like. Round-0 handoffs (the initial author submission)
+      // intentionally don't get a badge — the operator doesn't need
+      // "Round 1" noise on the very first turn.
+      const isLoopIntent = intent === "request_revision" || intent === "accept" || intent === "reject_final";
+      const showRoundBadge = isLoopIntent || (intent === "handoff" && round > 0);
       return {
         id: `msg-${m.id || idx}`,
         agent: m.fromRole,
@@ -669,6 +679,7 @@ export function messagesToTurns(messages) {
         text,
         ts: m.createdAt ? Date.parse(m.createdAt) || Date.now() : Date.now(),
         _complete: true,
+        _round: showRoundBadge ? round : undefined,
       };
     });
 }

@@ -203,21 +203,21 @@ can reject and force `author` to revise. This is where Sentri stops being
 an assembly line.
 
 ## B3.1 — New intents
-- [ ] `request_revision` — reviewer → author with
+- [x] `request_revision` — reviewer → author with
       `{issues: [{testId, problem, suggestion}]}`
-- [ ] `accept` — reviewer → supervisor "ship it"
-- [ ] `reject_final` — reviewer → supervisor "unrecoverable"
+- [x] `accept` — reviewer → supervisor "ship it"
+- [x] `reject_final` — reviewer → supervisor "unrecoverable"
 
 ## B3.2 — Reviewer prompt change
-- [ ] `backend/src/prompts/reviewerPrompt.js`:
-  - [ ] Require structured output `{verdict, issues[]}`
-  - [ ] `verdict ∈ {accept, revise, reject}`
-  - [ ] `issues[].testId` MUST reference a test from the author's most
+- [x] `backend/src/prompts/reviewerPrompt.js`:
+  - [x] Require structured output `{verdict, issues[]}`
+  - [x] `verdict ∈ {accept, revise, reject}`
+  - [x] `issues[].testId` MUST reference a test from the author's most
         recent `handoff` artifact (else envelope validation fails)
 
 ## B3.3 — Loop runner
-- [ ] New: `backend/src/aiProvider/agentLoop.js`
-  - [ ] `runReviewerAuthorLoop(initialArtifact, opts)`:
+- [x] New: `backend/src/aiProvider/agentLoop.js`
+  - [x] `runReviewerAuthorLoop(initialArtifact, opts)`:
     ```
     round = 0
     while round < MAX_REVIEW_ROUNDS:
@@ -229,54 +229,68 @@ an assembly line.
       round += 1
     return lastAuthorArtifact  # max rounds reached, ship with warning
     ```
-- [ ] `MAX_REVIEW_ROUNDS` defaults to **3** — exposed via
-      `agent_configs.maxReviewRounds` per workspace
-- [ ] Termination metric:
+- [x] `MAX_REVIEW_ROUNDS` defaults to **3** — exposed via
+      `agent_configs.maxReviewRounds` per workspace (migration 059)
+- [x] Termination metric:
       `agent_review_rounds_total{outcome=accept|max_rounds|reject_final}`
       with a 4-bucket histogram on `round` index
 
 ## B3.4 — Per-`(route, role)` quota awareness
-- [ ] Loop runner integrates with existing `quotaGuard.checkAndReserve`
-      — a revision round that would breach quota terminates early with
-      `outcome=quota_exhausted` and ships the last accepted artifact
+- [x] Loop runner integrates with existing `quotaGuard.checkSpendCap`
+      — a revision round that would breach the workspace's daily/monthly
+      USD spend cap terminates early with `outcome=quota_exhausted` and
+      ships the last accepted artifact (`defaultQuotaCheck` in
+      `agentLoop.js`)
 - [ ] AI-005c single-agent collapse rule preserved: when author + reviewer
       share the same `routeId`, loop still runs (both calls happen) but
-      a warning surfaces on the run detail page
+      a warning surfaces on the run detail page (deferred to the
+      orchestrator-wiring follow-up — the loop runner itself doesn't
+      yet have a UI surface to emit the warning into; tracked under
+      `AUTO-023-B3-FOLLOWUP-SINGLE-AGENT-WARNING`)
 
 ## B3.5 — UI: round indicator + diff view
-- [ ] `frontend/src/components/ai/AgentConversation.jsx`:
-  - [ ] `request_revision` messages render with a "Round N" badge
-  - [ ] Per-round artifact diff: which tests changed between rounds
-- [ ] `Reviewer rejected N issues → Author fixing` becomes a real
+- [x] `frontend/src/components/ai/AgentConversation.jsx`:
+  - [x] `request_revision` messages render with a "Round N" badge
+        (`.ac-round-badge` pill; `_round` surfaced by `messagesToTurns`
+        on every loop-vocabulary envelope)
+  - [x] Per-round artifact diff: which tests changed between rounds
+        (`messagesToTurns` computes `+N added, ~N updated, -N removed`
+        from consecutive author-handoff artifacts)
+- [x] `Reviewer rejected N issues → Author fixing` becomes a real
       narration line, not a synthesized template string
 
 ## B3.6 — Safety: termination guarantees
-- [ ] `MAX_REVIEW_ROUNDS` ceiling enforced server-side regardless of
-      workspace config (hard cap = 10)
-- [ ] Wall-clock budget per loop: `loopTimeoutMs` (default 5 min) —
-      mirrors `runCapabilityProbe`'s deadline pattern
-- [ ] Cycle protection: reject envelope if `replyToId` chain exceeds
-      `MAX_REVIEW_ROUNDS * 2`
+- [x] `MAX_REVIEW_ROUNDS` ceiling enforced server-side regardless of
+      workspace config (hard cap = 10) — `HARD_MAX_REVIEW_ROUNDS` +
+      `clampReviewRounds` in `agentLoop.js`; also clamped at the repo
+      layer in `agentConfigRepo.upsert`
+- [x] Wall-clock budget per loop: `loopTimeoutMs` (default 5 min, hard
+      cap 30 min) — checked at top-of-loop AND post-reviewer to catch
+      single-long-reviewer-call timeouts
+- [x] Cycle protection: reject envelope if `replyToId` chain exceeds
+      `MAX_REVIEW_ROUNDS * 2` — `maxReplyChainDepth` + `replyDepth`
+      counter in `agentLoop.js` throws `ERR_REVIEW_CYCLE_PROTECTION`
 
 ## B3.7 — Tests
-- [ ] `backend/tests/agent-reviewer-loop.test.js`:
-  - [ ] Reviewer accepts on round 1 → loop returns immediately
-  - [ ] Reviewer revises once, accepts on round 2 → 2 author calls,
+- [x] `backend/tests/agent-reviewer-loop.test.js`:
+  - [x] Reviewer accepts on round 1 → loop returns immediately
+  - [x] Reviewer revises once, accepts on round 2 → 2 author calls,
         2 reviewer calls, artifact carries round-2 changes
-  - [ ] Reviewer keeps revising → loop terminates at MAX_REVIEW_ROUNDS
+  - [x] Reviewer keeps revising → loop terminates at MAX_REVIEW_ROUNDS
         with `outcome=max_rounds`
-  - [ ] Reviewer `reject_final` → throws `ReviewRejection`, no further
+  - [x] Reviewer `reject_final` → throws `ReviewRejection`, no further
         author calls
-  - [ ] Quota exhaustion mid-loop → ships last accepted artifact
-- [ ] Registered in `backend/tests/run-tests.js`
+  - [x] Quota exhaustion mid-loop → ships last accepted artifact
+- [x] Registered in `backend/tests/run-tests.js`
 
 ## B3.8 — Exit criteria (Bundle 3)
-- [ ] Reviewer↔author loop demonstrably improves a known-bad test
+- [x] Reviewer↔author loop demonstrably improves a known-bad test
       fixture (regression: a test with a brittle selector ships
-      strengthened after 1 revision round)
-- [ ] No infinite loops possible — max-rounds + wall-clock + cycle
+      strengthened after 1 revision round — pinned by the
+      "golden fixture" test in `agent-reviewer-loop.test.js`)
+- [x] No infinite loops possible — max-rounds + wall-clock + cycle
       protection all enforced
-- [ ] Operator can see round count + per-round diff in the UI
+- [x] Operator can see round count + per-round diff in the UI
 
 ---
 

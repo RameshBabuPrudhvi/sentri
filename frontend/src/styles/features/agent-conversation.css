@@ -127,6 +127,26 @@
   font-size: 0.68rem;
 }
 
+/* ─── Round badge (B3.5) ────────────────────────────────────────────────────
+ * Surfaces the reviewer↔author loop round index ("Round 2") on every turn
+ * derived from a Bundle 3 loop envelope (`request_revision` / `accept` /
+ * `reject_final`, or any `handoff` with `round > 0`). Visually distinct
+ * from `.ac-model` so the operator can scan iteration count without
+ * conflating it with the provider attribution chip. */
+
+.ac-round-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--ac-reviewer-bg);
+  border: 1px solid var(--ac-reviewer-border);
+  color: var(--ac-reviewer-fg);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 .ac-text {
   font-size: 0.85rem;
   line-height: 1.55;

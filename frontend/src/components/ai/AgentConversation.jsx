@@ -383,7 +383,7 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
             className={`ac-turn ac-turn--${persona.color} ac-turn--${turn.phase}${
               isHandoff ? " ac-turn--handoff" : ""
             }`}
-            aria-label={`${persona.label} — ${turn.phase}`}
+            aria-label={`${persona.label} — ${turn.phase}${turn._round != null ? ` — round ${turn._round + 1}` : ""}`}
           >
             <div
               className={`ac-avatar ac-avatar--${persona.color}`}
@@ -396,6 +396,19 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
               {!isHandoff && (
                 <div className="ac-meta">
                   <span className="ac-agent-label">{persona.label}</span>
+                  {/* B3.5 — Round badge for reviewer↔author loop turns.
+                      `_round` is set by `messagesToTurns` on every envelope-
+                      derived turn that carries a non-zero round index OR
+                      whose intent is part of the loop vocabulary
+                      (`request_revision` / `accept` / `reject_final`). The
+                      badge surfaces "Round N" so operators can see at a
+                      glance which reviewer↔author iteration a turn belongs
+                      to without parsing the bubble text. */}
+                  {turn._round != null && (
+                    <span className="ac-round-badge" aria-label={`Round ${turn._round + 1}`}>
+                      Round {turn._round + 1}
+                    </span>
+                  )}
                   {model && turn.phase !== "onboard" && turn.phase !== "accept" && turn.phase !== "handoff" && (
                     <span className="ac-model">· {model}</span>
                   )}

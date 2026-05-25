@@ -159,3 +159,60 @@ test("loop records termination metric with bounded outcome label", async () => {
   const sawAccept = json.values.some((v) => v.labels?.outcome === "accept");
   assert.equal(sawAccept, true);
 });
+
+// B3.8 — Golden-fixture regression: a known-bad test with a brittle CSS-
+// hashed selector ships strengthened after one revision round. Pre-fix
+// (no loop) the test went out as-is; with the loop the reviewer flags
+// the auto-generated class and the author rewrites it to a role-based
+// locator on round 1.
+test("loop strengthens a brittle-selector test after one revision round (B3.8 golden fixture)", async () => {
+  const brittleTest = {
+    id: "t-brittle",
+    name: "Submit form",
+    playwrightCode: "await page.click('.css-1a2b3c4');",
+  };
+  let authorCalls = 0;
+  const out = await runReviewerAuthorLoop({ tests: [brittleTest] }, {
+    runAuthor: async ({ artifact, reviewerIssues }) => {
+      authorCalls += 1;
+      if (!reviewerIssues || reviewerIssues.length === 0) return artifact;
+      // Round 2 — author rewrites the brittle selector in response to
+      // the reviewer's high-severity issue.
+      const fixed = {
+        ...brittleTest,
+        playwrightCode: "await page.getByRole('button', { name: 'Submit' }).click();",
+      };
+      return { ...artifact, tests: [fixed] };
+    },
+    runReviewer: async ({ round, artifact }) => {
+      const code = artifact?.tests?.[0]?.playwrightCode || "";
+      const hasBrittle = /\.css-[a-z0-9]+/i.test(code);
+      if (hasBrittle && round === 0) {
+        return {
+          intent: "request_revision",
+          artifact: {
+            issues: [{
+              testId: "t-brittle",
+              problem: "Brittle auto-generated CSS class selector",
+              suggestion: "Use getByRole or data-testid",
+            }],
+          },
+        };
+      }
+      return { intent: "accept" };
+    },
+    maxReviewRounds: 3,
+  });
+  assert.equal(out.outcome, "accept", "test eventually accepts after revision");
+  assert.equal(out.round, 1, "accepted on the second round (round index 1)");
+  assert.equal(authorCalls, 2, "author called twice (initial + one revision)");
+  const finalCode = out.artifact?.tests?.[0]?.playwrightCode || "";
+  assert.ok(
+    finalCode.includes("getByRole"),
+    `final artifact uses role-based locator, got: ${finalCode}`,
+  );
+  assert.ok(
+    !/\.css-[a-z0-9]+/i.test(finalCode),
+    "brittle CSS-hash selector is gone from final artifact",
+  );
+});
