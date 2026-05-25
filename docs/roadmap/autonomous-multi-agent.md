@@ -196,7 +196,14 @@ groundwork for loops + branches in Bundle 3.
 
 ---
 
-# Bundle 3 — Reviewer ↔ Author feedback loop (first real conversation)
+# Bundle 3 — Reviewer ↔ Author feedback loop (first real conversation) ✅ COMPLETED
+
+**Status:** shipped in PR #35. Loop runner + per-workspace
+`maxReviewRounds` override (migration 059) + real `quotaGuard`
+integration + AI-005c single-agent-collapse warning + termination
+metric + UI round badge & per-round artifact diff + golden-fixture
+regression all live. See `docs/changelog.md` "AUTO-023 Bundle 3" entry
+for the full enumeration.
 
 **Goal:** the smallest possible real multi-agent interaction — `reviewer`
 can reject and force `author` to revise. This is where Sentri stops being
@@ -221,19 +228,25 @@ an assembly line.
     ```
     round = 0
     while round < MAX_REVIEW_ROUNDS:
+      if checkQuota({round, workspaceId}).ok == false:
+        return { outcome: "quota_exhausted", artifact: lastAuthorArtifact }
+      if Date.now() > deadline:
+        return { outcome: "timeout", artifact: lastAuthorArtifact }
       authorMsg   = runAuthor(currentArtifact, prevReviewerFeedback)
       reviewerMsg = runReviewer(authorMsg.artifact)
-      if reviewerMsg.intent == accept:       return authorMsg.artifact
+      if reviewerMsg.intent == accept:       return { outcome: "accept", artifact: authorMsg.artifact }
       if reviewerMsg.intent == reject_final: throw ReviewRejection
-      prevReviewerFeedback = reviewerMsg.artifact.issues
+      if Date.now() > deadline:
+        return { outcome: "timeout", artifact: lastAuthorArtifact }
+      prevReviewerFeedback = reviewerMsg.artifact.issues   // validated against author tests
       round += 1
-    return lastAuthorArtifact  # max rounds reached, ship with warning
+    return { outcome: "max_rounds", artifact: lastAuthorArtifact }
     ```
 - [x] `MAX_REVIEW_ROUNDS` defaults to **3** — exposed via
       `agent_configs.maxReviewRounds` per workspace (migration 059)
 - [x] Termination metric:
-      `agent_review_rounds_total{outcome=accept|max_rounds|reject_final}`
-      with a 4-bucket histogram on `round` index
+      `app_agent_review_rounds_total{outcome=accept|max_rounds|timeout|quota_exhausted|reject_final}`
+      with a 4-bucket histogram on `round` index ([0, 1, 2, 3])
 
 ## B3.4 — Per-`(route, role)` quota awareness
 - [x] Loop runner integrates with existing `quotaGuard.checkSpendCap`
@@ -284,7 +297,26 @@ an assembly line.
   - [x] Reviewer `reject_final` → throws `ReviewRejection`, no further
         author calls
   - [x] Quota exhaustion mid-loop → ships last accepted artifact
-- [x] Registered in `backend/tests/run-tests.js`
+        (`outcome=quota_exhausted`)
+  - [x] Wall-clock timeout mid-loop → ships last accepted artifact
+        (`outcome=timeout`)
+  - [x] Unrecognized reviewer `intent` values (`handoff`, `question`,
+        `answer`, `final`, `tool_call`, `tool_result`) normalise to
+        `accept` instead of silently looping with unsanitised feedback
+- [x] `backend/tests/agent-config-max-review-rounds.test.js` —
+      repo-layer `[1, 10]` clamp on `agent_configs.maxReviewRounds`
+      and the loop's resolution order (caller > workspace override >
+      `DEFAULT_MAX_REVIEW_ROUNDS`).
+- [x] `backend/tests/reviewer-prompt.test.js` —
+      `normalizeReviewerVerdict` filters issues to known testIds and
+      downgrades `revise` with zero valid issues to `accept`.
+- [x] `frontend/tests/AgentConversation.test.js` —
+      `messagesToTurns` Round N badge + per-round artifact diff
+      narration; `eventsToTurns` standalone-warning turn for the
+      single-agent-collapse advisory; `supervisor` + `healer` envelopes
+      survive the persona-table filter.
+- [x] All registered in `backend/tests/run-tests.js` /
+      `frontend/tests/run-tests.js`
 
 ## B3.8 — Exit criteria (Bundle 3)
 - [x] Reviewer↔author loop demonstrably improves a known-bad test
