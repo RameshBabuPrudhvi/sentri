@@ -241,7 +241,13 @@ export async function tryVisionHeal(ctx, deps = {}) {
         emitHandoffEnvelope({
           runId: _runId, threadId: _threadId, workspaceId: _workspaceId,
           fromRole: "healer", toRole: "reviewer",
-          artifact: { kind: "vision_pixelmatch", testId: ctx.testId, action: ctx.action, label: ctx.label, confidence: r.confidence, healed: true },
+          // `box` is mirrored from the return value below so a reviewer
+          // replaying the thread sees WHERE the heal landed (coordinates
+          // are what the host-side re-action uses to dispatch the verb).
+          // Pre-fix the envelope omitted box, so the thread carried a
+          // less complete record than the executeTest healing-event
+          // stream.
+          artifact: { kind: "vision_pixelmatch", testId: ctx.testId, action: ctx.action, label: ctx.label, confidence: r.confidence, box: r.box || null, healed: true },
           rationale: "Healer pixelmatch CV heal succeeded",
         });
         return {
@@ -304,7 +310,10 @@ export async function tryVisionHeal(ctx, deps = {}) {
         artifact: {
           kind: "vision_llm", testId: ctx.testId, action: ctx.action, label: ctx.label,
           confidence: r.confidence, model: r.model || null,
-          costUsd: Number.isFinite(r.costUsd) ? r.costUsd : 0, healed: true,
+          costUsd: Number.isFinite(r.costUsd) ? r.costUsd : 0,
+          // Same box-symmetry rationale as the pixelmatch envelope above.
+          box: r.box || null,
+          healed: true,
         },
         rationale: "Healer LLM-vision heal succeeded",
       });
