@@ -22,6 +22,7 @@ import {
   synthesizeTurns,
   getStepAgentSequence,
   eventsToTurns,
+  messagesToTurns,
 } from "../src/components/ai/agentConversationSynth.js";
 
 let passed = 0;
@@ -402,6 +403,49 @@ test("turn IDs are stable across calls with the same event sequence", () => {
   const a = eventsToTurns(events).map(t => t.id);
   const b = eventsToTurns(events).map(t => t.id);
   assert.deepEqual(a, b);
+});
+
+// ─── messagesToTurns (agent_message adapter) ─────────────────────────────────
+
+console.log("\n── messagesToTurns ──");
+
+test("returns empty array for null/undefined/empty input", () => {
+  assert.deepEqual(messagesToTurns(null), []);
+  assert.deepEqual(messagesToTurns(undefined), []);
+  assert.deepEqual(messagesToTurns([]), []);
+});
+
+test("maps agent_message rows to handoff turns with intent and role metadata", () => {
+  const turns = messagesToTurns([
+    {
+      id: "am-1",
+      fromRole: "author",
+      toRole: "reviewer",
+      intent: "handoff",
+      rationale: "Author generated tests",
+      round: 2,
+      createdAt: "2026-05-25T10:00:00.000Z",
+    },
+  ]);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].id, "msg-am-1");
+  assert.equal(turns[0].agent, "author");
+  assert.equal(turns[0].phase, "handoff");
+  assert.equal(turns[0].step, 2);
+  assert.match(turns[0].text, /\[handoff\]/);
+  assert.match(turns[0].text, /Author/);
+  assert.match(turns[0].text, /Reviewer/);
+});
+
+test("skips unknown fromRole and falls back to index-based id", () => {
+  const turns = messagesToTurns([
+    { fromRole: "unknown-role", toRole: "author", intent: "question" },
+    { fromRole: "planner", toRole: null, intent: "question", artifact: { q: "Next?" } },
+  ]);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].id, "msg-0");
+  assert.match(turns[0].text, /\[question\]/);
+  assert.match(turns[0].text, /Planner/);
 });
 
 process.on("beforeExit", () => {
