@@ -43,18 +43,41 @@ import { randomUUID } from "crypto";
 import { emitRunEvent } from "../routes/sse.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 
-// Monotonic id sequence — guarantees insertion order is preserved by the
-// repo's `(createdAt ASC, id ASC)` tiebreaker when multiple envelopes are
-// emitted inside the same millisecond. Pre-fix the id was `am-${randomUUID()}`
-// and same-ms rows came back in non-deterministic UUID order, flaking the
-// explorer → planner → author thread ordering assertion in
-// `tests/agent-pipeline-envelope.test.js`.
-let _agentMessageSeq = 0;
+// Monotonic envelope id — guarantees insertion order is preserved by the
+// repo's `(createdAt ASC, id ASC)` tiebreaker BOTH within a single process
+// and across clustered workers.
+//
+// Format: `am-<13-digit-ms-timestamp>-<6-digit-intra-ms-counter>-<uuid>`
+//
+//   - Timestamp prefix sorts envelopes by their actual emit wall-clock
+//     across workers (no per-process counter coordination needed). 13
+//     digits = ms since epoch, valid until ~year 5138.
+//   - Intra-ms counter (zero-padded to 6 digits, capacity 1M per ms per
+//     process — far above any realistic LLM emit burst) keeps order
+//     deterministic for envelopes a single process emits inside the same
+//     millisecond.
+//   - UUID suffix preserves PK uniqueness when two workers in a cluster
+//     happen to emit on the same ms with the same intra-ms counter
+//     (otherwise both would share the prefix and only the UUID would
+//     distinguish them).
+//
+// Replaces the previous process-local `_agentMessageSeq` counter which
+// gave deterministic order WITHIN one process but produced overlapping
+// `am-000000000001-…` ids in a clustered deployment — two workers'
+// "first envelope of the process" both started at seq=1 and only the
+// UUID suffix distinguished them, so the cross-process ordering claim
+// only held when `createdAt` differed by a full millisecond.
+let _idLastMs = 0;
+let _idIntraMsCounter = 0;
 function _nextAgentMessageId() {
-  _agentMessageSeq += 1;
-  // 12-digit zero-pad keeps lexicographic order aligned with numeric order
-  // for the practical lifetime of a single process (10^12 messages).
-  return `am-${String(_agentMessageSeq).padStart(12, "0")}-${randomUUID()}`;
+  const now = Date.now();
+  if (now === _idLastMs) {
+    _idIntraMsCounter += 1;
+  } else {
+    _idLastMs = now;
+    _idIntraMsCounter = 0;
+  }
+  return `am-${String(now).padStart(13, "0")}-${String(_idIntraMsCounter).padStart(6, "0")}-${randomUUID()}`;
 }
 // Task 2 — `model` resolution. `resolveRoute({ agentRole, workspaceId })`
 // returns the same route the pipeline's `generateText(...)` call will use

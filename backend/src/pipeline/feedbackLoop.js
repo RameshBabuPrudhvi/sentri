@@ -546,7 +546,7 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     // loop has signal to surface in the NarrativeFeed's quality-review entry.
     const _runId = options.runId || null;
     const threadId = _runId ? mainThreadId(_runId) : null;
-    readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
+    const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
     emitAgentEvent(_runId, { step: 7, agent: "author", phase: "start", workspaceId,
       message: `Repairing ${test?.name || "failing test"} (${failureCategory})` });
     let text;
@@ -559,6 +559,7 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     emitHandoffEnvelope({
       runId: _runId, threadId, workspaceId,
       fromRole: "author", toRole: "reviewer",
+      replyToId: inbound?.id || null,
       artifact: { testId: test?.id || null, failureCategory, improved: { name: improved?.name, description: improved?.description } },
       rationale: "Author regenerated failing test",
     });

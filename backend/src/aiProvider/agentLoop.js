@@ -72,6 +72,32 @@ function toMessage({ runId, threadId, workspaceId, fromRole, toRole, intent, art
  * Bundle 3 loop substrate: author/reviewer roundtrip with bounded termination.
  * Callers inject `runAuthor` and `runReviewer` wrappers around existing
  * pipeline/prompt call-sites so this module stays orchestration-only.
+ *
+ * ### Result contract
+ *
+ * Every successful outcome returns `{ outcome, round, roundsCompleted, artifact }`.
+ * `reject_final` throws `ReviewRejection` and is never an outcome value.
+ *
+ * - `round`: 0-indexed index of the final round the loop reached.
+ *   `accept` → the round the reviewer accepted on.
+ *   `max_rounds` → `maxRounds - 1` (last attempted round).
+ *   `timeout` → 0-indexed last fully-completed round, or `-1` if the
+ *   deadline fired before round 0 completed.
+ * - `roundsCompleted`: 1-based count of fully-completed author↔reviewer
+ *   round-trips. **This is the field operators / metrics should read**;
+ *   `round` is preserved for backward-compat with pre-existing consumers.
+ *   `accept` on round 0 → `1`. `max_rounds` with `maxRounds=3` → `3`.
+ *   `timeout` before round 0 completes → `0`.
+ *
+ * ### Termination guarantees
+ *
+ * The deadline is checked at TWO points per iteration: top of loop (before
+ * `runAuthor`) and immediately after `runReviewer`. The post-reviewer
+ * check catches "single long reviewer call exceeds the budget" — without
+ * it, `maxReviewRounds: 1` could never timeout because the top-of-loop
+ * check on iteration 0 sees `Date.now() < deadline`. Belt-and-braces:
+ * with both checks, any caller-set `loopTimeoutMs` is honoured regardless
+ * of `maxReviewRounds`.
  */
 export async function runReviewerAuthorLoop(initialArtifact, {
   runAuthor,
@@ -90,6 +116,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   const deadline = Date.now() + maxElapsedMs;
   const maxReplyChainDepth = maxRounds * 2;
   let round = 0;
+  let roundsCompleted = 0;
   let currentArtifact = initialArtifact;
   let prevReviewerFeedback = null;
   let lastAuthorArtifact = initialArtifact;
@@ -97,8 +124,15 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   let replyDepth = 0;
 
   while (round < maxRounds) {
+    // First deadline check — catches "budget already exhausted by prior
+    // rounds before this iteration starts".
     if (Date.now() > deadline) {
-      return { outcome: "timeout", round: Math.max(0, round - 1), artifact: lastAuthorArtifact };
+      return {
+        outcome: "timeout",
+        round: roundsCompleted === 0 ? -1 : roundsCompleted - 1,
+        roundsCompleted,
+        artifact: lastAuthorArtifact,
+      };
     }
     const authorArtifact = await runAuthor({
       round,
@@ -151,16 +185,45 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       throw err;
     }
 
+    // A full author↔reviewer round-trip just finished. Bump
+    // `roundsCompleted` BEFORE the post-reviewer deadline check so a
+    // timeout fired by a slow reviewer still attributes this round as
+    // completed in the result — and so any return below can report a
+    // 1-based count without off-by-one juggling.
+    roundsCompleted += 1;
+
     if (intent === "accept") {
-      return { outcome: "accept", round, artifact: authorArtifact };
+      return { outcome: "accept", round, roundsCompleted, artifact: authorArtifact };
     }
     if (intent === "reject_final") {
       throw new ReviewRejection();
     }
+
+    // Second deadline check — catches "single long reviewer call exceeds
+    // the budget". Without this check the post-reviewer path could
+    // continue to round N+1 even with the budget blown, and a caller
+    // with `maxReviewRounds: 1` could never time out at all (the
+    // top-of-loop check on the only iteration sees `Date.now() < deadline`
+    // because no work has happened yet). The test in
+    // `agent-reviewer-loop.test.js#timeout` exercises this branch.
+    if (Date.now() > deadline) {
+      return {
+        outcome: "timeout",
+        round: roundsCompleted - 1,
+        roundsCompleted,
+        artifact: lastAuthorArtifact,
+      };
+    }
+
     prevReviewerFeedback = artifact?.issues || [];
     currentArtifact = authorArtifact;
     round += 1;
   }
 
-  return { outcome: "max_rounds", round: maxRounds - 1, artifact: lastAuthorArtifact };
+  return {
+    outcome: "max_rounds",
+    round: maxRounds - 1,
+    roundsCompleted,
+    artifact: lastAuthorArtifact,
+  };
 }

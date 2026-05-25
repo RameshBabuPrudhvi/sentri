@@ -169,7 +169,10 @@ function parseEndpointHints(description, appUrl) {
  */
 export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   const threadId = runId ? mainThreadId(runId) : null;
-  readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
+  // AUTO-023 Bundle 2 — read the inbound envelope and feed its id into
+  // the outbound `replyToId` so the thread reads as a true reply chain
+  // (not a discarded read). See `intentClassifier.js` for the contract.
+  const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
   const apiIntent = isApiIntent(name, description);
 
   let prompt;
@@ -226,6 +229,7 @@ export async function generateFromDescription(name, description, appUrl, onToken
   sanitiseSteps(tests);
   emitHandoffEnvelope({
     runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+    replyToId: inbound?.id || null,
     artifact: { tests }, rationale: "Author generated tests",
   });
 
@@ -240,7 +244,7 @@ export async function generateFromDescription(name, description, appUrl, onToken
 export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   try {
     const threadId = runId ? mainThreadId(runId) : null;
-    readLatestEnvelope({ threadId, workspaceId, toRole: "planner" });
+    const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "planner" });
     const prompt = withDials(buildJourneyPrompt(journey, snapshotsByUrl, { testCount }), dialsPrompt);
     // Step 3 — Classify / Map journeys. `planner` decomposes a journey
     // (start page → expected outcome) into the test scaffolding the
@@ -261,6 +265,7 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
     sanitiseSteps(tests);
     emitHandoffEnvelope({
       runId, threadId, workspaceId, fromRole: "planner", toRole: "author",
+      replyToId: inbound?.id || null,
       artifact: { journey: journey?.name || null, tests }, rationale: "Planner journey decomposition",
     });
     return tests;
@@ -281,7 +286,7 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
 export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   try {
     const threadId = runId ? mainThreadId(runId) : null;
-    readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
+    const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
     const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot, { testCount }), dialsPrompt);
     // Step 4 — Generate. `author` writes per-page intent tests for each
     // high-priority classified page.
@@ -300,6 +305,7 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
     sanitiseSteps(tests);
     emitHandoffEnvelope({
       runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+      replyToId: inbound?.id || null,
       artifact: { url: classifiedPage?.url || null, intent: classifiedPage?.dominantIntent || null, tests },
       rationale: "Author generated intent tests",
     });
@@ -512,7 +518,7 @@ export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "",
   try {
     throwIfAborted(signal);
     const threadId = runId ? mainThreadId(runId) : null;
-    readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
+    const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
     const prompt = withDials(buildApiTestPrompt(apiEndpoints, appUrl, { testCount }), dialsPrompt);
     // Step 4 — Generate. `author` writes Playwright `request` API tests from
     // HAR-captured endpoint summaries (mirrors the UI test path).
@@ -542,6 +548,7 @@ export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "",
     sanitiseSteps(tests);
     emitHandoffEnvelope({
       runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+      replyToId: inbound?.id || null,
       artifact: { appUrl, endpointCount: apiEndpoints.length, tests },
       rationale: "Author generated API tests",
     });

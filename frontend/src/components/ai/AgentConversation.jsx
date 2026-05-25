@@ -109,6 +109,19 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
     () => {
       const haveEvents = Array.isArray(agentEvents) && agentEvents.length > 0;
       const haveMessages = Array.isArray(agentMessages) && agentMessages.length > 0;
+      // AUTO-023 Bundle 2 — merge envelope-derived turns alongside the
+      // per-stage `agent_event` narration instead of priority-short-
+      // circuiting. Pre-fix `eventsToTurns` always won (every pipeline
+      // stage emits start/done events) so `messagesToTurns` was
+      // unreachable in production and the operator never saw envelopes
+      // in the UI. Both sources have non-colliding id prefixes
+      // (`evt-…` vs `msg-…`) so merging by timestamp produces a stable
+      // chronological transcript; the diff effect below keys on id and
+      // doesn't care which source a turn came from.
+      if (haveEvents && haveMessages) {
+        return [...eventsToTurns(agentEvents), ...messagesToTurns(agentMessages)]
+          .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      }
       if (haveEvents) return eventsToTurns(agentEvents);
       if (haveMessages) return messagesToTurns(agentMessages);
       return synthesizeTurns(run, ctx);

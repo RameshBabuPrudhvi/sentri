@@ -130,7 +130,13 @@ const AI_THRESHOLD = parseInt(process.env.AI_CLASSIFY_THRESHOLD, 10) || 40;
 
 async function aiClassifyPage(snapshot, signal, workspaceId = null, runId = null) {
   const threadId = runId ? mainThreadId(runId) : null;
-  readLatestEnvelope({ threadId, workspaceId, toRole: "explorer" });
+  // AUTO-023 Bundle 2 — read the latest envelope addressed to this role
+  // and thread its id into the outbound emit as `replyToId`. This honours
+  // the B2.2 roadmap contract literally: the stage's read result FEEDS
+  // the write, completing a real reply chain (not a discarded read).
+  // In `pipeline` mode the helper short-circuits via `isEnvelopeReadEnabled`
+  // and returns null — `replyToId` becomes null, preserving zero-regression.
+  const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "explorer" });
   const elements = (snapshot.elements || []).slice(0, 15).map(e => ({
     tag: e.tag, text: (e.text || "").slice(0, 40), role: e.role, type: e.type,
   }));
@@ -184,6 +190,7 @@ Return ONLY valid JSON (no markdown):
     workspaceId,
     fromRole: "explorer",
     toRole: "planner",
+    replyToId: inbound?.id || null,
     artifact: { url: snapshot?.url || null, intent, confidence: result.confidence || 70 },
     rationale: "Intent classification handoff",
   });

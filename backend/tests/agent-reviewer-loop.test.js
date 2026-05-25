@@ -76,29 +76,60 @@ test("loop throws ReviewRejection on reject_final", async () => {
 });
 
 test("loop terminates with timeout outcome when wall-clock budget is exceeded", async () => {
-  // The deadline check fires at the TOP of each while-iteration, BEFORE
-  // `runAuthor` runs. So for `maxReviewRounds: N` and `loopTimeoutMs: B`,
-  // the reviewer's per-round latency must satisfy
-  //   `(N - 1) * latency > B`
-  // for the check to fire on iteration N-1 instead of the loop exiting
-  // naturally via `round < N`. With N=2 and B=1005ms, latency > 1005ms
-  // suffices. We use 600ms per round across 2 rounds — round 0 finishes
-  // at ~600ms, top-of-loop check at round 1 sees 600 < 1005 (passes),
-  // round 1 finishes at ~1200ms, top-of-loop check that WOULD start
-  // round 2 (but the loop already exited at `round < 2`) — so we set
-  // N=3 and use 600ms so round 1's top-check is 600ms (pass), round 2's
-  // top-check is 1200ms (FAIL → timeout). Pre-fix this used 15ms × 3,
-  // total ~45ms vs 1005ms budget — the check never fired and the loop
-  // returned `max_rounds` instead of `timeout` (devin-ai-integration
-  // review thread #1).
+  // Guaranteed-trigger fixture: the budget clamp is 1000ms (anything below
+  // falls back to DEFAULT_LOOP_TIMEOUT_MS — see `clampLoopTimeoutMs`), and
+  // `setTimeout(_, 50)` reliably takes >0ms in real time. So a single
+  // reviewer with even a trivial real-time yield will exceed the 1000ms
+  // budget after a small number of completed rounds, AND — thanks to the
+  // post-reviewer deadline check added in this PR — even a single slow
+  // reviewer call on `maxReviewRounds: 1` would time out. We use
+  // `maxReviewRounds: 5` + 300ms reviewer sleep against the minimum-clamped
+  // 1000ms budget so the deadline blows somewhere around round 4 regardless
+  // of scheduler jitter; the test never depends on a tuned (rounds × sleep)
+  // product narrowly matching the budget.
   const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
     runAuthor: async ({ artifact }) => artifact,
     runReviewer: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      await new Promise((resolve) => setTimeout(resolve, 300));
       return { intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "retry" }] } };
     },
-    maxReviewRounds: 3,
-    loopTimeoutMs: 1_005,
+    maxReviewRounds: 5,
+    loopTimeoutMs: 1_000,
   });
   assert.equal(out.outcome, "timeout");
+  // roundsCompleted must reflect the work actually done (Bug 1 fix —
+  // result contract documents this as the canonical 1-based count).
+  assert.ok(out.roundsCompleted >= 1 && out.roundsCompleted <= 5, `roundsCompleted within bounds, got ${out.roundsCompleted}`);
+});
+
+test("loop returns roundsCompleted alongside outcome for every termination path", async () => {
+  // Accept on round 0 → roundsCompleted: 1
+  const accept0 = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async () => ({ intent: "accept" }),
+  });
+  assert.equal(accept0.outcome, "accept");
+  assert.equal(accept0.round, 0);
+  assert.equal(accept0.roundsCompleted, 1);
+
+  // Accept on round 1 (after one revise) → roundsCompleted: 2
+  const accept1 = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async ({ round }) => round === 0
+      ? { intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "x" }] } }
+      : { intent: "accept" },
+  });
+  assert.equal(accept1.outcome, "accept");
+  assert.equal(accept1.round, 1);
+  assert.equal(accept1.roundsCompleted, 2);
+
+  // Max rounds (3) → roundsCompleted: 3
+  const maxOut = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async () => ({ intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "x" }] } }),
+    maxReviewRounds: 3,
+  });
+  assert.equal(maxOut.outcome, "max_rounds");
+  assert.equal(maxOut.round, 2);
+  assert.equal(maxOut.roundsCompleted, 3);
 });
