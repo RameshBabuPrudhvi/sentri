@@ -55,7 +55,7 @@ Code:
 ${test?.playwrightCode || "(no code)"}
 \`\`\`
 
-### Approve when
+### Accept when
 - Selectors are stable (data-testid, role-based locators, accessible names)
 - Wait conditions are present where the test acts on dynamic content
 - Assertions verify meaningful outcomes (cart count, form submission success, navigation completion)

@@ -16,7 +16,17 @@ export class ReviewRejection extends Error {
 
 function normalizeVerdict(reviewer) {
   if (!reviewer) return "accept";
-  if (reviewer.intent) return reviewer.intent;
+  if (reviewer.intent) {
+    // `reject` is a valid envelope INTENT value but, in the loop's
+    // verdict vocabulary, it means "unrecoverable final rejection" —
+    // i.e. `reject_final`. Without this remap a reviewer callback
+    // returning `{ intent: "reject" }` would silently fall through to
+    // the revision/continue path (neither `accept` nor `reject_final`
+    // matched the terminal checks at lines 195–200), looping until
+    // `maxRounds`. Map it explicitly so the terminal check fires.
+    if (reviewer.intent === "reject") return "reject_final";
+    return reviewer.intent;
+  }
   const verdict = String(reviewer.verdict || "").toLowerCase();
   if (verdict === "accept") return "accept";
   if (verdict === "revise") return "request_revision";
