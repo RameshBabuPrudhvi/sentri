@@ -32,6 +32,7 @@ import * as runRepo from "./database/repositories/runRepo.js";
 import * as aiRequestLogRepo from "./database/repositories/aiRequestLogRepo.js";
 import { purgeExpired as purgeExpiredCacheRows } from "./aiProvider/responseCache.js";
 import * as providerRouteAuditRepo from "./database/repositories/providerRouteAuditRepo.js";
+import * as agentMessageRepo from "./database/repositories/agentMessageRepo.js";
 import * as activityRepo from "./database/repositories/activityRepo.js";
 import { generateRunId } from "./utils/idGenerator.js";
 import { runWithAbort } from "./utils/runWithAbort.js";
@@ -64,6 +65,7 @@ let _providerAuditRetentionTask = null;
 
 /** @type {Object|null} B2.5 — daily AI request-log retention sweep. */
 let _aiRequestLogRetentionTask = null;
+let _agentMessageRetentionTask = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -513,7 +515,25 @@ export function initScheduler() {
   // the same `cron.schedule()` shape as the sibling daily tasks above
   // and stored on `_aiRequestLogRetentionTask` so graceful shutdown
   // can stop it via `stopAllTasks()` below.
-  _aiRequestLogRetentionTask = cron.schedule("45 4 * * *", () => {
+    // AUTO-023 B1.1 — daily agent-message retention sweep (90d default),
+  // mirroring run_agent_events retention posture.
+  _agentMessageRetentionTask = cron.schedule("15 5 * * *", () => {
+    try {
+      const raw = process.env.AGENT_MESSAGE_RETENTION_DAYS;
+      const days = raw === undefined || raw === "" ? 90 : Number.parseInt(raw, 10);
+      if (!Number.isFinite(days) || days <= 0) return;
+      const deleted = agentMessageRepo.purgeOlderThan(days);
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] Agent-message retention sweep deleted ${deleted} row(s) older than ${days} days`));
+      }
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[scheduler] Agent-message retention sweep failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
+_aiRequestLogRetentionTask = cron.schedule("45 4 * * *", () => {
     try {
       const raw = process.env.AI_REQUEST_LOG_RETENTION_DAYS;
       const days = raw === undefined || raw === "" ? 30 : Number.parseInt(raw, 10);
@@ -594,6 +614,10 @@ export function stopAllTasks() {
   if (_aiRequestLogRetentionTask) {
     _aiRequestLogRetentionTask.stop();
     _aiRequestLogRetentionTask = null;
+  }
+  if (_agentMessageRetentionTask) {
+    _agentMessageRetentionTask.stop();
+    _agentMessageRetentionTask = null;
   }
 }
 

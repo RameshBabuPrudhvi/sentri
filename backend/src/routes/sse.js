@@ -16,6 +16,7 @@ import { Router } from "express";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runLogRepo from "../database/repositories/runLogRepo.js";
+import * as agentMessageRepo from "../database/repositories/agentMessageRepo.js";
 // Task 2 — per-agent SSE event history is hydrated by `runRepo.getById`
 // (see `run.agentEvents` below). No separate repo import needed here —
 // reusing the hydrated array avoids a redundant DB round-trip and keeps
@@ -176,6 +177,7 @@ router.get("/runs/:runId/events", (req, res) => {
   const signedRun = signRunArtifacts({
     ...run,
     logs: runLogRepo.getMessagesByRunId(run.id),
+    agentMessages: agentMessageRepo.listByRun(run.id, req.workspaceId),
   });
   res.write(`data: ${JSON.stringify({ type: "snapshot", run: signedRun })}\n\n`);
 

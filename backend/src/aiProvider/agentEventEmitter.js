@@ -37,6 +37,9 @@
  */
 
 import * as repo from "../database/repositories/runAgentEventRepo.js";
+import * as agentMessageRepo from "../database/repositories/agentMessageRepo.js";
+import { validateEnvelope } from "./agentEnvelope.js";
+import { randomUUID } from "crypto";
 import { emitRunEvent } from "../routes/sse.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 // Task 2 — `model` resolution. `resolveRoute({ agentRole, workspaceId })`
@@ -176,4 +179,31 @@ export function emitAgentEvent(runId, { step, agent, phase, message, data, nextA
     console.warn(formatLogLine("warn", runId,
       `[agentEventEmitter] broadcast failed (${agent}/${phase}): ${err?.message || err}`));
   }
+}
+
+
+export function emitAgentMessage(envelope = {}) {
+  const withDefaults = {
+    id: envelope.id || `am-${randomUUID()}`,
+    createdAt: envelope.createdAt || new Date().toISOString(),
+    round: envelope.round ?? 0,
+    ...envelope,
+  };
+  const valid = validateEnvelope(withDefaults);
+
+  try {
+    agentMessageRepo.append(valid);
+  } catch (err) {
+    console.warn(formatLogLine("warn", valid.runId || null,
+      `[agentEventEmitter] agent_message persist failed (${valid.fromRole}/${valid.intent}): ${err?.message || err}`));
+  }
+
+  try {
+    emitRunEvent(valid.runId, "agent_message", valid);
+  } catch (err) {
+    console.warn(formatLogLine("warn", valid.runId || null,
+      `[agentEventEmitter] agent_message broadcast failed (${valid.fromRole}/${valid.intent}): ${err?.message || err}`));
+  }
+
+  return valid;
 }
