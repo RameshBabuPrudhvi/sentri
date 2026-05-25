@@ -4,6 +4,7 @@ import { agentReviewRoundsTotal } from "../utils/metrics.js";
 import { checkSpendCap } from "./quotaGuard.js";
 import { getMaxReviewRounds } from "../database/repositories/agentConfigRepo.js";
 import { resolveRoute } from "./registry.js";
+import { PIPELINE_STEPS } from "../utils/pipelineState.js";
 
 const HARD_MAX_REVIEW_ROUNDS = 10;
 const DEFAULT_MAX_REVIEW_ROUNDS = 3;
@@ -181,7 +182,7 @@ function maybeWarnSingleAgentCollapse({ runId, workspaceId }) {
     const rId = reviewer?.route?.id;
     if (!aId || !rId || aId !== rId) return;
     emitAgentEvent(runId, {
-      step: 7,
+      step: PIPELINE_STEPS.REVIEW,
       agent: "reviewer",
       phase: "finding",
       message: "Author and reviewer share the same provider route — review loop runs but cannot catch model-specific blind spots.",

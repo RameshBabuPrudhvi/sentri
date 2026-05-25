@@ -47,13 +47,24 @@ function seedConfig(workspaceId, role, maxReviewRounds) {
 }
 
 test("repo clamps maxReviewRounds into [1, 10]", () => {
+  // Three successive seedConfig calls intentionally target the SAME
+  // (workspaceId, "reviewer") tuple to exercise `agentConfigRepo.upsert`'s
+  // `ON CONFLICT(workspaceId, role) DO UPDATE` path defined in
+  // `backend/src/database/migrations/046_agent_configs.sql` (UNIQUE
+  // index) + `backend/src/database/repositories/agentConfigRepo.js:91-100`.
+  // The contract under test is: the clamp at the repo layer runs on every
+  // write, not just on initial INSERT — so an operator who first sets 5,
+  // then attempts 999, must end up at 10 (not the prior 5). Pinning the
+  // UPDATE path explicitly here means a future refactor that drops
+  // ON CONFLICT (e.g. switching to a separate `update()` path) would
+  // fail this assertion instead of silently regressing the clamp.
   const wsId = seedWorkspace();
   seedConfig(wsId, "reviewer", 999);
-  assert.equal(agentConfigRepo.getMaxReviewRounds(wsId, "reviewer"), 10, "clamped to hard cap");
+  assert.equal(agentConfigRepo.getMaxReviewRounds(wsId, "reviewer"), 10, "clamped to hard cap on INSERT");
   seedConfig(wsId, "reviewer", 0);
-  assert.equal(agentConfigRepo.getMaxReviewRounds(wsId, "reviewer"), 1, "clamped to floor of 1");
+  assert.equal(agentConfigRepo.getMaxReviewRounds(wsId, "reviewer"), 1, "clamped to floor on ON CONFLICT UPDATE");
   seedConfig(wsId, "reviewer", 5);
-  assert.equal(agentConfigRepo.getMaxReviewRounds(wsId, "reviewer"), 5, "valid value preserved");
+  assert.equal(agentConfigRepo.getMaxReviewRounds(wsId, "reviewer"), 5, "valid value preserved on ON CONFLICT UPDATE");
 });
 
 test("repo getMaxReviewRounds returns null when row missing", () => {

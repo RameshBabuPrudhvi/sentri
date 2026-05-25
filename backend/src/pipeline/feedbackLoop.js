@@ -35,6 +35,7 @@ import { emitHandoffEnvelope, mainThreadId, readLatestEnvelope } from "../aiProv
 // on round 0 short-circuits identically to pre-loop behaviour.
 import { runReviewerAuthorLoop, ReviewRejection } from "../aiProvider/agentLoop.js";
 import { validateTest } from "./testValidator.js";
+import { PIPELINE_STEPS } from "../utils/pipelineState.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
@@ -620,7 +621,7 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
           // envelopes — the operator sees iteration via the
           // AgentConversation feed, not via repeated step-7 start events.
           if (!firstAuthorStartFired) {
-            emitAgentEvent(_runId, { step: 7, agent: "author", phase: "start", workspaceId,
+            emitAgentEvent(_runId, { step: PIPELINE_STEPS.REVIEW, agent: "author", phase: "start", workspaceId,
               message: "Repairing " + (test?.name || "failing test") + " (" + failureCategory + ")" });
             firstAuthorStartFired = true;
           }
@@ -666,7 +667,7 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     // Done event fires ONCE after the loop terminates (mirror of the
     // single start event above) so the NarrativeFeed shows one
     // start/done pair per regeneration, not one per round.
-    emitAgentEvent(_runId, { step: 7, agent: "author", phase: "done", workspaceId });
+    emitAgentEvent(_runId, { step: PIPELINE_STEPS.REVIEW, agent: "author", phase: "done", workspaceId });
 
     // Bundle 2 audit-trail bridge: the loop wrote its own author/reviewer
     // envelopes internally, but the captured `inbound` envelope's reply

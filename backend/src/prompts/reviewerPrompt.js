@@ -108,29 +108,136 @@ Respond with valid JSON only — no prose around it.
  * @typedef {Object} ReviewerVerdict
  * @property {"accept"|"revise"|"reject"} verdict
  * @property {ReviewerIssue[]} issues
+ * @property {Array<{testId: string, problem: string, reason: "unknown_test_id"|"missing_fields"}>} [droppedIssues]
+ *   Issues that didn't survive validation, with the reason. Populated only
+ *   when something was actually dropped — empty / undefined on clean input.
  */
+
+/**
+ * Error thrown by `normalizeReviewerVerdict` in strict mode when the
+ * reviewer's `issues[]` violate the roadmap contract documented at
+ * `docs/roadmap/autonomous-multi-agent.md:222-223` ("`issues[].testId`
+ * MUST reference a test from the author's most recent `handoff`
+ * artifact"). Carries the dropped issues for audit / debugging.
+ *
+ * Callers (the loop runner, the orchestrator) catch this and decide
+ * whether to downgrade to `accept` or surface it as a hard reviewer
+ * failure. The class shape mirrors `ReviewRejection` in `agentLoop.js`
+ * (Error subclass + typed `.code`) so error-handling sites use one
+ * pattern across the bundle.
+ */
+export class ReviewerEnvelopeError extends Error {
+  constructor(message, { droppedIssues = [] } = {}) {
+    super(message);
+    this.name = "ReviewerEnvelopeError";
+    this.code = "ERR_REVIEWER_ENVELOPE_INVALID";
+    this.droppedIssues = droppedIssues;
+  }
+}
 
 /**
  * Parse + normalize reviewer JSON output into the Bundle-3 verdict shape.
  *
+ * ### Validation contract
+ *
+ * Per `docs/roadmap/autonomous-multi-agent.md:222-223` Bundle 3 specifies:
+ *
+ *   > `issues[].testId` MUST reference a test from the author's most
+ *   > recent `handoff` artifact (else envelope validation fails)
+ *
+ * This function enforces the contract in two modes:
+ *
+ *   - **Soft (default — `strict: false`):** drop issues that violate
+ *     the contract and populate `droppedIssues` on the return value so
+ *     callers can audit the filtering. Mirrors the pre-fix silent
+ *     behaviour but surfaces the drops instead of hiding them. Used by
+ *     UI / prompt-parse code paths where we want best-effort recovery
+ *     from a bad LLM response.
+ *   - **Strict (opt-in — `strict: true`):** throw
+ *     `ReviewerEnvelopeError` when any issue references an unknown
+ *     `testId`. Used by the loop runner / orchestrator where envelope-
+ *     schema integrity is part of the termination contract — the loop
+ *     catches the error and treats it as a structured "reviewer
+ *     envelope violation" outcome instead of silently rejecting the
+ *     issues. Soft mode is the default so existing callers don't
+ *     break; strict mode is the roadmap-spec behaviour.
+ *
+ * Both modes also downgrade a `revise` verdict with zero surviving
+ * issues to `accept` (so the loop never fires another author round
+ * with empty feedback) — that's the no-actionable-signal safety net,
+ * orthogonal to the testId-validation contract above.
+ *
  * @param {unknown} raw
- * @param {Set<string>} validTestIds
+ * @param {Set<string>} validTestIds  Set of testIds from the author's
+ *   most recent handoff artifact. Empty Set = "no constraint" (existing
+ *   callers without testId tracking pass through unchanged).
+ * @param {Object} [opts]
+ * @param {boolean} [opts.strict=false]  When true, throw
+ *   `ReviewerEnvelopeError` on testId violations instead of dropping.
  * @returns {ReviewerVerdict}
+ * @throws {ReviewerEnvelopeError} (strict mode only) when any
+ *   `issues[].testId` is not in `validTestIds`.
  */
-export function normalizeReviewerVerdict(raw, validTestIds = new Set()) {
+export function normalizeReviewerVerdict(raw, validTestIds = new Set(), opts = {}) {
+  const { strict = false } = opts;
   const verdictRaw = String(raw?.verdict || raw?.intent || "accept").toLowerCase();
   const verdict = verdictRaw === "revise" || verdictRaw === "reject" ? verdictRaw : "accept";
   const issuesIn = Array.isArray(raw?.issues) ? raw.issues : [];
-  const issues = issuesIn
-    .map((i) => ({
-      testId: String(i?.testId || "").trim(),
-      problem: String(i?.problem || i?.message || "").trim(),
-      suggestion: i?.suggestion ? String(i.suggestion).trim() : undefined,
-    }))
-    .filter((i) => i.testId && i.problem)
-    .filter((i) => validTestIds.size === 0 || validTestIds.has(i.testId));
-  if (verdict === "revise" && issues.length === 0) {
-    return { verdict: "accept", issues: [] };
+
+  // Stage 1: shape the issues + drop ones with missing required fields.
+  // Captured drops carry a `reason` so the caller can distinguish "LLM
+  // returned garbage" from "LLM picked the wrong testId".
+  const droppedIssues = [];
+  const shaped = issuesIn.map((i) => ({
+    testId: String(i?.testId || "").trim(),
+    problem: String(i?.problem || i?.message || "").trim(),
+    suggestion: i?.suggestion ? String(i.suggestion).trim() : undefined,
+  }));
+  const withFields = [];
+  for (const issue of shaped) {
+    if (!issue.testId || !issue.problem) {
+      droppedIssues.push({ testId: issue.testId, problem: issue.problem, reason: "missing_fields" });
+    } else {
+      withFields.push(issue);
+    }
   }
-  return { verdict, issues };
+
+  // Stage 2: enforce the roadmap's "testId MUST reference a test from
+  // the author's most recent handoff artifact" contract.
+  const issues = [];
+  for (const issue of withFields) {
+    if (validTestIds.size === 0 || validTestIds.has(issue.testId)) {
+      issues.push(issue);
+    } else {
+      droppedIssues.push({ testId: issue.testId, problem: issue.problem, reason: "unknown_test_id" });
+    }
+  }
+
+  // Strict mode: any unknown_test_id drop is a contract violation —
+  // throw so the caller can treat it as a structured outcome rather
+  // than silently filtering. The throw fires AFTER we've shaped the
+  // full droppedIssues list so the error carries every violation for
+  // audit, not just the first one.
+  if (strict) {
+    const unknownTestIdDrops = droppedIssues.filter((d) => d.reason === "unknown_test_id");
+    if (unknownTestIdDrops.length > 0) {
+      throw new ReviewerEnvelopeError(
+        `reviewer envelope references unknown testIds: ${unknownTestIdDrops.map((d) => d.testId).join(", ")}`,
+        { droppedIssues: unknownTestIdDrops },
+      );
+    }
+  }
+
+  // Empty-issues downgrade — orthogonal to the contract above. If the
+  // reviewer asked for a revision but no surviving issue carries
+  // actionable feedback, fall back to accept rather than burn the next
+  // author round on `reviewerIssues: []`.
+  if (verdict === "revise" && issues.length === 0) {
+    return droppedIssues.length > 0
+      ? { verdict: "accept", issues: [], droppedIssues }
+      : { verdict: "accept", issues: [] };
+  }
+  return droppedIssues.length > 0
+    ? { verdict, issues, droppedIssues }
+    : { verdict, issues };
 }

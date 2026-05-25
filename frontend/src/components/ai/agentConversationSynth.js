@@ -667,7 +667,31 @@ export function messagesToTurns(messages) {
       return String(a?.id || "").localeCompare(String(b?.id || ""));
     });
   const roundAuthorTests = new Map();
-  const fingerprint = (t) => `${t?.id || ""}|${t?.name || ""}|${t?.playwrightCode || ""}`;
+  // Cheap content digest for the round-diff `updated` check. The full-string
+  // fingerprint (`id|name|playwrightCode`) was correct but allocated a fresh
+  // ~2KB string per test per render; at a 50-test suite × ~5 re-renders per
+  // SSE tick that's ~500KB/sec of throwaway strings + Map-key comparisons.
+  // FNV-1a 32-bit hash over `playwrightCode` is O(n) once per fingerprint
+  // computation but produces a tiny integer that hashes in O(1) — net win
+  // since `roundAuthorTests` is consulted on every `request_revision` turn.
+  // Collision risk is acceptable for a visual diff hint: the worst case is
+  // a turn shows "no artifact diff captured" when one test's code happened
+  // to collide with the prior version, which downgrades to the same wording
+  // the empty-diff branch already uses. Length-prefix keeps collisions in
+  // the rare "two strings of different length hash to the same 32-bit value"
+  // class instead of the common "same length, same hash" class.
+  const fnv1a32 = (s) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  };
+  const fingerprint = (t) => {
+    const code = t?.playwrightCode || "";
+    return `${t?.id || ""}|${t?.name || ""}|${code.length}:${fnv1a32(code).toString(16)}`;
+  };
   return ordered
     .map((m, idx) => {
       const toLabel = m.toRole && AGENT_PERSONAS[m.toRole] ? AGENT_PERSONAS[m.toRole].label : "All";
