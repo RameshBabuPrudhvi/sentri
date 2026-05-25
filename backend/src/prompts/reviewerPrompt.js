@@ -98,11 +98,24 @@ Respond with valid JSON only — no prose around it.
 }
 
 /**
+ * @typedef {Object} ReviewerIssue
+ * @property {string} testId
+ * @property {string} problem
+ * @property {string} [suggestion]
+ */
+
+/**
+ * @typedef {Object} ReviewerVerdict
+ * @property {"accept"|"revise"|"reject"} verdict
+ * @property {ReviewerIssue[]} issues
+ */
+
+/**
  * Parse + normalize reviewer JSON output into the Bundle-3 verdict shape.
  *
  * @param {unknown} raw
  * @param {Set<string>} validTestIds
- * @returns {{ verdict: "accept"|"revise"|"reject", issues: Array<{testId:string, problem:string, suggestion?:string}> }}
+ * @returns {ReviewerVerdict}
  */
 export function normalizeReviewerVerdict(raw, validTestIds = new Set()) {
   const verdictRaw = String(raw?.verdict || raw?.intent || "accept").toLowerCase();
