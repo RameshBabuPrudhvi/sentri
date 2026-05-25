@@ -598,12 +598,17 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
         runId: _runId,
         threadId,
         workspaceId,
-        // Cap at 2 rounds so a chronically-bad LLM bails out instead of
-        // burning credits. Per-workspace `agent_configs.maxReviewRounds`
-        // can override (clamped to [1, HARD_MAX_REVIEW_ROUNDS=10]) but
-        // we explicitly pin 2 as the operationally safe ceiling for
-        // the post-run feedback-loop surface.
-        maxReviewRounds: 2,
+        // Round ceiling is intentionally NOT pinned by this call site —
+        // we let the loop's resolution order (caller > per-workspace
+        // `agent_configs.maxReviewRounds` > `DEFAULT_MAX_REVIEW_ROUNDS=3`)
+        // apply, so operators who configured a different ceiling via the
+        // Settings → Agent Roles UI actually get it. Previous code passed
+        // `maxReviewRounds: 2` and silently overrode the workspace setting,
+        // making the new override column inert on the post-run regen path.
+        // The hard cap `HARD_MAX_REVIEW_ROUNDS=10` + per-round
+        // `defaultQuotaCheck` (workspace spend cap) + wall-clock
+        // `loopTimeoutMs` still bound worst-case cost — no need for a
+        // call-site-pinned ceiling here.
 
         runAuthor: async ({ round, reviewerIssues }) => {
           throwIfAborted(signal);

@@ -1,12 +1,17 @@
 import { emitAgentMessage, emitAgentEvent } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { agentReviewRoundsTotal } from "../utils/metrics.js";
-import { checkSpendCap } from "./quotaGuard.js";
+import { readSpendCaps, evaluateSpendCap } from "./quotaGuard.js";
 import { getMaxReviewRounds } from "../database/repositories/agentConfigRepo.js";
 import { resolveRoute } from "./registry.js";
 import { PIPELINE_STEPS } from "../utils/pipelineState.js";
 
-const HARD_MAX_REVIEW_ROUNDS = 10;
+// Exported so callers + repo-layer clamps share a single source of truth.
+// Bumping the ceiling now only requires editing this file. `agentConfigRepo`
+// imports this constant to clamp its `maxReviewRounds` writes — previously
+// the value was duplicated in both files and silently drifted apart on
+// any future change.
+export const HARD_MAX_REVIEW_ROUNDS = 10;
 const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 const DEFAULT_LOOP_TIMEOUT_MS = 5 * 60 * 1000;
 const HARD_MAX_LOOP_TIMEOUT_MS = 30 * 60 * 1000;
@@ -121,9 +126,23 @@ function observeLoopOutcome(outcome, round) {
  */
 function makeDefaultQuotaCheck(workspaceId) {
   if (!workspaceId) return () => ({ ok: true });
+  // Cache the per-workspace cap configuration ONCE for the loop's
+  // lifetime. The `workspaces.dailySpendCapUsd` / `monthlySpendCapUsd`
+  // / `spendAlertThresholdPct` values are operator-set columns that
+  // don't change mid-loop in practice — caching them eliminates the
+  // `workspaces` SELECT on every round. Spend windows still re-read
+  // per round via `evaluateSpendCap` so mid-loop accrual is detected
+  // on the very next gate check. Pre-fix: docblock claimed caching
+  // but the code called `checkSpendCap` (full read each round).
+  //
+  // Cap row resolution is best-effort — a DB hiccup on this one read
+  // collapses to `null`, which `evaluateSpendCap` treats as "no caps
+  // configured" → fail-open. Same contract as `quotaGuard.readSpendCaps`.
+  let cachedCaps = null;
+  try { cachedCaps = readSpendCaps(workspaceId); } catch { cachedCaps = null; }
   return () => {
     try {
-      const result = checkSpendCap(workspaceId);
+      const result = evaluateSpendCap(workspaceId, cachedCaps);
       if (result?.ok === false) {
         return { ok: false, reason: `spend_cap_${result.exceeded || "exceeded"}`, remainingUsd: result.remainingUsd };
       }
@@ -351,7 +370,9 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     let intent = normalizeVerdict(reviewer);
     let artifact = reviewer?.artifact ?? null;
     if (intent === "request_revision") {
-      const safeIssues = validateRevisionIssues(artifact?.issues, authorArtifact);
+      const rawIssues = Array.isArray(artifact?.issues) ? artifact.issues : [];
+      const safeIssues = validateRevisionIssues(rawIssues, authorArtifact);
+      const droppedCount = rawIssues.length - safeIssues.length;
       // Safety downgrade: if the reviewer asked for a revision but
       // every issue referenced a testId not in the author's artifact,
       // `safeIssues` is now empty. Continuing as `request_revision`
@@ -360,7 +381,30 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       // helper `normalizeReviewerVerdict`'s contract (it does the same
       // downgrade at the prompt-parse boundary) so direct callers of
       // `runReviewerAuthorLoop` get the same safety net.
+      //
+      // Surface the downgrade via an `agent_event` finding so operators
+      // debugging "why didn't this loop run?" have a signal — pre-fix the
+      // reviewer's verdict was silently discarded with no audit trail.
+      // The event lands on the same channel the run-detail page renders
+      // (Task 2 NarrativeFeed contract); no new UI surface needed.
       if (safeIssues.length === 0) {
+        if (droppedCount > 0 && runId) {
+          try {
+            emitAgentEvent(runId, {
+              step: PIPELINE_STEPS.REVIEW,
+              agent: "reviewer",
+              phase: "finding",
+              message: `Reviewer verdict downgraded to accept — all ${droppedCount} issue${droppedCount === 1 ? "" : "s"} referenced unknown testIds.`,
+              data: {
+                kind: "reviewer_verdict_downgraded",
+                droppedCount,
+                round,
+                droppedTestIds: rawIssues.map((i) => i?.testId).filter(Boolean).slice(0, 5),
+              },
+              workspaceId,
+            });
+          } catch { /* best-effort — never block the loop on observability */ }
+        }
         intent = "accept";
         artifact = null;
       } else {

@@ -706,17 +706,30 @@ export function messagesToTurns(messages) {
       }
       let detail = m.rationale || formatScalarData(m.artifact) || "";
       if (intent === "request_revision") {
-        const prev = roundAuthorTests.get(round - 1) || new Map();
-        const curr = roundAuthorTests.get(round) || new Map();
-        const added = [...curr.keys()].filter((id) => !prev.has(id));
-        const removed = [...prev.keys()].filter((id) => !curr.has(id));
-        const updated = [...curr.keys()].filter((id) => prev.has(id) && prev.get(id) !== curr.get(id));
-        const pieces = [];
-        if (added.length) pieces.push(`+${added.length} added`);
-        if (updated.length) pieces.push(`~${updated.length} updated`);
-        if (removed.length) pieces.push(`-${removed.length} removed`);
-        const diffLabel = pieces.length ? pieces.join(", ") : "no artifact diff captured";
-        detail = `Round ${round + 1} — Reviewer rejected ${(m.artifact?.issues || []).length || 0} issues → Author fixing (${diffLabel})`;
+        // Per-round diff is only meaningful when there's a PRIOR round
+        // to compare against. On round 0 (the very first revision request)
+        // every test is "new" relative to nothing — printing "+N added"
+        // reads as "the author created N tests this round" when they were
+        // actually the initial submission. Suppress the diff fragment on
+        // round 0; on round 1+ compute against the previous round's
+        // author handoff. `roundAuthorTests.get(-1)` would otherwise
+        // return `undefined` and fall through to the empty-Map default,
+        // producing the misleading "+N added".
+        let diffFragment = "";
+        if (round > 0) {
+          const prev = roundAuthorTests.get(round - 1) || new Map();
+          const curr = roundAuthorTests.get(round) || new Map();
+          const added = [...curr.keys()].filter((id) => !prev.has(id));
+          const removed = [...prev.keys()].filter((id) => !curr.has(id));
+          const updated = [...curr.keys()].filter((id) => prev.has(id) && prev.get(id) !== curr.get(id));
+          const pieces = [];
+          if (added.length) pieces.push(`+${added.length} added`);
+          if (updated.length) pieces.push(`~${updated.length} updated`);
+          if (removed.length) pieces.push(`-${removed.length} removed`);
+          const diffLabel = pieces.length ? pieces.join(", ") : "no artifact diff captured";
+          diffFragment = ` (${diffLabel})`;
+        }
+        detail = `Round ${round + 1} — Reviewer rejected ${(m.artifact?.issues || []).length || 0} issues → Author fixing${diffFragment}`;
       }
       const text = `[${intent}] ${AGENT_PERSONAS[m.fromRole].label} → ${toLabel}${detail ? ` — ${detail}` : ""}`;
       // B3.5 — surface the round index on every loop-vocabulary turn so

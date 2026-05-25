@@ -8,6 +8,10 @@
 
 import { getDatabase } from "../sqlite.js";
 import * as providerRouteRepo from "./providerRouteRepo.js";
+// AUTO-023 B3.3 — single source of truth for the reviewer↔author loop's
+// hard round ceiling. Imported here so a future bump in `agentLoop.js`
+// flows through the repo-layer clamp without drift.
+import { HARD_MAX_REVIEW_ROUNDS } from "../../aiProvider/agentLoop.js";
 
 /**
  * Fetch a single role config for a workspace.
@@ -93,8 +97,8 @@ export function upsert(config) {
   // the repo layer so a bad write (operator UI, JSON import, future
   // admin script) can never exceed the loop's server-side ceiling. NULL
   // is preserved as "no override" — the loop reads `DEFAULT_MAX_REVIEW_ROUNDS`
-  // for those rows.
-  const HARD_MAX_REVIEW_ROUNDS = 10;
+  // for those rows. Ceiling imported from `agentLoop.js` so the constant
+  // is defined exactly once.
   let mrr = config.maxReviewRounds;
   if (mrr === undefined || mrr === null) {
     mrr = null;

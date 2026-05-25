@@ -157,6 +157,67 @@ test("loop exits early when quota check fails and reports quota_exhausted", asyn
   assert.equal(authorCalls, 1, "ships last author artifact without entering next round");
 });
 
+test("onOutcome callback fires on every terminal path (accept, max_rounds, timeout, quota_exhausted, reject_final)", async () => {
+  // Symmetry contract — operators / orchestrators that hook `onOutcome`
+  // expect EVERY terminal path to surface, including `reject_final`
+  // (which also throws ReviewRejection — the hook fires first, then the
+  // throw happens). Pre-fix the reject_final path only recorded the
+  // metric and re-threw, silently bypassing the hook.
+  const seen = [];
+  const onOutcome = (out) => { seen.push(out.outcome); };
+
+  // accept on round 0
+  await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async () => ({ intent: "accept" }),
+    onOutcome,
+  });
+
+  // max_rounds
+  await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async () => ({ intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "x" }] } }),
+    maxReviewRounds: 1,
+    onOutcome,
+  });
+
+  // quota_exhausted
+  await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async () => ({ intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "x" }] } }),
+    checkQuota: async () => ({ ok: false }),
+    onOutcome,
+  });
+
+  // timeout — 1000ms is the minimum clamp; 300ms reviewer delay × 5
+  // rounds blows the budget reliably.
+  await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async () => {
+      await new Promise((r) => setTimeout(r, 300));
+      return { intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "x" }] } };
+    },
+    maxReviewRounds: 5,
+    loopTimeoutMs: 1_000,
+    onOutcome,
+  });
+
+  // reject_final — the hook MUST fire before the throw
+  await assert.rejects(
+    runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+      runAuthor: async ({ artifact }) => artifact,
+      runReviewer: async () => ({ intent: "reject_final" }),
+      onOutcome,
+    }),
+    (err) => err instanceof ReviewRejection,
+  );
+
+  // Order of completion: accept, max_rounds, quota_exhausted, timeout,
+  // reject_final. Sort for resilience to scheduler interleaving.
+  const sorted = [...seen].sort();
+  assert.deepEqual(sorted, ["accept", "max_rounds", "quota_exhausted", "reject_final", "timeout"]);
+});
+
 test("loop records termination metric with bounded outcome label", async () => {
   await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
     runAuthor: async ({ artifact }) => artifact,

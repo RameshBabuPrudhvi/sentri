@@ -418,8 +418,20 @@ test("request_revision includes round badge narration", () => {
   assert.equal(reviseTurns.length, 2);
   assert.match(reviseTurns[0].text, /Round 1/);
   assert.match(reviseTurns[0].text, /Reviewer rejected 1 issues/);
+  // Round-0 revision: no prior round to diff against. The "+N added" /
+  // "~N updated" fragment is intentionally suppressed because every test
+  // would otherwise read as "added" relative to nothing, which misleads
+  // operators into thinking the author created N tests on round 0 when
+  // they're actually the initial submission.
+  assert.ok(!/\+\d+ added/.test(reviseTurns[0].text),
+    "round-0 revision must NOT carry +N added (no prior round to diff)");
+  assert.ok(!/~\d+ updated/.test(reviseTurns[0].text),
+    "round-0 revision must NOT carry ~N updated (no prior round to diff)");
   assert.match(reviseTurns[1].text, /Round 2/);
   assert.match(reviseTurns[1].text, /Reviewer rejected 2 issues/);
+  // Round-1 revision DOES have round-0 as the diff baseline — "+1 added"
+  // (test t2 didn't exist on round 0) + "~1 updated" (t1's code changed
+  // from v1 to v2) are both meaningful here.
   assert.match(reviseTurns[1].text, /\+1 added/);
   assert.match(reviseTurns[1].text, /~1 updated/);
 
