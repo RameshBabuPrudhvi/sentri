@@ -196,7 +196,24 @@ export function emitAgentMessage(envelope = {}) {
     createdAt: envelope.createdAt || new Date().toISOString(),
     round: envelope.round ?? 0,
   };
-  const valid = validateEnvelope(withDefaults);
+
+  // Validation is wrapped in its own try/catch so a malformed envelope
+  // (`ERR_AGENT_ENVELOPE_INVALID` from `validateEnvelope`) degrades to a
+  // logged warning + `null` return — same defensive posture the sibling
+  // `emitAgentEvent` already uses for persist + broadcast. The module
+  // docblock above promises this helper "must NEVER break the originating
+  // LLM call"; without this guard, the eventual Bundle 2 / 3 pipeline
+  // call sites that hand-build envelopes would propagate a Zod failure
+  // up through the LLM call stack and crash the user-initiated run
+  // (lifeguard finding).
+  let valid;
+  try {
+    valid = validateEnvelope(withDefaults);
+  } catch (err) {
+    console.warn(formatLogLine("warn", envelope?.runId || null,
+      `[agentEventEmitter] agent_message validation failed (${envelope?.fromRole || "?"}/${envelope?.intent || "?"}): ${err?.message || err}`));
+    return null;
+  }
 
   try {
     agentMessageRepo.append(valid);
