@@ -42,6 +42,20 @@ import { validateEnvelope } from "./agentEnvelope.js";
 import { randomUUID } from "crypto";
 import { emitRunEvent } from "../routes/sse.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+
+// Monotonic id sequence — guarantees insertion order is preserved by the
+// repo's `(createdAt ASC, id ASC)` tiebreaker when multiple envelopes are
+// emitted inside the same millisecond. Pre-fix the id was `am-${randomUUID()}`
+// and same-ms rows came back in non-deterministic UUID order, flaking the
+// explorer → planner → author thread ordering assertion in
+// `tests/agent-pipeline-envelope.test.js`.
+let _agentMessageSeq = 0;
+function _nextAgentMessageId() {
+  _agentMessageSeq += 1;
+  // 12-digit zero-pad keeps lexicographic order aligned with numeric order
+  // for the practical lifetime of a single process (10^12 messages).
+  return `am-${String(_agentMessageSeq).padStart(12, "0")}-${randomUUID()}`;
+}
 // Task 2 — `model` resolution. `resolveRoute({ agentRole, workspaceId })`
 // returns the same route the pipeline's `generateText(...)` call will use
 // at dispatch time, so reading `route.model` here gives the operator
@@ -192,7 +206,7 @@ export function emitAgentMessage(envelope = {}) {
   // back to the generated default (lifeguard finding).
   const withDefaults = {
     ...envelope,
-    id: envelope.id || `am-${randomUUID()}`,
+    id: envelope.id || _nextAgentMessageId(),
     createdAt: envelope.createdAt || new Date().toISOString(),
     round: envelope.round ?? 0,
   };

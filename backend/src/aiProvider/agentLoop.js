@@ -1,6 +1,5 @@
 import { emitAgentMessage } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
-import { randomUUID } from "crypto";
 
 const HARD_MAX_REVIEW_ROUNDS = 10;
 const DEFAULT_MAX_REVIEW_ROUNDS = 3;
@@ -50,8 +49,10 @@ function nowIso() {
 }
 
 function toMessage({ runId, threadId, workspaceId, fromRole, toRole, intent, artifact, rationale, round, replyToId }) {
+  // Omit `id` — `emitAgentMessage` assigns a monotonic id via its internal
+  // sequence so `(createdAt ASC, id ASC)` tiebreaks preserve insertion
+  // order when multiple envelopes share the same millisecond.
   return emitAgentMessage({
-    id: `am-${randomUUID()}`,
     runId,
     threadId,
     traceId: getCurrentTraceId() || `trace-${runId || "standalone"}`,
