@@ -26,6 +26,11 @@ import * as runLogRepo from "./runLogRepo.js";
 // a reconnecting SSE client receives the full per-agent narrative replay
 // on the initial snapshot, not just events that arrived post-connect.
 import * as runAgentEventRepo from "./runAgentEventRepo.js";
+// AUTO-023 B1.1 — per-thread agent envelopes. Same cascade contract as
+// `run_agent_events`: no FK to `runs`, so hard-delete paths must purge
+// `agent_messages` explicitly to keep the parity claim in the changelog
+// honest (lifeguard finding — fulfils B1.1 "retention janitor parity").
+import * as agentMessageRepo from "./agentMessageRepo.js";
 import { filterShardRetrySurvivors, countShardRetrySurvivors } from "../../utils/shardRetryFilter.js";
 import { runsTotal as metricsRunsTotal } from "../../utils/metrics.js"; // INF-007 — bump on every run-row creation.
 
@@ -1204,6 +1209,8 @@ export function hardDeleteByProjectId(projectId) {
     // Task 2 — cascade into run_agent_events on project-level purge
     // (mirrors the run_logs batch cascade so storage stays consistent).
     runAgentEventRepo.deleteByRunIds(ids);
+    // AUTO-023 B1.1 — cascade into agent_messages on project-level purge.
+    agentMessageRepo.deleteByRunIds(ids);
     db.prepare("DELETE FROM runs WHERE projectId = ?").run(projectId);
   }
   return ids;
@@ -1288,6 +1295,9 @@ export function hardDeleteById(id) {
   // Task 2 — cascade into run_agent_events so a purge removes the per-agent
   // narrative replay alongside the run + log rows.
   runAgentEventRepo.deleteByRunId(id);
+  // AUTO-023 B1.1 — cascade into agent_messages so the per-thread envelope
+  // history is removed alongside the run + log + agent-event rows.
+  agentMessageRepo.deleteByRunId(id);
   db.prepare("DELETE FROM runs WHERE id = ?").run(id);
 }
 

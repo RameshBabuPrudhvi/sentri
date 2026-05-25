@@ -52,6 +52,9 @@ const files = [
   // createdAt ordering, runRepo.getById hydration, cascade-delete, and the
   // emitAgentEvent broadcast contract (persists + delivers to runListeners).
   "tests/agentEvents.test.js",
+  "tests/agent-envelope.test.js",
+  "tests/agent-message-repo.test.js",
+  "tests/agent-message-emitter.test.js",
   "tests/webhook-token.test.js",
   "tests/scheduler.test.js",
   "tests/trigger-api.test.js",

@@ -15,6 +15,11 @@ import * as runLogRepo from "./runLogRepo.js";
 // `run_agent_events` explicitly to avoid orphan rows surviving an
 // account-level GDPR erasure.
 import * as runAgentEventRepo from "./runAgentEventRepo.js";
+// AUTO-023 B1.1 — per-thread agent envelopes. Same cascade + export
+// contract as `run_agent_events`: no FK to `runs`, so erasure must purge
+// `agent_messages` explicitly and Article 20 data-portability must include
+// the envelope history alongside the runs they belong to.
+import * as agentMessageRepo from "./agentMessageRepo.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -71,6 +76,9 @@ export function buildAccountExport(userId) {
       // Task 2 — mirror the `runLogs: []` empty-state entry so the export
       // shape is stable whether or not the user has owned workspaces.
       runAgentEvents: [],
+      // AUTO-023 B1.1 — stable empty-state entry so the Article 20 export
+      // shape stays consistent for users without owned workspaces.
+      agentMessages: [],
       activities: [],
       notificationSettings: [],
       schedules: [],
@@ -98,11 +106,19 @@ export function buildAccountExport(userId) {
   // silently omit them — violating the symmetry contract documented in
   // the import comment at the top of this file.
   let runAgentEvents = [];
+  // AUTO-023 B1.1 — Article 20 data portability for the per-thread envelope
+  // history. Same `runId IN (...)` pattern as `runLogs` / `runAgentEvents`
+  // above; the deletion path below already purges this table, so omitting
+  // it from the export would break the export↔erase symmetry contract.
+  let agentMessages = [];
   if (runIds.length > 0) {
     const rph = placeholders(runIds);
     runLogs = db.prepare(`SELECT * FROM run_logs WHERE runId IN (${rph}) ORDER BY runId, seq ASC`).all(...runIds);
     runAgentEvents = db
       .prepare(`SELECT * FROM run_agent_events WHERE runId IN (${rph}) ORDER BY runId, createdAt ASC, id ASC`)
+      .all(...runIds);
+    agentMessages = db
+      .prepare(`SELECT * FROM agent_messages WHERE runId IN (${rph}) ORDER BY runId, createdAt ASC, id ASC`)
       .all(...runIds);
   }
 
@@ -145,6 +161,7 @@ export function buildAccountExport(userId) {
     runs,
     runLogs,
     runAgentEvents,
+    agentMessages,
     activities,
     notificationSettings,
     schedules,
@@ -219,6 +236,11 @@ export function deleteAccount(userId) {
         // erasure path leaves orphan agent-event rows that reference a
         // deleted runId forever.
         runAgentEventRepo.deleteByRunIds(runIds);
+        // AUTO-023 B1.1 — cascade into `agent_messages` so the per-thread
+        // envelope history is purged alongside the runs + logs + events.
+        // Mirrors `runRepo.hardDeleteByProjectId`; without this the GDPR
+        // erasure path leaves orphan rows pointing at a deleted runId.
+        agentMessageRepo.deleteByRunIds(runIds);
       }
 
       db.prepare(`DELETE FROM activities WHERE workspaceId IN (${wsph})`).run(...ownedWorkspaceIds);

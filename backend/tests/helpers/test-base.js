@@ -135,6 +135,7 @@ const RESET_TABLES = [
   "webhook_tokens",
   "schedules",
   "run_logs",
+  "agent_messages",
   "healing_history",
   "activities",
   "runs",

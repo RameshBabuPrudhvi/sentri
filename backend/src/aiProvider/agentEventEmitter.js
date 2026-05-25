@@ -37,6 +37,9 @@
  */
 
 import * as repo from "../database/repositories/runAgentEventRepo.js";
+import * as agentMessageRepo from "../database/repositories/agentMessageRepo.js";
+import { validateEnvelope } from "./agentEnvelope.js";
+import { randomUUID } from "crypto";
 import { emitRunEvent } from "../routes/sse.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 // Task 2 — `model` resolution. `resolveRoute({ agentRole, workspaceId })`
@@ -176,4 +179,55 @@ export function emitAgentEvent(runId, { step, agent, phase, message, data, nextA
     console.warn(formatLogLine("warn", runId,
       `[agentEventEmitter] broadcast failed (${agent}/${phase}): ${err?.message || err}`));
   }
+}
+
+
+export function emitAgentMessage(envelope = {}) {
+  // Spread `envelope` FIRST, then layer the computed defaults on top so the
+  // `||` / `??` fallbacks actually win when the caller passed a falsy /
+  // nullish value (or omitted the field entirely). Pre-fix the spread came
+  // last and clobbered the auto-generated `id` / `createdAt` / `round` with
+  // whatever the caller had on the source object — including `undefined`,
+  // which then tripped `ERR_AGENT_ENVELOPE_INVALID` instead of falling
+  // back to the generated default (lifeguard finding).
+  const withDefaults = {
+    ...envelope,
+    id: envelope.id || `am-${randomUUID()}`,
+    createdAt: envelope.createdAt || new Date().toISOString(),
+    round: envelope.round ?? 0,
+  };
+
+  // Validation is wrapped in its own try/catch so a malformed envelope
+  // (`ERR_AGENT_ENVELOPE_INVALID` from `validateEnvelope`) degrades to a
+  // logged warning + `null` return — same defensive posture the sibling
+  // `emitAgentEvent` already uses for persist + broadcast. The module
+  // docblock above promises this helper "must NEVER break the originating
+  // LLM call"; without this guard, the eventual Bundle 2 / 3 pipeline
+  // call sites that hand-build envelopes would propagate a Zod failure
+  // up through the LLM call stack and crash the user-initiated run
+  // (lifeguard finding).
+  let valid;
+  try {
+    valid = validateEnvelope(withDefaults);
+  } catch (err) {
+    console.warn(formatLogLine("warn", envelope?.runId || null,
+      `[agentEventEmitter] agent_message validation failed (${envelope?.fromRole || "?"}/${envelope?.intent || "?"}): ${err?.message || err}`));
+    return null;
+  }
+
+  try {
+    agentMessageRepo.append(valid);
+  } catch (err) {
+    console.warn(formatLogLine("warn", valid.runId || null,
+      `[agentEventEmitter] agent_message persist failed (${valid.fromRole}/${valid.intent}): ${err?.message || err}`));
+  }
+
+  try {
+    emitRunEvent(valid.runId, "agent_message", valid);
+  } catch (err) {
+    console.warn(formatLogLine("warn", valid.runId || null,
+      `[agentEventEmitter] agent_message broadcast failed (${valid.fromRole}/${valid.intent}): ${err?.message || err}`));
+  }
+
+  return valid;
 }
