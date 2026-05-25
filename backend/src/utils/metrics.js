@@ -56,6 +56,7 @@ const HTTP_BUCKETS = [0.01, 0.05, 0.1, 0.3, 1, 3, 10];
 const RUN_BUCKETS = [1, 5, 15, 30, 60, 120, 300, 600, 1800];
 const AI_BUCKETS = [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120];
 const PIPELINE_BUCKETS = [0.5, 1, 3, 10, 30, 60, 180];
+const REVIEW_ROUND_BUCKETS = [0, 1, 2, 3];
 
 // ─── Run lifecycle ───────────────────────────────────────────────────────────
 export const runsTotal = new client.Counter({
@@ -245,6 +246,17 @@ export const activeRuns = new client.Gauge({
   name: "app_active_runs",
   help: "Currently-running runs in process. Mirrors `runAbortControllers.size` for in-process execution and BullMQ active-job count for distributed mode. Set from the dashboard route's introspection block on each scrape via a setter helper.",
   labelNames: ["type"],
+  registers: [register],
+});
+
+// AUTO-023 B3.3 — reviewer↔author loop termination visibility.
+// `outcome` is the bounded terminal enum from `agentLoop.js`:
+// accept | max_rounds | timeout | quota_exhausted.
+export const agentReviewRoundsTotal = new client.Histogram({
+  name: "app_agent_review_rounds_total",
+  help: "Reviewer↔author loop rounds completed before termination. `round` index is 0-based and bucketed 0..3 to mirror Bundle-3 defaults. Labelled by terminal outcome for operator debugging.",
+  labelNames: ["outcome"],
+  buckets: REVIEW_ROUND_BUCKETS,
   registers: [register],
 });
 

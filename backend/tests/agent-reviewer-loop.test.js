@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runReviewerAuthorLoop, ReviewRejection } from "../src/aiProvider/agentLoop.js";
+import { register } from "../src/utils/metrics.js";
 
 test("loop returns immediately when reviewer accepts", async () => {
   let authorCalls = 0;
@@ -146,4 +147,15 @@ test("loop exits early when quota check fails and reports quota_exhausted", asyn
   });
   assert.equal(out.outcome, "quota_exhausted");
   assert.equal(authorCalls, 1, "ships last author artifact without entering next round");
+});
+
+test("loop records termination metric with bounded outcome label", async () => {
+  await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async () => ({ intent: "accept" }),
+  });
+  const metric = register.getSingleMetric("app_agent_review_rounds_total");
+  const json = await metric.get();
+  const sawAccept = json.values.some((v) => v.labels?.outcome === "accept");
+  assert.equal(sawAccept, true);
 });

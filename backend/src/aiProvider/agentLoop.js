@@ -1,5 +1,6 @@
 import { emitAgentMessage } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
+import { agentReviewRoundsTotal } from "../utils/metrics.js";
 
 const HARD_MAX_REVIEW_ROUNDS = 10;
 const DEFAULT_MAX_REVIEW_ROUNDS = 3;
@@ -56,6 +57,12 @@ function clampLoopTimeoutMs(value) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function observeLoopOutcome(outcome, round) {
+  try {
+    agentReviewRoundsTotal.observe({ outcome }, Math.max(0, Number(round) || 0));
+  } catch { /* best-effort */ }
 }
 
 function toMessage({ runId, threadId, workspaceId, fromRole, toRole, intent, artifact, rationale, round, replyToId }) {
@@ -146,6 +153,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
           artifact: lastAuthorArtifact,
         };
         if (typeof onOutcome === "function") onOutcome(out);
+        observeLoopOutcome(out.outcome, out.round);
         return out;
       }
     }
@@ -159,6 +167,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
         artifact: lastAuthorArtifact,
       };
       if (typeof onOutcome === "function") onOutcome(out);
+      observeLoopOutcome(out.outcome, out.round);
       return out;
     }
     const authorArtifact = await runAuthor({
@@ -222,9 +231,11 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     if (intent === "accept") {
       const out = { outcome: "accept", round, roundsCompleted, artifact: authorArtifact };
       if (typeof onOutcome === "function") onOutcome(out);
+      observeLoopOutcome(out.outcome, out.round);
       return out;
     }
     if (intent === "reject_final") {
+      observeLoopOutcome("reject_final", round);
       throw new ReviewRejection();
     }
 
@@ -243,6 +254,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
         artifact: lastAuthorArtifact,
       };
       if (typeof onOutcome === "function") onOutcome(out);
+      observeLoopOutcome(out.outcome, out.round);
       return out;
     }
 
@@ -258,5 +270,6 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     artifact: lastAuthorArtifact,
   };
   if (typeof onOutcome === "function") onOutcome(out);
+  observeLoopOutcome(out.outcome, out.round);
   return out;
 }
