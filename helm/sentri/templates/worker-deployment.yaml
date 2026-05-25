@@ -8,6 +8,7 @@ spec:
   template:
     metadata: { labels: { app: worker } }
     spec:
+      terminationGracePeriodSeconds: 60
       containers:
         - name: worker
           image: {{ .Values.worker.image }}

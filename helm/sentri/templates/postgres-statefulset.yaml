@@ -12,8 +12,15 @@ spec:
         - name: postgres
           image: {{ .Values.postgres.image }}
           env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: sentri-secrets, key: POSTGRES_USER }
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef: { name: sentri-secrets, key: POSTGRES_DB }
             - name: POSTGRES_PASSWORD
-              value: sentri
+              valueFrom:
+                secretKeyRef: { name: sentri-secrets, key: POSTGRES_PASSWORD }
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data

@@ -8,9 +8,14 @@ worker:
 postgres:
   image: postgres:16
   storage: 10Gi
+  user: sentri
+  database: sentri
 redis:
   image: redis:7
   cluster:
+    # When true, the in-cluster single-node Redis Deployment/Service is NOT
+    # rendered; operators are expected to point REDIS_URL at an externally
+    # managed Redis Cluster (e.g. AWS ElastiCache, Redis Enterprise).
     enabled: false
 ingress:
   enabled: true
