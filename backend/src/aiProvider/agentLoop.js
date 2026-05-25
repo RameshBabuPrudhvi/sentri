@@ -4,6 +4,8 @@ import { randomUUID } from "crypto";
 
 const HARD_MAX_REVIEW_ROUNDS = 10;
 const DEFAULT_MAX_REVIEW_ROUNDS = 3;
+const DEFAULT_LOOP_TIMEOUT_MS = 5 * 60 * 1000;
+const HARD_MAX_LOOP_TIMEOUT_MS = 30 * 60 * 1000;
 
 export class ReviewRejection extends Error {
   constructor(message = "Reviewer rejected final artifact") {
@@ -35,6 +37,12 @@ function clampReviewRounds(value) {
   const parsed = Number.parseInt(String(value ?? DEFAULT_MAX_REVIEW_ROUNDS), 10);
   if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MAX_REVIEW_ROUNDS;
   return Math.min(parsed, HARD_MAX_REVIEW_ROUNDS);
+}
+
+function clampLoopTimeoutMs(value) {
+  const parsed = Number.parseInt(String(value ?? DEFAULT_LOOP_TIMEOUT_MS), 10);
+  if (!Number.isFinite(parsed) || parsed < 1_000) return DEFAULT_LOOP_TIMEOUT_MS;
+  return Math.min(parsed, HARD_MAX_LOOP_TIMEOUT_MS);
 }
 
 function nowIso() {
@@ -71,18 +79,26 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   threadId = null,
   workspaceId = null,
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
+  loopTimeoutMs = DEFAULT_LOOP_TIMEOUT_MS,
 } = {}) {
   if (typeof runAuthor !== "function" || typeof runReviewer !== "function") {
     throw new Error("runReviewerAuthorLoop requires runAuthor + runReviewer functions");
   }
   const maxRounds = clampReviewRounds(maxReviewRounds);
+  const maxElapsedMs = clampLoopTimeoutMs(loopTimeoutMs);
+  const deadline = Date.now() + maxElapsedMs;
+  const maxReplyChainDepth = maxRounds * 2;
   let round = 0;
   let currentArtifact = initialArtifact;
   let prevReviewerFeedback = null;
   let lastAuthorArtifact = initialArtifact;
   let lastReviewerMsgId = null;
+  let replyDepth = 0;
 
   while (round < maxRounds) {
+    if (Date.now() > deadline) {
+      return { outcome: "timeout", round: Math.max(0, round - 1), artifact: lastAuthorArtifact };
+    }
     const authorArtifact = await runAuthor({
       round,
       artifact: currentArtifact,
@@ -97,6 +113,12 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       round,
       replyToId: lastReviewerMsgId,
     });
+    replyDepth += 1;
+    if (replyDepth > maxReplyChainDepth) {
+      const err = new Error("Reply chain depth exceeded safety bound");
+      err.code = "ERR_REVIEW_CYCLE_PROTECTION";
+      throw err;
+    }
 
     const reviewer = await runReviewer({ round, artifact: authorArtifact });
     const intent = normalizeVerdict(reviewer);
@@ -115,6 +137,12 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       round,
     });
     lastReviewerMsgId = reviewerMsg?.id || null;
+    replyDepth += 1;
+    if (replyDepth > maxReplyChainDepth) {
+      const err = new Error("Reply chain depth exceeded safety bound");
+      err.code = "ERR_REVIEW_CYCLE_PROTECTION";
+      throw err;
+    }
 
     if (intent === "accept") {
       return { outcome: "accept", round, artifact: authorArtifact };

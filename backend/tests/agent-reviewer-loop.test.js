@@ -74,3 +74,16 @@ test("loop throws ReviewRejection on reject_final", async () => {
     (err) => err instanceof ReviewRejection && err.code === "ERR_REVIEW_REJECT_FINAL",
   );
 });
+
+test("loop terminates with timeout outcome when wall-clock budget is exceeded", async () => {
+  const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      return { intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "retry" }] } };
+    },
+    maxReviewRounds: 3,
+    loopTimeoutMs: 1_005,
+  });
+  assert.equal(out.outcome, "timeout");
+});
