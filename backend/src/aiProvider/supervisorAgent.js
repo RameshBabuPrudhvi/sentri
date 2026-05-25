@@ -29,7 +29,7 @@
  * AI-005c single-agent-collapse warning. Idempotent + best-effort.
  */
 
-import { generateText, parseJSON } from "./index.js";
+import { generateText as defaultGenerateText, parseJSON } from "./index.js";
 import { resolveRoute } from "./registry.js";
 import { emitAgentEvent } from "./agentEventEmitter.js";
 import { buildSupervisorPrompt, normalizeSupervisorDecision } from "../prompts/supervisorPrompt.js";
@@ -56,15 +56,34 @@ function isWeakSupervisorModel(modelId) {
   return WEAK_SUPERVISOR_MODEL_TOKENS.some((tok) => m.includes(tok));
 }
 
-// Per-thread one-shot warning latch. Strings (typical thread ids) live
-// in a regular Set; in the unlikely case a caller passes an object
-// thread key, the WeakSet path keeps it from anchoring GC.
-const weakWarningFiredByString = new Set();
+// Per-thread one-shot warning latch.
+//
+// Bounded LRU (10k entries) — autonomous threads are 10-min-cap each,
+// so even at 100 concurrent threads the working set is ~600/hour. The
+// 10k bound covers ~16h of peak load before eviction; eviction is
+// silently fine since the LRU only governs whether the operator gets
+// a SECOND advisory for a re-warned thread (which is harmless — the
+// advisory is informational, not an action gate).
+//
+// Object-keyed threads use a WeakSet so they don't anchor GC. The
+// LRU only applies to the string-keyed path (typical case).
+const WEAK_WARNING_LRU_MAX = 10_000;
+const weakWarningFiredByString = new Map(); // Map for insertion-order LRU
 const weakWarningFired = new WeakSet();
 
 function markWeakWarningFired(threadKey) {
-  if (typeof threadKey === "object" && threadKey !== null) weakWarningFired.add(threadKey);
-  else if (threadKey) weakWarningFiredByString.add(threadKey);
+  if (typeof threadKey === "object" && threadKey !== null) {
+    weakWarningFired.add(threadKey);
+    return;
+  }
+  if (!threadKey) return;
+  // Map preserves insertion order — re-set bumps to most-recent. When
+  // the LRU is over capacity, evict the oldest entry (Map.keys().next()).
+  weakWarningFiredByString.set(threadKey, true);
+  if (weakWarningFiredByString.size > WEAK_WARNING_LRU_MAX) {
+    const oldest = weakWarningFiredByString.keys().next().value;
+    if (oldest !== undefined) weakWarningFiredByString.delete(oldest);
+  }
 }
 
 function hasWeakWarningFired(threadKey) {
@@ -147,6 +166,15 @@ export async function supervisorDecisionFromLLM({
   threadId = null,
   signal,
   policy = {},
+  // AUTO-023 B4 — dependency-injection seam for `generateText`. The
+  // production caller in `crawler.js` doesn't pass this; tests pass
+  // a stub. Accepting it as an arg sidesteps the ESM-namespace mock
+  // problem in Node 20+ (`mock.method(import * as ns, "generateText")`
+  // throws `Cannot redefine property` because module-namespace
+  // bindings are non-configurable per the ECMAScript spec). Same
+  // pattern `agentLoop.runReviewerAuthorLoop` uses for `runAuthor`
+  // / `runReviewer` so the orchestrator stays testable in isolation.
+  generateText = defaultGenerateText,
 } = {}) {
   maybeWarnWeakSupervisorModel({ runId, workspaceId, threadId });
 
@@ -162,7 +190,13 @@ export async function supervisorDecisionFromLLM({
       agentRole: "supervisor",
       workspaceId,
       signal,
-      responseFormat: { type: "json_object" },
+      // String-shape responseFormat to match the codebase convention
+      // (`dispatcher.js#buildAdapterOpts` defaults to the string
+      // `"json_object"`; the health-check probe + agentLoop reviewer
+      // call all pass strings). Object-shape `{ type: "json_object" }`
+      // worked but inconsistent and risks future-adapter pattern-match
+      // breakage if a downstream adapter does `=== "json_object"`.
+      responseFormat: "json_object",
     });
   } catch (err) {
     // Dispatch failure (rate limit, auth, network) — terminate safely.

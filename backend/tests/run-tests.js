@@ -83,6 +83,11 @@ const files = [
   // single-turn terminate, multi-turn reviewer revise loop, and
   // supervisor parse-error safe termination.
   "tests/autonomous-mode-e2e.test.js",
+  // AUTO-023 B4.4 — integration coverage for the new admin-gated
+  // `/settings/agent-mode` endpoints + workspaceRepo round-trip.
+  // Pins status codes, response shape, cross-workspace isolation,
+  // 400 on invalid mode + defence-in-depth coercion at the repo layer.
+  "tests/agent-mode-routes.test.js",
   "tests/reviewer-prompt.test.js",
   // AUTO-023 B3.3 — per-workspace `agent_configs.maxReviewRounds` override
   // (migration 059). Pins the repo-layer `[1, 10]` clamp + the loop's

@@ -363,8 +363,15 @@ export async function generateFromUserDescription(project, run, { name, descript
           runId: run.id,
           workspaceId: project.workspaceId || null,
           threadId,
+          // Forward signal so a user abort cancels the supervisor LLM
+          // call mid-thread (BUG-6 fix). The orchestrator threads it
+          // into both supervisorDecision and runAgent.
+          signal,
           supervisorDecision: supervisorDecisionFromLLM,
-          runAgent: makeRoleDispatcher({ project, run, signal }),
+          // Test Dials threaded into the dispatcher so autonomous-
+          // mode author calls produce the same test count + dial
+          // preferences pipeline mode would (BUG-7 fix).
+          runAgent: makeRoleDispatcher({ project, run, signal, dialsPrompt, testCount }),
           runLinearFallback: makeLinearFallback({ project, run }),
         },
       );

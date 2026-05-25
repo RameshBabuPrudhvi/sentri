@@ -21,25 +21,35 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mock } from "node:test";
 
-import * as aiProviderIndex from "../src/aiProvider/index.js";
 import { runAutonomousThread } from "../src/aiProvider/agentOrchestrator.js";
 import { supervisorDecisionFromLLM, _resetSupervisorWarningsForTests } from "../src/aiProvider/supervisorAgent.js";
 import { makeRoleDispatcher, makeLinearFallback } from "../src/aiProvider/autonomousDispatch.js";
 
-// Scripted supervisor + agent responses keyed by call index. The
-// orchestrator only invokes `generateText` for the supervisor and the
-// reviewer/oracle judges; the author/planner branches are NOT
+// Scripted supervisor + agent responses keyed by call index. Returns
+// a scripted `generateText` function that the test injects into BOTH
+// the supervisor bridge AND the role dispatcher — both consume DI
+// (matches `agentLoop.runReviewerAuthorLoop`'s callback pattern).
+// Sidesteps the Node 20+ ESM-namespace mock failure
+// (`mock.method(import * as ns, "generateText")` throws
+// `Cannot redefine property` per the ECMAScript spec).
+//
+// The orchestrator only invokes `generateText` for the supervisor
+// (via `supervisorDecisionFromLLM`) and the reviewer/oracle judges
+// (via `makeRoleDispatcher`); the author/planner branches are NOT
 // exercised here because they dynamically import the heavy pipeline
-// graph (covered separately by `autonomous-dispatch.test.js`).
-function setupGenerateMock(script) {
+// graph (covered by `autonomous-dispatch.test.js`).
+function makeScriptedGenerateText(script) {
   let i = 0;
-  return mock.method(aiProviderIndex, "generateText", async () => {
+  let callCount = 0;
+  const stub = async () => {
+    callCount += 1;
     const next = script[i] ?? script[script.length - 1];
     i += 1;
     return typeof next === "function" ? await next() : next;
-  });
+  };
+  stub.callCount = () => callCount;
+  return stub;
 }
 
 test("autonomous-mode E2E: supervisor routes to reviewer, terminate carries tests", async () => {
@@ -48,6 +58,11 @@ test("autonomous-mode E2E: supervisor routes to reviewer, terminate carries test
   //   step 0 → route to reviewer
   //   step 1 → terminate with finalArtifact
   // Reviewer judge call inside the role dispatcher returns "accept".
+  // BUT roleEligible now rejects unknown roles even when workspaceId
+  // is null (defence-in-depth). `reviewer` IS in the canonical set so
+  // it passes. We also need a non-null workspaceId to exercise route
+  // resolution — but `null` skips `roleEligible`'s `resolveRoute`
+  // probe, and reviewer is in the canonical set so it passes.
   const script = [
     // step 0 supervisor decision
     '{"nextRole":"reviewer","instruction":"check"}',
@@ -56,27 +71,30 @@ test("autonomous-mode E2E: supervisor routes to reviewer, terminate carries test
     // step 1 supervisor decision
     '{"terminate":true,"finalArtifact":{"tests":[{"id":"t1","name":"login","playwrightCode":"// ok"}]},"rationale":"done"}',
   ];
-  const restore = setupGenerateMock(script);
-  try {
-    const project = { id: "proj-1", url: "https://example.com", workspaceId: null };
-    const run = { id: "run-1" };
-    const out = await runAutonomousThread(
-      { artifact: { name: "login flow", description: "user signs in", appUrl: project.url, tests: [{ id: "t1" }] } },
-      {
-        runId: run.id,
-        workspaceId: null,  // null skips registry probe → roleEligible passes
-        threadId: "THREAD-E2E-1",
-        supervisorDecision: supervisorDecisionFromLLM,
-        runAgent: makeRoleDispatcher({ project, run }),
-        runLinearFallback: makeLinearFallback({ project, run }),
-      },
-    );
-    assert.equal(out.outcome, "terminate");
-    assert.ok(Array.isArray(out.artifact?.tests), "final artifact must carry tests[]");
-    assert.equal(out.artifact.tests[0].id, "t1");
-    // 2 supervisor calls + 1 reviewer judge call = 3 generateText invocations.
-    assert.equal(restore.mock.callCount(), 3);
-  } finally { restore.mock.restore(); }
+  const generateText = makeScriptedGenerateText(script);
+  const project = { id: "proj-1", url: "https://example.com", workspaceId: null };
+  const run = { id: "run-1" };
+  // Closure wrapper: pass `generateText` to BOTH supervisor decisions
+  // AND the role dispatcher. The supervisor's `generateText` is
+  // injected via the decision callback's args; the dispatcher's via
+  // its ctx. Same script consumed by both via the call counter.
+  const supervisorDecision = async (args) => supervisorDecisionFromLLM({ ...args, generateText });
+  const out = await runAutonomousThread(
+    { artifact: { name: "login flow", description: "user signs in", appUrl: project.url, tests: [{ id: "t1" }] } },
+    {
+      runId: run.id,
+      workspaceId: null,  // null skips registry probe → roleEligible relies on canonical set
+      threadId: "THREAD-E2E-1",
+      supervisorDecision,
+      runAgent: makeRoleDispatcher({ project, run, generateText }),
+      runLinearFallback: makeLinearFallback({ project, run }),
+    },
+  );
+  assert.equal(out.outcome, "terminate");
+  assert.ok(Array.isArray(out.artifact?.tests), "final artifact must carry tests[]");
+  assert.equal(out.artifact.tests[0].id, "t1");
+  // 2 supervisor calls + 1 reviewer judge call = 3 generateText invocations.
+  assert.equal(generateText.callCount(), 3);
 });
 
 test("autonomous-mode E2E: reviewer revise verdict → supervisor loops author (multi-turn pin)", async () => {
@@ -103,27 +121,26 @@ test("autonomous-mode E2E: reviewer revise verdict → supervisor loops author (
     // step 2 supervisor → terminate
     '{"terminate":true,"finalArtifact":{"tests":[{"id":"t1","name":"strengthened"}]},"rationale":"converged"}',
   ];
-  const restore = setupGenerateMock(script);
-  try {
-    const project = { id: "proj-1", url: "https://example.com", workspaceId: null };
-    const run = { id: "run-2" };
-    const out = await runAutonomousThread(
-      { artifact: { tests: [{ id: "t1" }] } },
-      {
-        runId: run.id,
-        workspaceId: null,
-        threadId: "THREAD-E2E-2",
-        supervisorDecision: supervisorDecisionFromLLM,
-        runAgent: makeRoleDispatcher({ project, run }),
-      },
-    );
-    assert.equal(out.outcome, "terminate");
-    assert.equal(out.artifact.tests[0].name, "strengthened");
-    // 3 supervisor + 2 reviewer judge = 5 generateText calls.
-    assert.equal(restore.mock.callCount(), 5);
-    // 2 reviewer dispatches consumed before terminate.
-    assert.equal(out.steps, 2);
-  } finally { restore.mock.restore(); }
+  const generateText = makeScriptedGenerateText(script);
+  const project = { id: "proj-1", url: "https://example.com", workspaceId: null };
+  const run = { id: "run-2" };
+  const supervisorDecision = async (args) => supervisorDecisionFromLLM({ ...args, generateText });
+  const out = await runAutonomousThread(
+    { artifact: { tests: [{ id: "t1" }] } },
+    {
+      runId: run.id,
+      workspaceId: null,
+      threadId: "THREAD-E2E-2",
+      supervisorDecision,
+      runAgent: makeRoleDispatcher({ project, run, generateText }),
+    },
+  );
+  assert.equal(out.outcome, "terminate");
+  assert.equal(out.artifact.tests[0].name, "strengthened");
+  // 3 supervisor + 2 reviewer judge = 5 generateText calls.
+  assert.equal(generateText.callCount(), 5);
+  // 2 reviewer dispatches consumed before terminate.
+  assert.equal(out.steps, 2);
 });
 
 test("autonomous-mode E2E: supervisor parse error terminates safely with last artifact", async () => {
@@ -133,20 +150,19 @@ test("autonomous-mode E2E: supervisor parse error terminates safely with last ar
   // rather than throwing or looping. Last accepted artifact (the
   // initial seed) round-trips on the return value so the caller can
   // still hand it to the linear-fallback path.
-  const restore = setupGenerateMock(["not-json-at-all"]);
-  try {
-    const project = { id: "proj-1", url: "https://example.com", workspaceId: null };
-    const out = await runAutonomousThread(
-      { artifact: { seed: true, tests: [] } },
-      {
-        runId: "run-3",
-        workspaceId: null,
-        threadId: "THREAD-E2E-3",
-        supervisorDecision: supervisorDecisionFromLLM,
-        runAgent: makeRoleDispatcher({ project }),
-      },
-    );
-    assert.equal(out.outcome, "terminate");
-    assert.deepEqual(out.artifact, { seed: true, tests: [] });
-  } finally { restore.mock.restore(); }
+  const generateText = makeScriptedGenerateText(["not-json-at-all"]);
+  const project = { id: "proj-1", url: "https://example.com", workspaceId: null };
+  const supervisorDecision = async (args) => supervisorDecisionFromLLM({ ...args, generateText });
+  const out = await runAutonomousThread(
+    { artifact: { seed: true, tests: [] } },
+    {
+      runId: "run-3",
+      workspaceId: null,
+      threadId: "THREAD-E2E-3",
+      supervisorDecision,
+      runAgent: makeRoleDispatcher({ project, generateText }),
+    },
+  );
+  assert.equal(out.outcome, "terminate");
+  assert.deepEqual(out.artifact, { seed: true, tests: [] });
 });

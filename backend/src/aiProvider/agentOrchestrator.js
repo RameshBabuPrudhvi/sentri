@@ -13,9 +13,33 @@ import {
 export const MAX_AUTONOMOUS_STEPS = 20;
 export const DEFAULT_AUTONOMOUS_TIMEOUT_MS = 10 * 60 * 1000;
 
+// AUTO-023 B4 — closed-set of canonical roles the supervisor LLM is
+// allowed to emit. Mirrored from `frontend/src/config.js#AGENT_ROLES`
+// (single source of truth for the agent-name vocabulary). Used to
+// clamp the unbounded `nextRole` Prometheus label so a hallucinated
+// role name from the supervisor LLM (`"analyzer"`, `"debugger"`, …)
+// can't bankrupt the TSDB by minting a new time series per typo.
+// `supervisor` is included because the prompt prevents self-routing
+// at the LLM layer but defence-in-depth allows it in the closed set.
+const KNOWN_AGENT_ROLES = new Set([
+  "supervisor", "explorer", "planner", "author",
+  "oracle", "reviewer", "healer", "triager",
+]);
+
+function clampRoleLabel(role) {
+  return KNOWN_AGENT_ROLES.has(String(role || "")) ? String(role) : "other";
+}
+
 function nowIso() { return new Date().toISOString(); }
 
 function roleEligible(workspaceId, role) {
+  // Defence-in-depth — even when workspaceId is null (smoke-test /
+  // CLI standalone caller), reject roles outside the canonical set.
+  // Pre-fix the null-workspace short-circuit allowed the supervisor
+  // to dispatch arbitrary strings like `"analyzer"` which the role
+  // dispatcher then handled with an empty `unknown_role:*` envelope —
+  // wasted step + misleading "the run produced nothing" UX.
+  if (!KNOWN_AGENT_ROLES.has(String(role || ""))) return false;
   if (!workspaceId) return true;
   try {
     const { route } = resolveRoute({ workspaceId, agentRole: role });
@@ -96,12 +120,23 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
     // is the workspace's spend-cap evaluator. Same shape as
     // `agentLoop.runReviewerAuthorLoop`'s `checkQuota` arg.
     checkQuota = null,
+    // AUTO-023 B4 — abort signal threaded into BOTH the supervisor
+    // decision call AND the role dispatcher's runAgent. Without this
+    // a user-cancelled run continues to burn supervisor LLM time
+    // until the provider's own timeout. The orchestrator forwards
+    // signal to every async step it owns; downstream callbacks pull
+    // it from their args.
+    signal = null,
   } = opts;
   const startedAt = Date.now();
   const deadline = Date.now() + Math.min(autonomousTimeoutMs, 30 * 60 * 1000);
   const stepsLimit = Math.min(Math.max(1, maxSteps), MAX_AUTONOMOUS_STEPS);
   const thread = [{ fromRole: "supervisor", intent: "handoff", artifact: initialMessage }];
-  let lastArtifact = initialMessage?.artifact || null;
+  // `??` not `||` so a valid falsy artifact (`0`, `false`, `""`) on
+  // the seed message survives. The per-step update at line ~169
+  // already uses `??`; pre-fix this initializer was the only
+  // asymmetric coercion in the loop.
+  let lastArtifact = initialMessage?.artifact ?? null;
   // AUTO-023 B4.2 — resolve quota gate ONCE per thread so cap reads
   // are cached across steps. `null` from caller falls back to the
   // workspace-spend-cap default.
@@ -125,7 +160,10 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
       try { agentThreadDurationSeconds.observe({ outcome: "timeout" }, Math.max(0.001, (Date.now() - startedAt) / 1000)); } catch {}
       return { outcome: "timeout", artifact: lastArtifact, steps: step };
     }
-    const decision = await supervisorDecision({ thread, lastArtifact, step, workspaceId, runId, threadId });
+    if (signal?.aborted) {
+      return { outcome: "aborted", artifact: lastArtifact, steps: step };
+    }
+    const decision = await supervisorDecision({ thread, lastArtifact, step, workspaceId, runId, threadId, signal });
     if (decision?.terminate) {
       emitAgentEvent(runId, { step: 7, agent: "supervisor", phase: "done", message: "Supervisor terminated autonomous thread", workspaceId, data: { threadId, step } });
       // AUTO-023 B4.5 — audit-log every supervisor.terminate so admins
@@ -144,7 +182,11 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
       return { outcome: "terminate", artifact: decision.finalArtifact ?? lastArtifact, steps: step };
     }
     const nextRole = decision?.nextRole;
-    try { agentSupervisorDecisionsTotal.inc({ nextRole: String(nextRole || "unknown") }); } catch {}
+    // Clamp to canonical role set before incrementing so a hallucinated
+    // `nextRole` from the supervisor LLM (`"analyzer"`, typos, etc.)
+    // can't bankrupt the TSDB. Bounded label cardinality:
+    // 8 roles × N outcomes = 8N series.
+    try { agentSupervisorDecisionsTotal.inc({ nextRole: clampRoleLabel(nextRole) }); } catch {}
     if (!roleEligible(workspaceId, nextRole)) {
       onFallback?.({ reason: "ineligible_role", nextRole, step });
       try { agentOrchestratorFallbackTotal.inc({ reason: "ineligible_role" }); } catch {}
@@ -164,7 +206,7 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
       agentRole: nextRole,
       operation: "autonomous_thread_step",
     });
-    const msg = await runAgent({ role: nextRole, instruction: decision.instruction, thread, step, workspaceId, runId, threadId });
+    const msg = await runAgent({ role: nextRole, instruction: decision.instruction, thread, step, workspaceId, runId, threadId, signal });
     thread.push(msg);
     lastArtifact = msg?.artifact ?? lastArtifact;
     emitAgentMessage({

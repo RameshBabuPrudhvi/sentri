@@ -24,75 +24,77 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mock } from "node:test";
 
-import * as aiProviderIndex from "../src/aiProvider/index.js";
 import {
   makeRoleDispatcher,
   makeLinearFallback,
 } from "../src/aiProvider/autonomousDispatch.js";
 
+// `makeRoleDispatcher` accepts `generateText` as a ctx arg (DI). We
+// pass an inline stub per-test instead of trying to mock the ESM
+// namespace binding — `mock.method(import * as ns, "generateText")`
+// throws `Cannot redefine property` on Node 20+ because module-
+// namespace properties are non-configurable per the ECMAScript spec.
+function stubGenerateText(impl) {
+  return async (..._args) => impl(..._args);
+}
+
 test("makeRoleDispatcher: reviewer parses verdict + returns request_revision intent", async () => {
-  const restore = mock.method(aiProviderIndex, "generateText", async () =>
+  const generateText = stubGenerateText(async () =>
     '{"verdict":"revise","issues":[{"testId":"t1","problem":"weak selector","suggestion":"use getByRole"}],"rationale":"x"}',
   );
-  try {
-    const dispatch = makeRoleDispatcher({ project: { url: "https://example.com", workspaceId: "ws-1" } });
-    const msg = await dispatch({
-      role: "reviewer",
-      instruction: "check",
-      thread: [{ artifact: { tests: [{ id: "t1", name: "click submit" }] } }],
-      workspaceId: "ws-1",
-      runId: "run-1",
-    });
-    assert.equal(msg.fromRole, "reviewer");
-    assert.equal(msg.intent, "request_revision");
-    assert.equal(msg.artifact.verdict, "revise");
-    assert.equal(msg.artifact.issues[0].testId, "t1");
-  } finally { restore.mock.restore(); }
+  const dispatch = makeRoleDispatcher({
+    project: { url: "https://example.com", workspaceId: "ws-1" },
+    generateText,
+  });
+  const msg = await dispatch({
+    role: "reviewer",
+    instruction: "check",
+    thread: [{ artifact: { tests: [{ id: "t1", name: "click submit" }] } }],
+    workspaceId: "ws-1",
+    runId: "run-1",
+  });
+  assert.equal(msg.fromRole, "reviewer");
+  assert.equal(msg.intent, "request_revision");
+  assert.equal(msg.artifact.verdict, "revise");
+  assert.equal(msg.artifact.issues[0].testId, "t1");
 });
 
 test("makeRoleDispatcher: reviewer accept verdict → accept intent", async () => {
-  const restore = mock.method(aiProviderIndex, "generateText", async () => '{"verdict":"accept"}');
-  try {
-    const dispatch = makeRoleDispatcher({ project: { url: "https://example.com" } });
-    const msg = await dispatch({
-      role: "reviewer",
-      instruction: "check",
-      thread: [{ artifact: { tests: [{ id: "t1" }] } }],
-    });
-    assert.equal(msg.intent, "accept");
-  } finally { restore.mock.restore(); }
+  const generateText = stubGenerateText(async () => '{"verdict":"accept"}');
+  const dispatch = makeRoleDispatcher({ project: { url: "https://example.com" }, generateText });
+  const msg = await dispatch({
+    role: "reviewer",
+    instruction: "check",
+    thread: [{ artifact: { tests: [{ id: "t1" }] } }],
+  });
+  assert.equal(msg.intent, "accept");
 });
 
 test("makeRoleDispatcher: reviewer reject verdict → reject_final intent", async () => {
-  const restore = mock.method(aiProviderIndex, "generateText", async () => '{"verdict":"reject","rationale":"unrecoverable"}');
-  try {
-    const dispatch = makeRoleDispatcher({ project: { url: "https://example.com" } });
-    const msg = await dispatch({
-      role: "reviewer",
-      instruction: "check",
-      thread: [{ artifact: { tests: [{ id: "t1" }] } }],
-    });
-    assert.equal(msg.intent, "reject_final");
-  } finally { restore.mock.restore(); }
+  const generateText = stubGenerateText(async () => '{"verdict":"reject","rationale":"unrecoverable"}');
+  const dispatch = makeRoleDispatcher({ project: { url: "https://example.com" }, generateText });
+  const msg = await dispatch({
+    role: "reviewer",
+    instruction: "check",
+    thread: [{ artifact: { tests: [{ id: "t1" }] } }],
+  });
+  assert.equal(msg.intent, "reject_final");
 });
 
 test("makeRoleDispatcher: oracle returns handoff envelope with parsed artifact", async () => {
-  const restore = mock.method(aiProviderIndex, "generateText", async () =>
+  const generateText = stubGenerateText(async () =>
     '{"decision":"rewrite","tests":[{"id":"t1","playwrightCode":"strong code"}],"rationale":"upgraded"}',
   );
-  try {
-    const dispatch = makeRoleDispatcher({ project: { url: "https://example.com" } });
-    const msg = await dispatch({
-      role: "oracle",
-      instruction: "strengthen",
-      thread: [{ artifact: { tests: [{ id: "t1", playwrightCode: "weak code" }] } }],
-    });
-    assert.equal(msg.fromRole, "oracle");
-    assert.equal(msg.intent, "handoff");
-    assert.equal(msg.artifact.decision, "rewrite");
-  } finally { restore.mock.restore(); }
+  const dispatch = makeRoleDispatcher({ project: { url: "https://example.com" }, generateText });
+  const msg = await dispatch({
+    role: "oracle",
+    instruction: "strengthen",
+    thread: [{ artifact: { tests: [{ id: "t1", playwrightCode: "weak code" }] } }],
+  });
+  assert.equal(msg.fromRole, "oracle");
+  assert.equal(msg.intent, "handoff");
+  assert.equal(msg.artifact.decision, "rewrite");
 });
 
 test("makeRoleDispatcher: oracle/reviewer with empty tests short-circuits to accept", async () => {
@@ -123,19 +125,17 @@ test("makeRoleDispatcher: unknown role returns unknown_role envelope (defence-in
 });
 
 test("makeRoleDispatcher: dispatch failure inside reviewer returns dispatch_error envelope (does NOT throw)", async () => {
-  const restore = mock.method(aiProviderIndex, "generateText", async () => {
+  const generateText = stubGenerateText(async () => {
     throw new Error("simulated rate limit");
   });
-  try {
-    const dispatch = makeRoleDispatcher({ project: { url: "https://example.com" } });
-    const msg = await dispatch({
-      role: "reviewer",
-      instruction: "check",
-      thread: [{ artifact: { tests: [{ id: "t1" }] } }],
-    });
-    assert.equal(msg.fromRole, "reviewer");
-    assert.ok(String(msg.rationale).startsWith("dispatch_error:"), `rationale=${msg.rationale}`);
-  } finally { restore.mock.restore(); }
+  const dispatch = makeRoleDispatcher({ project: { url: "https://example.com" }, generateText });
+  const msg = await dispatch({
+    role: "reviewer",
+    instruction: "check",
+    thread: [{ artifact: { tests: [{ id: "t1" }] } }],
+  });
+  assert.equal(msg.fromRole, "reviewer");
+  assert.ok(String(msg.rationale).startsWith("dispatch_error:"), `rationale=${msg.rationale}`);
 });
 
 test("makeLinearFallback: returns linear_fallback sentinel with reason + nextRole + artifact", async () => {

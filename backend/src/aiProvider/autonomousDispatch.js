@@ -45,7 +45,7 @@
  * code take over execution.
  */
 
-import { generateText, parseJSON } from "./index.js";
+import { generateText as defaultGenerateText, parseJSON } from "./index.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 
 // ── Public role dispatcher ────────────────────────────────────────────────────
@@ -88,8 +88,28 @@ function buildJudgePrompt(role, instruction, tests) {
  * @returns {Function} runAgentByRole closure matching the orchestrator's contract.
  */
 export function makeRoleDispatcher(ctx = {}) {
-  const { project = {}, signal } = ctx;
-  return async function runAgentByRole({ role, instruction, thread, workspaceId, runId }) {
+  const {
+    project = {},
+    signal,
+    // AUTO-023 B4 — Test Dials surface threaded into the autonomous
+    // path. `crawler.js` passes `dialsPrompt` + `testCount` here so
+    // when the supervisor routes to `author` the role dispatcher
+    // forwards them to `generateFromDescription` — same shape the
+    // linear path uses. Pre-fix these were silently dropped on the
+    // autonomous code path; users with a Test Dials config saw it
+    // honoured in `pipeline` mode but not in `autonomous`.
+    dialsPrompt = "",
+    testCount = "ai_decides",
+    // AUTO-023 B4 — DI seam for `generateText` (matches supervisorAgent
+    // pattern). Production caller doesn't pass this; tests pass a stub.
+    // Sidesteps the ESM-namespace mock problem in Node 20+.
+    generateText = defaultGenerateText,
+  } = ctx;
+  return async function runAgentByRole({ role, instruction, thread, workspaceId, runId, signal: stepSignal }) {
+    // Step-scoped signal wins when the orchestrator forwards one;
+    // ctx-scoped signal is the fallback for callers that build the
+    // dispatcher with a single signal upfront.
+    const effectiveSignal = stepSignal || signal;
     let pipelineMod;
     let intentClassifierMod;
     try {
@@ -113,7 +133,7 @@ export function makeRoleDispatcher(ctx = {}) {
           };
           const snapshotsByUrl = lastArtifact?.snapshotsByUrl || {};
           const tests = await pipelineMod.generateJourneyTest(journey, snapshotsByUrl, {
-            signal, workspaceId: ws, runId,
+            signal: effectiveSignal, workspaceId: ws, runId, dialsPrompt, testCount,
           });
           return { fromRole: "planner", intent: "handoff", artifact: { tests, journey }, rationale: instruction };
         }
@@ -122,7 +142,11 @@ export function makeRoleDispatcher(ctx = {}) {
           const description = instruction || "Generate a Playwright test for the most important user flow.";
           const tests = await pipelineMod.generateFromDescription(
             name, description, project.url, null,
-            { signal, workspaceId: ws, runId },
+            // Forward Test Dials so an autonomous-mode author call
+            // produces the same test count + dial preferences a
+            // pipeline-mode call would. Pre-fix the autonomous path
+            // silently used the legacy defaults.
+            { signal: effectiveSignal, workspaceId: ws, runId, dialsPrompt, testCount },
           );
           return { fromRole: "author", intent: "handoff", artifact: { tests }, rationale: instruction };
         }
@@ -130,7 +154,7 @@ export function makeRoleDispatcher(ctx = {}) {
           const snapshot = lastArtifact?.snapshot || { url: project.url, elements: [] };
           const elements = snapshot.elements || [];
           const classified = await intentClassifierMod.classifyPageWithAI(snapshot, elements, {
-            signal, workspaceId: ws, runId,
+            signal: effectiveSignal, workspaceId: ws, runId,
           });
           return { fromRole: "explorer", intent: "handoff", artifact: { classified, snapshot }, rationale: instruction };
         }
@@ -144,9 +168,11 @@ export function makeRoleDispatcher(ctx = {}) {
           const raw = await generateText(prompt, {
             agentRole: role,
             workspaceId: ws,
-            signal,
+            signal: effectiveSignal,
             runId,
-            responseFormat: { type: "json_object" },
+            // String-shape responseFormat to match codebase convention
+            // (see supervisorAgent.js for the same fix rationale).
+            responseFormat: "json_object",
           });
           const parsed = safeParseJson(raw);
           if (role === "reviewer") {
@@ -175,7 +201,7 @@ export function makeRoleDispatcher(ctx = {}) {
           };
       }
     } catch (err) {
-      if (err?.name === "AbortError" || signal?.aborted) throw err;
+      if (err?.name === "AbortError" || effectiveSignal?.aborted) throw err;
       console.warn(formatLogLine("warn", runId,
         `[autonomousDispatch] role=${role} failed (${err?.message || "unknown"}); returning empty envelope`));
       return {
