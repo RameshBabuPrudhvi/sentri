@@ -26,6 +26,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { AUTH_COOKIE } from "./authenticate.js";
 import { redis, isRedisAvailable } from "../utils/redisClient.js";
+import { aiRateLimit } from "./aiRateLimit.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { isS3Storage, signS3ArtifactUrl, s3PublicOrigin } from "../utils/objectStorage.js";
 import { requestContext, createRequestId } from "../utils/observability.js";
@@ -557,6 +558,7 @@ export const aiGenerationLimiter = rateLimit({
 // The tighter per-operation limiters are applied at the route level in
 // routes/runs.js and routes/tests.js via the exported limiters above.
 app.use("/api", generalApiLimiter);
+app.use(aiRateLimit());
 
 // ─── Artifact signing helpers ─────────────────────────────────────────────────
 // Screenshots, videos, and Playwright traces are served as static files.

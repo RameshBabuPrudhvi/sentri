@@ -371,3 +371,10 @@ export const agentOrchestratorFallbackTotal = new client.Counter({
   labelNames: ["reason"],
   registers: [register],
 });
+
+export const aiRateLimitedTotal = new client.Counter({
+  name: "app_ai_rate_limited_total",
+  help: "MNT-015 — per-workspace-role AI limiter rejections.",
+  labelNames: ["workspace_role"],
+  registers: [register],
+});

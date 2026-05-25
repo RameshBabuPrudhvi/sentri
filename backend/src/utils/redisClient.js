@@ -129,3 +129,26 @@ export async function closeRedis() {
   redisSub = null;
   _connected = false;
 }
+
+export async function incrWithExpiry(key, cost = 1, windowSec = 60) {
+  if (!redis) {
+    const e = new Error("Redis unavailable");
+    e.code = "ERR_REDIS_UNAVAILABLE";
+    throw e;
+  }
+  const n = Math.max(1, Number.parseInt(String(cost || 1), 10) || 1);
+  const w = Math.max(1, Number.parseInt(String(windowSec || 60), 10) || 60);
+  const lua = `
+local v = redis.call('INCRBY', KEYS[1], ARGV[1])
+if v == tonumber(ARGV[1]) then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+local ttl = redis.call('TTL', KEYS[1])
+return {v, ttl}
+`;
+  const out = await redis.eval(lua, 1, key, n, w);
+  return {
+    value: Number(out?.[0] || 0),
+    ttlSec: Number(out?.[1] || -1),
+  };
+}
