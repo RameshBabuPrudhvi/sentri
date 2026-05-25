@@ -49,6 +49,38 @@ export function getById(id, workspaceId) {
   return row ? parseRow(row) : undefined;
 }
 
+/**
+ * Hard-delete every envelope row for a run. Called from `runRepo.hardDeleteById`
+ * when a run is permanently purged (recycle-bin purge / project hard-delete /
+ * GDPR Article 17 erasure) so the per-thread envelope history is removed
+ * alongside the run + log + agent-event rows. Mirrors
+ * `runAgentEventRepo.deleteByRunId` — same append-only, no-FK-to-runs contract.
+ *
+ * @param {string} runId
+ * @returns {number} Rows deleted.
+ */
+export function deleteByRunId(runId) {
+  if (!runId) return 0;
+  const info = getDatabase().prepare("DELETE FROM agent_messages WHERE runId = ?").run(runId);
+  return info.changes || 0;
+}
+
+/**
+ * Batch sibling of {@link deleteByRunId} for project-level purges and the
+ * GDPR account-erasure path. Mirrors `runAgentEventRepo.deleteByRunIds`.
+ *
+ * @param {string[]} runIds
+ * @returns {number} Total rows deleted.
+ */
+export function deleteByRunIds(runIds) {
+  if (!runIds || runIds.length === 0) return 0;
+  const placeholders = runIds.map(() => "?").join(", ");
+  const info = getDatabase()
+    .prepare(`DELETE FROM agent_messages WHERE runId IN (${placeholders})`)
+    .run(...runIds);
+  return info.changes || 0;
+}
+
 export function purgeOlderThan(days) {
   const d = Number(days);
   if (!Number.isFinite(d) || d <= 0) return 0;
