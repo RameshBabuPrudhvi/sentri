@@ -31,6 +31,25 @@ import { MAX_RETRIES, BASE_DELAY_MS, MAX_BACKOFF_MS, sleep } from "../retry.js";
 import { formatLogLine } from "../../utils/logFormatter.js";
 import { pricingFor } from "../modelCatalog.js";
 
+// Per-attempt fetch timeout — defaults to `DEFAULT_OLLAMA_TIMEOUT_MS`
+// (120s, set below) for dispatch traffic. Capability probes pass
+// `opts.attemptTimeoutMs` (typically 15s) so a connection-refused
+// probe against a local Ollama daemon that isn't running fails fast
+// instead of waiting out the dispatch budget. `opts.timeoutMs` is
+// retained as the lower-precedence override path so existing call
+// sites that set `timeoutMs` aren't affected.
+//
+// Resolution order (highest to lowest):
+//   1. `opts.attemptTimeoutMs` — new probe-driven knob.
+//   2. `opts.timeoutMs`        — pre-existing field used by tests +
+//                                future per-call overrides.
+//   3. `DEFAULT_OLLAMA_TIMEOUT_MS` — the 120s baseline.
+function resolveAttemptTimeoutMs(opts) {
+  if (Number.isFinite(opts.attemptTimeoutMs)) return opts.attemptTimeoutMs;
+  if (Number.isFinite(opts.timeoutMs)) return opts.timeoutMs;
+  return DEFAULT_OLLAMA_TIMEOUT_MS;
+}
+
 // B2.4 — protocol modules return raw `{ input, output }` token usage
 // only. For Ollama (which doesn't expose token counts in non-streaming
 // mode), we emit `{ input: 0, output: 0 }` for catalog-known local
@@ -60,7 +79,9 @@ async function callOllama(route, messages, opts) {
   if (opts.useJson) body.format = "json";
 
   const controller = new AbortController();
-  const timeoutMs = opts.timeoutMs || DEFAULT_OLLAMA_TIMEOUT_MS;
+  // See `resolveAttemptTimeoutMs` JSDoc — probes override via
+  // `attemptTimeoutMs`, dispatch uses `timeoutMs` (or the 120s default).
+  const timeoutMs = resolveAttemptTimeoutMs(opts);
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   let onExternalAbort = null;
@@ -129,7 +150,16 @@ export async function generate(route, messages, opts) {
   if (!route.baseUrl) {
     throw new Error("ollama protocol generate(): route.baseUrl is required");
   }
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  // `opts.maxRetries` honours the same probe fast-fail contract as
+  // `protocols/openai.js#generate` (which forwards it to `withRetry`).
+  // Ollama has its own manual retry loop because it retries on a
+  // narrower error set (ECONNREFUSED / fetch failed / Ollama 500 —
+  // the local-daemon-down signals) than the cloud `withRetry` (which
+  // retries on rate-limit + 5xx). The opt-in is the same: probes pass
+  // `0` to skip retries entirely so a daemon-not-running surfaces in
+  // a single fetch attempt (~15s) rather than the legacy ~113s chain.
+  const maxRetries = Number.isFinite(opts.maxRetries) ? opts.maxRetries : MAX_RETRIES;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const text = await callOllama(route, messages, opts);
       // B2.4 — distinguish "free local model" (catalog hit → `{0, 0}`
@@ -145,11 +175,15 @@ export async function generate(route, messages, opts) {
       const isRetryable = err.message.includes("ECONNREFUSED")
         || err.message.includes("fetch failed")
         || err.message.includes("Ollama HTTP 500");
-      if (attempt === MAX_RETRIES || !isRetryable) throw err;
+      if (attempt === maxRetries || !isRetryable) throw err;
       const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
       console.warn(formatLogLine("warn", null,
-        `[ollama-protocol] ${err.message.slice(0, 80)}. Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
-      await sleep(delay);
+        `[ollama-protocol] ${err.message.slice(0, 80)}. Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries})`));
+      // Honour the caller's abort signal during the backoff sleep so
+      // a probe deadline / dispatch budget can cancel the retry chain
+      // instead of waiting out the full delay. Mirrors `retry.js`'s
+      // signal-aware sleep added for the same fast-fail rationale.
+      await sleep(delay, opts.signal);
     }
   }
   return { text: "", usage: null };
