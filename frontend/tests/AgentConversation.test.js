@@ -22,6 +22,7 @@ import {
   synthesizeTurns,
   getStepAgentSequence,
   eventsToTurns,
+  messagesToTurns,
 } from "../src/components/ai/agentConversationSynth.js";
 
 let passed = 0;
@@ -402,6 +403,17 @@ test("turn IDs are stable across calls with the same event sequence", () => {
   const a = eventsToTurns(events).map(t => t.id);
   const b = eventsToTurns(events).map(t => t.id);
   assert.deepEqual(a, b);
+});
+
+console.log("\n── messagesToTurns ──");
+test("request_revision includes round badge narration", () => {
+  const turns = messagesToTurns([
+    { id: "1", fromRole: "author", toRole: "reviewer", intent: "handoff", round: 0, artifact: { tests: [{ id: "t1" }] }, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "2", fromRole: "reviewer", toRole: "author", intent: "request_revision", round: 0, artifact: { issues: [{ testId: "t1" }] }, createdAt: "2026-01-01T00:00:01.000Z" },
+  ]);
+  assert.equal(turns.length, 2);
+  assert.match(turns[1].text, /Round 1/);
+  assert.match(turns[1].text, /Reviewer rejected 1 issues/);
 });
 
 process.on("beforeExit", () => {

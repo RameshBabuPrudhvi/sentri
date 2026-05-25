@@ -112,6 +112,8 @@ function toMessage({ runId, threadId, workspaceId, fromRole, toRole, intent, art
 export async function runReviewerAuthorLoop(initialArtifact, {
   runAuthor,
   runReviewer,
+  checkQuota = null,
+  onOutcome = null,
   runId = null,
   threadId = null,
   workspaceId = null,
@@ -134,15 +136,30 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   let replyDepth = 0;
 
   while (round < maxRounds) {
+    if (typeof checkQuota === "function") {
+      const quota = await checkQuota({ round, runId, threadId, workspaceId });
+      if (quota?.ok === false) {
+        const out = {
+          outcome: "quota_exhausted",
+          round: roundsCompleted === 0 ? -1 : roundsCompleted - 1,
+          roundsCompleted,
+          artifact: lastAuthorArtifact,
+        };
+        if (typeof onOutcome === "function") onOutcome(out);
+        return out;
+      }
+    }
     // First deadline check — catches "budget already exhausted by prior
     // rounds before this iteration starts".
     if (Date.now() > deadline) {
-      return {
+      const out = {
         outcome: "timeout",
         round: roundsCompleted === 0 ? -1 : roundsCompleted - 1,
         roundsCompleted,
         artifact: lastAuthorArtifact,
       };
+      if (typeof onOutcome === "function") onOutcome(out);
+      return out;
     }
     const authorArtifact = await runAuthor({
       round,
@@ -203,7 +220,9 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     roundsCompleted += 1;
 
     if (intent === "accept") {
-      return { outcome: "accept", round, roundsCompleted, artifact: authorArtifact };
+      const out = { outcome: "accept", round, roundsCompleted, artifact: authorArtifact };
+      if (typeof onOutcome === "function") onOutcome(out);
+      return out;
     }
     if (intent === "reject_final") {
       throw new ReviewRejection();
@@ -217,12 +236,14 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     // because no work has happened yet). The test in
     // `agent-reviewer-loop.test.js#timeout` exercises this branch.
     if (Date.now() > deadline) {
-      return {
+      const out = {
         outcome: "timeout",
         round: roundsCompleted - 1,
         roundsCompleted,
         artifact: lastAuthorArtifact,
       };
+      if (typeof onOutcome === "function") onOutcome(out);
+      return out;
     }
 
     prevReviewerFeedback = artifact?.issues || [];
@@ -230,10 +251,12 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     round += 1;
   }
 
-  return {
+  const out = {
     outcome: "max_rounds",
     round: maxRounds - 1,
     roundsCompleted,
     artifact: lastAuthorArtifact,
   };
+  if (typeof onOutcome === "function") onOutcome(out);
+  return out;
 }

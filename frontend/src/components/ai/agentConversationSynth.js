@@ -624,18 +624,38 @@ export function eventsToTurns(events) {
 
 export function messagesToTurns(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return [];
-  return messages
+  const ordered = messages
     .filter((m) => m && AGENT_PERSONAS[m.fromRole])
+    .sort((a, b) => {
+      const at = Date.parse(a?.createdAt || "") || 0;
+      const bt = Date.parse(b?.createdAt || "") || 0;
+      if (at !== bt) return at - bt;
+      return String(a?.id || "").localeCompare(String(b?.id || ""));
+    });
+  const roundAuthorTests = new Map();
+  return ordered
     .map((m, idx) => {
       const toLabel = m.toRole && AGENT_PERSONAS[m.toRole] ? AGENT_PERSONAS[m.toRole].label : "All";
       const intent = m.intent || "handoff";
-      const detail = m.rationale || formatScalarData(m.artifact) || "";
+      const round = Number(m.round) || 0;
+      if (m.fromRole === "author" && intent === "handoff") {
+        const ids = new Set((m.artifact?.tests || []).map((t) => t?.id).filter(Boolean));
+        roundAuthorTests.set(round, ids);
+      }
+      let detail = m.rationale || formatScalarData(m.artifact) || "";
+      if (intent === "request_revision") {
+        const prev = roundAuthorTests.get(round - 1) || new Set();
+        const curr = roundAuthorTests.get(round) || new Set();
+        const changed = [...curr].filter((id) => !prev.has(id));
+        const diffLabel = changed.length > 0 ? `changed tests: ${changed.join(", ")}` : "no test-id diff captured";
+        detail = `Round ${round + 1} — Reviewer rejected ${(m.artifact?.issues || []).length || 0} issues → Author fixing (${diffLabel})`;
+      }
       const text = `[${intent}] ${AGENT_PERSONAS[m.fromRole].label} → ${toLabel}${detail ? ` — ${detail}` : ""}`;
       return {
         id: `msg-${m.id || idx}`,
         agent: m.fromRole,
         phase: "handoff",
-        step: Number(m.round) || 0,
+        step: round,
         text,
         ts: m.createdAt ? Date.parse(m.createdAt) || Date.now() : Date.now(),
         _complete: true,

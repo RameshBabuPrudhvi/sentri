@@ -66,13 +66,15 @@ test("loop terminates at max rounds", async () => {
 });
 
 test("loop throws ReviewRejection on reject_final", async () => {
+  let authorCalls = 0;
   await assert.rejects(
     runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
-      runAuthor: async ({ artifact }) => artifact,
+      runAuthor: async ({ artifact }) => { authorCalls += 1; return artifact; },
       runReviewer: async () => ({ intent: "reject_final" }),
     }),
     (err) => err instanceof ReviewRejection && err.code === "ERR_REVIEW_REJECT_FINAL",
   );
+  assert.equal(authorCalls, 1, "no additional author calls after reject_final");
 });
 
 test("loop terminates with timeout outcome when wall-clock budget is exceeded", async () => {
@@ -132,4 +134,16 @@ test("loop returns roundsCompleted alongside outcome for every termination path"
   assert.equal(maxOut.outcome, "max_rounds");
   assert.equal(maxOut.round, 2);
   assert.equal(maxOut.roundsCompleted, 3);
+});
+
+test("loop exits early when quota check fails and reports quota_exhausted", async () => {
+  let authorCalls = 0;
+  const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => { authorCalls += 1; return artifact; },
+    runReviewer: async () => ({ intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "x" }] } }),
+    checkQuota: async ({ round }) => ({ ok: round === 0 }),
+    maxReviewRounds: 3,
+  });
+  assert.equal(out.outcome, "quota_exhausted");
+  assert.equal(authorCalls, 1, "ships last author artifact without entering next round");
 });
