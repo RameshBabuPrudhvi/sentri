@@ -485,15 +485,25 @@ LangGraph / AutoGen / CrewAI pattern, scoped to Sentri's domain.
 - [x] All termination guarantees (max-steps, wall-clock, quota, cycle)
       enforced + observable in metrics
 
-## B4.8 — Follow-up scope (NOT in B4)
-- Crawl-mode (`crawlAndGenerateTests`) entry-point wire-up — the crawl
-  path calls 3 generators across `generateAllTests` and a clean
-  wire-up requires the orchestrator to drive a loop over journeys +
-  pages, which is a meaningfully different refactor. Description-mode
-  (`generateFromUserDescription`) is wired today and exercises every
-  orchestrator primitive end-to-end; crawl-mode lifts only the
-  loop-over-pages binding once description-mode behaviour is verified
-  in production.
+## B4.8 — Crawl-mode wire-up ✅ COMPLETED
+- [x] `crawlAndGenerateTests` reads `getWorkspaceAgentMode(workspaceId)`
+      after the journey-detection step and, when `'autonomous'`, drives
+      ONE supervisor thread per journey via `runAutonomousThread`
+      (industry-standard LangGraph pattern — one graph instance per
+      logical scope, not one mega-thread for every journey).
+- [x] Per-journey threading seeds the supervisor with the journey +
+      its classified pages + `snapshotsByUrl` so the supervisor has
+      full context for routing decisions (planner → author → reviewer
+      loop, terminate when satisfied).
+- [x] Gap-fill: after autonomous covers journeys, any high-priority
+      classified page not in any journey routes through the linear
+      `generateAllTests` per-page path so coverage matches `pipeline`
+      mode. This is the industry-standard "supervisor for flows,
+      linear for orphan pages" hybrid pattern.
+- [x] Fail-OPEN: orchestrator throw, ≥50% per-journey failures, OR
+      zero autonomous tests collapses to the legacy `generateAllTests`
+      path for the entire crawl. Misconfigured autonomous workspaces
+      never get a WORSE outcome than `pipeline` mode.
 
 ---
 

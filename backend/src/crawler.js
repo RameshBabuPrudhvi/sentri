@@ -773,13 +773,131 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
   setStep(run, 4);
   structuredLog("pipeline.generate", { runId: run.id, pages: effectiveClassifiedPages.length, journeys: journeys.length });
   log(run, `🤖 Generating intent-driven tests...`);
-  const genResult = await generateAllTests(
-    effectiveClassifiedPages,
-    journeys,
-    effectiveSnapshotsByUrl,
-    (msg) => log(run, msg),
-    { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id },
-  );
+
+  // AUTO-023 B4.4 — crawl-mode autonomous dispatch. When the workspace
+  // has flipped `agentMode = 'autonomous'`, drive ONE supervisor thread
+  // per journey instead of the linear `generateAllTests` DAG. Each
+  // thread seeds the supervisor with the journey + its classified
+  // pages + snapshotsByUrl, then lets the supervisor decide who acts
+  // next (planner → author → reviewer loop, terminate when satisfied).
+  //
+  // Per-journey threading (not one mega-thread for all journeys) keeps
+  // each supervisor decision focused on a single coherent flow — the
+  // industry-standard LangGraph pattern is "one graph instance per
+  // logical scope" rather than batching every journey through one
+  // supervisor (which would blow the prompt size + lose attribution).
+  //
+  // Fail-OPEN at every level: orchestrator throw, zero-tests outcome,
+  // or any per-journey failure collapses to the legacy
+  // `generateAllTests` path for the affected journey. Crawl-mode
+  // accuracy floor matches `pipeline` mode regardless of autonomous
+  // outcomes.
+  const crawlAgentMode = project.workspaceId
+    ? (() => { try { return getWorkspaceAgentMode(project.workspaceId); } catch { return "pipeline"; } })()
+    : "pipeline";
+  let genResult;
+  if (crawlAgentMode === "autonomous" && journeys.length > 0) {
+    log(run, `🤖 Autonomous mode — supervisor will orchestrate role handoffs per journey (${journeys.length} journey${journeys.length !== 1 ? "s" : ""}).`);
+    const autonomousTests = [];
+    let autonomousFailures = 0;
+    for (const journey of journeys) {
+      throwIfAborted(signal);
+      const threadId = `${mainThreadId(run.id)}-j${journey.name?.replace(/\s+/g, "-") || autonomousTests.length}`;
+      let out;
+      try {
+        out = await runAutonomousThread(
+          {
+            artifact: {
+              journey,
+              pages: journey.pages || [],
+              snapshotsByUrl: effectiveSnapshotsByUrl,
+              classified: effectiveClassifiedPages,
+              tests: [],
+            },
+          },
+          {
+            runId: run.id,
+            workspaceId: project.workspaceId || null,
+            threadId,
+            signal,
+            supervisorDecision: supervisorDecisionFromLLM,
+            runAgent: makeRoleDispatcher({ project, run, signal, dialsPrompt, testCount }),
+            runLinearFallback: makeLinearFallback({ project, run }),
+          },
+        );
+      } catch (err) {
+        if (err.name === "AbortError" || signal?.aborted) throw err;
+        logWarn(run, `Autonomous orchestrator failed for journey "${journey.name}" (${err.message?.slice(0, 80) || "unknown"}); will retry via linear path.`);
+        autonomousFailures += 1;
+        continue;
+      }
+      const journeyTests = Array.isArray(out?.artifact?.tests) ? out.artifact.tests : [];
+      if (journeyTests.length > 0) {
+        // Tag each test with its source journey so the persistence layer
+        // can attribute pages + titles the same way `generateAllTests`
+        // does (matches the linear-path enrichment at line 431).
+        for (const t of journeyTests) {
+          autonomousTests.push({
+            ...t,
+            sourceUrl: t.sourceUrl || journey.pages?.[0]?.url,
+            pageTitle: t.pageTitle || journey.name,
+          });
+        }
+        log(run, `🤖 Journey "${journey.name}": ${out.outcome} after ${out?.steps ?? 0} step(s) → ${journeyTests.length} test(s).`);
+      } else {
+        log(run, `🤖 Journey "${journey.name}": ${out?.outcome || "no-output"} → 0 tests (will fall back to linear).`);
+        autonomousFailures += 1;
+      }
+    }
+
+    // Linear fallback: when zero journeys produced tests OR more than
+    // half of journeys failed, fall back to `generateAllTests` so the
+    // run never produces a WORSE outcome than `pipeline` mode. The
+    // 50% threshold protects against partial-autonomous shipping a
+    // half-empty test suite when the supervisor LLM is wobbly.
+    const halfFailed = autonomousFailures >= Math.ceil(journeys.length / 2);
+    if (autonomousTests.length === 0 || halfFailed) {
+      log(run, `↩️  Autonomous produced ${autonomousTests.length} tests (${autonomousFailures}/${journeys.length} journey failures) — falling back to linear pipeline for remaining coverage.`);
+      genResult = await generateAllTests(
+        effectiveClassifiedPages,
+        journeys,
+        effectiveSnapshotsByUrl,
+        (msg) => log(run, msg),
+        { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id },
+      );
+    } else {
+      // Per-page coverage for high-priority pages not covered by any
+      // journey — `generateAllTests` does this via `classifiedPages`
+      // loop after journeys. We replicate the gap-fill so autonomous
+      // crawl-mode coverage matches linear-mode coverage.
+      const journeyUrls = new Set(journeys.flatMap((j) => (j.pages || []).map((p) => p.url)));
+      const uncoveredHighPriority = effectiveClassifiedPages.filter(
+        (cp) => cp.isHighPriority && !journeyUrls.has(cp.url),
+      );
+      if (uncoveredHighPriority.length > 0) {
+        log(run, `🤖 Filling per-page coverage for ${uncoveredHighPriority.length} high-priority page(s) not in any journey…`);
+        // Reuse the linear gap-fill path — it's already optimised for
+        // single-page intent tests and respects the same Test Dials.
+        const gapFill = await generateAllTests(
+          uncoveredHighPriority,
+          [], // no journeys — we already covered them above
+          effectiveSnapshotsByUrl,
+          (msg) => log(run, msg),
+          { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id },
+        );
+        for (const t of gapFill.tests) autonomousTests.push(t);
+      }
+      genResult = { tests: autonomousTests, rateLimitHit: false, rateLimitError: null };
+    }
+  } else {
+    genResult = await generateAllTests(
+      effectiveClassifiedPages,
+      journeys,
+      effectiveSnapshotsByUrl,
+      (msg) => log(run, msg),
+      { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id },
+    );
+  }
   const rawTests = genResult.tests;
   log(run, `📝 Raw UI tests: ${rawTests.length}`);
 
