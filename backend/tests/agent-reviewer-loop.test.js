@@ -187,14 +187,28 @@ test("loop wires real quotaGuard (readSpendCaps + evaluateSpendCap) when checkQu
   ).run(wsId, `ws-${wsId}`, wsId, userId, 0.01, null, 80, now, now);
   // Seed an ai_request_log row that pushes the workspace over its cap.
   // The row needs to land in the rolling 24h window the spend-cap sums
-  // (`createdAt >= now - 24h`).
+  // (`createdAt >= now - 24h`). Schema (migration 047): id TEXT PK,
+  // workspaceId TEXT (nullable FK), routeId TEXT, agentRole TEXT,
+  // userId TEXT, promptHash TEXT NOT NULL, promptRedacted TEXT,
+  // responseRedacted TEXT, inputTokens, outputTokens, costUsd REAL,
+  // latencyMs INTEGER, outcome TEXT, errorReason TEXT, traceId TEXT,
+  // createdAt TEXT NOT NULL. No `provider` / `model` / `totalTokens`
+  // / `promptTokens` columns — provider attribution lives on the linked
+  // `provider_routes` row via `routeId`.
+  // Match the column subset production's `logRequest` actually writes
+  // (`backend/src/aiProvider/requestLog.js:68-93`) so this test exercises
+  // the same row shape live workspaces accumulate. `evaluateSpendCap`
+  // only reads `workspaceId` + `costUsd` + `createdAt` from the row, but
+  // matching the production write path makes the test a stricter
+  // contract — any future schema refactor that breaks `logRequest`'s
+  // INSERT will also break this seed.
   db.prepare(
-    "INSERT INTO ai_request_log (id, workspaceId, agentRole, provider, model, " +
-    "promptTokens, completionTokens, totalTokens, costUsd, outcome, latencyMs, createdAt) " +
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO ai_request_log (id, workspaceId, agentRole, promptHash, " +
+    "inputTokens, outputTokens, costUsd, outcome, latencyMs, createdAt) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
-    `req-${randomUUID().slice(0, 8)}`, wsId, "author", "openai", "gpt-4",
-    100, 200, 300, 1.00, "success", 1500, now,
+    `air-${randomUUID().slice(0, 8)}`, wsId, "author", "test-prompt-hash",
+    100, 200, 1.00, "success", 1500, now,
   );
 
   let authorCalls = 0;
