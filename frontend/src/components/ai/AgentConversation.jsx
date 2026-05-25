@@ -394,7 +394,21 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
               {persona.icon}
             </div>
             <div className="ac-bubble">
-              {!isHandoff && (
+              {/* Meta line renders when:
+                  - the turn is NOT a handoff (the regular case: doing /
+                    finding / onboard / accept turns from `eventsToTurns`
+                    and the synthesizer), OR
+                  - the turn IS a handoff BUT carries a `_round` index
+                    (envelope-derived loop turns from `messagesToTurns`,
+                    which hardcode `phase: "handoff"` — without this
+                    branch the B3.5 round badge would never render
+                    because the entire `.ac-meta` container was gated
+                    off for handoff turns). The handoff variant's
+                    italic-muted styling (`.ac-turn--handoff .ac-text`)
+                    still applies to the bubble body; only the meta
+                    line is restored so the round badge has somewhere
+                    to live. */}
+              {(!isHandoff || turn._round != null) && (
                 <div className="ac-meta">
                   <span className="ac-agent-label">{persona.label}</span>
                   {/* B3.5 — Round badge for reviewer↔author loop turns.

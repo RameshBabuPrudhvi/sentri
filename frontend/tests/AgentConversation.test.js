@@ -422,6 +422,24 @@ test("request_revision includes round badge narration", () => {
   assert.match(reviseTurns[1].text, /Reviewer rejected 2 issues/);
   assert.match(reviseTurns[1].text, /\+1 added/);
   assert.match(reviseTurns[1].text, /~1 updated/);
+
+  // B3.5 render-predicate pin — every loop-vocabulary turn MUST carry a
+  // `_round` field, because `AgentConversation.jsx`'s `.ac-meta` block
+  // is gated on `(!isHandoff || turn._round != null)`. Every turn from
+  // `messagesToTurns` is hardcoded `phase: "handoff"`, so without the
+  // `_round` field the entire meta line (label + round badge + model
+  // chip) would never render for these envelope-derived turns and the
+  // operator-visible "Round N" badge would be invisible.
+  for (const t of reviseTurns) {
+    assert.equal(typeof t._round, "number", `request_revision turn must carry numeric _round (got ${typeof t._round})`);
+  }
+  // The round-0 author handoff (the initial submission) intentionally
+  // does NOT get a badge — pin that too so a future refactor can't
+  // accidentally surface "Round 1" on the very first turn.
+  const initialAuthorHandoff = turns.find((t) => t.id === "msg-1");
+  assert.ok(initialAuthorHandoff, "expected the round-0 author handoff turn");
+  assert.equal(initialAuthorHandoff._round, undefined,
+    "round-0 handoffs must NOT carry _round (no Round 1 noise on initial submission)");
 });
 
 test("single_agent_collapse advisory emits a standalone warning turn (not merged into doing)", () => {
