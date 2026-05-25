@@ -102,7 +102,37 @@ function buildOpts(route, callerOpts) {
     // Ollama-specific tuning passthrough (no-op for other protocols).
     timeoutMs: callerOpts.timeoutMs,
     maxPredict: callerOpts.maxPredict,
+    // PR #29 probe fast-fail knobs — capability probes pass
+    // `maxRetries: 0` + `attemptTimeoutMs: PROBE_ATTEMPT_TIMEOUT_MS` so a
+    // bad-key probe fails in seconds instead of burning the full 3-retry
+    // × 30s-backoff chain (~113s symptom that prompted this PR). Without
+    // forwarding them through `buildOpts`, every protocol module read
+    // `opts.attemptTimeoutMs === undefined` and fell back to the
+    // 120s `CLOUD_TIMEOUT_MS` + 3-retry defaults, defeating the whole
+    // fast-fail design in `capabilityProbe.js`. The protocol modules
+    // already gracefully degrade when these are undefined (they're
+    // optional — see `protocols/openai.js` and siblings), so non-probe
+    // dispatch behaviour is unchanged.
+    maxRetries: callerOpts.maxRetries,
+    attemptTimeoutMs: callerOpts.attemptTimeoutMs,
   };
+}
+
+/**
+ * Test-only escape hatch — exposes `buildOpts` so the regression test in
+ * `backend/tests/protocol-adapter-opts.test.js` can pin the forwarded-
+ * field contract without spinning up real protocol modules. The `_`
+ * prefix mirrors `_resetProbeDebounceForTests` / `_setProtocolAdapterForTests`
+ * elsewhere in the aiProvider tree so the convention is uniform.
+ *
+ * Production code MUST NOT call this. The seam exists because PR #29's
+ * `buildOpts` silently dropped `maxRetries` + `attemptTimeoutMs` for
+ * every probe call (~113s wall-clock per probe instead of ~15s); a
+ * future refactor that touches the field list MUST keep this contract
+ * intact, and the test enforces it.
+ */
+export function _buildOptsForTests(route, callerOpts) {
+  return buildOpts(route, callerOpts);
 }
 
 /**

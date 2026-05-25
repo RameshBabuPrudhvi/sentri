@@ -42,6 +42,11 @@ const SAFE_COLUMNS = [
   "rpmLimit", "tpmLimit",
   "cacheEnabled", "cacheTtlSec",
   "fallbackRouteId", "enabled",
+  // Migration 059 — workspace-default flag. NULL on non-default rows, 1 on
+  // the single default row enforced by `idx_provider_routes_workspace_default`.
+  "isWorkspaceDefault",
+  // Migration 060 — per-route probe timeout (ms). NULL = use env default.
+  "probeTimeoutMs",
   "createdAt", "updatedAt",
 ];
 const SAFE_SELECT = SAFE_COLUMNS.join(", ");
@@ -52,6 +57,9 @@ const MUTABLE_FIELDS = Object.freeze([
   "rpmLimit", "tpmLimit",
   "cacheEnabled", "cacheTtlSec",
   "fallbackRouteId", "enabled",
+  "isWorkspaceDefault",
+  // Migration 060 — per-route probe timeout override.
+  "probeTimeoutMs",
 ]);
 const REQUIRED_INSERT_FIELDS = Object.freeze(["name", "family", "protocol", "model"]);
 // ── JSON helpers ──────────────────────────────────────────────────────────────
@@ -112,6 +120,109 @@ export function listByFamily(workspaceId, family) {
     `SELECT ${SAFE_SELECT} FROM provider_routes WHERE workspaceId = ? AND family = ? ORDER BY name ASC`
   ).all(workspaceId, family).map(hydrate);
 }
+/**
+ * Migration 059 — fetch the workspace-default route, or `undefined` when
+ * no row has been pinned as default. Used by `resolveRoute` (registry.js)
+ * as the layer between `agent_configs` and env detection.
+ *
+ * Note: returns the SAFE_SELECT shape (no secret blob). Dispatch resolves
+ * the decrypted secret via `secrets.getDecryptedKey(workspaceId, routeId)`
+ * separately, same as any other route.
+ *
+ * @param {string} workspaceId
+ * @returns {Object|undefined}
+ */
+export function getWorkspaceDefault(workspaceId) {
+  return hydrate(getDatabase().prepare(
+    `SELECT ${SAFE_SELECT} FROM provider_routes
+     WHERE workspaceId = ? AND isWorkspaceDefault = 1`,
+  ).get(workspaceId));
+}
+
+/**
+ * Migration 059 — clear the `isWorkspaceDefault` flag on every row in the
+ * workspace EXCEPT `keepId`. Called inside `setWorkspaceDefault`'s
+ * transaction so the partial UNIQUE index never trips. NULLs out the
+ * column rather than setting `0` because the partial index relies on
+ * NULL ≠ 1 (see migration JSDoc).
+ *
+ * @param {string} workspaceId
+ * @param {string|null} keepId - Row to preserve; pass null to clear ALL flags.
+ * @returns {number} Rows updated.
+ */
+function clearOtherDefaults(workspaceId, keepId) {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const result = keepId
+    ? db.prepare(
+        `UPDATE provider_routes
+         SET isWorkspaceDefault = NULL, updatedAt = ?
+         WHERE workspaceId = ? AND isWorkspaceDefault = 1 AND id != ?`,
+      ).run(now, workspaceId, keepId)
+    : db.prepare(
+        `UPDATE provider_routes
+         SET isWorkspaceDefault = NULL, updatedAt = ?
+         WHERE workspaceId = ? AND isWorkspaceDefault = 1`,
+      ).run(now, workspaceId);
+  return result.changes;
+}
+
+/**
+ * Migration 059 — set `id` as the workspace's default provider. Clears any
+ * previous default in the same transaction so the partial UNIQUE index never
+ * trips. Audits the change as a single "update" row with `changed:
+ * ["isWorkspaceDefault"]` so the audit log reflects the intent.
+ *
+ * Passing `null` clears the default entirely (resolveRoute will then fall
+ * back to env detection for unconfigured roles, same as pre-migration-059).
+ *
+ * @param {string} workspaceId
+ * @param {string|null} id - Route to pin, or null to clear the default.
+ * @param {Object} [opts]
+ * @param {string|null} [opts.userId] - Audit actor.
+ * @returns {Object|null} The pinned route (or null when cleared).
+ * @throws {Error} `ERR_ROUTE_MISSING_FIELD` when id isn't in the workspace.
+ */
+export function setWorkspaceDefault(workspaceId, id, { userId = null } = {}) {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const tx = db.transaction(() => {
+    if (id) {
+      const existing = getById(workspaceId, id);
+      if (!existing) {
+        const err = new Error(`workspace-default route not found: ${id}`);
+        err.code = "ERR_ROUTE_MISSING_FIELD";
+        throw err;
+      }
+      clearOtherDefaults(workspaceId, id);
+      db.prepare(
+        `UPDATE provider_routes
+         SET isWorkspaceDefault = 1, updatedAt = ?
+         WHERE id = ? AND workspaceId = ?`,
+      ).run(now, id, workspaceId);
+      auditRepo.append({
+        workspaceId, routeId: id, userId,
+        action: "update",
+        metadata: { changed: ["isWorkspaceDefault"], isWorkspaceDefault: true },
+      });
+    } else {
+      // Clear-all path — no specific route to audit against. Audit at the
+      // workspace level (routeId: null) so the operator-facing log still
+      // captures the policy change.
+      const cleared = clearOtherDefaults(workspaceId, null);
+      if (cleared > 0) {
+        auditRepo.append({
+          workspaceId, routeId: null, userId,
+          action: "update",
+          metadata: { changed: ["isWorkspaceDefault"], isWorkspaceDefault: false, cleared },
+        });
+      }
+    }
+  });
+  tx();
+  return id ? getById(workspaceId, id) : null;
+}
+
 /**
  * Fetch encrypted secret material for a single route. Dedicated helper so
  * dispatch (B2+) explicitly opts into reading the secret blob; never
@@ -428,35 +539,121 @@ export function upsert(input) {
  *   `null` when the routeId doesn't exist in this workspace (caller
  *   should 404).
  */
-export async function probeAndPersist(workspaceId, routeId, { userId = null, timeoutMs } = {}) {
+// Bug 4 — in-flight + recent-result debounce. Without this guard, the
+// Settings UI firing a probe on every mount (or an operator clicking
+// Re-probe rapidly) burns a free-tier quota in seconds. We keep a small
+// per-route map of `{ inflight, lastCompletedAt }` so:
+//   • A second call while one is in flight returns the in-flight promise.
+//   • A call within `PROBE_DEBOUNCE_MS` of a completed probe is skipped
+//     and the existing capabilities are returned unchanged.
+// The map is process-local — adequate for single-node deployments and a
+// best-effort guard at scale (the per-route hot key contention makes
+// cross-node duplication rare in practice).
+const PROBE_DEBOUNCE_MS = 5_000;
+const probeInflight = new Map();   // routeId → Promise<route>
+const probeLastDone  = new Map();  // routeId → epoch ms
+
+/**
+ * Test-only escape hatch — clears the per-route debounce maps so a test
+ * file can assert behaviour across calls without waiting out the 5s
+ * window or dealing with leftover state from a previous test case.
+ *
+ * Production code MUST NOT call this. The `_` prefix mirrors the
+ * existing `_setProtocolAdapterForTests` / `_resetForTests` test seams
+ * elsewhere in the aiProvider tree (see `quotaGuard.js` /
+ * `responseCache.js`) so the convention is uniform.
+ */
+export function _resetProbeDebounceForTests() {
+  probeInflight.clear();
+  probeLastDone.clear();
+}
+
+export async function probeAndPersist(workspaceId, routeId, { userId = null, timeoutMs, force = false } = {}) {
   const route = getById(workspaceId, routeId);
   if (!route) return null;
-  // Probe runs OUTSIDE the transaction — see JSDoc.
-  const capabilities = await runCapabilityProbe(route, { timeoutMs });
-  const db = getDatabase();
-  const now = new Date().toISOString();
-  const tx = db.transaction(() => {
-    db.prepare(
-      "UPDATE provider_routes SET capabilities = ?, updatedAt = ? WHERE id = ? AND workspaceId = ?",
-    ).run(stringifyJson(capabilities), now, routeId, workspaceId);
-    auditRepo.append({
-      workspaceId,
-      routeId,
-      userId,
-      action: "probe",
-      metadata: {
-        capabilities,
-        // Surface probe outcome at the top level of metadata too so
-        // audit-log filters (B3.9) can `WHERE metadata LIKE '%"reachable":false%'`
-        // without parsing the nested `capabilities` JSON.
-        reachable: capabilities.reachable,
-        source: capabilities.source,
-        errorReason: capabilities.errorReason || null,
-      },
+  // Coalesce concurrent probes on the same route. Two upserts firing in
+  // the same tick used to schedule two `setImmediate` probes; now the
+  // second one rides on the first's promise.
+  //
+  // `force: true` MUST bypass this coalescing — otherwise the rotate-key
+  // gate (settings.js POST /:id/rotate-key) could ride on an auto-probe
+  // that started BEFORE the new ciphertext was persisted, returning the
+  // OLD key's probe result. The rotation gate would then accept a bad
+  // new key because the in-flight probe used the old (still-working)
+  // key. Skipping inflight reuse on `force` makes the second call issue
+  // a fresh network probe against the freshly-rotated key.
+  if (!force && probeInflight.has(routeId)) {
+    return probeInflight.get(routeId);
+  }
+  if (!force) {
+    const last = probeLastDone.get(routeId) || 0;
+    if (Date.now() - last < PROBE_DEBOUNCE_MS) {
+      // Recent probe — return the persisted row unchanged. Caller code
+      // (UI / audit) sees the same shape as a successful probe, just no
+      // new network call. Force=true skips this check for the explicit
+      // Re-probe button.
+      return route;
+    }
+  }
+  // Migration 060 — per-route probe-timeout override. Precedence:
+  //   1. Explicit `timeoutMs` arg (test seam / future per-call override).
+  //   2. `route.probeTimeoutMs` column (operator-set via Settings UI).
+  //   3. `runCapabilityProbe`'s env-driven default (`AI_PROBE_TIMEOUT_MS`).
+  // Clamp to [1s, 10min] as a defence-in-depth check against a runaway
+  // value — the migration's documented range, repeated here so a stale
+  // pre-migration row can't break things.
+  let effectiveTimeoutMs = timeoutMs;
+  if (effectiveTimeoutMs == null && Number.isFinite(route.probeTimeoutMs) && route.probeTimeoutMs > 0) {
+    effectiveTimeoutMs = Math.min(Math.max(route.probeTimeoutMs, 1_000), 600_000);
+  }
+  // Probe runs OUTSIDE the transaction — see JSDoc. Wrap the entire
+  // probe-then-persist flow in a promise we stash in `probeInflight` so
+  // concurrent callers ride the same network call instead of issuing
+  // duplicates. The map entry is cleared in finally regardless of outcome.
+  const work = (async () => {
+    const capabilities = await runCapabilityProbe(route, { timeoutMs: effectiveTimeoutMs });
+    const db = getDatabase();
+    const now = new Date().toISOString();
+    const tx = db.transaction(() => {
+      db.prepare(
+        "UPDATE provider_routes SET capabilities = ?, updatedAt = ? WHERE id = ? AND workspaceId = ?",
+      ).run(stringifyJson(capabilities), now, routeId, workspaceId);
+      auditRepo.append({
+        workspaceId,
+        routeId,
+        userId,
+        action: "probe",
+        metadata: {
+          capabilities,
+          // Surface probe outcome at the top level of metadata too so
+          // audit-log filters (B3.9) can `WHERE metadata LIKE '%"reachable":false%'`
+          // without parsing the nested `capabilities` JSON.
+          reachable: capabilities.reachable,
+          source: capabilities.source,
+          errorReason: capabilities.errorReason || null,
+        },
+      });
     });
-  });
-  tx();
-  return getById(workspaceId, routeId);
+    tx();
+    return getById(workspaceId, routeId);
+  })();
+  probeInflight.set(routeId, work);
+  try {
+    return await work;
+  } finally {
+    // Identity-check the map entry before deleting. A concurrent
+    // `force: true` caller (rotate-key gate) may have arrived after we
+    // set our entry but before we resolved — in that case the Map now
+    // points at the force-probe's promise, not ours, and unconditionally
+    // deleting would orphan it. Subsequent non-force callers would
+    // then miss the coalescing window and fan out duplicate probes.
+    // The race window is tight (overlapping auto-probe + force-probe on
+    // the same route) but the check is cheap, so we close it
+    // defensively. Mirrors the pattern in `responseCache.js` /
+    // `quotaGuard.js` where in-flight maps gate deletion on identity.
+    if (probeInflight.get(routeId) === work) probeInflight.delete(routeId);
+    probeLastDone.set(routeId, Date.now());
+  }
 }
 
 export function remove(workspaceId, id, { userId } = {}) {

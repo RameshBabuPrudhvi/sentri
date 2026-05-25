@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Play, Edit2, RefreshCw, Download,
   CheckCircle2, Clock,
-  ChevronRight, Calendar, GitCommit,
+  Calendar, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, GitMerge,
   Link2, Tag, Clipboard, Wand2, MoreHorizontal,
 } from "lucide-react";
@@ -16,6 +16,12 @@ import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
 import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/shared/TestBadges.jsx";
+import {
+  QualityScoreChip,
+  QualityScoreExplainer,
+  qualityTierKey,
+} from "../components/shared/QualityScoreChip.jsx";
+import Breadcrumb from "../components/shared/Breadcrumb.jsx";
 import { fmtDate, fmtDateTime, fmtRelativeTimeFull } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
@@ -301,27 +307,36 @@ export default function TestDetail() {
   return (
     <div className="fade-in td-page">
 
-      {/* ── Breadcrumb + toolbar ── */}
+      {/* ── Breadcrumb + toolbar ──
+          NAV-002 (audit): swapped the bespoke `.td-breadcrumb*` markup for
+          the shared `<Breadcrumb>` so RunDetail and TestDetail render the
+          same WAI-ARIA-compliant trail (`<nav aria-label="Breadcrumb">` +
+          `<ol>` + per-item `<Link>`). The audit's recommended trail for
+          test detail is:
+              Dashboard › Projects › [Project Name] › Tests › [Test Name]
+          When `project` hasn't loaded yet (rare — useTestDetailQuery
+          hydrates `test` + `project` together), we fall back to a flat
+          "Tests" trail rather than a partial chain that would 404 on click. */}
       <div className="td-toolbar">
-        <div className="td-breadcrumb">
-          {project ? (
-            <>
-              <button className="td-breadcrumb-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
-                {project.name}
-              </button>
-              <ChevronRight size={13} />
-              <button className="td-breadcrumb-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
-                Tests
-              </button>
-            </>
-          ) : (
-            <button className="td-breadcrumb-btn" onClick={() => navigate("/tests")}>
-              Tests
-            </button>
-          )}
-          <ChevronRight size={13} />
-          <span className="td-breadcrumb-current">Test Details</span>
-        </div>
+        {project ? (
+          <Breadcrumb
+            items={[
+              { label: "Dashboard", to: "/dashboard" },
+              { label: "Projects",  to: "/projects" },
+              { label: project.name, to: `/projects/${test.projectId}` },
+              { label: "Tests",      to: `/projects/${test.projectId}` },
+              { label: cleanTestName(test.name) || "Test" },
+            ]}
+          />
+        ) : (
+          <Breadcrumb
+            items={[
+              { label: "Dashboard", to: "/dashboard" },
+              { label: "Tests",     to: "/tests" },
+              { label: cleanTestName(test.name) || "Test" },
+            ]}
+          />
+        )}
 
         {/* ── Action buttons ── */}
         <div className="td-toolbar-actions">
@@ -743,22 +758,45 @@ export default function TestDetail() {
             <StatusBadge result={test.lastResult} />
           </InfoRow>
 
+          {/* ENT-004 (audit) — surface the `reviewComment` column (migration
+              054) so the feedback-loop's "Auto-regenerated after failure
+              (REASON)…" line is visible inline on the test detail page.
+              Before this, the column was silently dropped by VALID_COLS
+              filtering and the only signal was a workspace-wide audit row.
+              Renders nothing when null (most rows) so the sidebar stays
+              compact for tests with no comment. */}
+          {test.reviewComment && (
+            <InfoRow label="Review note">
+              <div className="td-review-comment">{test.reviewComment}</div>
+            </InfoRow>
+          )}
+
           {typeof test.qualityScore === "number" && (
+            // AI-001 (audit): the bare numeric badge was a number-without-
+            // context. The shared `QualityScoreChip` carries the
+            // factor breakdown popover (same component used in ReviewQueue)
+            // and `QualityScoreExplainer` renders the plain-English tier
+            // line ("Scores above 75 are typically safe to auto-approve")
+            // so reviewers have a mental model for the value before they
+            // click into the breakdown. The bar's colour ramp is unified
+            // through the shared `quality-bar-fill--<tier>` class so
+            // green/amber/red thresholds match every other surface that
+            // shows a score (previously TestDetail used 70/40 cutoffs vs
+            // ReviewQueue's 75/50 — confusing).
             <InfoRow label="Quality score">
               <div className="td-quality-wrap">
-                <span
-                  className={`badge td-quality-score ${test.qualityScore >= 70 ? "badge-green" : test.qualityScore >= 40 ? "badge-amber" : "badge-red"}`}
-                  title="AI-computed quality score (0–100)"
-                >
-                  {test.qualityScore}
-                </span>
+                <QualityScoreChip
+                  score={test.qualityScore}
+                  factors={test.qualityScoreFactors}
+                />
                 <div className="td-quality-bar-bg" title={`${test.qualityScore} / 100`}>
-                  <div className="td-quality-bar-fill" style={{
-                    width: `${test.qualityScore}%`,
-                    background: test.qualityScore >= 70 ? "var(--green)" : test.qualityScore >= 40 ? "var(--amber)" : "var(--red)",
-                  }} />
+                  <div
+                    className={`td-quality-bar-fill quality-bar-fill--${qualityTierKey(test.qualityScore)}`}
+                    style={{ width: `${test.qualityScore}%` }}
+                  />
                 </div>
               </div>
+              <QualityScoreExplainer score={test.qualityScore} />
             </InfoRow>
           )}
 
@@ -951,6 +989,20 @@ export default function TestDetail() {
             </button>
             <button className="btn btn-ghost btn-sm td-view-project-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
               View Project
+            </button>
+            {/* ENT-004 (audit) — deep-link to the workspace Audit Log
+                pre-filtered to this test. Admins see the per-test slice
+                (approved by, rejected by, regenerated, healed) without
+                hunting through the workspace-wide feed. Non-admin users
+                land on the same route's permission gate; the audit's
+                follow-up to expose a viewer-friendly variant is tracked
+                separately. */}
+            <button
+              className="btn btn-ghost btn-sm td-view-project-btn"
+              onClick={() => navigate(`/audit-log?testId=${encodeURIComponent(test.id)}`)}
+              title="See approve / reject / regenerate / healing events for this test"
+            >
+              View activity →
             </button>
           </div>
         </div>

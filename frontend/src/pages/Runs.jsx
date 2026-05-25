@@ -11,6 +11,7 @@ import StatusBadge from "../components/shared/StatusBadge";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import GateBadge from "../components/shared/GateBadge.jsx";
 import RunRegressionModal from "../components/run/RunRegressionModal.jsx";
+import EmptyState from "../components/shared/EmptyState.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
 
@@ -320,24 +321,38 @@ export default function Work() {
           </div>
         </div>
 
-        {/* ── Table ── */}
+        {/* ── Table ──
+            ONB-002 (audit): empty state via shared primitive. Two branches —
+            no runs at all (onboarding: create a project to start crawling)
+            vs filtered to nothing (offer Clear filters + a Run Tests CTA so
+            the user has both an escape hatch and a forward action). */}
         {filtered.length === 0 ? (
-          <div className="empty-state" style={{ color: "var(--text2)" }}>
-            {runs.length === 0 ? (
-              <>
-                <Zap size={32} color="var(--text3)" style={{ marginBottom: 12 }} />
-                <div className="empty-state-title">No runs yet</div>
-                <div className="empty-state-desc">
-                  Start by crawling a project to generate tests, then run them.
-                </div>
-                <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
-                  Create a Project
-                </button>
-              </>
-            ) : (
-              <div>No runs match your filters</div>
-            )}
-          </div>
+          runs.length === 0 ? (
+            <EmptyState
+              variant="bare"
+              icon={<Zap size={32} color="var(--accent)" />}
+              title="No runs yet"
+              description="Start by creating a project. Crawls and test runs land here as soon as you kick one off."
+              action={{ label: "Create a Project", onClick: () => navigate("/projects/new") }}
+            />
+          ) : (
+            <EmptyState
+              variant="bare"
+              icon={<Search size={32} color="var(--text3)" />}
+              title="No runs match your filters"
+              description={
+                search
+                  ? `No runs match "${search}".`
+                  : "Try clearing the status, type, or search filter — or kick off a new run."
+              }
+              secondaryAction={
+                anyFilterActive || search
+                  ? { label: "Clear filters", onClick: () => { setStatusFilter("all"); setTypeFilter("all"); setSearch(""); } }
+                  : null
+              }
+              action={{ label: "Run Tests", onClick: () => setShowRunModal(true) }}
+            />
+          )
         ) : (
           <>
           <table className="table">

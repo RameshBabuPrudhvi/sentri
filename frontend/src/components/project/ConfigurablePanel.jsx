@@ -85,10 +85,12 @@ export default function ConfigurablePanel({
   // Notify the Automation status-chip cache after any successful save/clear.
   // Also bust the shared project-data cache so any consumer reading
   // `project.webVitalsBudgets` / `project.qualityGates` off the project list
-  // (e.g. `<ProjectQualityCard>`'s threshold prop on the AUTO-017.3
-  // `<TrendChart>` instances) refreshes immediately rather than waiting for
-  // the next route navigation. Without this, editing a budget here leaves
-  // the trend chart's threshold line drawn at the old value.
+  // (e.g. `QualityGatesSection`'s threshold prop on the AUTO-017.3
+  // `<TrendChart>` instances at
+  // `features/project-settings/sections/quality-gates/QualityGatesSection.jsx`)
+  // refreshes immediately rather than waiting for the next route navigation.
+  // Without this, editing a budget here leaves the trend chart's threshold
+  // line drawn at the old value.
   const notifyStatus = () => {
     const kind = RESULT_KEY_TO_STATUS_KIND[resultKey];
     if (projectId && kind) invalidateAutomationStatus(projectId, kind);

@@ -315,4 +315,41 @@
   .at-summary__stat:last-child {
     border-bottom: none;
   }
+
+  /* Header controls: project + range selects each have `min-width:
+     140px / 120px` that sums to 260px + 8px gap = 268px, which crowds
+     the title block on a 375px viewport. Let them shrink to fit. */
+  .at-header__project-select,
+  .at-header__range-select {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+/* ── Responsive: 480px ────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Page padding tightens to match other pages' 480px rules. */
+  .at-page {
+    padding: 12px 14px;
+  }
+
+  /* Per-row layout: `.at-row__time` uses `margin-left: auto` to
+     right-align, which works on a wide row but collapses badly on
+     phones because the row gets four flex children (name + sep +
+     project + score + time) competing for ~340px of content. Allow
+     wrapping so time drops below identity on phones. */
+  .at-row {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+  .at-row__time {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  /* Batch rows panel: tighten inner padding so the per-test rows have
+     more breathing room. */
+  .at-rows {
+    padding: 0 12px 10px 20px;
+  }
 }

@@ -1,0 +1,162 @@
+/* DS-001: TestRunView inline-style migration. .trv-* BEM. Features layer. */
+.trv-grid { display: grid; grid-template-columns: minmax(260px, 320px) 1fr; gap: 16px; min-height: 560px; }
+.trv-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-sm); overflow: hidden; display: flex; flex-direction: column; }
+.trv-suite-header { padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.trv-suite-header__top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.trv-suite-header__title { font-weight: 700; font-size: 0.82rem; }
+.trv-suite-header__count { font-size: 0.68rem; color: var(--text3); font-family: var(--font-mono); }
+.trv-suite-header__bar-row { display: flex; align-items: center; gap: 8px; }
+.trv-suite-header__bar-track { flex: 1; height: 4px; background: var(--bg3); border-radius: 99px; overflow: hidden; }
+.trv-suite-header__bar-fill { height: 100%; background: var(--green); border-radius: 99px; transition: width 0.6s ease; }
+.trv-suite-header__passed { font-size: 0.68rem; color: var(--green); font-family: var(--font-mono); font-weight: 600; }
+.trv-suite-header__failed { font-size: 0.68rem; color: var(--red); font-family: var(--font-mono); font-weight: 600; }
+.trv-list { overflow-y: auto; flex: 1; }
+.trv-row { display: flex; align-items: center; gap: 8px; padding: 11px 14px; cursor: pointer; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; transition: all 0.12s; }
+.trv-row--selected { background: var(--bg2); }
+.trv-row__body { flex: 1; min-width: 0; }
+.trv-row__name { font-size: 0.78rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trv-row__name-link { color: inherit; text-decoration: none; }
+.trv-row__name-link:hover { color: var(--accent); }
+.trv-row__steps { font-size: 0.67rem; color: var(--text3); margin-top: 1px; }
+.trv-row__right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.trv-row__badge { font-size: 0.62rem; }
+.trv-row__duration { font-size: 0.67rem; color: var(--text3); font-family: var(--font-mono); }
+.trv-row__drill { width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg2); cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--text3); transition: all 0.12s; flex-shrink: 0; }
+.trv-row__drill:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+.trv-pending-row { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; transition: all 0.12s; }
+.trv-pending-row--active { background: var(--bg2); border-left-color: var(--blue); }
+.trv-pending-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--blue); border-top-color: transparent; animation: spin 0.9s linear infinite; flex-shrink: 0; }
+.trv-pending-body { flex: 1; min-width: 0; }
+.trv-pending-name { font-size: 0.78rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trv-pending-sub { font-size: 0.67rem; color: var(--blue); margin-top: 1px; }
+.trv-pending-skeleton { display: flex; flex-direction: column; gap: 5px; }
+.trv-running-indicator { padding: 10px 14px; display: flex; align-items: center; gap: 8px; color: var(--text3); font-size: 0.75rem; }
+.trv-running-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); animation: pulse 1.4s ease-in-out infinite; }
+.trv-empty-list { padding: 24px; text-align: center; color: var(--text3); font-size: 0.82rem; }
+.trv-preview { display: flex; flex-direction: column; height: 100%; }
+.trv-preview__header { padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.trv-preview__header-inner { display: flex; align-items: flex-start; gap: 10px; }
+.trv-preview__header-body { flex: 1; min-width: 0; }
+.trv-preview__title { font-weight: 700; font-size: 0.88rem; margin-bottom: 4px; line-height: 1.4; }
+.trv-preview__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trv-preview__meta-text { font-size: 0.72rem; color: var(--text3); }
+.trv-preview__meta-mono { font-size: 0.72rem; color: var(--text3); font-family: var(--font-mono); }
+.trv-preview__content { flex: 1; overflow-y: auto; padding: 16px; }
+.trv-preview__empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); font-size: 0.82rem; }
+.trv-suspense-fallback { padding: 32px; text-align: center; color: var(--text3); font-size: 0.85rem; }
+.trv-timeline-wrap { grid-column: 1 / -1; }
+.trv-footer-review { background: var(--surface); color: var(--text); border: 1px solid var(--border); font-weight: 600; gap: 6px; }
+.trv-footer-rerun--fail { background: var(--red); color: #fff; border: none; font-weight: 700; gap: 6px; }
+.trv-footer-rerun--pass { background: var(--green); color: #fff; border: none; font-weight: 700; gap: 6px; }
+
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   `.trv-grid` is `minmax(260px, 320px) 1fr` — fine on tablet, but on a
+   375px viewport with 16px page padding the 1fr column collapses to ~63px
+   and the right-side preview becomes unreadable. Stack the panels at the
+   900px (icon-rail) breakpoint so the suite list sits above the preview.
+   The browser-chrome URL pill `.trv-chrome__tab` keeps its `max-width:
+   220px` but on phones can squeeze under that; let it shrink to fit. */
+@media (max-width: 900px) {
+  .trv-grid { grid-template-columns: 1fr; min-height: 0; }
+  /* `.trv-list` (the suite-list panel) gets a cap so the user can scroll
+     past it to reach the preview without an infinite list eating the
+     viewport. Mirrors the `.rq-list-pane` cap at 50vh used by ReviewQueue. */
+  .trv-grid > .trv-panel:first-child .trv-list { max-height: 50vh; }
+}
+
+@media (max-width: 600px) {
+  /* Preview header URL meta + chrome URL pill: the URL pill is fine
+     (already truncates) but the top row of the panel header (title +
+     meta) wraps awkwardly because `.trv-preview__meta` is a flex row
+     with no wrap. Allow wrapping so badges + ID + timestamp stack onto
+     a second line when the title is long. */
+  .trv-preview__meta { gap: 6px; }
+  /* Chrome tab can shrink — its 220px max overflows narrow screens
+     because the `.trv-chrome__urlbar` row is non-wrapping. */
+  .trv-chrome__tab { max-width: 60vw; }
+  /* API-result header URL on narrow screens is the only metadata that
+     matters; let it claim the row by hiding the title block. */
+  .trv-api__header-url { max-width: 60vw; }
+}
+
+@media (max-width: 480px) {
+  /* Tighter padding on every interior surface so the available content
+     width isn't eaten by 14–18px inner padding × multiple nested cards. */
+  .trv-suite-header,
+  .trv-preview__header,
+  .trv-running__header { padding: 12px 14px; }
+  .trv-preview__content,
+  .trv-running__content { padding: 12px; }
+  .trv-row,
+  .trv-pending-row { padding: 10px 12px; }
+}
+
+/* ── Browser chrome ── */
+.trv-chrome { border-radius: 10px; overflow: hidden; border: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0,0,0,0.08); margin-bottom: 14px; }
+.trv-chrome__titlebar { background: linear-gradient(180deg, #e8e8e8 0%, #d8d8d8 100%); padding: 7px 12px 0; border-bottom: 1px solid #c0c0c0; }
+.trv-chrome__top-row { display: flex; align-items: center; margin-bottom: 6px; }
+.trv-chrome__lights { display: flex; gap: 6px; margin-right: 12px; }
+.trv-chrome__light { width: 11px; height: 11px; border-radius: 50%; border: 0.5px solid rgba(0,0,0,0.15); }
+.trv-chrome__tab { background: #fff; border-radius: 6px 6px 0 0; padding: 4px 14px 5px; font-size: 0.7rem; color: #333; font-weight: 500; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid #c0c0c0; border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; display: flex; align-items: center; gap: 5px; }
+.trv-chrome__tab-icon { font-size: 9px; }
+.trv-chrome__urlbar { background: #fff; padding: 3px 4px 6px; display: flex; align-items: center; gap: 4px; }
+.trv-chrome__nav-btn { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: #aaa; background: none; border: none; }
+.trv-chrome__url-pill { flex: 1; height: 26px; background: #f5f5f5; border-radius: 13px; border: 1px solid #d0d0d0; display: flex; align-items: center; gap: 6px; padding: 0 12px; }
+.trv-chrome__url-text { font-size: 0.72rem; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.trv-chrome__video { width: 100%; display: block; background: #000; cursor: pointer; }
+.trv-chrome__screenshot { width: 100%; display: block; cursor: pointer; }
+.trv-chrome__empty { padding: 40px 20px; text-align: center; background: #fafafa; color: #94a3b8; }
+.trv-chrome__empty-icon { font-size: 28px; margin-bottom: 8px; opacity: 0.3; }
+.trv-chrome__empty-text { font-size: 0.76rem; }
+
+/* ── API result panel ── */
+.trv-api { border-radius: 10px; overflow: hidden; border: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0,0,0,0.08); margin-bottom: 14px; }
+.trv-api__header { padding: 10px 14px; background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.trv-api__header-icon { font-size: 14px; }
+.trv-api__header-title { font-weight: 700; font-size: 0.78rem; color: var(--text); }
+.trv-api__header-url { font-size: 0.72rem; color: var(--text3); font-family: var(--font-mono); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
+.trv-api__body { padding: 40px 20px; text-align: center; cursor: pointer; }
+.trv-api__body--passed { background: var(--green-bg); }
+.trv-api__body--failed { background: var(--red-bg); }
+.trv-api__body--pending { background: var(--bg2); }
+.trv-api__status-icon { font-size: 32px; margin-bottom: 10px; opacity: 0.6; }
+.trv-api__status-label { font-weight: 700; font-size: 0.88rem; margin-bottom: 4px; }
+.trv-api__status-label--passed { color: var(--green); }
+.trv-api__status-label--failed { color: var(--red); }
+.trv-api__status-label--pending { color: var(--text2); }
+.trv-api__status-sub { font-size: 0.76rem; color: var(--text3); }
+
+/* ── Error block ── */
+.trv-error { padding: 10px 14px; background: var(--red-bg); border-radius: 8px; border: 1px solid #fca5a5; font-size: 0.76rem; color: var(--red); font-family: var(--font-mono); line-height: 1.6; white-space: pre-wrap; word-break: break-word; margin-bottom: 12px; }
+.trv-error__title { font-weight: 700; margin-bottom: 6px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* ── Running steps preview ── */
+.trv-running { display: flex; flex-direction: column; height: 100%; }
+.trv-running__header { padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.trv-running__title { font-weight: 700; font-size: 0.88rem; margin-bottom: 4px; }
+.trv-running__meta { display: flex; align-items: center; gap: 6px; }
+.trv-running__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); animation: pulse 1.4s ease-in-out infinite; }
+.trv-running__content { flex: 1; overflow-y: auto; padding: 16px; }
+.trv-running__steps-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+.trv-running__steps-header { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.trv-running__steps-spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--blue); border-top-color: transparent; animation: spin 0.9s linear infinite; }
+.trv-running__steps-label { font-weight: 700; font-size: 0.78rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; }
+.trv-running__steps-count { margin-left: auto; font-size: 0.68rem; color: var(--text3); }
+.trv-running__step { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; transition: all 0.3s; }
+.trv-running__step:last-child { border-bottom: none; }
+.trv-running__step--current { background: var(--blue-bg, rgba(37,99,235,0.04)); border-left-color: var(--blue); }
+.trv-running__step--future { opacity: 0.4; }
+.trv-running__step-indicator { flex-shrink: 0; margin-top: 1px; }
+.trv-running__step-circle { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.trv-running__step-circle--passed { background: var(--green-bg); border: 1.5px solid var(--green); }
+.trv-running__step-circle--current { border: 2px solid var(--blue); border-top-color: transparent; animation: spin 0.9s linear infinite; }
+.trv-running__step-circle--pending { border: 1.5px solid var(--border); font-size: 0.6rem; font-weight: 700; color: var(--text3); font-family: var(--font-mono); }
+.trv-running__step-body { flex: 1; }
+.trv-running__step-text { font-size: 0.78rem; line-height: 1.4; color: var(--text2); }
+.trv-running__step-text--current { font-weight: 600; color: var(--text); }
+.trv-running__step-status { font-size: 0.67rem; margin-top: 3px; }
+.trv-running__step-status--running { color: var(--blue); }
+.trv-running__step-status--passed { color: var(--green); }
+.trv-running__no-steps { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px; color: var(--text3); }
+.trv-running__no-steps-spinner { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--blue); animation: spin 0.9s linear infinite; }
+.trv-running__no-steps-text { font-size: 0.82rem; }

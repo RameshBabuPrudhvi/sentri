@@ -48,6 +48,10 @@ const files = [
   "tests/review-queue-filters.test.js",
   "tests/recycle-bin.test.js",
   "tests/run-logs.test.js",
+  // Task 2 — per-agent SSE events (migration 057). Pins persistence,
+  // createdAt ordering, runRepo.getById hydration, cascade-delete, and the
+  // emitAgentEvent broadcast contract (persists + delivers to runListeners).
+  "tests/agentEvents.test.js",
   "tests/webhook-token.test.js",
   "tests/scheduler.test.js",
   "tests/trigger-api.test.js",
@@ -65,6 +69,18 @@ const files = [
   // SEC-007 — Compliance audit log (hash chain, retention, DLQ, routes).
   "tests/audit-log-routes.test.js",
   "tests/audit-auth-events.test.js",
+  // ENT-004 (audit, migration 055) — `activities.runId` column + filter
+  // regression coverage. Pins the auto-derive from `meta.runId`, workspace
+  // ACL on the runId scope, and the explicit-arg-wins precedence rule.
+  "tests/activity-runid-filter.test.js",
+  // ENT-004 (audit, migration 054) — `tests.reviewComment` column + repo
+  // round-trip. Locks down the Lifeguard-flagged VALID_COLS regression so
+  // future refactors of testRepo.update can't silently drop the field.
+  "tests/test-review-comment.test.js",
+  // GAP-005 (audit, migration 056) — `aiRequestLogRepo.listByRun` regression
+  // coverage. Pins workspace ACL, chronological ordering, null-runId
+  // exclusion, and limit clamping for the new exported repo method.
+  "tests/ai-request-log-list-by-run.test.js",
   // SEC-007 Part C — SIEM forwarder (HMAC + retry + DLQ + config CRUD).
   "tests/audit-siem-forwarder.test.js",
   "tests/postgres-adapter.test.js",
@@ -90,6 +106,35 @@ const files = [
   "tests/request-log.test.js",
   "tests/migration-rollback.test.js",
   "tests/capability-probe.test.js",
+  // PR #28 / Migration 060 — per-route probe-timeout override. Pins repo
+  // column round-trip, `probeAndPersist` precedence chain (explicit arg →
+  // route.probeTimeoutMs → env default), and the [1s, 10min] defence-in-
+  // depth clamp applied before reaching `runCapabilityProbe`.
+  "tests/probe-timeout.test.js",
+  // PR #29 — Probe debounce + in-flight coalescing in providerRouteRepo.
+  // Pins the recent-result skip, force: true bypass, concurrent-coalesce,
+  // and the rotate-key gate's required force-skips-inflight semantics.
+  "tests/probe-debounce.test.js",
+  // PR #29 — B4.6 read-only routeGroupRepo. Per REVIEW.md mandatory-test
+  // rule: covers list / getById / listMembers, member-count aggregates,
+  // LEFT-JOIN safety for empty groups, capabilities JSON hydration, and
+  // the workspace-scoping invariant (cross-workspace lookups return
+  // undefined / [] rather than leaking existence).
+  "tests/route-group-repo.test.js",
+  // PR #29 regression — protocolAdapter.buildOpts forwarded-field
+  // contract. Pins maxRetries + attemptTimeoutMs round-trip (the
+  // keystone bug this PR shipped + then fixed: probes silently fell
+  // back to 113s wall-clock because buildOpts dropped the fast-fail
+  // knobs), the derivation of useJson from responseFormat, and the
+  // no-leak invariant (caller fields outside the documented surface
+  // must NOT appear on the output bag).
+  "tests/protocol-adapter-opts.test.js",
+  // PR #28 — `getAiProviderState()` registry inspector backing the new
+  // `GET /api/v1/system/ai-state` route + Systems page "AI provider state"
+  // panel. Pins the snapshot shape (healthy + open-breaker + sticky cases),
+  // per-role key splitting, expired-sticky sweep contract, and JSON-safe
+  // round-trip so `res.json()` never trips on a stray Map / Set reference.
+  "tests/ai-state.test.js",
   // B3.7 — Token-bucket reserve + spend-cap enforcement.
   "tests/quota-guard.test.js",
   // B3.8 — Exact-match response cache + thundering-herd coalescing + janitor.
@@ -131,6 +176,8 @@ const files = [
   "tests/run-compare.test.js",
   "tests/metric-samples.test.js",
   "tests/healing-summary.test.js",
+  // GAP-001 — Global data search (workspace-scoped LIKE-based) backing ⌘K.
+  "tests/search.test.js",
   "tests/web-vitals-trend.test.js",
   "tests/auto-approval.test.js",
   "tests/auto-approval-routes.test.js",

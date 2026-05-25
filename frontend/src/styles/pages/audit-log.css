@@ -81,6 +81,55 @@
   cursor: pointer;
 }
 
+/* ENT-004 (audit) — active testId filter chip in the toolbar. Surfaces
+   when the URL carries `?testId=…` (deep-linked from TestDetail's "View
+   activity" button). Visually matches the type-chip row but renders
+   inline with the toolbar so it's the first thing the user sees on
+   load. The `×` is wrapped in the same button so the entire chip is one
+   click target. */
+.al-toolbar__filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 99px;
+  padding: 3px 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.al-toolbar__filter-chip:hover { background: var(--accent); color: #fff; }
+.al-toolbar__filter-chip-code {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  background: transparent;
+  padding: 0;
+}
+
+/* SEC-007 UX: "Audit reads" toggle — hides high-volume meta-audit rows
+   (`audit.read` / `audit.export`) from the default feed. Sits in the
+   toolbar next to the sort selector so admins doing forensic review can
+   flip it on without leaving the page. */
+.al-toolbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text2);
+  cursor: pointer;
+  user-select: none;
+  padding: 0 8px;
+  height: 36px;
+}
+
+.al-toolbar__toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
 /* ── Type chips ──────────────────────────────────────────────────────────── */
 .al-chips {
   display: flex;

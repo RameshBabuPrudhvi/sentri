@@ -12,6 +12,11 @@
 import { generateText, streamText, parseJSON, isRateLimitError, isTransientServerError } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+// Task 2 — per-agent SSE events. Every LLM call site emits a start/done pair
+// so the NarrativeFeed can render real-time per-agent attribution without a
+// second round-trip. `runId` is threaded through every public generator on
+// this module; when null (eval-harness, CLI), emitAgentEvent is a no-op.
+import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
 import { withDials } from "./promptHelpers.js";
 import { extractTestsArray, sanitiseSteps } from "./stepSanitiser.js";
 import { buildJourneyPrompt } from "./prompts/journeyPrompt.js";
@@ -161,7 +166,7 @@ function parseEndpointHints(description, appUrl) {
  * methods, status codes, etc.), automatically routes to the API test prompt
  * which generates Playwright `request` API tests instead of UI tests.
  */
-export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   const apiIntent = isApiIntent(name, description);
 
   let prompt;
@@ -182,9 +187,22 @@ export async function generateFromDescription(name, description, appUrl, onToken
     prompt = withDials(buildUserRequestedPrompt(name, description, appUrl, { testCount }), dialsPrompt);
   }
 
-  const text = onToken
-    ? await streamText(prompt, onToken, { signal, agentRole: "author", workspaceId })
-    : await generateText(prompt, { signal, agentRole: "author", workspaceId });
+  // Step 4 — Generate. The `author` agent writes one or more tests from the
+  // user-supplied requirement. Start/done bracket the LLM call so the
+  // NarrativeFeed can pulse the author chip in real time.
+  // `workspaceId` is forwarded so `emitAgentEvent` can resolve the same
+  // route/model `generateText` will dispatch against — populates the
+  // per-event `model` column for operator attribution.
+  emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
+    message: apiIntent ? "Generating API tests from requirement" : "Generating UI tests from requirement" });
+  let text;
+  try {
+    text = onToken
+      ? await streamText(prompt, onToken, { signal, agentRole: "author", workspaceId, runId })
+      : await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
+  } finally {
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
+  }
   const parsed = parseJSON(text);
   const tests = extractTestsArray(parsed);
 
@@ -212,10 +230,21 @@ export async function generateFromDescription(name, description, appUrl, onToken
 /**
  * generateJourneyTest(journey, snapshotsByUrl) → array of test objects or []
  */
-export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   try {
     const prompt = withDials(buildJourneyPrompt(journey, snapshotsByUrl, { testCount }), dialsPrompt);
-    const text = await generateText(prompt, { signal, agentRole: "planner", workspaceId });
+    // Step 3 — Classify / Map journeys. `planner` decomposes a journey
+    // (start page → expected outcome) into the test scaffolding the
+    // author agent later fleshes out. Step-3 is the multi-agent stage —
+    // intentClassifier.aiClassifyPage emits `explorer` on the same step.
+    emitAgentEvent(runId, { step: 3, agent: "planner", phase: "start", workspaceId,
+      message: `Planning journey: ${journey?.name || "unnamed"}` });
+    let text;
+    try {
+      text = await generateText(prompt, { signal, agentRole: "planner", workspaceId, runId });
+    } finally {
+      emitAgentEvent(runId, { step: 3, agent: "planner", phase: "done", workspaceId });
+    }
     const result = parseJSON(text);
     const tests = extractTestsArray(result);
     if (tests.length === 0) return [];
@@ -236,10 +265,19 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
 /**
  * generateIntentTests(classifiedPage, snapshot) → Array of test objects
  */
-export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   try {
     const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot, { testCount }), dialsPrompt);
-    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId });
+    // Step 4 — Generate. `author` writes per-page intent tests for each
+    // high-priority classified page.
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
+      message: `Writing tests for ${classifiedPage?.url || "page"}` });
+    let text;
+    try {
+      text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
+    } finally {
+      emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
+    }
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);
     if (tests.length === 0) return [];
@@ -264,7 +302,7 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
  *
  * @returns {{ tests: object[], rateLimitHit: boolean, rateLimitError: string|null }}
  */
-export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   const allTests = [];
   let rateLimitHit = false;
   let rateLimitError = null;
@@ -361,7 +399,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     throwIfAborted(signal);
     onProgress?.(`🗺️  Generating journey tests: ${journey.name}`);
     const journeyTests = await safeGenerate(`Journey "${journey.name}"`, () =>
-      generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt, testCount, signal, workspaceId })
+      generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt, testCount, signal, workspaceId, runId })
     );
     for (const jt of journeyTests) {
       allTests.push({ ...jt, sourceUrl: journey.pages[0]?.url, pageTitle: journey.name });
@@ -382,7 +420,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     if (!snapshot) continue;
 
     const tests = await safeGenerate(`Intent tests for ${classifiedPage.url}`, () =>
-      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal, workspaceId })
+      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal, workspaceId, runId })
     );
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
@@ -412,7 +450,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
 
     onProgress?.(`📄 Generating tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
     const tests = await safeGenerate(`Tests for ${classifiedPage.url}`, () =>
-      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal, workspaceId })
+      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal, workspaceId, runId })
     );
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
@@ -448,13 +486,22 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
  *   configured for the author stage.
  * @returns {Promise<object[]>}
  */
-export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   if (!apiEndpoints || apiEndpoints.length === 0) return [];
 
   try {
     throwIfAborted(signal);
     const prompt = withDials(buildApiTestPrompt(apiEndpoints, appUrl, { testCount }), dialsPrompt);
-    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId });
+    // Step 4 — Generate. `author` writes Playwright `request` API tests from
+    // HAR-captured endpoint summaries (mirrors the UI test path).
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
+      message: `Writing API tests for ${apiEndpoints.length} endpoint${apiEndpoints.length !== 1 ? "s" : ""}` });
+    let text;
+    try {
+      text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
+    } finally {
+      emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
+    }
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);
     if (tests.length === 0) return [];

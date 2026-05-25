@@ -25,6 +25,11 @@ import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSe
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
+// B4.6 — read-only route-group surface for the TopBar dropdown +
+// future Settings subtab. Mutations live behind a separate roadmap item
+// (`docs/roadmap/ai-provider-bundle.md:397-405`); today this repo only
+// exposes `list` + `getById` + `listMembers`.
+import * as routeGroupRepo from "../database/repositories/routeGroupRepo.js";
 import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
 import * as providerRouteAuditRepo from "../database/repositories/providerRouteAuditRepo.js";
 import { resetRouteBreakers } from "../aiProvider/registry.js";
@@ -34,9 +39,84 @@ import { resetRouteBreakers } from "../aiProvider/registry.js";
 // AES boundary and the repo stays a pure DAL. Plaintext is never written
 // to disk and never persisted on the request object beyond the call.
 import * as secrets from "../aiProvider/secrets.js";
+import { FAMILY_EMOJI, formatCostTier } from "../aiProvider/modelCatalog.js";
+
+// Static family → display label map. Used by `toDisplayRoute` to render
+// `displayLabel: "MyRoute (Anthropic)"` in the AI Providers dropdown.
+//
+// Why not use `getCloudName(row.family)` from modelCatalog.js? Because that
+// function reads `process.env[envVar]` (e.g. `ANTHROPIC_MODEL`) and returns
+// the raw model id when set — producing labels like "MyRoute (claude-3-opus-
+// 20240229)" instead of "MyRoute (Anthropic)" for every Anthropic-family
+// route in a deployment with model env overrides. This map is purely
+// family→brand, no env dependency. Lifeguard BUG-0001 / BUG-0004.
+const FAMILY_DISPLAY_LABEL = Object.freeze({
+  anthropic:  "Anthropic",
+  openai:     "OpenAI",
+  google:     "Google",
+  openrouter: "OpenRouter",
+  local:      "Ollama",
+  custom:     "Custom",
+});
 
 
 const router = Router();
+
+// ── AI Provider display helpers ───────────────────────────────────────────────
+//
+// Augment raw provider_routes rows with display-friendly fields for the
+// Settings UI and Agent Roles dropdown. Computed, never stored.
+//
+/**
+ * Enrich a provider_routes row with display-friendly fields:
+ *   displayLabel — "Claude Sonnet 4.6 (Anthropic)" for dropdowns
+ *   familyEmoji  — "🔶" instant visual family ID
+ *   costTier     — "$3 / $15 per M" or "Free (local)" / "Variable"
+ *   usedByRoles  — Agent roles pinned to this route (reverse ref). Lets the
+ *                  Settings UI render "Used by: explorer, planner" inline on
+ *                  each provider row so operators see the multi-agent wiring
+ *                  without tab-switching to Agent Roles.
+ *
+ * The `rolesByRouteId` Map is optional — single-row enrichment paths
+ * (rotate-key, probe, upsert response) can omit it; the list endpoints
+ * build it once for the whole workspace and pass it in to amortise the
+ * agent_configs query across N rows.
+ *
+ * @param {Object} row - Hydrated provider_routes row.
+ * @param {Map<string, string[]>} [rolesByRouteId] - routeId → role[] reverse map.
+ * @returns {Object} Same row + display fields.
+ */
+function toDisplayRoute(row, rolesByRouteId = null) {
+  if (!row) return row;
+  const familyLabel = FAMILY_DISPLAY_LABEL[row.family] || row.family || "Custom";
+  return {
+    ...row,
+    displayLabel: `${row.name} (${familyLabel})`,
+    familyEmoji:  FAMILY_EMOJI[row.family] ?? "🤖",
+    costTier:     formatCostTier(row.model),
+    usedByRoles:  rolesByRouteId?.get(row.id) ?? [],
+  };
+}
+
+/**
+ * Build the routeId → role[] reverse map for a workspace in one DB call.
+ * Used by the list endpoints so each row's `usedByRoles` field is
+ * populated without an N+1 query.
+ *
+ * @param {string} workspaceId
+ * @returns {Map<string, string[]>}
+ */
+function buildRolesByRouteId(workspaceId) {
+  const map = new Map();
+  for (const cfg of agentConfigRepo.listByWorkspace(workspaceId)) {
+    if (!cfg.routeId) continue;
+    const list = map.get(cfg.routeId) || [];
+    list.push(cfg.role);
+    map.set(cfg.routeId, list);
+  }
+  return map;
+}
+
 
 // GET /api/config — provider info for the LLM badge shown everywhere
 router.get("/config", async (req, res) => {
@@ -79,6 +159,15 @@ router.post("/settings", requireRole("admin"), async (req, res) => {
   // ── Quick-switch: frontend sends "__use_existing__" to activate a provider
   // that already has a saved key without re-entering it. Just set the
   // active-provider override — no key is written or validated.
+  //
+  // @deprecated Phase 3 of the route-based provider switcher rollout.
+  // The TopBar dropdown no longer fires this branch — it now calls
+  // `POST /settings/ai-providers/:id/default` which flips
+  // `provider_routes.isWorkspaceDefault`. The branch is retained for
+  // backward compat with the legacy Settings UI (ProvidersSection.jsx
+  // and CompatProviderForm.jsx call `saveApiKey()` on form save which
+  // still uses this flow). See `setActiveProvider` JSDoc in
+  // `backend/src/aiProvider/registry.js` for deletion criteria.
   if (apiKey === "__use_existing__" && provider !== "local") {
     const configured = getConfiguredKeys();
     const hasCompat = isCompat && configured.compatProviders?.some((p) => p.provider === provider);
@@ -487,6 +576,19 @@ function buildProviderRoutePayload(body, { isCreate }) {
   if (body && "cacheEnabled" in body) payload.cacheEnabled = !!body.cacheEnabled;
   if (body && "cacheTtlSec" in body) payload.cacheTtlSec = numOrNull(body.cacheTtlSec) ?? 0;
   if (body && "fallbackRouteId" in body) payload.fallbackRouteId = body.fallbackRouteId || null;
+  // Migration 060 — per-route probe-timeout override (ms). NULL clears the
+  // override and falls back to the env-driven default. Clamped to a sane
+  // [1s, 10min] range so a UI typo can't disable timeouts or set sub-
+  // second values that would abort before TLS handshake completes.
+  if (body && "probeTimeoutMs" in body) {
+    const n = numOrNull(body.probeTimeoutMs);
+    if (n == null) payload.probeTimeoutMs = null;
+    else if (n < 1_000 || n > 600_000) {
+      return { error: "probeTimeoutMs must be between 1000 and 600000 (1s–10min)" };
+    } else {
+      payload.probeTimeoutMs = n;
+    }
+  }
 
   // apiKey — plaintext on the wire, encrypted before the repo sees it.
   // Empty string MUST be treated as "no change" (the create+edit form
@@ -540,7 +642,8 @@ function handleProviderRouteError(err, res) {
  * display. Workspace scoping is enforced by the repo's WHERE clause.
  */
 router.get("/settings/provider-routes", requireRole("admin"), (req, res) => {
-  res.json({ routes: providerRouteRepo.list(req.workspaceId) });
+  const rolesByRouteId = buildRolesByRouteId(req.workspaceId);
+  res.json({ routes: providerRouteRepo.list(req.workspaceId).map((r) => toDisplayRoute(r, rolesByRouteId)) });
 });
 
 /**
@@ -558,7 +661,7 @@ router.post("/settings/provider-routes", requireRole("admin"), (req, res) => {
       userId: req.authUser?.sub || null,
     });
     logActivity({ ...actor(req), type: "settings.update", detail: `Provider route created: ${saved.name}` });
-    res.status(201).json(saved);
+    res.status(201).json(toDisplayRoute(saved));
   } catch (err) {
     return handleProviderRouteError(err, res);
   }
@@ -703,15 +806,38 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
     // Settings UI can show the operator what went wrong.
     const probed = await providerRouteRepo.probeAndPersist(req.workspaceId, existing.id, {
       userId: req.authUser?.sub || null,
+      // Rotation gate MUST run a fresh probe — the debounce window must
+      // not let a stale "reachable" verdict greenlight a newly-rotated
+      // bad key.
+      force: true,
     });
     const caps = probed?.capabilities;
-    const probeOk = caps && caps.reachable && caps.auth !== false && caps.model !== false;
+    // Bug 2 — strict truthiness + errorReason gate (same as ProbeBadge).
+    // Previously `caps.auth !== false` treated `null` as a pass, so a 402
+    // / unknown_error response from the candidate key could pass the
+    // rotation gate. Inverting to require explicit positive evidence
+    // closes that hole.
+    const probeOk = caps
+      && caps.reachable === true
+      && caps.auth === true
+      && caps.model === true
+      && !caps.errorReason;
     if (!probeOk) {
       // Roll back to the snapshot captured BEFORE the upsert. The
       // repo's diff-based audit emits ANOTHER rotate_key row pointing
       // at the prior `lastFour` — operators see the full
       // rotate→rollback sequence in the audit log, which is the
       // desired forensic shape.
+      //
+      // ALSO restore `capabilities` — `probeAndPersist` just wrote the
+      // FAILED probe result for the new key into the row, but after
+      // rollback the row's stored key is the old known-good one whose
+      // last successful probe lives on `existing.capabilities`. Without
+      // this restore, every Settings UI badge + system component reading
+      // `route.capabilities.reachable` (vision-heal resolver in
+      // `aiProvider/vision.js`, health-check probes) sees the stale
+      // failed-probe payload for a route that actually dispatches fine,
+      // potentially leading operators to delete a working route.
       providerRouteRepo.upsert({
         id: existing.id,
         workspaceId: req.workspaceId,
@@ -719,12 +845,19 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
         apiKeyEncrypted: priorSecret?.apiKeyEncrypted ?? null,
         apiKeyNonce: priorSecret?.apiKeyNonce ?? null,
         apiKeyLastFour: priorSecret?.apiKeyLastFour ?? null,
+        // Snapshot was taken via `getById` at the top of the handler —
+        // before `probeAndPersist` clobbered the column with the failed
+        // probe payload, so this is the LAST KNOWN-GOOD capabilities
+        // shape (or `null` if the route had never been probed). The
+        // diff-aware upsert detects the change and writes back; the
+        // resulting `action: "update"` audit row with `changed:
+        // ["capabilities"]` is desired forensic context.
+        capabilities: existing.capabilities ?? null,
         // B2.2 — suppress auto-probe on the rollback write. The prior
         // key was already known-good (it was working before this
         // attempt); re-probing it on rollback would waste an API call
-        // confirming what we already know. The operator sees the
-        // failed-rotation probe result in `capabilities` via the
-        // synchronous `probeAndPersist` above.
+        // confirming what we already know AND would re-clobber the
+        // capabilities we just restored.
         skipAutoProbe: true,
       });
       return res.status(400).json({
@@ -755,8 +888,13 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
 });
 
 router.post("/settings/provider-routes/:id/probe", requireRole("admin"), async (req, res) => {
+  // `force: true` bypasses the in-flight + recent-result debounce in
+  // `probeAndPersist`. An admin clicking "Re-probe" is explicitly asking
+  // for a fresh network call — the debounce only suppresses incidental
+  // duplicate auto-probes from UI mount loops, not operator-driven ones.
   const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
     userId: req.authUser?.sub || null,
+    force: true,
   });
   if (!updated) return res.status(404).json({ error: "Route not found" });
   return res.json({ ok: true, route: updated, capabilities: updated.capabilities });
@@ -846,6 +984,14 @@ function serialiseRouteForExport(row) {
     cacheEnabled: row.cacheEnabled === 1 || row.cacheEnabled === true,
     cacheTtlSec: row.cacheTtlSec ?? 0,
     fallbackRouteId: row.fallbackRouteId ?? null,
+    // Migration 060 — preserve per-route probe-timeout override across
+    // export/import round-trips. Matches the rpmLimit / tpmLimit pattern
+    // (operator-set numeric override, NULL = use the workspace/env
+    // default). Without this an operator who configures a 120s probe
+    // timeout for an Ollama provider loses that setting when exporting
+    // from workspace A and importing into workspace B (or reimporting
+    // into the same workspace after disaster recovery).
+    probeTimeoutMs: row.probeTimeoutMs ?? null,
     capabilities: row.capabilities ?? null,
     pricing: row.pricing ?? null,
   };
@@ -1050,6 +1196,13 @@ router.post("/settings/provider-routes/import", requireRole("admin"), async (req
       // fallbackRouteId is rewired in phase 2 — leave it null on the
       // first pass so the cycle check can't trip on a forward reference.
       fallbackRouteId: null,
+      // Migration 060 — pass the per-route probe-timeout override through
+      // `buildProviderRoutePayload` so the validator enforces the
+      // [1000, 600000] range automatically. A hand-edited bundle with an
+      // out-of-range value lands in `stats.errors` rather than silently
+      // persisting; absent / null values fall through to the env default
+      // post-import, matching create semantics.
+      probeTimeoutMs: incoming.probeTimeoutMs ?? null,
       // apiKey is NEVER in the export, so the import never carries one.
       // The route lands keyless and the operator re-supplies via
       // rotate-key after import.
@@ -1316,6 +1469,304 @@ router.post("/settings/ai-requests/:id/replay", requireRole("admin"), async (req
 router.get("/settings/ai-requests", requireRole("admin"), (req, res) => {
   const rows = aiRequestLogRepo.list(req.workspaceId, req.query || {});
   res.json({ items: rows, nextCursor: rows.length ? rows[rows.length - 1].createdAt : null });
+});
+
+// ── /settings/ai-providers — renamed aliases for /settings/provider-routes ───
+//
+// "AI Providers" is the new operator-facing name for what was called
+// "Provider Routes". Every CRUD + probe + rotate-key operation is aliased
+// here so the frontend can call /settings/ai-providers without a DB
+// migration. The old /settings/provider-routes paths are preserved for
+// backward compat (existing integrations, runbooks, exported JSON schema).
+//
+// Each alias is a thin one-liner that calls the identical handler body
+// inline — no shared closure needed because the handlers read from
+// req.workspaceId / req.params / req.body / req.authUser which are the
+// same on both paths.
+
+/** List all AI Providers (= provider_routes) for this workspace. */
+router.get("/settings/ai-providers", requireRole("admin"), (req, res) => {
+  const rolesByRouteId = buildRolesByRouteId(req.workspaceId);
+  res.json({ routes: providerRouteRepo.list(req.workspaceId).map((r) => toDisplayRoute(r, rolesByRouteId)) });
+});
+
+/**
+ * After an AI Provider row with `family: "local"` is persisted, sync the
+ * runtime Ollama state in `registry.js` so legacy detection paths see the
+ * just-saved baseUrl + model. The new `provider_routes`-driven dispatch
+ * reads `route.baseUrl` / `route.model` directly on the row — this hook
+ * is purely for the **workspace-agnostic** surfaces the AI Providers UI
+ * doesn't replace:
+ *
+ *   • `getProvider()` / `/config` / header dropdown — `detectProvider`
+ *     calls `hasOllamaConfig()` which reads the runtime cache.
+ *   • `buildProviderMeta().local` — Settings dropdowns + crawler logs.
+ *   • Env-fallback bottom layer in `resolveRoute` — when no agent_configs
+ *     row, no workspace default, and no cloud env keys, this is the only
+ *     way Ollama ever surfaces.
+ *
+ * Same single-tenant assumption as the legacy `POST /settings` path
+ * (`backend/src/routes/settings.js:154`): the most recently saved Ollama
+ * row is the runtime "active" Ollama. Multi-workspace dispatch through
+ * `provider_routes.id` keeps working unchanged because each route still
+ * carries its own baseUrl/model.
+ *
+ * @param {Object} row - Hydrated `provider_routes` row (the just-saved one).
+ */
+function syncRuntimeOllamaFromRoute(row) {
+  if (!row || row.family !== "local") return;
+  if (!row.enabled) return; // Disabled local provider — don't promote to runtime.
+  setRuntimeOllama({
+    baseUrl: row.baseUrl || "",
+    model:   row.model   || "",
+    disabled: false,
+  });
+}
+
+/** Create a new AI Provider. */
+router.post("/settings/ai-providers", requireRole("admin"), (req, res) => {
+  const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: true });
+  if (error) return res.status(400).json({ error });
+  try {
+    const saved = providerRouteRepo.upsert({
+      ...payload,
+      workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+    });
+    syncRuntimeOllamaFromRoute(saved);
+    logActivity({ ...actor(req), type: "settings.update", detail: `AI Provider created: ${saved.name}` });
+    res.status(201).json(toDisplayRoute(saved));
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
+});
+
+/** Partial-update an AI Provider. */
+router.patch("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "AI provider not found" });
+  // Migration 059 — `isWorkspaceDefault` has side effects on other rows
+  // (clears any previous default in the same transaction). Force callers
+  // through the dedicated endpoint so the audit row is correctly tagged.
+  if (req.body && "isWorkspaceDefault" in req.body)
+    return res.status(400).json({ error: "Use POST /settings/ai-providers/:id/default to pin as workspace default" });
+  const { payload, error } = buildProviderRoutePayload(req.body || {}, { isCreate: false });
+  if (error) return res.status(400).json({ error });
+  // Mirror the legacy `/provider-routes/:id` semantics — only reject when
+  // a non-empty key was supplied (which `buildProviderRoutePayload` would
+  // have encrypted into `payload.apiKeyEncrypted`). An empty string is the
+  // documented "keep existing key" sentinel and must be a no-op, matching
+  // the frontend's FORM_EMPTY shape and direct API callers that send
+  // `apiKey: ""` to express "no change". Lifeguard-flagged contract drift.
+  if (payload.apiKeyEncrypted)
+    return res.status(400).json({ error: "Use POST /settings/ai-providers/:id/rotate-key to change the API key" });
+  try {
+    const updated = providerRouteRepo.upsert({
+      ...payload,
+      id: existing.id,
+      workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+    });
+    syncRuntimeOllamaFromRoute(updated);
+    // Lifeguard BUG-0006 — operator-facing activity log entry. The repo's
+    // own audit (`providerRouteAuditRepo`) captures the field-level diff;
+    // this row surfaces "what changed" in the workspace activity stream
+    // so admins watching the audit page see the rename / re-enable / etc.
+    // without filtering on a separate provider-routes-audit subtab.
+    logActivity({ ...actor(req), type: "settings.update", detail: `AI Provider updated: ${updated.name}` });
+    res.json(toDisplayRoute(updated));
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
+});
+
+/** Delete an AI Provider (rejects with 409 if any agent_config references it). */
+router.delete("/settings/ai-providers/:id", requireRole("admin"), (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "AI provider not found" });
+  const pinnedRoles = agentConfigRepo.listByWorkspace(req.workspaceId)
+    .filter((c) => c.routeId === existing.id)
+    .map((c) => c.role);
+  if (pinnedRoles.length > 0) {
+    return res.status(409).json({
+      error: `AI provider is in use by agent role(s): ${pinnedRoles.join(", ")}. Reassign or clear those roles first.`,
+      code: "ERR_ROUTE_IN_USE",
+      pinnedRoles,
+    });
+  }
+  const result = providerRouteRepo.remove(req.workspaceId, req.params.id, { userId: req.authUser?.sub || null });
+  // Migration 059 + Ollama-UX regression fix — when the deleted row was
+  // the runtime "active" Ollama, mark Ollama disabled so legacy detection
+  // paths don't keep advertising a now-deleted endpoint. Mirrors the
+  // legacy `DELETE /settings/local` behaviour (`backend/src/routes/settings.js:295`).
+  if (existing.family === "local") {
+    setRuntimeOllama({ baseUrl: "", model: "", disabled: true });
+  }
+  logActivity({ ...actor(req), type: "settings.update", detail: `AI Provider deleted: ${existing.name}` });
+  res.json({ ok: true, ...result });
+});
+
+/** Probe an AI Provider (network reachability + auth + model check). */
+router.post("/settings/ai-providers/:id/probe", requireRole("admin"), async (req, res) => {
+  // See `/settings/provider-routes/:id/probe` for why `force: true` —
+  // operator-driven probes bypass the debounce that guards auto-probes.
+  const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
+    userId: req.authUser?.sub || null,
+    force: true,
+  });
+  if (!updated) return res.status(404).json({ error: "AI provider not found" });
+  return res.json({ ok: true, route: toDisplayRoute(updated), capabilities: updated.capabilities });
+});
+
+/**
+ * Migration 059 — pin / unpin the workspace-default AI Provider.
+ *
+ * This is the explicit operator surface for the "which provider handles
+ * agent roles that have no per-role override?" question. Without a default
+ * pinned, `resolveRoute` falls through to env-variable detection
+ * (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc.), which is invisible to
+ * operators looking only at the AI Providers UI.
+ *
+ * POST body: `{ default: true }` to pin THIS provider, `{ default: false }`
+ * to clear the workspace's default entirely. Mutual exclusion (one default
+ * per workspace) is enforced by the migration's partial UNIQUE index and
+ * the repo's `setWorkspaceDefault` transaction.
+ *
+ * Dedicated endpoint rather than a PATCH field because:
+ *   1. Setting a default has side effects on OTHER rows (clearing the
+ *      previous default). Hiding that in a generic PATCH would surprise
+ *      anyone reading the audit log.
+ *   2. The audit entry needs a specific `metadata.changed:
+ *      ["isWorkspaceDefault"]` shape so admins can filter for "who pinned
+ *      the default and when?".
+ */
+router.post("/settings/ai-providers/:id/default", requireRole("admin"), (req, res) => {
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "AI provider not found" });
+  const wantDefault = req.body?.default === true;
+  try {
+    const updated = providerRouteRepo.setWorkspaceDefault(
+      req.workspaceId,
+      wantDefault ? existing.id : null,
+      { userId: req.authUser?.sub || null },
+    );
+    logActivity({
+      ...actor(req), type: "settings.update",
+      detail: wantDefault
+        ? `AI Provider pinned as workspace default: ${existing.name}`
+        : `AI Provider workspace default cleared`,
+    });
+    const rolesByRouteId = buildRolesByRouteId(req.workspaceId);
+    res.json({ ok: true, route: updated ? toDisplayRoute(updated, rolesByRouteId) : null });
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
+});
+
+/**
+ * B4.6 — Read-only route-groups listing for the TopBar AI Provider
+ * dropdown and the future Route Groups Settings subtab.
+ *
+ * Each row carries `memberCount` + `enabledMemberCount` aggregates so the
+ * frontend renders "Cheapest tier · 3 routes (2 healthy)" without a
+ * second round-trip per group. We also fold in `usedByRoles` (the same
+ * reverse-ref shape as `toDisplayRoute`) so operators see which agent
+ * roles dispatch through each group — groups are reachable today only
+ * via `agent_configs.routeId = "rg-..."`.
+ *
+ * Mutations (`POST/PATCH/DELETE`) intentionally NOT implemented here —
+ * the Settings UI for editing groups is a follow-up roadmap item
+ * (`docs/roadmap/ai-provider-bundle.md:397-405`). Today's surface is
+ * read-only so the dropdown can SHOW the operator-defined groups
+ * without claiming an editing affordance that doesn't exist yet.
+ */
+router.get("/settings/route-groups", requireRole("admin"), (req, res) => {
+  const groups = routeGroupRepo.list(req.workspaceId);
+  // Build a single reverse-ref map (routeId / groupId → role[]) so the
+  // N+1 from per-group reads is avoided. `agent_configs.routeId` carries
+  // both shapes; we partition by the `rg-` prefix.
+  const rolesByGroupId = new Map();
+  for (const cfg of agentConfigRepo.listByWorkspace(req.workspaceId)) {
+    if (!cfg.routeId) continue;
+    if (typeof cfg.routeId === "string" && cfg.routeId.startsWith("rg-")) {
+      const list = rolesByGroupId.get(cfg.routeId) || [];
+      list.push(cfg.role);
+      rolesByGroupId.set(cfg.routeId, list);
+    }
+  }
+  // Strategy → human label. Kept inline so the frontend doesn't have to
+  // duplicate the mapping — same convention as `FAMILY_DISPLAY_LABEL`.
+  const STRATEGY_LABEL = { weighted: "Weighted", latency: "Lowest latency", cost: "Cheapest" };
+  res.json({
+    groups: groups.map((g) => ({
+      ...g,
+      strategyLabel: STRATEGY_LABEL[g.strategy] || g.strategy,
+      usedByRoles: rolesByGroupId.get(g.id) || [],
+    })),
+  });
+});
+
+/** Rotate API key for an AI Provider — identical logic to provider-routes rotate-key. */
+router.post("/settings/ai-providers/:id/rotate-key", requireRole("admin"), async (req, res) => {
+  // Re-use the original handler by rewriting the param and delegating to
+  // the identically-scoped route. Express doesn't support router.dispatch
+  // directly, so we replicate the thin validation + delegate pattern here.
+  // The handler body is identical to /settings/provider-routes/:id/rotate-key.
+  const existing = providerRouteRepo.getById(req.workspaceId, req.params.id);
+  if (!existing) return res.status(404).json({ error: "AI provider not found" });
+  const rawKey = (typeof req.body?.newApiKey === "string" && req.body.newApiKey)
+    || (typeof req.body?.apiKey === "string" && req.body.apiKey)
+    || "";
+  const plaintext = rawKey.trim();
+  if (!plaintext || plaintext.length < 10)
+    return res.status(400).json({ error: "newApiKey is required and must be at least 10 characters" });
+  const priorSecret = providerRouteRepo.getSecretById(req.workspaceId, existing.id);
+  const enc = secrets.encryptKey(plaintext);
+  try {
+    providerRouteRepo.upsert({
+      id: existing.id, workspaceId: req.workspaceId,
+      userId: req.authUser?.sub || null,
+      apiKeyEncrypted: enc.ciphertext, apiKeyNonce: enc.nonce, apiKeyLastFour: enc.lastFour,
+      skipAutoProbe: true,
+    });
+    const probed = await providerRouteRepo.probeAndPersist(req.workspaceId, existing.id, {
+      userId: req.authUser?.sub || null,
+      // Rotation gate — see /settings/provider-routes/:id/rotate-key.
+      force: true,
+    });
+    const caps = probed?.capabilities;
+    // Strict gate — see /settings/provider-routes/:id/rotate-key (Bug 2).
+    const probeOk = caps
+      && caps.reachable === true
+      && caps.auth === true
+      && caps.model === true
+      && !caps.errorReason;
+    if (!probeOk) {
+      providerRouteRepo.upsert({
+        id: existing.id, workspaceId: req.workspaceId,
+        userId: req.authUser?.sub || null,
+        apiKeyEncrypted: priorSecret?.apiKeyEncrypted ?? null,
+        apiKeyNonce: priorSecret?.apiKeyNonce ?? null,
+        apiKeyLastFour: priorSecret?.apiKeyLastFour ?? null,
+        capabilities: existing.capabilities ?? null,
+        skipAutoProbe: true,
+      });
+      return res.status(400).json({
+        error: "Probe failed — new key was rejected",
+        reason: caps?.errorReason || "probe_failed",
+        capabilities: caps,
+      });
+    }
+    resetRouteBreakers(existing.id);
+    logActivity({
+      ...actor(req), type: "auth.api_key.rotate", req,
+      workspaceId: req.workspaceId,
+      meta: { routeId: existing.id, routeName: existing.name, lastFour: enc.lastFour },
+    });
+    res.json({ ok: true, lastFour: enc.lastFour, capabilities: caps });
+  } catch (err) {
+    return handleProviderRouteError(err, res);
+  }
 });
 
 export default router;

@@ -82,7 +82,7 @@ temperature, maxTokens, fallbackRole, createdAt, updatedAt
 Edit via **Settings → Agent Roles** (admin only). The UI surfaces:
 
 - **Route** dropdown — one of the `provider_routes` rows configured
-  under **Settings → Provider Routes**. Each route bundles protocol +
+  under **Settings → AI Providers**. Each provider row bundles protocol +
   endpoint + model + encrypted API key, so switching a role's route
   changes every dispatch dimension at once.
 - System prompt override (free text, optional — appended as the system

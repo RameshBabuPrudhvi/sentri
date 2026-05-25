@@ -42,6 +42,7 @@ import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline, sanitizeRunInputs } from "./pipeline/pipelineOrchestrator.js";
 import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
+import { emitAgentEvent } from "./aiProvider/agentEventEmitter.js";
 import { setStep } from "./utils/pipelineState.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog } from "./utils/logFormatter.js";
@@ -181,6 +182,26 @@ function runDiffAwareBaseline(project, run, snapshots, mode, opts = {}) {
 async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal) {
   // ── Step 2: Element filtering ───────────────────────────────────────────
   setStep(run, 2);
+  // Step 1 done — crawler finished, hand off. The finding (pages count) is
+  // emitted here because `pagesFound` is only populated after the crawl
+  // branch finishes and `filterAndClassify` is entered.
+  emitAgentEvent(run.id, {
+    step: 1, agent: "explorer", phase: "finding",
+    message: run.pagesFound != null
+      ? `Mapped ${run.pagesFound} page${run.pagesFound !== 1 ? "s" : ""}.`
+      : "Crawl complete.",
+    workspaceId: project.workspaceId,
+  });
+  emitAgentEvent(run.id, {
+    step: 1, agent: "explorer", phase: "done",
+    workspaceId: project.workspaceId,
+  });
+  // Step 2 start
+  emitAgentEvent(run.id, {
+    step: 2, agent: "explorer", phase: "start",
+    message: "Scanning each page for buttons, inputs, forms — anything a user can act on. Skipping decorative content.",
+    workspaceId: project.workspaceId,
+  });
   structuredLog("pipeline.filter", { runId: run.id, pages: snapshots.length });
   log(run, `🔍 Filtering elements (removing noise)...`);
   const filteredSnapshots = snapshots.map(snap => {
@@ -189,6 +210,20 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
     return { ...snap, elements: filtered };
   });
   for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
+
+  // Step 2 done — emit finding before step 3 starts
+  const keptTotal = filteredSnapshots.reduce((n, s) => n + (s.elements?.length ?? 0), 0);
+  emitAgentEvent(run.id, {
+    step: 2, agent: "explorer", phase: "finding",
+    message: keptTotal > 0
+      ? `Kept ${keptTotal} interactive element${keptTotal !== 1 ? "s" : ""}.`
+      : "No interactive elements found after filtering.",
+    workspaceId: project.workspaceId,
+  });
+  emitAgentEvent(run.id, {
+    step: 2, agent: "explorer", phase: "done",
+    workspaceId: project.workspaceId,
+  });
 
   throwIfAborted(signal);
 
@@ -199,7 +234,7 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
   const classifiedPages = [];
   for (const snap of filteredSnapshots) {
     throwIfAborted(signal);
-    const classified = await classifyPageWithAI(snap, snap.elements, { signal, workspaceId: project.workspaceId || null });
+    const classified = await classifyPageWithAI(snap, snap.elements, { signal, workspaceId: project.workspaceId || null, runId: run.id });
     if (classified._aiAssisted) {
       log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
     }
@@ -291,7 +326,7 @@ export async function generateFromUserDescription(project, run, { name, descript
 
   const rawTests = await generateFromDescription(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
-  }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null });
+  }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Steps 5-7: Dedup → Enhance → Validate (shared pipeline) ────────────
@@ -378,6 +413,14 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
   log(run, `HAR capture: ✅ enabled (API traffic → API test generation)`);
   log(run, `Target URL: ${project.url}`);
   setStep(run, 1);
+  // Agent event: Explorer begins crawl (step 1). `workspaceId` lets the
+  // emitter resolve the model attribution from the registry without an
+  // extra arg at every downstream call site.
+  emitAgentEvent(run.id, {
+    step: 1, agent: "explorer", phase: "start",
+    message: `Opening ${project.url} and following every link I can reach…`,
+    workspaceId: project.workspaceId,
+  });
 
   // AI-005 pre-flight: probe every configured agent_config role before the
   // crawl + AI work begins. Workspaces with no configured agents get a fast
@@ -655,7 +698,7 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     journeys,
     effectiveSnapshotsByUrl,
     (msg) => log(run, msg),
-    { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null },
+    { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id },
   );
   const rawTests = genResult.tests;
   log(run, `📝 Raw UI tests: ${rawTests.length}`);
@@ -686,7 +729,7 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     throwIfAborted(signal);
     log(run, `🌐 Generating API tests from ${apiEndpoints.length} discovered endpoints...`);
     try {
-      const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal, workspaceId: project.workspaceId || null });
+      const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal, workspaceId: project.workspaceId || null, runId: run.id });
       if (apiTests.length > 0) {
         for (const t of apiTests) rawTests.push(t);
         log(run, `📝 API tests generated: ${apiTests.length} (total raw: ${rawTests.length})`);

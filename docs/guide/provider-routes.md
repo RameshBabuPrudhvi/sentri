@@ -1,17 +1,43 @@
-# Provider Routes — Operator Guide
+# AI Providers (Provider Routes) — Operator Guide
 
-Add a new LLM vendor to Sentri with zero code edits. Each route bundles
-protocol + endpoint + model + encrypted API key into one record that
-agent roles dispatch against.
+> Renamed in PR #28: the operator-facing surface is now **Settings → AI
+> Providers**. The underlying `provider_routes` table, REST paths
+> (`/api/v1/settings/provider-routes/*`), and JSON import / export schema
+> are unchanged — only the UI label, route, and tab name shifted from
+> "Provider Routes" to "AI Providers". Both URLs (`/settings/ai_providers`
+> and the legacy `/settings/provider_routes`) resolve to the same page.
+
+Add a new LLM vendor to Sentri with zero code edits. Each AI Provider
+(formerly "provider route") bundles protocol + endpoint + model +
+encrypted API key into one record that agent roles dispatch against.
 
 ## Quick start
 
-1. **Settings → Provider Routes → Create.**
+1. **Settings → AI Providers → Add AI Provider.**
 2. Pick a **family** (anthropic / openai / google / openrouter / local / custom) and **protocol** (the wire format the endpoint speaks).
 3. Enter the **model** id (e.g. `claude-3-5-sonnet`, `gpt-4o-mini`).
 4. Paste the **API key** — encrypted at rest via AES-256-GCM; only `••••<lastFour>` is ever displayed.
-5. Click **Create**. The platform auto-probes the route (B2.2) and shows a green/red reachability badge within seconds.
-6. **Settings → Agent Roles** — assign the new route to any pipeline role (`planner`, `author`, `healer`, etc.).
+5. Click **Save**. The platform auto-probes the route (B2.2) and shows a green/red reachability badge within seconds.
+6. (Optional) Click **⭐ Set as default** — every agent role with no per-role override now dispatches through this provider. See "Workspace default" below.
+7. **Settings → Agent Roles** — assign the new provider to a specific pipeline role (`planner`, `author`, `healer`, etc.) if you want per-role granularity instead of the workspace default.
+
+## Workspace default (Migration 059)
+
+The ⭐ Set as default action pins one AI Provider as the workspace's
+default. Any agent role that has no `agent_configs.routeId` override
+dispatches through the pinned default. Resolution order on every LLM
+call (`backend/src/aiProvider/registry.js#resolveRoute`):
+
+1. **Sticky fallback** — rate-limit-recovery pin for the specific role.
+2. **`agent_configs.routeId`** — per-role override set in Settings → Agent Roles.
+3. **Workspace-default `provider_routes` row** — `isWorkspaceDefault = 1`.
+4. **Env-variable detection** — `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc., last-resort safety net.
+
+A single workspace can have at most one default at a time (enforced by
+a partial UNIQUE index). Disabling a default route is safe: it
+silently falls through to env detection, never returns `route: null`.
+Clear the default entirely by clicking **Unpin default** on the
+currently-pinned row.
 
 ## Route fields
 
@@ -41,11 +67,11 @@ Every route save (create / update with routing-relevant field changes) auto-fire
 - **JSON mode** — does `responseFormat: "json_object"` work?
 - **Vision** — from the static catalog (cost-justified; no image sent).
 
-Results persist to `provider_routes.capabilities` and drive the Settings UI green/red badge. Re-probe manually via the **Test** button or `POST /api/v1/settings/provider-routes/:id/probe`.
+Results persist to `provider_routes.capabilities` and drive the Settings UI green/red badge. Re-probe manually via the **Test** button (or **Re-probe** once a previous probe has run) or `POST /api/v1/settings/ai-providers/:id/probe` (alias of the legacy `provider-routes` path).
 
 ## Key rotation
 
-**Settings → Provider Routes → Rotate key** (or `POST /api/v1/settings/provider-routes/:id/rotate-key`).
+**Settings → AI Providers → Rotate key** (or `POST /api/v1/settings/ai-providers/:id/rotate-key`).
 
 1. Encrypts the new plaintext.
 2. Writes the new ciphertext to the route.
@@ -70,7 +96,7 @@ Per-route: `rpmLimit` / `tpmLimit` on the route row. Pre-call `checkAndReserve` 
 
 Per-workspace: `dailySpendCapUsd` / `monthlySpendCapUsd` on the workspace row. `checkSpendCap` sums realised cost from `ai_request_log` over rolling 24h / month-to-date windows. Alert fires at `spendAlertThresholdPct` (default 80%).
 
-Set via **Settings → Provider Routes → Workspace spend caps** panel or `PATCH /workspaces/current`.
+Set via **Settings → AI Providers → Spend Caps** tab or `PATCH /workspaces/current`.
 
 ## Response caching
 
@@ -84,7 +110,7 @@ Per-route opt-in via `cacheEnabled` + `cacheTtlSec`. Exact-match keyed by `sha25
 
 ## Audit log
 
-Every mutation (create / update / delete / rotate_key / probe / export / import) appends a `provider_route_audit` row. View via **Settings → Provider Routes → Audit log** subtab or `GET /api/v1/settings/provider-routes/audit`. Retention: 90 days default (`AI_ROUTES_AUDIT_RETENTION_DAYS`).
+Every mutation (create / update / delete / rotate_key / probe / export / import) appends a `provider_route_audit` row. View via **Settings → AI Providers → Audit Log** tab or `GET /api/v1/settings/provider-routes/audit`. Retention: 90 days default (`AI_ROUTES_AUDIT_RETENTION_DAYS`).
 
 ## Troubleshooting
 

@@ -273,6 +273,207 @@
 .tl-env-section { margin-bottom: 12px; }
 .tl-env-select  { width: 100%; height: 36px; }
 
+/* ── DS-001 (audit) — Inline-style migration ──────────────────────────────────
+   The classes below replace every inline `style={{}}` block in TestLab.jsx
+   except for data-driven values (avatar HSL hues, progress-bar widths) which
+   stay inline per AGENT.md §127. Grouped by JSX location for traceability. */
+
+/* Topbar brand cluster — leftmost group with Atom icon + label + tagline. */
+.tl-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 24px;
+  padding-right: 24px;
+  border-right: 1px solid var(--border);
+}
+.tl-topbar__brand-icon { color: var(--accent); }
+.tl-topbar__brand-title { font-weight: 700; font-size: 0.92rem; color: var(--text); }
+.tl-topbar__brand-tagline { font-size: 0.78rem; color: var(--text3); font-weight: 400; }
+
+/* Red "Record a test" button — right-aligned in the topbar. */
+.tl-record-btn {
+  margin-left: auto;
+  margin-right: 16px;
+  gap: 6px;
+  font-weight: 600;
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+
+/* Queue tab header — title margin + actions row alignment. */
+.tl-queue-title { margin-bottom: 2px; }
+.tl-queue-actions { align-items: center; }
+.tl-queue-pulse-badge { animation: pulse 1.5s infinite; }
+.tl-queue-filter-select {
+  height: 30px;
+  font-size: 0.78rem;
+  padding: 0 26px 0 9px;
+  min-width: 140px;
+}
+
+/* "Recent" section label inside the Queue list — extra top margin to
+   visually separate from the Active list above. */
+.tl-queue-recent-label { margin-top: 20px; }
+
+/* Queue-row trailing badges + ghost buttons — flex-shrink reset so they
+   don't collapse when the row is narrow. */
+.tl-queue-row__pin { flex-shrink: 0; }
+
+/* Project sidebar skeleton — replaces inline height/radius/margin. */
+.tl-proj-skeleton { height: 48px; border-radius: 8px; margin-bottom: 4px; }
+
+/* Last-crawl meta — second row needs a small top margin from the first. */
+.tl-proj-meta-value--row2 { margin-top: 2px; }
+
+/* Run-center status suffix appended to the type label. */
+.tl-run-status-suffix {
+  margin-left: 8px;
+  font-weight: 700;
+}
+.tl-run-status-suffix--done   { color: var(--green); }
+.tl-run-status-suffix--failed { color: var(--red); }
+
+/* Banner rows inside the run-center view. */
+.tl-banner-row {
+  margin: 10px 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tl-banner-row__icon { flex-shrink: 0; }
+.tl-banner-margin    { margin: 10px 14px 0; }
+.tl-banner-body      { flex: 1; }
+.tl-banner-actions   { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+.tl-banner-spaced-btn-l { margin-left: 10px; }
+.tl-banner-spaced-btn-s { margin-left: 6px; }
+
+/* Progress bar margin inside the pipeline-col header. */
+.tl-pipeline-progress-bar { margin: 6px 0 10px; }
+
+/* "Pages crawled" stat value uses the default text color — overrides the
+   tl-run-stat-val color that otherwise inherits from the accent palette. */
+.tl-pipeline-stat-val--default { color: var(--text); }
+
+/* Stop / New run button beneath the so-far stats column. */
+.tl-pipeline-stat-btn {
+  width: 100%;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+/* Inner-tab panes for sitegraph + logs. */
+.tl-sitegraph-pane { flex: 1; overflow: auto; padding: 14px; }
+.tl-logs-pane      { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+/* Test Name annotation inside the section label — normal-case hint. */
+.tl-section-label-hint {
+  margin-left: 6px;
+  color: var(--text3);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* Test Name input — reuses `.tl-select` shell but kills the dropdown
+   chevron background and sets explicit sizing. */
+.tl-name-input {
+  width: 100%;
+  background-image: none;
+  padding-right: 10px;
+  height: 36px;
+}
+
+/* Import-issue inline panel internals. */
+.tl-import-issue-label {
+  font-size: 0.78rem;
+  color: var(--text2);
+  font-weight: 500;
+}
+.tl-import-issue-textarea {
+  min-height: 88px;
+  margin-bottom: 0;
+}
+.tl-import-issue-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Hidden file input inside the composer toolbar — the visible affordance is
+   `.tl-composer-action`; the <input> sits off-screen so click-to-attach can
+   delegate to it without showing the browser-native widget. */
+.tl-file-input-hidden { display: none; }
+
+/* Right-panel attached-run header card. */
+.tl-stat-cell--header { margin-bottom: 10px; }
+.tl-stat-cell__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.tl-stat-cell__sub {
+  font-size: 0.72rem;
+  color: var(--text3);
+}
+
+/* Final test-count stats row — wider bottom margin so the divider beneath
+   sits clear of the cards. */
+.tl-run-stats--final { margin-bottom: 12px; }
+
+/* Full-width centred button used throughout the right panel + footer
+   actions (Stop run / View detail / New run / Start crawl / Generate). */
+.tl-full-btn {
+  width: 100%;
+  justify-content: center;
+  gap: 6px;
+}
+.tl-full-btn--padded {
+  width: 100%;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+}
+
+/* Stack of full-width buttons inside the done/aborted right-panel branch. */
+.tl-btn-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Requirement-tab "Ready" stat — smaller font than the numeric counterpart. */
+.tl-stat-val--text {
+  font-size: 1rem;
+  padding-top: 4px;
+}
+
+/* Placeholder colour for unset launch-panel stats (— em-dash). */
+.tl-stat-placeholder { color: var(--text3); }
+
+/* Active-runs card inside the right panel — replaces the inline border /
+   background / cursor / font block on the <button>. */
+.tl-active-run-card-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+/* "live" badge on the active-run card header. */
+.tl-arc-live-badge {
+  font-size: 0.65rem;
+  animation: pulse 1.5s infinite;
+}
+
 .tl-select-wrap { display: flex; flex-direction: column; gap: 5px; }
 
 .tl-select {
@@ -507,6 +708,9 @@
   font-family: var(--font-mono);
   color: var(--text3);
 }
+/* DS-001 (audit): the "running…" status uses the accent palette so the
+   active stage's running marker matches its dot colour. */
+.tl-stage-stat--running { color: var(--accent); }
 
 /* ── Live output log ──────────────────────────────────────────────────────────
    Used in two layouts:
@@ -1178,6 +1382,15 @@
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+
+/* ── (Narrative feed CSS removed — superseded by AgentConversation.) ──────────
+   Task 3 replaced the inline `NarrativeFeed` component with
+   `<AgentConversation>` (see `frontend/src/components/ai/AgentConversation.jsx`),
+   whose styles live in `frontend/src/styles/features/agent-conversation.css`
+   under the `.ac-*` namespace. The legacy `.tl-narrative-feed` / `.tl-nf-*`
+   rules that used to live here are deleted — no element renders them after
+   the JSX swap. Keeping the divider comment so a reader scanning for the
+   narrative-feed surface finds the breadcrumb. */
 
 /* Sub-col 3: so far stats */
 .tl-pipeline-stats-col {

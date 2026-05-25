@@ -18,6 +18,15 @@ const files = [
   "tests/approval-provenance.test.js",
   // AUTO-022 — score-format helpers powering the EvalPanel ScoreBadge.
   "tests/eval-score-format.test.js",
+  // Audit fix — notification-coerce helpers that prevent `[object Object]`
+  // from rendering in the bell when a callsite passes a non-string title.
+  "tests/notification-coerce.test.js",
+  // Task 3 — AgentConversation turn synthesizer + step → agent-sequence
+  // resolver. Pure-logic test of `agentConversationSynth.js` (the JSX-free
+  // sibling of `AgentConversation.jsx`); visual layers (streaming cursor,
+  // ARIA wiring, auto-scroll) are covered by the Task 3 manual acceptance
+  // criteria since the codebase doesn't ship a JSX testing framework.
+  "tests/AgentConversation.test.js",
 ];
 
 let passed = 0;

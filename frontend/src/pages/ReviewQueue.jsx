@@ -39,6 +39,7 @@ import { fmtRelativeTimeFull } from "../utils/formatters.js";
 import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
 import { ReviewBadge, StatusBadge } from "../components/shared/TestBadges.jsx";
 import ModalShell from "../components/shared/ModalShell.jsx";
+import { QualityScoreChip, qualityTierKey } from "../components/shared/QualityScoreChip.jsx";
 import highlightCode from "../utils/highlightCode.js";
 import "../styles/pages/review-queue.css";
 
@@ -63,95 +64,6 @@ const SORT_OPTIONS = [
   { id: "quality", label: "Quality score"  },
   { id: "name",    label: "Name (A→Z)"     },
 ];
-
-// ── Quality score colour helper ───────────────────────────────────────────────
-function qualityColor(score) {
-  if (score == null) return "var(--text3)";
-  if (score >= 75) return "var(--green)";
-  if (score >= 50) return "var(--amber)";
-  return "var(--red)";
-}
-
-// ── Quality score explainer popover ──────────────────────────────────────────
-// "Why was this drafted?" — surfaces the factor breakdown that produced
-// `qualityScore` (e.g. `+20 URL assertion`, `-30 No assertions`) so reviewers
-// don't have to read the test code to grade it. Backed by the `qualityScoreFactors`
-// JSON column populated by `scoreTestWithFactors()` in the pipeline.
-function QualityScoreChip({ score, factors }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function h(e) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-
-  if (score == null) return null;
-  const hasFactors = Array.isArray(factors) && factors.length > 0;
-
-  return (
-    <div className="rq-quality-chip-wrap" ref={wrapRef}>
-      <button
-        className="rq-quality-chip"
-        onClick={() => hasFactors && setOpen(v => !v)}
-        disabled={!hasFactors}
-        title={hasFactors ? "Why this score?" : "No factor breakdown available"}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        style={{ color: qualityColor(score) }}
-        aria-label={`Quality score ${score} out of 100`}
-      >
-        {/* Circular progress arc — replaces the "Q:72" prefix with a
-            visual ring (Sonar-style). The score sits in the centre as a
-            bare number; the ring's filled arc encodes the value. */}
-        <svg
-          className="rq-quality-chip__ring"
-          width="22"
-          height="22"
-          viewBox="0 0 22 22"
-          aria-hidden="true"
-        >
-          <circle cx="11" cy="11" r="9" fill="none" stroke="var(--border)" strokeWidth="2" />
-          <circle
-            cx="11" cy="11" r="9"
-            fill="none"
-            stroke={qualityColor(score)}
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeDasharray={`${(Math.max(0, Math.min(100, score)) / 100) * (2 * Math.PI * 9)} ${2 * Math.PI * 9}`}
-            transform="rotate(-90 11 11)"
-          />
-        </svg>
-        <span className="rq-quality-chip__score">{score}</span>
-        {hasFactors && <span className="rq-quality-chip__caret" aria-hidden="true">▾</span>}
-      </button>
-      {open && hasFactors && (
-        <div className="rq-quality-popover" role="dialog" aria-label="Quality score breakdown">
-          <div className="rq-quality-popover__header">
-            Quality {score} / 100
-          </div>
-          <ul className="rq-quality-popover__list">
-            {factors.map(f => (
-              <li key={f.id} className={`rq-quality-popover__item rq-quality-popover__item--${f.kind}`}>
-                <span className="rq-quality-popover__icon" aria-hidden="true">
-                  {f.kind === "reward" ? "✓" : "✗"}
-                </span>
-                <span className="rq-quality-popover__label">{f.label}</span>
-                <span className="rq-quality-popover__delta">
-                  {f.delta > 0 ? `+${f.delta}` : f.delta} pts
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Inline code viewer with copy ──────────────────────────────────────────────
 function CodeView({ code }) {
@@ -212,7 +124,7 @@ function DetailSidebar({
           <div className="rq-info-row">
             <div className="rq-info-label">Quality score</div>
             <div className="rq-quality-row rq-quality-row--flush">
-              <span className="rq-quality-score" style={{ color: qualityColor(score) }}>
+              <span className={`rq-quality-score rq-quality-score--${qualityTierKey(score)}`}>
                 {score}
               </span>
               <div
@@ -224,20 +136,20 @@ function DetailSidebar({
                 aria-label="Quality score"
               >
                 <div
-                  className="rq-quality-fill"
-                  style={{ width: `${score}%`, background: qualityColor(score) }}
+                  className={`rq-quality-fill quality-bar-fill--${qualityTierKey(score)}`}
+                  style={{ width: `${score}%` }}
                 />
               </div>
             </div>
             {(worst || best) && (
               <div className="rq-quality-summary">
                 {worst && (
-                  <div className="rq-quality-summary__line" style={{ color: "var(--red)" }}>
+                  <div className="rq-quality-summary__line rq-quality-summary__line--penalty">
                     − {worst.label} ({worst.delta})
                   </div>
                 )}
                 {best && (
-                  <div className="rq-quality-summary__line" style={{ color: "var(--green)" }}>
+                  <div className="rq-quality-summary__line rq-quality-summary__line--reward">
                     + {best.label} (+{best.delta})
                   </div>
                 )}
@@ -452,6 +364,9 @@ export default function ReviewQueue() {
   // model. `kind` discriminates the copy; `payload` carries either the
   // single test or the array of selected ids. `null` = no modal.
   const [confirmDialog, setConfirmDialog] = useState(null);
+  // ENT-004: review comment typed inside the reject/approve modal.
+  // Cleared on modal close so stale text doesn't leak between actions.
+  const [modalComment, setModalComment] = useState("");
 
   // Debounced search — `searchDraft` mirrors the input field (immediate
   // feedback so typing feels responsive), and a 300ms idle timer commits
@@ -632,10 +547,11 @@ export default function ReviewQueue() {
     setConfirmDialog({ kind: "reject", payload: test });
   }
 
-  async function executeReject(test) {
+  async function executeReject(test, comment) {
     setActionLoading(`reject-${test.id}`);
     try {
-      await api.rejectTest(test.projectId, test.id);
+      const body = comment ? { reviewComment: comment } : undefined;
+      await api.rejectTest(test.projectId, test.id, body);
       const next = visibleTests.find((t, i) => i > activeIdx && t.id !== test.id);
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
@@ -995,11 +911,14 @@ export default function ReviewQueue() {
                         {a.testName ? cleanTestName(a.testName) : a.testId || "test"}
                       </span>
                       {score100 != null && (
-                        // Value-driven colour stays inline per the
-                        // `.rq-quality-chip` precedent in review-queue.css.
+                        // Tier-driven colour via modifier class — see
+                        // `.quality-bar-fill--<tier>` precedent in components.css.
+                        // A11Y-001 inline-style sweep replaced the previous
+                        // `style={{ color: qualityColor(...) }}` with a
+                        // `--<tier>` modifier that resolves to the same
+                        // green/amber/red ramp through `quality-explainer--*`.
                         <span
-                          className="rq-auto-tray__chip-score"
-                          style={{ color: qualityColor(score100) }}
+                          className={`rq-auto-tray__chip-score quality-explainer--${qualityTierKey(score100)}`}
                           aria-label={`Quality score ${score100} out of 100`}
                         >
                           {score100}<span className="rq-auto-tray__chip-score-denom">/100</span>
@@ -1477,7 +1396,9 @@ export default function ReviewQueue() {
             body: <>Reject <strong>{cleanTestName(payload.name)}</strong>? You can restore it to Draft from the Rejected tab.</>,
             confirmLabel: "Reject test",
             confirmClass: "btn btn-danger btn-sm",
-            run: () => executeReject(payload),
+            showComment: true,
+            commentPlaceholder: "Reason for rejection (optional — visible on Test Detail)",
+            run: () => executeReject(payload, modalComment),
           } :
           kind === "delete" ? {
             title: "Delete test?",
@@ -1502,16 +1423,31 @@ export default function ReviewQueue() {
           } : null;
         if (!config) return null;
         return (
-          <ModalShell onClose={() => setConfirmDialog(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
-            <div className="rq-confirm__title">{config.title}</div>
+          <ModalShell onClose={() => { setConfirmDialog(null); setModalComment(""); }} width="min(420px, 95vw)" ariaLabelledBy="rq-confirm-title" style={{ padding: "28px 32px" }}>
+            <div id="rq-confirm-title" className="rq-confirm__title">{config.title}</div>
             <div className="rq-confirm__body">{config.body}</div>
+            {/* ENT-004: optional review comment textarea. Shown on reject
+                (and future approve-with-comment if wired). The comment is
+                persisted to `tests.reviewComment` and rendered on TestDetail
+                so the next reviewer sees "why was this rejected?" inline. */}
+            {config.showComment && (
+              <textarea
+                className="input rq-confirm__comment"
+                placeholder={config.commentPlaceholder || "Add a comment (optional)"}
+                value={modalComment}
+                onChange={(e) => setModalComment(e.target.value)}
+                rows={3}
+                maxLength={2000}
+                autoFocus
+              />
+            )}
             <div className="rq-confirm__actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDialog(null)}>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setConfirmDialog(null); setModalComment(""); }}>
                 Cancel
               </button>
               <button
                 className={config.confirmClass}
-                onClick={() => { setConfirmDialog(null); config.run(); }}
+                onClick={() => { setConfirmDialog(null); config.run(); setModalComment(""); }}
               >
                 {config.confirmLabel}
               </button>

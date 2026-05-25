@@ -80,6 +80,11 @@
       "role": "admin",
       "source": "backend/src/routes/runs.js:411"
     },
+    "GET /api/v1/runs/:runId/ai-requests": {
+      "role": "admin",
+      "source": "backend/src/routes/runs.js:735",
+      "$comment": "GAP-005 (migration 056) — per-run AI request log for the RunDetail Agent Call Timeline. Workspace ACL enforced inside aiRequestLogRepo.listByRun via the leading workspaceId = ? predicate; runId guesses for runs in another workspace return [] rather than 403."
+    },
     "POST /api/v1/projects/:id/tests": {
       "role": "qa_lead",
       "source": "backend/src/routes/tests.js:318"
@@ -243,6 +248,11 @@
       "source": "backend/src/routes/system.js",
       "$comment": "SEC-007 \u2014 lists deployment-wide security events tagged with the SYSTEM_WORKSPACE_ID sentinel (chiefly auth.login.failed against unknown emails \u2014 credential-stuffing probes that fire before a tenant can be resolved). Cross-tenant by design; the workspace-scoped routes naturally exclude these rows. Defence-in-depth: rejects callers whose own workspaceId equals the sentinel."
     },
+    "GET /api/v1/system/ai-state": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "Read-only snapshot of AI dispatcher state \u2014 every open circuit breaker + active sticky fallback the registry is tracking. Powers the Systems page's \"AI provider state\" panel so admins can answer \"tests stopped generating, what happened?\" without grepping log lines. Pure inspection (no mutation), admin-gated to match the trust boundary on /settings/ai-providers."
+    },
     "GET /api/v1/workspaces/:workspaceId/audit-log": {
       "role": "admin",
       "source": "backend/src/routes/system.js",
@@ -400,6 +410,44 @@
       "source": "backend/src/routes/settings.js",
       "$comment": "B3.9 — paginated workspace-scoped audit log viewer. Filterable by routeId / action / since / before. Cursor pagination via `before` matching the AI request log endpoint. Retention sweep is daily at 05:00 UTC, configurable via AI_ROUTES_AUDIT_RETENTION_DAYS (default 90)."
     },
+    "GET /api/v1/settings/ai-providers": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "provider-rename refactor — renamed alias for /settings/provider-routes. Returns enriched rows with displayLabel, familyEmoji, costTier, usedByRoles (reverse ref from agent_configs)."
+    },
+    "POST /api/v1/settings/ai-providers": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "PATCH /api/v1/settings/ai-providers/:id": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "Rejects non-empty `apiKey` (use /rotate-key — empty string is the documented \"keep existing\" sentinel, no-op) and any `isWorkspaceDefault` field (use /default) — both have side effects that require dedicated audit shapes."
+    },
+    "DELETE /api/v1/settings/ai-providers/:id": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "Refuses with 409 ERR_ROUTE_IN_USE when any agent_configs row references the provider — operator must reassign those roles first."
+    },
+    "POST /api/v1/settings/ai-providers/:id/probe": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "POST /api/v1/settings/ai-providers/:id/rotate-key": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "Same probe-before-persist gate as the provider-routes equivalent — encrypts the new plaintext, runs a network probe against the candidate key, rolls back on probe failure. Audit row emitted as action=rotate_key."
+    },
+    "POST /api/v1/settings/ai-providers/:id/default": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "Migration 059 — pin / unpin the workspace-default AI Provider. Body: { default: true|false }. Dedicated endpoint (not part of PATCH) because setting a default has side effects on OTHER rows (clears the previous default in the same transaction) and the audit row needs a specific changed:[\"isWorkspaceDefault\"] shape so admins can filter for \"who pinned the default and when?\"."
+    },
+    "GET /api/v1/settings/route-groups": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "B4.6 — read-only listing of route groups for the TopBar dropdown + future Settings subtab. Returns each group's strategy (weighted | latency | cost), memberCount, enabledMemberCount, and usedByRoles (agent_configs reverse-ref filtered to rg-* entries). Mutations are a follow-up roadmap item (docs/roadmap/ai-provider-bundle.md:397-405)."
+    },
     "GET /api/v1/settings/ai-requests": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"
@@ -426,6 +474,7 @@
     "GET /api/v1/projects/:id/last-deployment-run",
     "GET /api/v1/tests/:testId",
     "GET /api/v1/tests/counts",
+    "GET /api/v1/search",
     "GET /api/v1/recycle-bin",
     "GET /api/v1/auth/export",
     "DELETE /api/v1/auth/account",

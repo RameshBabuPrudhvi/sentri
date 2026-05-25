@@ -31,6 +31,17 @@ import { getDatabase } from "../sqlite.js";
  * @private
  */
 function rowMinusHash(row) {
+  // ENT-004 (migration 055) — `runId` is INTENTIONALLY EXCLUDED from this
+  // shape. Including it would change the hash output for every row
+  // computed under the new schema, breaking `verifyAuditChain()` on every
+  // deployment that already has a chain (the verifier would re-derive
+  // hashes with `runId: null` for legacy rows but the persisted hashes
+  // were computed without the key at all — JSON serialisation differs
+  // on key presence vs absence). Tamper-evidence for the runId field
+  // is still preserved indirectly because `meta.runId` (which IS in the
+  // hash) carries the same value for every writer that historically
+  // stuffed it there. The new dedicated column is purely an index/filter
+  // affordance — the canonical truth stays in `meta`.
   return {
     id: row.id,
     type: row.type,
@@ -193,8 +204,8 @@ export function create(activity) {
   const metaStr = activity.meta != null ? JSON.stringify(activity.meta) : null;
 
   const insert = db.prepare(`
-    INSERT INTO activities (id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId, userName, workspaceId, meta, ipAddress, userAgent, prevHash)
-    VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @detail, @status, @createdAt, @userId, @userName, @workspaceId, @meta, @ipAddress, @userAgent, @prevHash)
+    INSERT INTO activities (id, type, projectId, projectName, testId, testName, runId, detail, status, createdAt, userId, userName, workspaceId, meta, ipAddress, userAgent, prevHash)
+    VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @runId, @detail, @status, @createdAt, @userId, @userName, @workspaceId, @meta, @ipAddress, @userAgent, @prevHash)
   `);
 
   // SEC-007: hash-chain compute. Wrapped in a transaction so the lookup of
@@ -212,6 +223,11 @@ export function create(activity) {
     projectName: activity.projectName || null,
     testId: activity.testId || null,
     testName: activity.testName || null,
+    // ENT-004 (migration 055) — indexed column for `/audit-log?runId=…`
+    // server-side filtering. `activityLogger.logActivity` resolves this
+    // from a first-class arg OR from legacy `meta.runId` so existing
+    // call sites keep populating it without per-site updates.
+    runId: activity.runId || null,
     detail: activity.detail || null,
     status: activity.status || "completed",
     createdAt: activity.createdAt,
@@ -409,7 +425,7 @@ export function getAllAsDict() {
  *   result set; used by paginated UIs (Load more) to fetch the next page.
  * @returns {Object[]}
  */
-export function getFiltered({ type, projectId, workspaceId, after, before, limit, offset } = {}) {
+export function getFiltered({ type, projectId, testId, runId, workspaceId, after, before, limit, offset } = {}) {
   const db = getDatabase();
   let sql = "SELECT * FROM activities WHERE 1=1";
   const params = [];
@@ -424,6 +440,24 @@ export function getFiltered({ type, projectId, workspaceId, after, before, limit
   if (projectId) {
     sql += " AND projectId = ?";
     params.push(projectId);
+  }
+  // ENT-004 (audit) — per-entity scoping so TestDetail can link directly
+  // to its own activity slice (`/audit-log?testId=…`). Indexed via the
+  // (workspaceId, testId) covering pattern used by the existing
+  // workspace-scoped queries; for older deployments without the dedicated
+  // index, the workspace+createdAt path narrows the row set enough that a
+  // tail SELECT on `testId` stays bounded.
+  if (testId) {
+    sql += " AND testId = ?";
+    params.push(testId);
+  }
+  // ENT-004 (migration 055) — per-run filter for RunDetail's "View
+  // activity →" link. The `runId` column is dedicated + indexed (see
+  // `idx_activities_runId`), so workspace + runId narrows to a tiny
+  // row set even on deployments with millions of activity rows.
+  if (runId) {
+    sql += " AND runId = ?";
+    params.push(runId);
   }
   if (after) {
     sql += " AND createdAt >= ?";
@@ -645,7 +679,7 @@ export function purgeOlderThan(days) {
  *   first order; `nextCursor` is the timestamp to pass to the next call,
  *   or `null` when there are no more rows.
  */
-export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
+export function getWorkspaceAuditLog(workspaceId, { userId, projectId, testId, runId, types = [], excludeTypes = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
   const db = getDatabase();
   // Hard-cap defensively even though the route handler also clamps — a
   // direct repo caller (test, future internal job) shouldn't be able to
@@ -655,7 +689,24 @@ export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [
   const params = [workspaceId];
   if (userId) { sql += " AND userId = ?"; params.push(userId); }
   if (projectId) { sql += " AND projectId = ?"; params.push(projectId); }
+  // ENT-004 (audit) — per-test slice for the "View activity →" link on
+  // TestDetail. Workspace ACL is enforced by the leading `workspaceId = ?`
+  // predicate; the testId narrow is purely a render-time concern.
+  if (testId) { sql += " AND testId = ?"; params.push(testId); }
+  // ENT-004 (migration 055) — per-run slice for the matching "View
+  // activity →" link on RunDetail. Same workspace-ACL guarantee as
+  // `testId` — the leading `workspaceId = ?` predicate is the security
+  // boundary; this narrow is purely about render shape.
+  if (runId) { sql += " AND runId = ?"; params.push(runId); }
   if (types?.length) { sql += ` AND type IN (${types.map(() => "?").join(",")})`; params.push(...types); }
+  // `excludeTypes` lets the route layer hide high-volume meta-audit types
+  // (`audit.read`, `audit.export`) from the default Audit Log view without
+  // skipping the rows themselves — PCI-DSS 10.2.6 / SOC 2 CC7.2 still
+  // require them to be persisted and reachable; this is a UX filter, not
+  // an audit-trail filter. Server-side so pagination math (`limit + 1`,
+  // `nextCursor`) stays correct vs. a client-side post-filter that would
+  // leave sparse pages and miscount "load more" boundaries.
+  if (excludeTypes?.length) { sql += ` AND type NOT IN (${excludeTypes.map(() => "?").join(",")})`; params.push(...excludeTypes); }
   if (dateFrom) { sql += " AND createdAt >= ?"; params.push(dateFrom); }
   if (dateTo) { sql += " AND createdAt <= ?"; params.push(dateTo); }
   if (ipAddress) { sql += " AND ipAddress = ?"; params.push(ipAddress); }

@@ -7,6 +7,33 @@
  * Layer: Components (ITCSS)
  */
 
+/* ── A11Y-001 (audit) — Global focus-visible ring ────────────────────────────
+   WCAG 2.4.7 (Focus Visible, Level AA) and 2.4.11 (Focus Appearance, WCAG 2.2
+   Level AA) require a visible focus indicator on every interactive element.
+   `:focus-visible` only fires on keyboard-driven focus (Tab, Shift+Tab, arrow
+   keys via Roving Tabindex) — mouse clicks suppress it, so the ring does NOT
+   appear on every button press. This matches the keyboard-first conventions
+   adopted by Linear, Vercel, GitHub, Datadog, and Radix UI primitives.
+
+   The 2px solid ring at the accent color + 2px offset is the de-facto standard
+   from the Radix design system. Border-radius matches the token used by
+   `.btn`, `.card`, `.input` so the ring hugs rounded corners. Specific
+   components (e.g. `.input:focus`) can still override with a tighter
+   indicator; this is the safety net. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* The `.input` family uses an inset accent box-shadow as its focus indicator
+   (see `.input:focus` below), so the outer outline ring would double up.
+   Suppress the global ring here — the box-shadow alone meets WCAG 2.4.7. */
+.input:focus-visible,
+.dial-textarea:focus-visible {
+  outline: none;
+}
+
 /* ── Badges ─────────────────────────────────────────────────────────────────── */
 .badge {
   display: inline-flex; align-items: center; gap: 4px;
@@ -241,6 +268,112 @@
   background: var(--accent-bg); border: 1px solid rgba(91,110,245,0.2);
 }
 
+/* A11Y-002 (audit) — Modal title shared class. Used as the `aria-labelledby`
+   target across `<ModalShell>` call sites that don't carry a `.modal-form-title`
+   header (DeleteProjectModal, Tests bulk-delete). Centralises the
+   `font-weight: 700; font-size: 1rem; margin-bottom: 10px;` triplet that
+   was previously duplicated as inline `style={{}}` on each title <div>. */
+.modal-title {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+
+/* NAV-002 (audit) — Shared breadcrumb component.
+   Used by RunDetail + TestDetail to render the entity chain
+   (Dashboard › Projects › {Project} › Runs › Run #abc) so deep-page
+   navigation lands somewhere logical regardless of how the user arrived
+   (notification link, bookmark, direct URL). Mirrors the existing
+   `.td-breadcrumb*` look so the visual treatment is unchanged. */
+.breadcrumb { margin-bottom: 20px; }
+.breadcrumb__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: var(--text3);
+}
+.breadcrumb__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.breadcrumb__link {
+  color: var(--text3);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font-size: 0.82rem;
+  transition: color 0.12s;
+  /* `<Link>` keeps a real anchor tag so middle-click "open in new tab"
+     and screen-reader announcement work; we just style it to match the
+     surrounding text. */
+}
+.breadcrumb__link:hover { color: var(--text); }
+.breadcrumb__current {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+.breadcrumb__sep {
+  color: var(--text3);
+  flex-shrink: 0;
+}
+
+/* AI-001 (audit) — shared quality-score primitives.
+   Used by `<QualityScoreChip>` + `<QualityScoreExplainer>` to render
+   tier-aware colour (high / medium / low) without per-component inline
+   `style={{ color }}` blocks. Tier modifier classes encode the colour
+   ramp once; the chip's circular arc inherits via `currentColor`, and
+   the explainer line + bar fill expose CSS variables that callers can
+   reference for their own value-driven UI (e.g. TestDetail's quality
+   bar `background`). */
+.quality-chip-wrap { position: relative; display: inline-flex; }
+
+.quality-chip {
+  --quality-color: var(--text3);
+  color: var(--quality-color);
+}
+.quality-chip--high   { --quality-color: var(--green); }
+.quality-chip--medium { --quality-color: var(--amber); }
+.quality-chip--low    { --quality-color: var(--red);   }
+
+/* Ring track (the unfilled circle behind the score arc). */
+.quality-chip__ring-track {
+  stroke: var(--border);
+}
+
+/* Plain-English tier explainer rendered by `<QualityScoreExplainer>`. */
+.quality-explainer {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+.quality-explainer--high    { color: var(--green); }
+.quality-explainer--medium  { color: var(--amber); }
+.quality-explainer--low     { color: var(--red);   }
+.quality-explainer--unknown { color: var(--text3); }
+
+/* Tier-aware bar fill — used by callers that render their own progress
+   bar with a `width: N%` inline (the only legitimate inline style left,
+   since width is genuinely continuous). Apply alongside `.quality-bar-fill--<tier>`
+   so the colour ramp is consistent with the chip + explainer. */
+.quality-bar-fill--high    { background: var(--green); }
+.quality-bar-fill--medium  { background: var(--amber); }
+.quality-bar-fill--low     { background: var(--red);   }
+.quality-bar-fill--unknown { background: var(--text3); }
+
 /* ── Empty state ────────────────────────────────────────────────────────────── */
 .empty-state { padding: 52px 40px; text-align: center; }
 .empty-state-icon { font-size: 2rem; margin-bottom: 14px; }
@@ -248,6 +381,16 @@
 .empty-state-desc {
   font-size: 0.875rem; color: var(--text2); margin-bottom: 20px;
   line-height: 1.7; max-width: 420px; margin-left: auto; margin-right: auto;
+}
+/* ONB-002 (audit): action row for the shared `<EmptyState>` primitive.
+   Centred + 8px gap so primary/secondary CTAs sit together below the
+   description without each call site re-declaring the flex shape. */
+.empty-state-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 /* ── List row ───────────────────────────────────────────────────────────────── */
@@ -364,6 +507,37 @@
     max-height: calc(100vh - 24px);
   }
 
+  /* MOB-001 follow-up: side-by-side selects inside modal forms (e.g.
+     Locale + Timezone in RunRegressionModal) overflow on phones because
+     the parent `.modal-panel` is already at `100vw - 24px`. Stack them so
+     each field has the full panel width and the labels stay readable. */
+  .modal-form-row--inline {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* MOB-001 follow-up: modal action footer — right-aligned button row
+     wraps when both Cancel + Save outgrow the narrow panel. Letting it
+     stretch full-width prevents the buttons from being cropped by the
+     panel's overflow:hidden. */
+  .modal-form-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .modal-form-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* MOB-001 follow-up: tighten the form header padding so the title +
+     close-button row doesn't dominate the panel on phones. */
+  .modal-form-header {
+    padding: 14px 16px 12px;
+  }
+  .modal-form-body {
+    padding: 16px;
+  }
+
   /* Banners: stack icon + text vertically when text is long */
   .banner {
     flex-wrap: wrap;
@@ -436,6 +610,95 @@
     width: 36px;
     height: 36px;
     border-radius: 8px;
+  }
+}
+
+/* ── MOB-002 (audit): minimum touch targets ────────────────────────────────
+   Apple HIG (44×44pt) + Material Design 3 (48×48dp) require interactive
+   elements to be at least 44×44 CSS pixels when reached by a touch
+   pointer. The audit names: **sidebar collapse button**, **nav item
+   chevrons**, **badge chips**, **ProviderBadge** in the TopBar.
+
+   Scoped to `@media (pointer: coarse)` — touch devices only. Desktop
+   keeps pixel-tight icon buttons (24-28px) because:
+     - 44×44 on every icon button at desktop density wastes horizontal
+       space in dense surfaces like the sidebar rail and TopBar
+       cluster, where the audit elsewhere asks for COMPACT layout.
+     - WCAG 2.5.5 (Target Size, Level AAA) only applies as Level AAA
+       and explicitly exempts mouse-pointer contexts.
+     - The pointer-coarse media query is the W3C-recommended hook
+       (CSS Media Queries Level 4) for distinguishing touch from
+       mouse intent — matches Linear / Vercel / GitHub's approach.
+
+   `min-width` + `min-height` (not `width`/`height`) so existing visual
+   size from padding-driven layout stays unchanged when content already
+   exceeds 44px; the rules only inflate the click box when the rendered
+   element is smaller than the target. */
+@media (pointer: coarse) {
+  /* Sidebar collapse toggle — 26×26 visual, needs hit-box expansion. */
+  .sidebar-header__collapse-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Notification bell — `notif-bell-btn` is `padding: 6px` around an
+     18px icon = ~30px total. Inflate the hit box without growing the
+     icon. */
+  .notif-bell-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Modal close button — `.modal-close` is a bare icon button with no
+     baseline size. Same hit-box rule. */
+  .modal-close {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  /* Badge chips that are clickable. The base `.badge` is purely
+     decorative (whitespace 2/8 padding); only badges wired to onClick
+     handlers need the hit-box. We target the two cases that exist
+     today: AuditLog filter chips (`.al-toolbar__filter-chip`) and the
+     sidebar pending-pill nav badges (`.sidebar-nav__auto-badge`).
+     Bare `.badge` stays unchanged because growing a decorative chip
+     to 44px would balloon the layout. */
+  .al-toolbar__filter-chip,
+  .sidebar-nav__auto-badge {
+    min-height: 32px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  /* The chip itself stays compact (32px) but its tap target is
+     extended via a transparent ::after overlay that grows the
+     pointer-hit region to 44px without affecting layout. Pattern
+     mirrors the Material 3 "expanded touch target" guidance. */
+  .al-toolbar__filter-chip,
+  .sidebar-nav__auto-badge,
+  .sidebar-rail__nav-dot,
+  .sidebar-rail__nav-item {
+    position: relative;
+  }
+  .sidebar-rail__nav-item::after,
+  .sidebar-nav__item::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    /* Transparent — invisible to sight, but reachable by touch
+       pointer because the parent is `position: relative`. */
+  }
+
+  /* Provider badge in the TopBar (`.provider-badge` or `.st-provider-badge`).
+     The audit names it as below 44×44. Same inflation rule — only
+     active when the badge is reachable as a touch target (i.e. it's
+     a button or has a click handler). The `.provider-badge` selector
+     in the topbar is the click-through to /settings/ai_providers. */
+  .provider-badge,
+  .st-provider-badge {
+    min-height: 32px;
+    padding-top: 4px;
+    padding-bottom: 4px;
   }
 }
 

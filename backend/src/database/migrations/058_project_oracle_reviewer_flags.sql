@@ -1,0 +1,66 @@
+-- Migration 058: per-project toggles for Oracle + Reviewer LLM passes
+-- (AUTO-023 — partial, scaffolding only)
+--
+-- This migration ships the DB shape so the orchestrator wiring (next PR
+-- in the AUTO-023 series) can land without a follow-up migration. Both
+-- flags default to 0 (disabled) so existing deployments don't get a 3×
+-- cost bump on the next pipeline run — operators opt in per-project via
+-- the Project Settings → Quality panel once the wiring lands.
+--
+-- ### Columns
+--
+-- `oracleEnabled` — when 1, step 6 (assertion enhancement) runs an LLM-
+--   driven Oracle pass AFTER the existing heuristic enhancer in
+--   `backend/src/pipeline/assertionEnhancer.js`. The heuristic stays as
+--   the safety net: if the LLM call fails, rate-limits, or returns
+--   invalid JSON, the test degrades to the heuristic-enhanced version
+--   rather than being dropped. Same augment-not-replace contract used
+--   by MNT-001 vision-heal (host-side pixelmatch falls back to LLM only
+--   on miss).
+--
+-- `reviewerEnabled` — when 1, step 7 (validate) runs an LLM-driven
+--   Reviewer pass AFTER the existing `pipeline/testValidator.js`
+--   heuristics. If the LLM rejects a test the orchestrator surfaces
+--   the rejection through the existing `validationRejected` counter
+--   so the conversation feed + dashboard stay consistent. LLM failure
+--   → heuristic decision passes through unchanged.
+--
+-- `oracleMaxCostUsdPerRun` / `reviewerMaxCostUsdPerRun` — per-run hard
+--   caps. When the running cost for either agent exceeds the cap mid-
+--   stage, the orchestrator skips further LLM calls for that agent on
+--   this run and falls back to heuristic-only for remaining tests. The
+--   already-completed LLM upgrades stay applied — we don't roll back
+--   work that succeeded. Mirrors `visionHealMaxCostUsdPerMonth` from
+--   migration 035 (MNT-001).
+--
+--   Defaults: $1.00 each. At Claude Sonnet pricing (~$3/M input,
+--   ~$15/M output) and ~800-token round trips this is ~$0.018/test, or
+--   ~55 tests per run before the cap fires. Adjust per-project if the
+--   suite is larger.
+--
+-- ### Compatibility
+--
+-- SQLite + PostgreSQL both accept the bare `ALTER TABLE ... ADD COLUMN`
+-- syntax unchanged. No CHECK constraint on the boolean columns — both
+-- backends accept 0/1 integers via the existing better-sqlite3 binding,
+-- and the postgres-adapter's translate layer maps INTEGER NOT NULL
+-- DEFAULT 0 identically. Idempotency at the runner level: the
+-- `schema_migrations` ledger ensures this file runs exactly once.
+--
+-- ### Drift contract
+--
+-- When the orchestrator wiring lands (next AUTO-023 sub-PR), update
+-- `backend/src/database/repositories/projectRepo.js`:
+--   1. Add the four columns to `JSON_FIELDS` / `INSERT_COLS` / the
+--      `update()` allow-list so they round-trip cleanly through the
+--      repo layer.
+--   2. Expose them in the `GET /api/v1/projects/:id` payload so the
+--      frontend Quality panel can toggle them.
+--   3. Add them to the project-create defaults so new projects inherit
+--      the safe-off state explicitly (rather than relying on the SQL
+--      DEFAULT 0).
+
+ALTER TABLE projects ADD COLUMN oracleEnabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE projects ADD COLUMN reviewerEnabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE projects ADD COLUMN oracleMaxCostUsdPerRun REAL DEFAULT 1.0;
+ALTER TABLE projects ADD COLUMN reviewerMaxCostUsdPerRun REAL DEFAULT 1.0;

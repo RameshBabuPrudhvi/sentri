@@ -1,0 +1,486 @@
+# Autonomous multi-agent collaboration (AUTO-023)
+
+Sentri today runs a **fixed sequential pipeline** with per-stage LLM calls
+(`explorer → planner → author → oracle → reviewer`). Each stage has its own
+prompt + routed model, but agents do not address each other, cannot
+disagree, cannot iterate, and share no memory beyond the previous stage's
+return value. The "conversation" surfaced in the UI is templated narration
+(`frontend/src/components/ai/agentConversationSynth.js`), not real
+agent-to-agent messaging.
+
+This roadmap evolves Sentri from that **multi-model pipeline** into a real
+**multi-agent system**: agents exchange structured envelopes on a shared
+thread, reviewers can reject and force revisions, and a supervisor decides
+who speaks next. Every phase is independently shippable and
+backwards-compatible — multi-agent mode is **off by default** and a
+workspace with the flag off behaves identically to today.
+
+Closes the `❌ DAG agent handshake` non-goal carved out of
+`docs/roadmap/ai-provider-bundle.md:506`.
+
+---
+
+# Bundle 1 — Foundations (envelope + persistence)
+
+**Goal:** introduce the wire format and persistence agents will talk
+through. No behavioural change yet — the pipeline still drives execution,
+but every handoff is also captured as a structured message.
+
+## B1.1 — `agent_messages` schema
+- [ ] Migration `backend/src/database/migrations/0XX_agent_messages.sql`:
+  ```sql
+  CREATE TABLE agent_messages (
+    id TEXT PRIMARY KEY,
+    runId TEXT NOT NULL,
+    threadId TEXT NOT NULL,         -- groups a multi-turn debate
+    traceId TEXT NOT NULL,          -- correlates with agent_events
+    fromRole TEXT NOT NULL,         -- explorer | planner | author | reviewer | oracle | healer | triager | supervisor
+    toRole TEXT,                    -- null = broadcast to thread
+    replyToId TEXT REFERENCES agent_messages(id),
+    intent TEXT NOT NULL,           -- handoff | request_revision | accept | reject | question | answer | final
+    artifact JSON,                  -- structured payload (journeys, tests, findings…)
+    rationale TEXT,                 -- short human-readable reason
+    round INTEGER NOT NULL DEFAULT 0,
+    workspaceId TEXT NOT NULL,
+    createdAt TEXT NOT NULL
+  );
+  CREATE INDEX idx_agent_messages_thread ON agent_messages(threadId, createdAt);
+  CREATE INDEX idx_agent_messages_run    ON agent_messages(runId, createdAt);
+  ```
+- [ ] Workspace-scoped on every read (mirrors `provider_routes` contract)
+- [ ] Retention janitor parity with `agent_events` (90 days default)
+
+## B1.2 — Envelope schema + validator
+- [ ] New: `backend/src/aiProvider/agentEnvelope.js`
+- [ ] Zod schema with closed-set enums for `intent` + `fromRole` / `toRole`
+- [ ] `validateEnvelope(msg)` — throws `ERR_AGENT_ENVELOPE_INVALID` on
+      bad shape; called by every write path
+- [ ] Frozen `INTENTS` + `ROLES` exports — single source of truth for
+      backend + frontend
+
+## B1.3 — Repo + emitter
+- [ ] New: `backend/src/database/repositories/agentMessageRepo.js`
+      with `append`, `listByThread`, `listByRun`, `getById`
+- [ ] Extend `backend/src/aiProvider/agentEventEmitter.js`:
+  - [ ] `emitAgentMessage(envelope)` helper — validates, persists,
+        broadcasts an `agent_message` SSE event
+  - [ ] Same best-effort persist contract as `emitAgentEvent` (DB
+        failure must NEVER break the LLM call)
+- [ ] SSE wiring in `backend/src/routes/sse.js`:
+  - [ ] Snapshot includes `run.agentMessages` for re-attach
+  - [ ] Live `agent_message` event pushed alongside `agent_event`
+
+## B1.4 — Tests (per REVIEW.md mandatory test requirements)
+- [ ] `backend/tests/agent-envelope.test.js` — schema validation,
+      enum closure, rejection cases
+- [ ] `backend/tests/agent-message-repo.test.js` — append + workspace
+      scoping + thread ordering + retention
+- [ ] `backend/tests/agent-message-emitter.test.js` — best-effort
+      persist contract, SSE broadcast shape parity with `agent_event`
+- [ ] All three files registered in `backend/tests/run-tests.js`
+
+## B1.5 — Exit criteria (Bundle 1)
+- [ ] Can write/read/broadcast an envelope end-to-end
+- [ ] No production call site reads `agent_messages` yet
+- [ ] Zero behaviour change on a full Test Lab run
+
+---
+
+# Bundle 2 — Envelope-mediated handoffs (still linear)
+
+**Goal:** every pipeline stage's input + output flows through the envelope.
+DAG is still linear, but the substrate is now message-passing — laying
+groundwork for loops + branches in Bundle 3.
+
+## B2.1 — Feature flag
+- [ ] `SENTRI_AGENT_MODE = "pipeline" | "envelope" | "autonomous"`
+- [ ] Default `pipeline` (today's behaviour)
+- [ ] `envelope` mode = persist + read envelopes, linear DAG unchanged
+- [ ] `autonomous` mode reserved for Bundle 3+
+- [ ] Documented in `docs/guide/env-vars.md`
+
+## B2.2 — Wrap each pipeline call site
+- [ ] At every `agentRole: "..."` call site
+      (per `frontend/src/config.js:13-71`):
+  - [ ] Before stage runs: read latest envelope addressed to this role
+        from `agentMessageRepo.listByThread(threadId, toRole)`
+  - [ ] After stage runs: emit a `handoff` envelope to the next role
+        carrying the structured `artifact`
+- [ ] Call sites affected:
+  - [ ] `backend/src/pipeline/intentClassifier.js` (explorer)
+  - [ ] `backend/src/pipeline/journeyGenerator.js` (planner → author)
+  - [ ] `backend/src/pipeline/testGenerator.js` (author)
+  - [ ] `backend/src/pipeline/testRefiner.js` (author dedup)
+  - [ ] `backend/src/pipeline/testValidator.js` (oracle)
+  - [ ] `backend/src/pipeline/testCritic.js` (reviewer)
+  - [ ] `backend/src/selfHealing.js` (healer — runtime, separate thread)
+  - [ ] `backend/src/routes/chat.js` (author — conversational editor)
+
+## B2.3 — Thread + trace propagation
+- [ ] `threadId = ${runId}-main` for pipeline runs
+- [ ] `threadId = ${runId}-heal-${testId}` for self-healing
+- [ ] `traceId` propagates into OTel span attributes + Prometheus labels
+      (alongside existing `route_name` + `agent_role`)
+
+## B2.4 — Shim mode (dual-write)
+- [ ] When `SENTRI_AGENT_MODE=pipeline`, still write envelopes as a
+      read-only audit trail (validates schema on real runs before flip)
+- [ ] Read path stays on the legacy stage-return-value flow
+
+## B2.5 — UI passthrough
+- [ ] `frontend/src/components/ai/AgentConversation.jsx`:
+  - [ ] Render `agent_message` rows when present
+  - [ ] Existing template synth in `agentConversationSynth.js` stays as
+        fallback for runs that pre-date the change
+- [ ] Per-message metadata: `fromRole` + `toRole` + `intent` badge
+
+## B2.6 — Tests
+- [ ] `backend/tests/agent-pipeline-envelope.test.js` — full run in
+      `envelope` mode produces a complete, replayable thread of
+      structured messages AND identical tests to `pipeline` mode
+- [ ] Snapshot test: envelope thread for canonical run is stable
+
+## B2.7 — Exit criteria (Bundle 2)
+- [ ] `envelope` mode passes the full backend test suite
+- [ ] Identical test artifacts produced in `pipeline` vs `envelope` mode
+- [ ] No regression in `route_name` + `agent_role` Prometheus cardinality
+
+---
+
+# Bundle 3 — Reviewer ↔ Author feedback loop (first real conversation)
+
+**Goal:** the smallest possible real multi-agent interaction — `reviewer`
+can reject and force `author` to revise. This is where Sentri stops being
+an assembly line.
+
+## B3.1 — New intents
+- [ ] `request_revision` — reviewer → author with
+      `{issues: [{testId, problem, suggestion}]}`
+- [ ] `accept` — reviewer → supervisor "ship it"
+- [ ] `reject_final` — reviewer → supervisor "unrecoverable"
+
+## B3.2 — Reviewer prompt change
+- [ ] `backend/src/prompts/reviewerPrompt.js`:
+  - [ ] Require structured output `{verdict, issues[]}`
+  - [ ] `verdict ∈ {accept, revise, reject}`
+  - [ ] `issues[].testId` MUST reference a test from the author's most
+        recent `handoff` artifact (else envelope validation fails)
+
+## B3.3 — Loop runner
+- [ ] New: `backend/src/aiProvider/agentLoop.js`
+  - [ ] `runReviewerAuthorLoop(initialArtifact, opts)`:
+    ```
+    round = 0
+    while round < MAX_REVIEW_ROUNDS:
+      authorMsg   = runAuthor(currentArtifact, prevReviewerFeedback)
+      reviewerMsg = runReviewer(authorMsg.artifact)
+      if reviewerMsg.intent == accept:       return authorMsg.artifact
+      if reviewerMsg.intent == reject_final: throw ReviewRejection
+      prevReviewerFeedback = reviewerMsg.artifact.issues
+      round += 1
+    return lastAuthorArtifact  # max rounds reached, ship with warning
+    ```
+- [ ] `MAX_REVIEW_ROUNDS` defaults to **3** — exposed via
+      `agent_configs.maxReviewRounds` per workspace
+- [ ] Termination metric:
+      `agent_review_rounds_total{outcome=accept|max_rounds|reject_final}`
+      with a 4-bucket histogram on `round` index
+
+## B3.4 — Per-`(route, role)` quota awareness
+- [ ] Loop runner integrates with existing `quotaGuard.checkAndReserve`
+      — a revision round that would breach quota terminates early with
+      `outcome=quota_exhausted` and ships the last accepted artifact
+- [ ] AI-005c single-agent collapse rule preserved: when author + reviewer
+      share the same `routeId`, loop still runs (both calls happen) but
+      a warning surfaces on the run detail page
+
+## B3.5 — UI: round indicator + diff view
+- [ ] `frontend/src/components/ai/AgentConversation.jsx`:
+  - [ ] `request_revision` messages render with a "Round N" badge
+  - [ ] Per-round artifact diff: which tests changed between rounds
+- [ ] `Reviewer rejected N issues → Author fixing` becomes a real
+      narration line, not a synthesized template string
+
+## B3.6 — Safety: termination guarantees
+- [ ] `MAX_REVIEW_ROUNDS` ceiling enforced server-side regardless of
+      workspace config (hard cap = 10)
+- [ ] Wall-clock budget per loop: `loopTimeoutMs` (default 5 min) —
+      mirrors `runCapabilityProbe`'s deadline pattern
+- [ ] Cycle protection: reject envelope if `replyToId` chain exceeds
+      `MAX_REVIEW_ROUNDS * 2`
+
+## B3.7 — Tests
+- [ ] `backend/tests/agent-reviewer-loop.test.js`:
+  - [ ] Reviewer accepts on round 1 → loop returns immediately
+  - [ ] Reviewer revises once, accepts on round 2 → 2 author calls,
+        2 reviewer calls, artifact carries round-2 changes
+  - [ ] Reviewer keeps revising → loop terminates at MAX_REVIEW_ROUNDS
+        with `outcome=max_rounds`
+  - [ ] Reviewer `reject_final` → throws `ReviewRejection`, no further
+        author calls
+  - [ ] Quota exhaustion mid-loop → ships last accepted artifact
+- [ ] Registered in `backend/tests/run-tests.js`
+
+## B3.8 — Exit criteria (Bundle 3)
+- [ ] Reviewer↔author loop demonstrably improves a known-bad test
+      fixture (regression: a test with a brittle selector ships
+      strengthened after 1 revision round)
+- [ ] No infinite loops possible — max-rounds + wall-clock + cycle
+      protection all enforced
+- [ ] Operator can see round count + per-round diff in the UI
+
+---
+
+# Bundle 4 — Supervisor orchestration (`autonomous` mode)
+
+**Goal:** stop encoding the DAG in if/else flow control. A `supervisor`
+agent reads the thread and decides who speaks next. This is the
+LangGraph / AutoGen / CrewAI pattern, scoped to Sentri's domain.
+
+## B4.1 — Supervisor role
+- [ ] Add `supervisor` to canonical `AGENT_ROLES`
+      (`frontend/src/config.js:13`) and per-role config
+- [ ] New prompt: `backend/src/prompts/supervisorPrompt.js`
+  - [ ] Input: thread transcript + last artifact + workspace policy
+  - [ ] Output: `{nextRole, instruction, rationale}` OR
+        `{terminate: true, finalArtifact}`
+- [ ] Recommended model: strong reasoning (catalog floor = Claude Sonnet
+      / GPT-4o) — surface a one-time warning if operator routes
+      supervisor to a cheap model
+
+## B4.2 — Orchestrator
+- [ ] New: `backend/src/aiProvider/agentOrchestrator.js`
+  - [ ] `runAutonomousThread(initialMessage, opts)`:
+    ```
+    while not terminated and steps < MAX_AUTONOMOUS_STEPS:
+      decision = runSupervisor(thread)
+      if decision.terminate: return decision.finalArtifact
+      nextMsg = runAgent(decision.nextRole, decision.instruction, thread)
+      append(nextMsg)
+      steps += 1
+    return last accepted artifact (with `outcome=max_steps`)
+    ```
+- [ ] `MAX_AUTONOMOUS_STEPS` hard cap = 20 (server-enforced)
+- [ ] Wall-clock budget: `autonomousTimeoutMs` (default 10 min)
+- [ ] Same `quotaGuard` + circuit breaker integration as B3.4
+
+## B4.3 — Capability gates
+- [ ] Supervisor's choice of `nextRole` validated against the role's
+      probed capabilities — e.g. cannot pick `oracle` if its route has
+      `model: false` in `provider_routes.capabilities`
+- [ ] Fall back to the linear DAG (envelope mode) if no eligible role
+      for the supervisor's decision — log + emit
+      `agent_orchestrator_fallback_total{reason}`
+
+## B4.4 — Mode rollout
+- [ ] `SENTRI_AGENT_MODE=autonomous` gates this orchestrator
+- [ ] Per-workspace opt-in via `workspaces.agentMode` column (new
+      migration) — default `envelope`, admin can flip to `autonomous`
+- [ ] Settings UI: Agent Roles subtab gains a "Mode" selector with
+      tooltip explaining cost + latency trade-off
+
+## B4.5 — Observability
+- [ ] New metrics:
+  - [ ] `agent_thread_steps_total{outcome}` histogram (bucketed 1..20)
+  - [ ] `agent_supervisor_decisions_total{nextRole}` counter
+  - [ ] `agent_thread_duration_seconds` histogram
+- [ ] OTel span per thread with child spans per agent call (`fromRole`,
+      `toRole`, `intent`, `round`, `traceId` as attributes)
+- [ ] Audit log entry on every `supervisor.terminate` decision
+
+## B4.6 — Tests
+- [ ] `backend/tests/agent-orchestrator.test.js`:
+  - [ ] Happy path: supervisor drives explorer → planner → author →
+        reviewer → terminate in ≤8 steps
+  - [ ] Supervisor loops author when reviewer requests revision
+  - [ ] `MAX_AUTONOMOUS_STEPS` enforced
+  - [ ] Capability gate rejects ineligible `nextRole`
+  - [ ] Quota exhaustion mid-thread ships last accepted artifact
+- [ ] `backend/tests/agent-orchestrator-fallback.test.js`:
+  - [ ] When supervisor picks unprobed role → fallback to linear DAG
+- [ ] Registered in `backend/tests/run-tests.js`
+
+## B4.7 — Exit criteria (Bundle 4)
+- [ ] Canonical Test Lab fixture runs end-to-end in `autonomous` mode
+      with supervisor making real routing decisions
+- [ ] No regression in test quality vs `envelope` mode on golden fixture
+- [ ] Operator can flip mode per workspace from Settings UI
+- [ ] All termination guarantees (max-steps, wall-clock, quota, cycle)
+      enforced + observable in metrics
+
+---
+
+# Bundle 5 — Shared memory + tool calling
+
+**Goal:** give agents read/write access to a thread-scoped blackboard
+and a closed set of tools (DB lookup, run code, ask peer). This is what
+turns "agents talking" into "agents collaborating to solve problems".
+
+## B5.1 — Thread blackboard
+- [ ] New table `agent_thread_state`:
+  ```sql
+  CREATE TABLE agent_thread_state (
+    threadId TEXT PRIMARY KEY,
+    workspaceId TEXT NOT NULL,
+    state JSON NOT NULL,            -- arbitrary key-value bag
+    version INTEGER NOT NULL,       -- optimistic concurrency
+    updatedAt TEXT NOT NULL
+  );
+  ```
+- [ ] `agentThreadStateRepo.get/setKey/casUpdate` with optimistic
+      concurrency (version mismatch → 409, retry once)
+- [ ] Size cap (default 64 KB) — reject writes that breach the budget
+
+## B5.2 — Tool registry
+- [ ] New: `backend/src/aiProvider/agentTools/index.js`
+- [ ] Closed set of read-only tools shipped in B5:
+  - [ ] `db.listExistingTests(projectId)` — for author dedup
+  - [ ] `db.getTest(testId)` — for reviewer inspection
+  - [ ] `crawl.getPageHtml(url, runId)` — for explorer drill-down
+  - [ ] `playwright.dryRun(testCode)` — for author/reviewer sanity check
+        (runs in existing sandbox)
+  - [ ] `thread.askPeer(role, question)` — emits a `question` envelope,
+        blocks on the matching `answer` envelope
+- [ ] Each tool declares a JSON schema; supervisor + agents see only
+      tools allowed by their role (per `agent_configs.allowedTools`)
+
+## B5.3 — Tool invocation via envelopes
+- [ ] New intent: `tool_call` with `{tool, args}` artifact
+- [ ] New intent: `tool_result` with `{toolCallId, result}` artifact
+- [ ] Tool execution is server-side — the LLM emits a `tool_call`
+      envelope, the orchestrator runs the tool, the result lands as a
+      `tool_result` envelope the agent can read on next turn
+- [ ] Per-tool quota: `agent_tool_calls_total{tool,outcome}` counter
+- [ ] Per-call timeout (default 30s)
+
+## B5.4 — Peer Q&A
+- [ ] `thread.askPeer` blocks the asking agent until the peer answers
+      OR `peerQuestionTimeoutMs` (default 60s) elapses
+- [ ] Cycle protection: an agent cannot ask itself; max 3 nested
+      questions per thread
+
+## B5.5 — Sandbox + safety
+- [ ] `playwright.dryRun` reuses existing test runner sandbox — no new
+      execution surface
+- [ ] `db.*` tools enforce workspace scoping at the repo layer (same
+      contract as every other repo in the codebase)
+- [ ] No tool can mutate state outside `agent_thread_state` in B5 —
+      write tools deferred to a future bundle
+
+## B5.6 — Tests
+- [ ] `backend/tests/agent-blackboard.test.js` — get/set/CAS + size cap
+- [ ] `backend/tests/agent-tools-registry.test.js` — schema validation,
+      `allowedTools` enforcement, timeout, quota counter increments
+- [ ] `backend/tests/agent-tool-call-envelope.test.js` — `tool_call` →
+      orchestrator runs tool → `tool_result` envelope appears in thread
+- [ ] `backend/tests/agent-peer-qa.test.js` — askPeer round-trip,
+      timeout, cycle protection
+- [ ] All registered in `backend/tests/run-tests.js`
+
+## B5.7 — Exit criteria (Bundle 5)
+- [ ] Author can call `db.listExistingTests` mid-generation to
+      genuinely deduplicate (replaces the LLM-blind dedup pass)
+- [ ] Reviewer can call `playwright.dryRun` and reject tests that
+      don't compile — eliminates a whole class of broken-output bugs
+- [ ] Operator can see per-thread tool-call timeline in the UI
+
+---
+
+# Cross-bundle invariants
+These must hold across every bundle — verify before merging each PR.
+- [ ] `SENTRI_AGENT_MODE=pipeline` (default) behaves identically to
+      today — zero regression for workspaces that haven't opted in
+- [ ] Envelope writes are best-effort: DB failure must NEVER break the
+      originating LLM call (mirrors `agentEventEmitter` contract)
+- [ ] All termination paths bounded: max-rounds, max-steps, wall-clock,
+      and cycle protection enforced server-side
+- [ ] AI-005c single-agent collapse rule preserved across all loops
+- [ ] Per-`(route, role)` circuit breaker + `quotaGuard` integration
+      maintained through loop runner and orchestrator
+- [ ] Workspace scoping enforced on every read of `agent_messages`,
+      `agent_thread_state`, and tool registry calls
+- [ ] `agent_role` Prometheus label remains bounded (canonical 7 roles
+      + `supervisor` + `default`)
+- [ ] All new endpoints registered in `permissions.json` with correct
+      `requireRole()` gate
+- [ ] All new tests registered in `backend/tests/run-tests.js`
+- [ ] `docs/changelog.md` updated under `## [Unreleased]` for each bundle
+
+---
+
+# Risk register
+| Risk | Mitigation | Bundle |
+|---|---|---|
+| Envelope schema drift between backend + frontend | Shared `agentEnvelope.js` exports; snapshot test on canonical run | B1.2 / B2.6 |
+| Reviewer loop ships worse tests than single pass | Golden fixture regression test in B3.7; ship metric `accept_round_1_ratio` | B3.8 |
+| Infinite loops / runaway cost in `autonomous` mode | Hard cap `MAX_AUTONOMOUS_STEPS=20` + `autonomousTimeoutMs` + quota integration | B4.2 |
+| Supervisor picks ineligible role mid-thread | B4.3 capability gate + fallback to linear DAG | B4.3 |
+| Per-workspace flag confusion (`pipeline` vs `envelope` vs `autonomous`) | Single env-var + per-workspace column + Settings UI selector; documented decision matrix | B4.4 |
+| Tool calls leak data across workspaces | Repo-level workspace scoping; integration test asserts cross-workspace reads return empty | B5.5 |
+| Tool sandbox escape via `playwright.dryRun` | Reuses existing runner sandbox (no new execution surface); no new tools mutate state in B5 | B5.5 |
+| Quota burn from chatty supervisor | Per-thread step counter + alert at 80% of `MAX_AUTONOMOUS_STEPS` | B4.5 |
+| `agent_messages` table growth unbounded | B1.1 retention janitor (90-day default, mirrors `agent_events`) | B1.1 |
+| Peer Q&A deadlock | `peerQuestionTimeoutMs` + cycle protection + max-nesting | B5.4 |
+| UI confusion ("which round is this?") | B3.5 round badges + per-round diff; B4 thread-step indicator | B3.5 / B4 |
+
+---
+
+# Bundle ordering rationale
+| Bundle | Why it ships when it does |
+|---|---|
+| **1** | Pure additive. Schema + envelope + emitter land together because they share the SSE wiring and audit-trail contract. Feature flag means zero blast radius. |
+| **2** | Same schema, new readers. Linear DAG preserved so we can A/B against `pipeline` mode on identical fixtures and prove zero-regression before adding loops. |
+| **3** | First real conversation. Scoped to a single agent pair (reviewer↔author) so termination guarantees and quota integration can be exercised in isolation before generalising. |
+| **4** | Generalises the loop pattern to an orchestrator. Requires Bundle 3's termination + observability primitives — can't safely ship without them. |
+| **5** | Capability bundle. Pure additive on top of the autonomous substrate. Skippable: workspaces can use the orchestrator without tools. |
+
+---
+
+# Estimated effort (rough)
+| Bundle | Tasks | Est. agent-days | Critical path |
+|---|---|---|---|
+| 1 | 5 task groups, ~10 files | 3–4 | Envelope schema + emitter + SSE wiring |
+| 2 | 7 task groups, ~15 files | 4–6 | Wrapping 8 pipeline call sites without regression |
+| 3 | 8 task groups, ~10 files | 4–5 | Loop runner + termination guarantees + golden-fixture regression |
+| 4 | 7 task groups, ~12 files | 6–8 | Supervisor prompt + orchestrator + capability gates |
+| 5 | 7 task groups, ~15 files | 5–7 (skip if not requested) | Tool registry + sandbox integration + peer Q&A |
+| **Total** | **34 task groups, ~62 files** | **22–30 agent-days** | — |
+
+> Effort assumes single agent working linearly. Bundles 1 → 2 → 3 → 4
+> serialise on schema + termination primitives. Bundle 5 parallelisable
+> after Bundle 4 lands.
+
+---
+
+# Definition of done (whole roadmap)
+Operator can:
+1. ✅ Watch agents genuinely converse in the UI (not templated narration)
+2. ✅ See reviewer reject author's output and force a revision round
+3. ✅ Configure max review rounds + agent mode per workspace
+4. ✅ Enable `autonomous` mode where a supervisor picks the next agent
+5. ✅ See per-thread tool-call timeline + per-round artifact diffs
+6. ✅ Trust hard termination guarantees (max-rounds, max-steps,
+      wall-clock, quota, cycle protection)
+7. ✅ Roll back to `pipeline` mode at any time with zero data loss
+8. ✅ Track agent collaboration cost via Prometheus + audit log
+
+System guarantees:
+- ✅ `pipeline` mode behaves identically to pre-AUTO-023 Sentri
+- ✅ Envelope schema is closed-set, validated, and versioned
+- ✅ All loops bounded; no infinite-call paths possible
+- ✅ Workspace isolation enforced on every read + write
+- ✅ Tool sandbox reuses existing runner — no new execution surface
+- ✅ Single-agent collapse rule (AI-005c) preserved end-to-end
+- ✅ Migration rollback works without data loss
+- ✅ No secrets, full prompts, or PII leaked through envelopes/metrics
+
+---
+
+# Out of scope (explicit non-goals)
+- ❌ **Multi-agent dispatch across workspaces** — single-workspace threads only
+- ❌ **Write-tools beyond `agent_thread_state`** — defer until B5 sandbox is battle-tested
+- ❌ **Embeddings / vector memory for agents** — start with structured blackboard
+- ❌ **Cross-run agent memory** — threads are run-scoped only
+- ❌ **External tool integrations (Slack, Jira, GitHub)** — separate roadmap item
+- ❌ **LLM-driven prompt mutation** — agent prompts stay file-controlled and reviewable
+- ❌ **Replacing the existing pipeline as default** — `autonomous` mode is opt-in per workspace for the foreseeable future

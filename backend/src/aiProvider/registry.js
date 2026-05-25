@@ -15,7 +15,7 @@ import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER, getCloudModel } from "./modelCatalog.js";
+import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER, getCloudModel, getOpenRouterBaseUrl } from "./modelCatalog.js";
 import { protocolForProvider } from "./protocolForProvider.js";
 // B4.6 — route-group resolution. When `agent_configs.routeId` starts
 // with `"rg-"`, the id points at a `route_groups` row instead of a
@@ -292,7 +292,54 @@ export function setRuntimeOllama({ baseUrl, model, disabled } = {}) {
   }
 }
 
+/**
+ * @deprecated Phase 3 of the route-based provider switcher rollout.
+ *
+ * Sets the in-memory `runtimeActiveProvider` override consulted by
+ * `detectProvider()` — the legacy "active provider id enum" path.
+ * Superseded by `provider_routes.isWorkspaceDefault` (Migration 059)
+ * + `providerRouteRepo.setWorkspaceDefault()`, which `resolveRoute()`
+ * honours BEFORE falling through to env detection. The new path lets
+ * a single workspace pin one of N routes per family, surfaces the
+ * choice in the AI Providers UI, and persists across restarts —
+ * `runtimeActiveProvider` does none of those.
+ *
+ * Still called by:
+ *   • `POST /settings` (`__use_existing__` quick-switch + new-key
+ *     activation + Ollama / compat flows). The TopBar dropdown no
+ *     longer hits this path post-Phase-1, but the legacy Settings
+ *     UI (`ProvidersSection.jsx`, `CompatProviderForm.jsx`) still
+ *     does on save.
+ *   • Five test files exercising the env-only / compat-slot paths.
+ *
+ * Deletion criteria — remove this function (and the
+ * `runtimeActiveProvider` state above + the `__use_existing__` HTTP
+ * branch in `backend/src/routes/settings.js:154-171`) when:
+ *   1. Migration 061 backfills every workspace with at least one
+ *      `provider_routes` row, AND
+ *   2. Every Settings save flow has been migrated to the
+ *      `provider_routes.upsert` + `setWorkspaceDefault` pair, AND
+ *   3. The legacy tests are rewritten to drive dispatch via
+ *      `resolveRoute()` instead of `setActiveProvider()`.
+ *
+ * Tracked under "AI Provider switcher Phase 3 cleanup" in ROADMAP.md.
+ *
+ * @param {string|null} provider
+ */
+let _setActiveProviderWarned = false;
 export function setActiveProvider(provider) {
+  // One-shot deprecation log so deployments see the call site without
+  // spamming once-per-request. The warning lands in the operator's
+  // server logs (not the HTTP response) so legacy clients don't observe
+  // a behaviour change. Skipped under NODE_ENV=test so test runs stay
+  // quiet — the deprecation is a deployment signal, not a test signal.
+  if (!_setActiveProviderWarned && process.env.NODE_ENV !== "test") {
+    _setActiveProviderWarned = true;
+    console.warn(formatLogLine(
+      "warn", null,
+      "[aiProvider] setActiveProvider() is deprecated — pin a provider_routes row via setWorkspaceDefault() instead. See ROADMAP.md \"AI Provider switcher Phase 3 cleanup\".",
+    ));
+  }
   runtimeActiveProvider = provider || null;
   // User chose a provider — clear sticky fallback so detection re-evaluates.
   clearStickyFallback();
@@ -314,7 +361,15 @@ export function clearStickyFallback(agentRole = null) {
 export function stickyFallbackActive(agentRole = null) {
   sweepExpiredStickies();
   for (const [k, v] of stickyFallbacks) {
-    if ((agentRole ? keyHasRole(k, agentRole) : true) && Date.now() < v.expiry) return true;
+    // Same two-keyspace matching as `detectProvider` — roleless callers
+    // match only roleless stickies; role-scoped callers match only their
+    // own role's stickies. The pre-fix `(agentRole ? ... : true)` pattern
+    // matched every sticky when agentRole was null, leaking per-role
+    // recovery state into workspace-level `isProviderDegraded()` checks.
+    const idx = k.lastIndexOf("::");
+    const keyIsRoleless = idx < 0;
+    const matches = agentRole ? keyHasRole(k, agentRole) : keyIsRoleless;
+    if (matches && Date.now() < v.expiry) return true;
   }
   return false;
 }
@@ -417,12 +472,15 @@ export function isProviderUsable(provider) {
  *   2. **`agent_configs.routeId`** — explicit per-role route assignment
  *      written by the Settings UI. Honoured when the route is usable
  *      (`provider_routes.enabled = 1` and a decryptable secret exists).
- *   3. **Env-default transient route** — when no `routeId` is set on
- *      the agent_configs row (or no row exists), `detectProvider`
- *      identifies the workspace-default provider and we synthesise a
- *      transient route from it. Collapses `effectiveAgentRole` to
- *      `null` per AI-005c so single-agent workspaces share one
- *      breaker across stages.
+ *   3a. **Workspace-default `provider_routes` row** (Migration 059) —
+ *      the single row with `isWorkspaceDefault = 1`. Checked when no
+ *      `routeId` is set on the agent_configs row (or no row exists).
+ *      Disabled defaults fall through to env detection.
+ *   3b. **Env-default transient route** — `detectProvider` identifies
+ *      the first usable env-var provider and we synthesise a transient
+ *      route from it. Collapses `effectiveAgentRole` to `null` per
+ *      AI-005c so single-agent workspaces share one breaker across
+ *      stages.
  *   4. **`null`** — no provider configured at all. Caller surfaces a
  *      config error to the operator.
  *
@@ -439,6 +497,21 @@ export function isProviderUsable(provider) {
  * @returns {{ route: Object|null, config: Object|null, effectiveAgentRole: string|null }}
  */
 export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
+  // Look up `agent_configs` BEFORE the sticky-fallback check so any
+  // per-role overrides (`systemPromptOverride`, `maxTokens`, etc.) thread
+  // through every return path — including the sticky-fallback branch.
+  // Without this, a rate-limit fallback would silently drop the admin's
+  // configured prompt + token cap for the entire 10-minute sticky TTL
+  // (the downstream `buildEffectivePrompt(prompt, config)` in
+  // `dispatcher.js` returns the raw prompt unchanged when `config` is
+  // null). Mirrors the same fix applied to `resolveProvider` — cfg
+  // resolution must happen up-front, not after the sticky branch.
+  let cfg = null;
+  if (agentRole && workspaceId) {
+    try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole) || null; }
+    catch (err) { logUnexpectedAgentConfigError(err, "resolveRoute"); }
+  }
+
   // (1) Sticky-fallback wins. The sticky map stores `{ provider, expiry }`
   // keyed by either a provider id or a route id — the value's `provider`
   // field is "the discriminator to dispatch against", interpreted by the
@@ -453,14 +526,15 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
       if (Date.now() < entry.expiry) {
         // Sticky entries from `generateText`'s fallback path carry a
         // `provider` (not a route id). Synthesise a transient route
-        // from it so callers see a uniform shape.
+        // from it so callers see a uniform shape. Thread `cfg` so
+        // per-role overrides survive the fallback window.
         if (entry.route) {
-          return { route: entry.route, config: null, effectiveAgentRole: agentRole };
+          return { route: entry.route, config: cfg, effectiveAgentRole: agentRole };
         }
         if (entry.provider && isProviderUsable(entry.provider)) {
           return {
             route: synthesiseTransientRoute({ provider: entry.provider, workspaceId }),
-            config: null,
+            config: cfg,
             effectiveAgentRole: agentRole,
           };
         }
@@ -468,11 +542,9 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
     }
   }
 
-  // (2) Consult agent_configs for this (workspaceId, role).
+  // (2) Consult agent_configs for this (workspaceId, role) — we already
+  // resolved `cfg` above; just branch on whether the admin configured a row.
   if (agentRole && workspaceId) {
-    let cfg;
-    try { cfg = agentConfigRepo.getByRole(workspaceId, agentRole); }
-    catch (err) { logUnexpectedAgentConfigError(err, "resolveRoute"); }
     if (cfg) {
       // Explicit route assignment. The route row carries everything
       // dispatch needs (protocol + baseUrl + model + encrypted secret).
@@ -508,12 +580,18 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
         // caller surfaces a config error to the user.
         return { route: null, config: cfg, effectiveAgentRole: agentRole };
       }
-      // No routeId — fall through to (3) but keep `cfg` so any per-role
-      // overrides on the row (systemPromptOverride, maxTokens) still
-      // apply. We return `effectiveAgentRole: agentRole` (not null)
-      // because the admin DID configure something for this role, even
-      // if not the route itself — breakers / sticky / metrics use the
-      // per-role keyspace.
+      // No routeId — fall through to workspace default (Migration 059)
+      // then env detection. Keep `cfg` so any per-role overrides on the
+      // row (systemPromptOverride, maxTokens) still apply. We return
+      // `effectiveAgentRole: agentRole` (not null) because the admin DID
+      // configure something for this role, even if not the route itself
+      // — breakers / sticky / metrics use the per-role keyspace.
+      let defaultRoute = null;
+      try { defaultRoute = providerRouteRepo.getWorkspaceDefault(workspaceId); }
+      catch { /* DB unavailable — fall through to env detection */ }
+      if (defaultRoute && defaultRoute.enabled) {
+        return { route: defaultRoute, config: cfg, effectiveAgentRole: agentRole };
+      }
       const fallbackProvider = detectProvider();
       if (!fallbackProvider) return { route: null, config: cfg, effectiveAgentRole: agentRole };
       return {
@@ -524,11 +602,33 @@ export function resolveRoute({ agentRole = null, workspaceId = null } = {}) {
     }
   }
 
-  // (3) No agent_configs row → AI-005c single-agent collapse. Return
-  // a route synthesised from the workspace-default provider so
-  // dispatch can still go through the protocol adapter, but collapse
-  // `effectiveAgentRole` to null so breakers / sticky / metrics use
-  // the bare-discriminator path.
+  // (3a) Migration 059 — workspace-default `provider_routes` row.
+  //
+  // Industry-standard pattern for autonomous multi-agent platforms
+  // (Vercel AI Gateway, LangSmith, Mastra): a DB-stored "default" row
+  // wins over env detection so operators see the runtime behaviour in
+  // the AI Providers UI without needing to know about env vars. Env
+  // detection still runs as the final safety net for dev environments
+  // and freshly-provisioned workspaces with no default pinned yet.
+  //
+  // Visible in dispatch only when the route is enabled — a disabled
+  // default falls through to env detection so disabling can't be a
+  // foot-gun. Workspace-scoped, so a workspace with no default + valid
+  // env keys behaves exactly the same as before this migration.
+  if (workspaceId) {
+    let defaultRoute = null;
+    try { defaultRoute = providerRouteRepo.getWorkspaceDefault(workspaceId); }
+    catch { /* DB unavailable — fall through to env detection */ }
+    if (defaultRoute && defaultRoute.enabled) {
+      return { route: defaultRoute, config: null, effectiveAgentRole: null };
+    }
+  }
+
+  // (3b) No agent_configs row AND no workspace default → AI-005c
+  // single-agent collapse. Return a route synthesised from env-detected
+  // provider so dispatch can still go through the protocol adapter, but
+  // collapse `effectiveAgentRole` to null so breakers / sticky / metrics
+  // use the bare-discriminator path.
   const provider = detectProvider();
   if (!provider) return { route: null, config: null, effectiveAgentRole: null };
   return {
@@ -593,6 +693,21 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
   // `getCompatConfig().model` higher up the stack.
   let effectiveModel = model || null;
   let effectiveBaseUrl = null;
+  // Bug-fix (Open-router-key-leak): family="openrouter" routes synthesised
+  // from env detection had `baseUrl: null`, which made `protocols/openai.js`
+  // fall through to the OpenAI SDK's hardcoded `api.openai.com` default —
+  // the OpenRouter key would then be sent to OpenAI's servers (rejected
+  // 401, but the wire request still happened). Populate the canonical
+  // OpenRouter endpoint here so dispatch reaches the right host.
+  // Keep this in sync with `getFamilyDefaultBaseUrl()` in
+  // `backend/src/aiProvider/protocols/openai.js` — both must honour
+  // the same `OPENROUTER_BASE_URL` env-var override.
+  if (provider === "openrouter") {
+    // Single source of truth in `modelCatalog.getOpenRouterBaseUrl()` —
+    // honours the documented `OPENROUTER_BASE_URL` override (see
+    // `REFERENCE.md` + `docker-compose.yml`) for self-hosted proxies.
+    effectiveBaseUrl = getOpenRouterBaseUrl();
+  }
   if (isCompatProvider(provider)) {
     // Compat slots carry their own baseUrl + model on the slot config
     // (not in the env). The dispatcher's SSRF-guardedFetch is gated on
@@ -648,9 +763,42 @@ export function detectProvider({ agentRole = null } = {}) {
   // Sticky fallback first — a successful rate-limit fallback pins the working
   // provider until the TTL expires, even if the user has the original
   // (rate-limited) provider selected in the dropdown.
+  //
+  // Role isolation: stickies live in two keyspaces depending on workspace
+  // mode at the time `setStickyFallback` was called:
+  //   • `"provider::role"` — multi-agent workspace, per-role pin.
+  //   • `"provider"`       — single-agent workspace (AI-005c collapsed
+  //                          `effectiveAgentRole` to null on dispatch).
+  //
+  // The previous `agentRole && !keyHasRole(...)` guard short-circuited
+  // the role check on `null` agentRole and matched **every** sticky
+  // regardless of which role pinned it (Lifeguard detect-provider
+  // sticky-leak). When `detectProvider` is called WITH an `agentRole`
+  // we must only match that specific role's stickies — NOT another
+  // role's, and NOT a single-agent roleless sticky (which would leak
+  // single-agent state into a multi-agent role's resolution). When
+  // called WITHOUT an `agentRole` we may only match roleless stickies
+  // (legitimate single-agent recovery state). `keyHasRole` already
+  // returns false for keys without `::`, so the matching predicate is
+  // simply: roleless callers want roleless keys; role-scoped callers
+  // want their own role's keys.
   sweepExpiredStickies();
   for (const [key, entry] of stickyFallbacks) {
-    if (agentRole && !keyHasRole(key, agentRole)) continue;
+    // A key is roleless when it has no `::` separator — i.e. it was
+    // stored via `breakerKey(provider, null)`. Compat slot IDs are
+    // validated as `/^[a-z0-9_-]+$/` at the HTTP boundary
+    // (`backend/src/routes/settings.js:132`), so `:` never appears in
+    // a compat provider name and `compat:foo::bar` is not a reachable
+    // state. Cloud provider names (`anthropic`, `openai`, etc.) also
+    // never contain `::`. The `lastIndexOf` check is therefore
+    // equivalent to `includes` for all reachable keys, but we use
+    // `lastIndexOf` to stay consistent with `keyHasRole`'s split.
+    const idx = key.lastIndexOf("::");
+    const keyIsRoleless = idx < 0;
+    const matches = agentRole
+      ? keyHasRole(key, agentRole)
+      : keyIsRoleless;
+    if (!matches) continue;
     if (Date.now() < entry.expiry && isProviderUsable(entry.provider)) return entry.provider;
   }
 
@@ -692,6 +840,82 @@ export function getFallbackProviders(primaryProvider, agentRole = null) {
     && isProviderUsable(p)
     && !isCircuitBreakerOpen(p, agentRole),
   );
+}
+
+// ── State inspection (read-only) ─────────────────────────────────────────────
+/**
+ * Read-only snapshot of every circuit breaker + sticky fallback in the
+ * registry. Powers `GET /api/v1/system/ai-state` so operators can see
+ * "tests stopped generating, what happened?" without grepping logs.
+ *
+ * Pure inspection — never mutates breaker / sticky state. Returned shape
+ * is intentionally JSON-safe (no Date objects, no Map references) so the
+ * route handler can pass it through `res.json()` unchanged.
+ *
+ * Sweeps expired stickies before snapshotting so the returned set
+ * matches what `detectProvider` would actually see — without this, an
+ * expired entry would surface in the UI for up to one TTL window after
+ * its real-world effect ended.
+ *
+ * Return shape (kept single-line so `jsdoc` can parse the type — the
+ * multi-line form trips its expression parser):
+ *   `{ breakers: Array<{key, provider, agentRole, failures, disabledUntil, openNow, remainingMs}>,`
+ *   ` stickyFallbacks: Array<{key, provider, agentRole, expiry, remainingMs}>,`
+ *   ` constants: {CIRCUIT_BREAKER_THRESHOLD, CIRCUIT_BREAKER_COOLDOWN_MS, STICKY_FALLBACK_TTL_MS} }`
+ *
+ * @returns {Object} A read-only snapshot of dispatcher state.
+ */
+export function getAiProviderState() {
+  sweepExpiredStickies();
+  const now = Date.now();
+
+  // Breakers: walk every entry. `splitKey` parses both bare-provider
+  // and `provider::role` keyspaces consistently with `keyHasRole` /
+  // `breakerKey` — see those JSDocs for why the split is `lastIndexOf`.
+  const splitKey = (key) => {
+    const idx = key.lastIndexOf("::");
+    if (idx < 0) return { provider: key, agentRole: null };
+    return { provider: key.slice(0, idx), agentRole: key.slice(idx + 2) };
+  };
+
+  const breakers = Object.entries(circuitBreakers).map(([key, value]) => {
+    const { provider, agentRole } = splitKey(key);
+    const openNow = value.disabledUntil > now;
+    return {
+      key,
+      provider,
+      agentRole,
+      failures: value.failures,
+      disabledUntil: value.disabledUntil,
+      openNow,
+      remainingMs: openNow ? value.disabledUntil - now : 0,
+    };
+  });
+
+  const stickies = [];
+  for (const [key, value] of stickyFallbacks) {
+    const { provider, agentRole } = splitKey(key);
+    stickies.push({
+      key,
+      // The sticky entry's stored `provider` is authoritative — it can
+      // differ from the key's primary discriminator when a route-shaped
+      // sticky is keyed by route id but stores the provider for display.
+      provider: value.provider || provider,
+      agentRole,
+      expiry: value.expiry,
+      remainingMs: Math.max(0, value.expiry - now),
+    });
+  }
+
+  return {
+    breakers,
+    stickyFallbacks: stickies,
+    constants: {
+      CIRCUIT_BREAKER_THRESHOLD,
+      CIRCUIT_BREAKER_COOLDOWN_MS,
+      STICKY_FALLBACK_TTL_MS,
+    },
+  };
 }
 
 // ── Database key persistence ─────────────────────────────────────────────────

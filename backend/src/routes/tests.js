@@ -808,8 +808,14 @@ router.post("/tests/:testId/run", requireRole("qa_lead"), demoQuota("run"), expe
     workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
+  // ENT-004 (migration 055): forward `runId` as a first-class arg on every
+  // lifecycle activity so `/audit-log?runId=…` filters this single-test
+  // run's events the same way it does for regression runs in routes/runs.js.
+  // Without these, single-test runs would be invisible to the RunDetail
+  // "View activity →" deep-link (runId column stays NULL → no match).
   logActivity({ ...actor(req),
     type: "test_run.start", projectId: project.id, projectName: project.name,
+    runId,
     testId: test.id, testName: test.name,
     detail: `Single test run started — "${test.name}"`, status: "running",
   });
@@ -819,11 +825,13 @@ router.post("/tests/:testId/run", requireRole("qa_lead"), demoQuota("run"), expe
     {
       onSuccess: () => logActivity({ ...actor(req),
         type: "test_run.complete", projectId: project.id, projectName: project.name,
+        runId,
         testId: test.id, testName: test.name,
         detail: `Single test completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
       }),
       onFailActivity: (err) => ({
         type: "test_run.fail", projectId: project.id, projectName: project.name,
+        runId,
         testId: test.id, testName: test.name,
         detail: `Test run failed for "${test.name}" — ${classifyError(err, "run").message}`,
       }),
@@ -844,6 +852,11 @@ router.patch("/projects/:id/tests/:testId/approve", requireRole("qa_lead"), (req
   if (!test || test.projectId !== req.params.id)
     return res.status(404).json({ error: "not found" });
   const reviewedAt = new Date().toISOString();
+  // ENT-004: optional approval comment (e.g. "Verified login flow manually").
+  // Same shape as the reject path — persisted to `tests.reviewComment`.
+  const reviewComment = typeof req.body?.reviewComment === "string"
+    ? req.body.reviewComment.trim().slice(0, 2000) || null
+    : null;
   // AUTO-003b: populate provenance columns on human approvals too so the
   // approval-stats counter and audit trail carry full decision-time data.
   // `humanApproval()` returns the four provenance fields keyed to this
@@ -852,6 +865,7 @@ router.patch("/projects/:id/tests/:testId/approve", requireRole("qa_lead"), (req
   testRepo.update(test.id, {
     reviewStatus: "approved",
     reviewedAt,
+    reviewComment,
     ...humanApproval(actorInfo),
   });
   logActivity({ ...actorInfo,
@@ -879,13 +893,21 @@ router.patch("/projects/:id/tests/:testId/reject", requireRole("qa_lead"), (req,
   if (!test || test.projectId !== req.params.id)
     return res.status(404).json({ error: "not found" });
   const reviewedAt = new Date().toISOString();
+  // ENT-004: optional rejection reason from the Review Queue modal.
+  // Persisted to `tests.reviewComment` (migration 054) so TestDetail
+  // renders "why was this rejected?" inline without digging through the
+  // audit log. Blank/absent = no comment (column stays NULL or previous
+  // value is cleared on status change).
+  const reviewComment = typeof req.body?.reviewComment === "string"
+    ? req.body.reviewComment.trim().slice(0, 2000) || null
+    : null;
   // AUTO-003b: clear the four provenance columns alongside `reviewStatus`
   // so a rejected auto-approved test doesn't keep stale `approvalSource:
   // "auto"` / `approvedBy: "auto-approver"` — the response from GET
   // `/tests/:id` would otherwise show a rejected test that still looks
   // auto-approved, which is a confusing audit-trail lie. Matches the
   // restore / revoke / bulk-restore paths that also clear provenance.
-  testRepo.update(test.id, { reviewStatus: "rejected", reviewedAt, ...PROVENANCE_CLEAR });
+  testRepo.update(test.id, { reviewStatus: "rejected", reviewedAt, reviewComment, ...PROVENANCE_CLEAR });
   logActivity({ ...actor(req),
     type: ACTIVITY_TYPES.TEST_REJECT, projectId: req.params.id, projectName: project.name,
     testId: test.id, testName: test.name,

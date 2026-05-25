@@ -1,0 +1,200 @@
+/**
+ * styles/features/topbar.css
+ *
+ * App-shell top bar (`<TopBar>` in `components/layout/TopBar.jsx`). Hosts
+ * the command-palette trigger, provider badge, theme toggle, notification
+ * bell, and the user menu (avatar + dropdown).
+ *
+ * DS-001 (audit): replaces the inline `style={{...}}` blocks that used
+ * to live on every TopBar element. Hover states now use CSS `:hover`
+ * pseudo-classes instead of `onMouseEnter`/`onMouseLeave` handlers — the
+ * audit calls those out as anti-pattern (extra renders, no specificity
+ * for theming, no `:focus-visible` integration).
+ *
+ * Layer: Features (ITCSS) — imported from index.css after the components
+ * layer so component-level rules can be overridden here when needed.
+ */
+
+/* ── Header bar ───────────────────────────────────────────────────────────── */
+.topbar {
+  height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* Spacer between the command-palette trigger and the right-side cluster
+   (provider badge / theme toggle / notification bell / user menu). */
+.topbar__spacer { flex: 1; }
+
+/* ── User menu (avatar + chevron + dropdown) ──────────────────────────────── */
+.topbar-user {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.topbar-user__btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 3px 6px 3px 3px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.topbar-user__btn:hover,
+.topbar-user__btn--open {
+  background: var(--bg2);
+  border-color: var(--border);
+}
+
+.topbar-user__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+
+.topbar-user__chevron { transition: transform 0.2s; }
+.topbar-user__chevron--open { transform: rotate(180deg); }
+
+/* ── Dropdown panel ───────────────────────────────────────────────────────── */
+.topbar-user-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  min-width: 200px;
+  overflow: hidden;
+}
+
+.topbar-user-dropdown__info {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.topbar-user-dropdown__name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.topbar-user-dropdown__email {
+  font-size: 0.75rem;
+  color: var(--text3);
+}
+
+/* Shared item styling — applies to <button> and <a> alike so the
+   dropdown rows feel uniform regardless of element type. */
+.topbar-user-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.83rem;
+  color: var(--text2);
+  text-align: left;
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+  font-family: inherit;
+}
+.topbar-user-dropdown__item:hover {
+  background: var(--bg2);
+}
+
+/* Sign-out variant — turns red on hover so the destructive action reads
+   without a confirmation dialog. */
+.topbar-user-dropdown__item--danger:hover {
+  color: #ef4444;
+}
+
+/* Trailing label / icon nudged to the right edge of the row. */
+.topbar-user-dropdown__item-meta {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--text3);
+  font-family: var(--font-mono);
+}
+.topbar-user-dropdown__item-icon-end {
+  margin-left: auto;
+  opacity: 0.4;
+}
+
+/* ── Responsive (MOB-001 follow-up) ─────────────────────────────────────────
+   The shell's 480/768 sidebar breakpoints in `pages/layout.css` already shrink
+   the `header` element's horizontal padding to 12px, but the TopBar's own
+   cluster spacing + dropdown anchor still produce overflow on 320–375px
+   viewports:
+     - `.topbar` keeps a `gap: 12px` between cluster items that pushes the
+       provider-badge / theme-toggle / bell / user-menu off the right edge
+       when combined with the command-palette trigger.
+     - `.topbar-user-dropdown` is anchored `right: 0` to the user-menu button,
+       which on a 320px screen places its left edge ~120px off the viewport
+       (`min-width: 200px`). Result: the dropdown reads as a slim vertical
+       strip with name + email truncated to one character. Web Vitals and
+       Lighthouse Mobile both flag this as `INP > 200ms` because the user
+       has to scroll horizontally to dismiss.
+   Two breakpoints below collapse the cluster gap and clamp the dropdown
+   width so the user menu stays usable on the smallest phones the app is
+   ever expected to load on. */
+@media (max-width: 600px) {
+  .topbar {
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  /* Avatar shrinks slightly so the cluster doesn't dominate the topbar
+     when the command-palette trigger collapses to icon-only. */
+  .topbar-user__avatar {
+    width: 26px;
+    height: 26px;
+  }
+
+  /* Dropdown: clamp to the viewport so it never overflows the right edge.
+     `max-width: calc(100vw - 24px)` leaves a 12px gutter on each side so
+     the panel doesn't read as flush-bleed. */
+  .topbar-user-dropdown {
+    min-width: 180px;
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 480px) {
+  /* Chevron is decorative on phones — the avatar tap target is enough. */
+  .topbar-user__chevron {
+    display: none;
+  }
+
+  /* Hide the user-menu's email row on extra-small phones — the name +
+     workspace context in the sidebar is enough identity. The full
+     identity is still reachable via `/settings/account`. */
+  .topbar-user-dropdown__email {
+    display: none;
+  }
+
+  /* Tap targets: the user-menu trigger needs at least 36×36 to meet the
+     audit's MOB-002 minimum touch-target requirement. */
+  .topbar-user__btn {
+    min-height: 36px;
+    min-width: 36px;
+  }
+}

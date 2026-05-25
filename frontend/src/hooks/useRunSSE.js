@@ -58,6 +58,24 @@ const MAX_SSE_RETRIES  = 5;
  * for runs that are already finished — prevents spurious "done" events
  * when reopening a historical run.
  *
+ * ### Event types forwarded to `onEvent`
+ *
+ *   { type: "snapshot",    run: Run }       — initial state + reconnect refresh
+ *   { type: "run_update",  run: Partial<Run> } — incremental run-row updates
+ *   { type: "update",      run: Partial<Run> } — alias of run_update
+ *   { type: "log",         message: string } — one log line
+ *   { type: "agent_event", step, agent, phase, message, data, nextAgent, model, createdAt }
+ *                                             — Task 2: per-agent narrative event
+ *                                               (start | progress | finding | handoff | done).
+ *                                               Consumers append to a local
+ *                                               `agentEvents[]` buffer (seeded
+ *                                               from `snapshot.run.agentEvents`).
+ *   { type: "done",        status, ... }   — terminal; hook closes EventSource
+ *
+ * The hook is event-type-agnostic — it forwards every parsed message verbatim
+ * to `onEvent`. New event types added on the backend require zero changes
+ * here; this JSDoc is the documented contract for consumers.
+ *
  * @param {string|null}    runId         - The run ID to monitor (e.g. `"RUN-1"`).
  * @param {Function}       onEvent       - Callback: `({ type, ...payload }) => void`.
  * @param {string|undefined} initialStatus - Initial run status; `undefined` = still loading.

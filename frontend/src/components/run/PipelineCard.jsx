@@ -9,8 +9,23 @@ import { CheckCircle2, Clock, RefreshCw, SkipForward } from "lucide-react";
  *   currentStep    — run.currentStep (1-based index of the active stage)
  *   status         — run.status ("running" | "completed" | "failed" | …)
  *   isRunning      — shorthand for status === "running"
+ *   agentRoleFor   — optional (step) => string | string[] | null
+ *                    GAP-005 (audit): when provided, each stage row labels which AI
+ *                    agent(s) ran (or will run) it. Returning a string array
+ *                    renders multiple badges side-by-side — step 3 (Classify) is
+ *                    multi-agent today (explorer + planner). The accepted role
+ *                    set is the canonical list at `frontend/src/config.js#AGENT_ROLES`
+ *                    which mirrors `backend/src/aiProvider/agentHealthCheck.js`.
+ *                    Stages without an agent (Crawl, Filter, Done) return [] /
+ *                    null and render no badges.
+ *   outcomeFor     — optional (step) => { label: string, value: number|string } | null
+ *                    GAP-005 (audit): per-stage outcome counts so the trace shows
+ *                    "Author agent generated 23 raw tests" / "Deduplicate removed 4"
+ *                    instead of just "Generate Tests via AI · done". Reads from
+ *                    `run.pipelineStats` at the caller's site; PipelineCard stays
+ *                    a pure presentation component.
  */
-export default function PipelineCard({ stages: rawStages, currentStep = 0, status, isRunning }) {
+export default function PipelineCard({ stages: rawStages, currentStep = 0, status, isRunning, agentRoleFor, outcomeFor }) {
   const isCompleted = status === "completed" || status === "completed_empty";
 
   const stages = rawStages.map((s) => {
@@ -78,7 +93,21 @@ export default function PipelineCard({ stages: rawStages, currentStep = 0, statu
 
       {/* Stage list */}
       <div style={{ padding: "2px 18px 16px", background: "var(--bg2)" }}>
-        {stages.map((stage, i) => (
+        {stages.map((stage, i) => {
+          // GAP-005 (audit): resolve per-stage agent + outcome from caller-supplied
+          // closures. Closures are O(1) and run-data-driven so the card stays a
+          // pure presentation component — adding a new agent or outcome shape only
+          // requires the caller (CrawlView / GenerateView) to update its lookup.
+          // Normalize agent attribution to an array — `agentRoleFor` can return
+          // a string (single agent), a string array (multi-agent step like
+          // step 3 = explorer + planner), or null. Falsy values short-circuit
+          // to an empty array so the badge loop renders nothing.
+          const rawAgent = typeof agentRoleFor === "function" ? agentRoleFor(stage.step) : null;
+          const agentRoles = Array.isArray(rawAgent)
+            ? rawAgent.filter(Boolean)
+            : rawAgent ? [rawAgent] : [];
+          const outcome = typeof outcomeFor === "function" ? outcomeFor(stage.step) : null;
+          return (
           <div key={i} style={{
             display: "flex", alignItems: "center", gap: 12,
             padding: "9px 0",
@@ -150,7 +179,46 @@ export default function PipelineCard({ stages: rawStages, currentStep = 0, statu
                     Complete
                   </span>
                 )}
+
+                {/* GAP-005 (audit): agent role badges — one per role that runs
+                    during this stage. Multi-agent steps (e.g. Classify =
+                    explorer + planner) render multiple badges side-by-side.
+                    Skipped + done-marker stages get empty `agentRoles` and
+                    render nothing. Same purple tint family as the AI-004
+                    streaming context line so the two surfaces read as one
+                    explainability story. */}
+                {!stage.skipped && agentRoles.map((role) => (
+                  <span
+                    key={role}
+                    style={{
+                      fontSize: "0.62rem", fontWeight: 700, padding: "1px 7px",
+                      borderRadius: 99, background: "var(--purple-bg)", color: "var(--purple)",
+                      border: "1px solid rgba(124,58,237,0.25)",
+                      textTransform: "capitalize",
+                    }}
+                    title={`${role} agent ran this stage`}
+                  >
+                    🤖 {role}
+                  </span>
+                ))}
               </div>
+
+              {/* GAP-005 (audit): per-stage outcome line — single muted row
+                  below the label. Renders only when the caller supplies a
+                  truthy outcome for this step (e.g. `{ label: "raw tests",
+                  value: 23 }`). Skipped stages and the terminal "Done" step
+                  pass null and render no extra row, keeping the card compact
+                  on flows where pipelineStats is empty. */}
+              {outcome && !stage.skipped && (
+                <div style={{
+                  fontSize: "0.72rem", color: "var(--text3)", marginTop: 3,
+                  fontFamily: "var(--font-mono)",
+                }}>
+                  <span style={{ color: "var(--text2)", fontWeight: 600 }}>{outcome.value}</span>
+                  {" "}
+                  <span>{outcome.label}</span>
+                </div>
+              )}
             </div>
 
             {/* Step number */}
@@ -162,7 +230,8 @@ export default function PipelineCard({ stages: rawStages, currentStep = 0, statu
               {i + 1}
             </span>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

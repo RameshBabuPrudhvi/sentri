@@ -1,10 +1,156 @@
 /**
  * Settings — page-specific styles
  *
- * Tab bar, key-value rows, info rows, and code blocks used
- * exclusively on the Settings page.
- * Scoped by descriptive class names (`.tab-*`, `.kv-*`, `.info-row`, `.code-block`).
+ * GAP-002 (audit, May 2026): the legacy single-file Settings.jsx was decomposed
+ * into a sidebar-driven shell + per-section route components under
+ * `frontend/src/features/settings/`. The new shell classes implement the
+ * industry-standard left-rail layout used by GitHub / Vercel / Linear / Sentry
+ * Settings. All inline styles in extracted components were replaced with the
+ * utility classes below per AGENT.md §127.
  */
+
+/* ── GAP-002 — Settings shell (sidebar + content) ───────────────────────────── */
+.settings-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 32px;
+  align-items: start;
+}
+.settings-header { margin-bottom: 24px; }
+.settings-header__title { font-weight: 800; font-size: 1.9rem; }
+.settings-header__sub { margin-top: 6px; font-size: 0.875rem; color: var(--text2); }
+.settings-back { margin-bottom: 16px; }
+.settings-sidebar {
+  position: sticky;
+  top: calc(52px + 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-right: 8px;
+}
+.settings-sidebar__group { display: flex; flex-direction: column; gap: 2px; }
+.settings-sidebar__group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 12px 6px;
+}
+.settings-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text2);
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+}
+.settings-nav-link:hover { background: var(--bg2); color: var(--text); }
+.settings-nav-link.active,
+.settings-nav-link[aria-current="page"] {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-nav-link__icon { display: inline-flex; align-items: center; flex-shrink: 0; }
+.settings-main { min-width: 0; }
+
+/* GAP-002 — Replacements for inline styles in extracted components */
+.st-section-title__heading { font-size: 1.05rem; }
+.st-section-title__sub { margin-top: 1px; }
+.st-admin-locked { text-align: center; padding: 40px 24px; }
+.st-admin-locked__icon { margin-bottom: 12px; }
+.st-admin-locked__title { font-size: 1.05rem; margin-bottom: 6px; }
+.st-admin-locked__body { max-width: 420px; margin: 0 auto; }
+.st-data-action__title { font-size: 0.88rem; }
+.st-data-action__count { font-weight: 400; margin-left: 6px; }
+.st-data-action__sub { margin-top: 2px; }
+.st-data-action__status { margin-top: 0; }
+.st-data-action__btn { flex-shrink: 0; }
+/* GAP-002 — Members tab */
+.members-loading { padding: 32px 0; text-align: center; }
+.members-error {
+  border-color: var(--danger);
+  color: var(--danger);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.members-invite-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.members-invite__email { flex: 1 1 220px; min-width: 180px; }
+.members-invite__role { flex: 0 0 130px; }
+.members-invite__input { height: 36px; font-size: 0.85rem; }
+.members-invite__label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--text2);
+}
+.members-invite__label-icon { margin-right: 4px; vertical-align: middle; }
+.members-invite__submit { height: 36px; }
+
+/* GAP-002 — Integrations tab */
+.integrations-intro__title { margin-bottom: 6px; }
+.integrations-intro__body { margin-bottom: 14px; }
+.integrations-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr auto auto;
+  gap: 12px;
+  align-items: end;
+}
+.integrations-row__toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* GAP-002 — Account tab */
+.account-confirm__input { margin-top: 8px; }
+.account-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.account-oauth-hint { display: flex; align-items: center; gap: 6px; }
+
+/* GAP-002 — Execution tab */
+.execution-hint { margin-top: 8px; padding-left: 2px; }
+.execution-hint__icon { vertical-align: middle; margin-right: 4px; }
+.execution-hint__path { background: var(--bg3); padding: 1px 5px; border-radius: 3px; }
+.execution-gap { height: 32px; }
+.execution-info-label { min-width: 130px; }
+.execution-info-value { color: var(--text); }
+.execution-card { overflow: hidden; }
+.execution-no-info { padding: 20px 0; }
+.execution-value--enabled { color: var(--green); }
+
+/* GAP-002 — Data + RecycleBin */
+.data-recycle-empty { text-align: center; color: var(--text2); }
+.data-recycle-empty__emoji { font-size: 2rem; margin-bottom: 8px; }
+.data-recycle-empty__hint { margin-top: 4px; }
+.recycle-section__title {
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.recycle-section__title-icon { display: inline; margin-right: 4px; }
+.recycle-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+.recycle-item__body { flex: 1; min-width: 0; }
+.recycle-item__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recycle-item__sub {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recycle-item__deleted { margin-top: 2px; }
+.recycle-item__actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 /* ── Tab bar ────────────────────────────────────────────────────────────────── */
 .tab-bar {
@@ -56,49 +202,7 @@
   color: #6ab4a0; overflow-x: auto; line-height: 2;
 }
 
-/* ── Provider card ──────────────────────────────────────────────────────────── */
-.st-provider-card {
-  border-radius: var(--radius-lg); padding: 24px;
-  transition: all 0.2s; position: relative;
-}
-.st-provider-active-pill {
-  position: absolute; top: 16px; right: 16px;
-  display: flex; align-items: center; gap: 5;
-  border-radius: 99px; padding: 3px 10px;
-}
-.st-provider-header {
-  display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px;
-}
-.st-provider-icon {
-  width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 20px;
-}
-.st-provider-badge {
-  font-size: 0.65rem; font-weight: 700;
-  padding: 2px 7px; border-radius: 99px;
-}
-.st-provider-desc {
-  font-size: 0.82rem; color: var(--text2); margin-bottom: 16px; line-height: 1.6;
-}
-.st-provider-warning {
-  display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px;
-  padding: 10px 12px; border-radius: var(--radius);
-  background: rgba(255,165,2,0.07); border: 1px solid rgba(255,165,2,0.2);
-}
-.st-provider-warning-text {
-  font-size: 0.76rem; color: var(--amber); line-height: 1.5;
-}
-
-/* ── Key status row (saved API key) ─────────────────────────────────────────── */
-.st-key-status {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px; background: var(--bg3); border-radius: var(--radius);
-  margin-bottom: 12px; border: 1px solid var(--border);
-}
-
-/* ── Key input row ──────────────────────────────────────────────────────────── */
-.st-key-input-row { display: flex; gap: 8px; }
+/* ── Key input wrap + toggle (used by AiProvidersSection rotate-key + form) ─── */
 .st-key-input-wrap { flex: 1; position: relative; }
 .st-key-toggle {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
@@ -112,12 +216,6 @@
 }
 .st-status-err {
   margin-top: 8px; font-size: 0.78rem; color: var(--red);
-}
-
-/* ── Docs link ──────────────────────────────────────────────────────────────── */
-.st-docs-link {
-  display: inline-flex; align-items: center; gap: 5;
-  margin-top: 12px; font-size: 0.76rem;
 }
 
 /* ── Section title ──────────────────────────────────────────────────────────── */
@@ -138,24 +236,7 @@
   border-radius: var(--radius-lg);
 }
 
-/* ── Provider banner (active / missing) ─────────────────────────────────────── */
-.st-provider-banner {
-  margin-bottom: 28px; padding: 14px 20px; border-radius: var(--radius-lg);
-  display: flex; align-items: center; gap: 12px;
-}
-.st-active-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--green); box-shadow: 0 0 8px var(--green);
-}
-
-/* ── Env tip card ───────────────────────────────────────────────────────────── */
-.st-env-tip {
-  margin-top: 28px; padding: 16px 20px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-
-/* ── Restart tour card ──────────────────────────────────────────────────────── */
+/* ── Restart tour card (used by AccountSection) ─────────────────────────────── */
 .st-tour-card {
   margin-top: 28px; padding: 16px 20px;
   background: var(--surface); border: 1px solid var(--border);
@@ -208,6 +289,77 @@
 /* Per-row form + list inside the ProviderRoutesTab. Class names follow the
    `.st-pr-*` prefix to stay scoped to the Settings page; no inline styles so
    the same look survives theme changes and the AGENT.md "no inline CSS" rule. */
+
+/* B3.0 — Section sub-tab strip. Mirrors the `.pd-tab-bar` / `.pd-tab` /
+   `.pd-tab--active` pattern from project-detail.css so the visual language is
+   consistent: underline-accent on the active tab, muted weight for inactive
+   tabs, no background/border on the strip itself. Used by AiProvidersSection
+   and any other Settings section that needs inner tabs. */
+.st-pr-subtabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.st-pr-subtabs .btn {
+  border: none;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  color: var(--text2);
+  font-weight: 400;
+  background: transparent;
+}
+.st-pr-subtabs .btn:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+.st-pr-subtab--active {
+  color: var(--accent) !important;
+  font-weight: 600 !important;
+  border-bottom-color: var(--accent) !important;
+}
+
+/* UX-AUDIT (May 2026) — page-level wrapper that stacks every AI Providers
+   sub-card (spend caps, IO bar, create form, provider list, audit log,
+   request log) with consistent vertical rhythm. Replaces the legacy
+   "everything in one big card" layout where users couldn't tell where one
+   form ended and the next began. 24px gap matches the `.flex-col.gap-lg`
+   rhythm used elsewhere in Settings so every section feels like a sibling. */
+.st-pr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* UX-AUDIT (May 2026) — per-card heading + sub. Visual rhythm matches the
+   `.st-pr-spend-title` / `.st-pr-audit-title` patterns already used by
+   WorkspaceSpendCapsPanel + Audit/Request-log subtabs (font-semi 0.88rem,
+   icon + label inline) so every card on the Provider Routes page reads as
+   a sibling of the others. The `--count` modifier renders the row count
+   in a muted parenthetical (mirrors Stripe Dashboard / GitHub Settings
+   "Members (12)" pattern). */
+.st-pr-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.st-pr-card-title__count {
+  color: var(--text3);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.st-pr-card-sub {
+  margin-top: 4px;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
 .st-pr-form {
   display: grid;
   gap: 12px;
@@ -502,11 +654,6 @@
 
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
-  /* Provider cards: tighten padding */
-  .st-provider-card {
-    padding: 18px;
-  }
-
   /* Key-value rows: stack label above value */
   .kv-row {
     flex-direction: column;
@@ -559,14 +706,6 @@
     white-space: nowrap;
   }
 
-  /* Provider banner: stack vertically */
-  .st-provider-banner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 12px 16px;
-  }
-
   /* Provider Routes: single-column form on phones */
   .st-pr-form-grid {
     grid-template-columns: 1fr;
@@ -607,36 +746,559 @@
   }
 }
 
+/* GAP-002 — Member rows + role legend */
+.members-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.members-row__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--bg3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text2);
+  overflow: hidden;
+}
+.members-row__avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.members-row__body { flex: 1; min-width: 0; }
+.members-row__name-line { display: flex; align-items: center; gap: 6px; }
+.members-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.members-row__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.members-row__you-badge {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+}
+.members-row__role-select {
+  width: 110px;
+  height: 32px;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.members-row__remove-btn { color: var(--text3); flex-shrink: 0; }
+.members-legend-card { background: var(--bg3); }
+.members-legend__title {
+  margin-bottom: 10px;
+  color: var(--text2);
+}
+.members-legend__row { display: flex; gap: 10px; align-items: baseline; }
+.members-legend__label { width: 70px; flex-shrink: 0; }
+
+/* GAP-002 — MFA / Security panels */
+.recovery-panel { display: flex; flex-direction: column; gap: 14px; }
+.recovery-panel__header { display: flex; align-items: flex-start; gap: 10px; }
+.recovery-panel__icon { margin-top: 2px; }
+.recovery-panel__title { font-size: 0.95rem; }
+.recovery-panel__hint { margin-top: 4px; line-height: 1.5; }
+.recovery-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  padding: 12px;
+  background: var(--bg3);
+  border-radius: var(--radius);
+}
+.recovery-panel__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.recovery-panel__confirm { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+/* PasswordConfirmModal now wraps in `<ModalShell>`, which provides the
+   backdrop, centering, and focus trap (A11Y-002, audit). The previous
+   `.pwd-modal-overlay` div was replaced; only the inner form classes
+   below remain in use. (`.pwd-modal*` is also defined in
+   `features/mfa.css`; the rules below win via ITCSS layer order — pages
+   load after features — and are the production-canonical values.) */
+.pwd-modal { display: flex; flex-direction: column; gap: 12px; }
+.pwd-modal__title { margin: 0; font-size: 1rem; }
+.pwd-modal__desc { margin: 0; }
+.pwd-modal__label { display: flex; flex-direction: column; gap: 6px; }
+.pwd-modal__input { margin-top: 0; }
+.pwd-modal__error { margin-top: 0; }
+.pwd-modal__actions { display: flex; gap: 8px; justify-content: flex-end; }
+.totp-enroll { align-items: stretch; }
+.totp-enroll__qr-wrap { display: flex; justify-content: center; }
+.totp-enroll__qr { border-radius: 8px; }
+.totp-enroll__secret-label { margin-bottom: 4px; }
+.totp-enroll__secret {
+  padding: 8px 12px;
+  background: var(--bg3);
+  border-radius: var(--radius);
+  word-break: break-all;
+}
+.totp-enroll__code-input { margin-top: 6px; letter-spacing: 0.2em; font-family: var(--font-mono); }
+.totp-enroll__actions { display: flex; gap: 8px; justify-content: flex-end; }
+.factor-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.factor-row__info { flex: 1; min-width: 200px; }
+.factor-row__sub { margin-top: 2px; }
+.mfa-label { display: flex; flex-direction: column; gap: 6px; }
+.passkey-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg2);
+}
+.passkey-item__info { flex: 1; min-width: 0; }
+.passkey-item__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.passkey-item__meta { margin-top: 2px; }
+.ws-enforce__loading { padding: 16px 0; }
+.ws-enforce__title { display: flex; align-items: center; gap: 8px; }
+.ws-enforce__compliance-note { margin-left: 6px; }
+.ws-enforce__require-label { display: flex; align-items: center; gap: 8px; }
+.ws-enforce__compliance { display: flex; flex-direction: column; gap: 4px; }
+.ws-enforce__compliance-title { text-transform: uppercase; letter-spacing: 0.06em; }
+.ws-enforce__grace-input { max-width: 120px; margin-top: 8px; }
+.ws-enforce__grace-hint { margin-top: 6px; }
+
+/* GAP-002 — Sidebar responsiveness */
+@media (max-width: 900px) {
+  .settings-shell { grid-template-columns: 1fr; gap: 16px; }
+  .settings-sidebar { position: static; padding-right: 0; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+  .settings-sidebar__group { flex: 1 1 220px; }
+}
+
 /* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
 @media (max-width: 480px) {
-  /* Key input row: stack input above save button */
-  .st-key-input-row {
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .st-key-input-row .btn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  /* Key status row: stack */
-  .st-key-status {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  /* Provider header: tighter gap */
-  .st-provider-header {
-    gap: 10px;
-  }
-
   /* Info rows: stack */
   .info-row {
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
     padding: 10px 16px;
+  }
+
+  /* MOB-001 follow-up: members section — invite form and per-member rows.
+     The invite form already wraps via `flex-wrap: wrap`, but on a 375px
+     viewport the role select (130px) + submit button (auto) sit beside
+     each other and the email field above stretches edge-to-edge, leaving
+     awkward horizontal slack. Force a single column so each field claims
+     the full width and the submit CTA reads as a primary action. */
+  .members-invite-form {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .members-invite__email,
+  .members-invite__role {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .members-invite__submit {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Member row: avatar + body + role-select + remove button. The role
+     select keeps its 110px on tablets but at 375px the row overflows
+     because email truncation + select + button competes for space.
+     Allow wrapping and let the role-select / remove sit on a second
+     line beneath the identity block. */
+  .members-row {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .members-row__body {
+    flex: 1 1 100%;
+  }
+  .members-row__role-select {
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  /* MOB-001 follow-up: integrations row is a fixed 5-column grid
+     (`1.2fr 1fr 1fr auto auto`) that crushes inputs to ~60px each on a
+     375px viewport. Stack on phones so each field stays usable. */
+  .integrations-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  /* MOB-001 follow-up: MFA factor row — the row already uses flex-wrap,
+     but the `.factor-row__info` block keeps a `min-width: 200px` that
+     overflows. Drop the min-width on phones so the description + button
+     stack cleanly. */
+  .factor-row__info {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  /* MOB-001 follow-up: recovery panel actions / TOTP enroll actions —
+     same flex-wrap rule as `.modal-form-actions`, applied here so MFA
+     setup remains operable on phones (the enroll flow is a critical
+     first-run gate). */
+  .recovery-panel__actions .btn,
+  .totp-enroll__actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+/* ── AI Providers section (provider-rename) ──────────────────────────────── */
+
+/* List header: count label + Add button on the right */
+.st-ai-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+.st-ai-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Provider row cards */
+.st-ai-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.st-ai-row {
+  transition: opacity 0.15s;
+}
+.st-ai-row--disabled {
+  opacity: 0.55;
+}
+.st-ai-row-emoji {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+/* Cost tier badge inline in row meta */
+.st-ai-cost-tier {
+  color: var(--text2);
+  font-size: 11px;
+}
+
+/* Error banner inside the providers card */
+.st-ai-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+/* Tip at the bottom of the list */
+.st-ai-tip {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+/* Inline form wrapper */
+.st-ai-form-wrap {
+  margin-bottom: 20px;
+}
+.st-ai-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.st-ai-form-err {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.st-ai-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Advanced toggle button */
+.st-ai-adv-toggle {
+  align-self: flex-start;
+  color: var(--text2);
+  gap: 4px;
+  margin-top: 4px;
+}
+.st-ai-adv-grid {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+/* Docs link next to API key label */
+.st-ai-docs-link {
+  margin-left: 8px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.st-ai-docs-link:hover {
+  text-decoration: underline;
+}
+
+/* Checkbox fields */
+.st-pr-field--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* Quick-start empty state */
+.st-ai-empty {
+  padding: 24px 0 8px;
+  text-align: center;
+}
+.st-ai-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text1);
+  margin-bottom: 6px;
+}
+.st-ai-empty-sub {
+  font-size: 12px;
+  color: var(--text2);
+  max-width: 480px;
+  margin: 0 auto 20px;
+  line-height: 1.6;
+}
+.st-ai-qs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.st-ai-qs-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--qs-color, var(--border));
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.st-ai-qs-tile:hover {
+  background: color-mix(in srgb, var(--qs-color, var(--accent)) 10%, var(--bg2));
+}
+.st-ai-qs-emoji {
+  font-size: 22px;
+}
+.st-ai-qs-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text1);
+}
+.st-ai-qs-hint {
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.4;
+}
+
+/* Agent Roles — provider dropdown richer styling */
+.st-agent-provider-select option {
+  font-family: inherit;
+}
+.st-agent-row-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text1);
+  margin-left: 8px;
+}
+
+/* Migration 059 — workspace-default badge + star button.
+   The "Default" pill sits next to the provider name, mirroring how GitHub
+   shows a "default branch" tag — informative, not a CTA. Uses accent-tinted
+   bg so it reads at a glance without screaming for attention. The Set-as-
+   default button uses the primary button style when active (filled star)
+   so operators can see which provider currently has the role at a glance. */
+.st-ai-default-badge {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg2));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.st-ai-default-btn {
+  /* Filled star (default pinned) inherits btn-primary colours; outlined
+     star (not pinned) uses btn-ghost. No extra rules needed — the modifier
+     classes from components.css handle it. */
+}
+
+/* Fallback chain visualization — rendered inline on each provider row so
+   operators see the runtime dispatch order without opening the edit form.
+   Visually quiet (no border, no bg) because chains will appear on most rows
+   in a multi-provider workspace and shouldn't compete with the row name. */
+.st-ai-fallback-chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text2);
+}
+.st-ai-fallback-label {
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.st-ai-fallback-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  color: var(--text1);
+}
+.st-ai-fallback-arrow {
+  color: var(--text3);
+  font-size: 12px;
+}
+
+/* "Used by" reverse reference — role chips that link this provider to the
+   pipeline agents that dispatch through it. Critical for the multi-agent
+   mental model so operators can see at a glance which roles depend on
+   this provider being healthy. */
+.st-ai-used-by {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.st-ai-used-by--none {
+  /* Muted style for the "not assigned" message — informational, not a
+     warning. Some providers are intentionally unassigned (warm spares
+     in a fallback chain). */
+  opacity: 0.7;
+}
+.st-ai-role-chip {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg2));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 7px;
+}
+
+/* Fallback dropdown promoted out of "Advanced" — wrapper just adds vertical
+   rhythm so the field doesn't crowd the primary form grid above it. */
+.st-ai-fallback-field {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg2));
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border));
+  border-radius: 8px;
+}
+
+/* Ollama connectivity badge — shown inline in the form when family=local.
+   Compact single-line replacement for the deleted OllamaStatusPanel. */
+.st-ai-ollama-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.st-ai-ollama-ok-icon { color: var(--green); }
+.st-ai-ollama-ok { color: var(--green); }
+.st-ai-ollama-err-icon { color: var(--red); }
+.st-ai-ollama-err { color: var(--red); }
+.st-ai-ollama-hint { margin-top: 4px; }
+
+/* Env-injected providers banner — read-only surface for ANTHROPIC_API_KEY /
+   GOOGLE_API_KEY / OLLAMA_BASE_URL / compat-slot configs that aren't backed
+   by a provider_routes row. Visually distinct from managed AI Provider rows
+   (dashed border + muted bg) so operators see at a glance that these come
+   from .env, not the DB. */
+.st-ai-env-banner {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--bg3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.st-ai-env-banner-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+.st-ai-env-banner-sub {
+  font-size: 11px;
+  color: var(--text3);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.st-ai-env-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.st-ai-env-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.st-ai-env-badge {
+  background: var(--bg3);
+  color: var(--text3);
+  border: 1px solid var(--border);
+  margin-left: auto;
+}
+
+/* Responsive: collapse quick-start to 2 columns on narrow viewports */
+@media (max-width: 640px) {
+  .st-ai-qs-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .st-ai-list-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

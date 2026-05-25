@@ -1,0 +1,57 @@
+/**
+ * styles/pages/system.css
+ *
+ * `pages/Systems.jsx` — runtime infrastructure telemetry. Post-cleanup
+ * the page renders only the worker pool card; the legacy AI Provider
+ * summary card and Application Environments project list were deleted
+ * (canonical surfaces live elsewhere). `.sys-*` BEM prefix scopes the
+ * rules so they don't bleed into other pages.
+ *
+ * The `.sys-section-header` rule also covers the page-local
+ * `<SectionHeader>` sub-component — it's defined inline in Systems.jsx
+ * and only used here, so the styling lives with it.
+ *
+ * Layer: Pages (ITCSS).
+ */
+
+/* ── Page shell ──────────────────────────────────────────────────────────── */
+.sys-page {
+  max-width: 880px;
+}
+
+/* Loading state — skeleton heights are still data-driven inline (each
+   skeleton row's height varies), but the rest of the skeleton shape
+   lives here. */
+.sys-skeleton {
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+
+/* ── Section header (inline sub-component) ───────────────────────────────── */
+.sys-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.sys-section-header__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sys-section-header__title {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.sys-section-header__sub {
+  font-size: 0.73rem;
+  color: var(--text3);
+  margin-top: 1px;
+}
+
+

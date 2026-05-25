@@ -151,10 +151,19 @@ function sanitiseProbeReason(err) {
   // the patterns most SDKs leak when echoing 401/403 responses verbatim.
   // The replacement is the literal "[redacted]" so the operator can see
   // "we removed something here" rather than silently truncated context.
+  // The last replacement uses a function replacer because the previous
+  // string-literal form `"$&-[redacted]".replace(/[^:=]+$/, "[redacted]")`
+  // was a parse-time bug: the inner `.replace()` ran ONCE against the
+  // literal `"$&-[redacted]"` (no `:`/`=` chars), collapsing the whole
+  // replacement string to `"[redacted]"` and erasing the header name from
+  // the operator's error reason. The function form runs per-match against
+  // the real captured text, preserves the header label (`authorization:` /
+  // `x-api-key=`), and redacts only the value so operators retain enough
+  // context to diagnose which header type leaked.
   const redacted = raw
     .replace(/\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{8,}/g, "[redacted-key]")
     .replace(/\bBearer\s+[A-Za-z0-9_.\-+/=]{8,}/gi, "Bearer [redacted]")
-    .replace(/\b(?:authorization|x-api-key)\s*[:=]\s*[^\s,;]+/gi, "$&-[redacted]".replace(/[^:=]+$/, "[redacted]"));
+    .replace(/\b(authorization|x-api-key)(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[redacted]");
   return redacted.slice(0, 200);
 }
 
