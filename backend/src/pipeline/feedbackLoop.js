@@ -620,9 +620,25 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
         // `loopTimeoutMs` still bound worst-case cost — no need for a
         // call-site-pinned ceiling here.
 
-        runAuthor: async ({ round, reviewerIssues }) => {
+        runAuthor: async ({ round, artifact, reviewerIssues }) => {
           throwIfAborted(signal);
-          let prompt = buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier);
+          // Round 0: prompt is the original failure context — the LLM
+          // has never seen the test before. Round 1+: prompt MUST use
+          // the previous round's `playwrightCode` (carried on `artifact`
+          // by the loop runner), not the original failing code. The
+          // reviewer issues being appended below reference the round-0
+          // LLM output's bugs, so showing the original code alongside
+          // would make the issue list incoherent ("the previous attempt
+          // STILL has these issues" while showing code that's not the
+          // previous attempt). Cite: `runReviewerAuthorLoop` always
+          // forwards the most recent author artifact onto the next
+          // round's `runAuthor({ artifact })` — see `agentLoop.js`'s
+          // round-trip closure for the contract.
+          const priorCandidate = round > 0 ? artifact?.tests?.[0] : null;
+          const promptTest = priorCandidate
+            ? { ...test, playwrightCode: priorCandidate.playwrightCode || test.playwrightCode }
+            : test;
+          let prompt = buildImprovementPrompt(promptTest, failureCategory, errorMessage, snapshot, tier);
           if (round > 0 && Array.isArray(reviewerIssues) && reviewerIssues.length > 0) {
             const issueLines = reviewerIssues
               .slice(0, 8)
