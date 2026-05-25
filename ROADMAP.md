@@ -19,7 +19,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** MNT-015 (Browser pool reuse + per-tenant AI rate limiting) — promoted after INF-009 (Helm chart + K8s readiness/liveness + DR playbook) landed in PR #30. MNT-015 clears the last hard dependency on AUTO-023 (`ROADMAP.md:1028`), unblocking the LangGraph-style DAG runner next. Queue: AUTO-023 (DAG pipeline runner — scaffolding already shipped via migration 058 + Task 2/Task 3 conversation feed) slot 1, AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 2, AUTO-014 (test dependency + execution ordering) slot 3, DIF-008 (Jira / Linear issue sync) slot 4. AI-provider routes Bundles 2 / 3 / 4 landed in PR #23 and are no longer queued.
+> **Current sprint:** MNT-015 (Browser pool reuse + per-tenant AI rate limiting) — promoted after INF-009 (Helm chart + K8s readiness/liveness + DR playbook) landed in PR #30. **AUTO-023 reframed** from a LangGraph-style DAG runner to a 5-bundle multi-agent collaboration plan (see [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md)) — the supervisor orchestrator (Bundle 4) supersedes the DAG runner; Bundle 1 is parallel-safe with MNT-015. Queue: AUTO-023 (multi-agent collaboration — scaffolding already shipped via migration 058 + Task 2/Task 3 conversation feed; the legacy `dagRunner.js` deliverable is **dropped**) slot 1, AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 2, AUTO-014 (test dependency + execution ordering) slot 3, DIF-008 (Jira / Linear issue sync) slot 4. AI-provider routes Bundles 2 / 3 / 4 landed in PR #23 and are no longer queued.
 >
 > **Blockers:** none remaining · **Remaining:** ~12 planned items across Phases 2–5 + Maintenance. The **AI platform foundation** track (originally AI-002 → AI-007) shipped end-to-end across PR #20 + PR #22 + PR #23: AI-002 + AI-003 (provider modularization + cost tracking) ✅ PR #20, AI-005 + B1.x (multi-agent dispatch + per-workspace provider routes foundation) ✅ PR #22, B2 + B3 + B4 (migration to `routeId` + capability auto-probe + per-route pricing + per-request log with PII redaction + Settings UI + JSON import/export + key rotation + rate-limit & spend caps + response cache + audit log viewer + compat-slot migration + cleanup sweep + dashboards + load tests + route groups) ✅ PR #23. The legacy AI-004 / AI-006 / AI-007 IDs are subsumed: AI-004 (agent role config schema) shipped inline with AI-005 in PR #22 (see migration 037); AI-006 (per-role eval harness) + AI-007 (cost governance) folded into B2 (per-request log + per-route pricing) and B3 (rate-limit + spend caps) respectively in PR #23.
 >
@@ -993,7 +993,11 @@ Full details: see Completed Work Summary table § INF-009 row.
 
 ---
 
-### AUTO-023 — LangGraph-style DAG pipeline runner 🟢 Strategic
+### AUTO-023 — Autonomous multi-agent collaboration 🟢 Strategic ⚠️ Reframed
+
+> **Reframed.** The legacy "LangGraph-style DAG pipeline runner" framing below is **superseded** by the 5-bundle multi-agent collaboration plan in [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md). The supervisor orchestrator (Bundle 4) replaces the DAG runner — flow control is decided by an LLM reading a structured `agent_messages` thread, not hardcoded if/else node graph. Migration 058's Oracle + Reviewer per-project flags + Task 2/3 conversation feed remain valid scaffolding for the new plan. The legacy prose below is kept inline for historical reference until a human prunes it.
+
+### AUTO-023 (legacy framing — superseded) — LangGraph-style DAG pipeline runner
 
 **Status:** 🔲 Planned | **Effort:** XL | **Source:** AUDIT.md AI1, A7 (formerly `AGENT-001` in AUDIT_IMPL.md)
 

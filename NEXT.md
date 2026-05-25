@@ -6,7 +6,7 @@
 
 ---
 
-> **Heads up — parallel track available:** [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md) (AUTO-023 reframed as multi-agent collaboration: envelope schema → reviewer↔author loop → supervisor orchestrator → tool calling). Bundle 1 (foundations: `agent_messages` schema + envelope validator + emitter) is purely additive and touches **zero files** in MNT-015's surface (browser pool / rate-limiter middleware / graceful-shutdown). Safe to start in parallel — MNT-015 is **not** a blocker.
+> **Heads up — AUTO-023 reframed.** The legacy "LangGraph-style DAG pipeline runner" framing is **retired**. AUTO-023 is now the 5-bundle multi-agent collaboration plan in [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md) (envelope schema → linear handoff → reviewer↔author loop → supervisor orchestrator → tool calling). The supervisor agent (Bundle 4) is a strictly more powerful version of the DAG runner — flow control is decided by an LLM reading a structured thread, not hardcoded if/else. Migration 058's Oracle + Reviewer flags remain valid scaffolding for both framings. Bundle 1 is purely additive and parallelisable with MNT-015 — no shared files, no blocker dependency.
 
 ## Bundling guidance
 
@@ -15,14 +15,14 @@ Flag adjacent items as bundling candidates in your PR description rather than ex
 ---
 
 ## ▶ Current PR — MNT-015 — Browser pool reuse + per-tenant AI rate limiting
-**Effort:** M | **Priority:** 🟡 High | **Dependencies:** INF-007 ✅ (metrics to measure pool hit/miss rate), INF-009 ✅ (PR #30 — graceful-shutdown plumbing the pool will hook into) | **Source:** `ROADMAP.md` Phase 5 (MNT-015) — formerly `PERF-001` in AUDIT_IMPL.md. **Unblocks:** AUTO-023 (LangGraph-style DAG pipeline runner) which lists MNT-015 as a hard dependency (`ROADMAP.md:1028`) because the DAG's executor node reuses pooled browser contexts instead of cold-starting per node. Migration 058 already shipped Oracle + Reviewer per-project flags as AUTO-023 scaffolding; this PR clears the last hard dependency so AUTO-023 can land in the next sprint.
+**Effort:** M | **Priority:** 🟡 High | **Dependencies:** INF-007 ✅ (metrics to measure pool hit/miss rate), INF-009 ✅ (PR #30 — graceful-shutdown plumbing the pool will hook into) | **Source:** `ROADMAP.md` Phase 5 (MNT-015) — formerly `PERF-001` in AUDIT_IMPL.md. **Note:** AUTO-023 (now reframed as the multi-agent collaboration plan — see [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md)) is **no longer blocked on MNT-015**; the two tracks are parallel-safe. MNT-015 remains valuable for `playwright.dryRun` tool latency in AUTO-023 Bundle 5, but is not a prerequisite.
 
 Replace the cold-start-per-test Chromium launch pattern in `backend/src/testRunner.js` with a `BrowserPool` that maintains N warm contexts (`BROWSER_POOL_SIZE`, default = `MAX_WORKERS`). Each test execution checks out a context, runs its Playwright code, and returns the context without closing the underlying browser process. Wall-clock run time for a 50-test suite drops 40–60% per AUDIT.md P4. **Plus** per-workspace AI rate limiting with cost weighting (AI call = 10 units, regular call = 1 unit) keyed in Redis under `workspaceId:ai` so expensive AI endpoints (`/chat`, `/tests/generate`, `/projects/:id/crawl`) stop sharing the same global bucket as cheap GETs that ENH-005's global-tier limiter currently treats identically.
 
 **Problem:**
 1. Every test in a regression run cold-starts a fresh Chromium instance. A 50-test suite = 50 browser launches = ~50 × 800ms = 40s of pure launch overhead before any test code executes. INF-007's `app_run_duration_seconds` histogram p90 is dominated by this overhead.
 2. ENH-005's global-tier rate limiter does not distinguish between a workspace hammering `POST /tests/generate` (one call = $0.20 in AI tokens) and the same workspace polling `GET /projects`. A noisy tenant burning AI quota can starve sibling workspaces' regular API traffic from the same global bucket. There is no per-workspace AI-specific tier.
-3. AUTO-023 (`ROADMAP.md:1028`) is blocked on MNT-015 — without pooled contexts the DAG executor node would re-launch a browser per stage and defeat the point of node-level checkpointing.
+3. AUTO-023's Bundle 5 `playwright.dryRun` tool will inherit the pool — without it, every reviewer-driven sanity-check would cold-start Chromium, defeating the point of fast iteration. (Not a hard dependency: AUTO-023 Bundles 1–4 don't touch the runner.)
 
 **Fix:**
 1. New `backend/src/runner/browserPool.js` exports a `BrowserPool` singleton with `acquire({ browserType, viewport, locale, timezone })` → `{ context, page, release }`, `drainAndClose()` (shutdown hook), and `getStats()` for INF-007 telemetry. Internally maintains a per-`browserType` array of warm `BrowserContext` instances seeded from a single `chromium.launch()` / `firefox.launch()` / `webkit.launch()` per type. Pool size honours `BROWSER_POOL_SIZE` (env, default `MAX_WORKERS`); when all contexts are checked out, `acquire` waits on a FIFO queue rather than spawning a new browser. Each `release()` runs `context.clearCookies()` + `context.clearPermissions()` + tears down the page (operator-supplied profile dimensions — locale/timezone/viewport — are part of the cache key so a context with `it-IT` never serves an `en-US` request).
@@ -48,12 +48,11 @@ Replace the cold-start-per-test Chromium launch pattern in `backend/src/testRunn
 - `QA.md` — new section "Browser pool + per-tenant AI rate limiting (MNT-015)" with manual test plan
 - Optional: `monitoring/prometheus/alerts.yml` — `BrowserPoolStarvation` rule fires when `app_browser_pool_in_use / app_browser_pool_size > 0.9` for 5m, runbook link to a new `docs/guide/observability.md#browserpoolstarvation` anchor
 
-**Acceptance criteria** (verbatim from ROADMAP.md MNT-015 plus the AUTO-023 dependency unblock):
+**Acceptance criteria** (verbatim from ROADMAP.md MNT-015):
 - A 10-test suite run starts in ≤3 browser launch events (verified via `app_browser_pool_acquires_total{outcome="miss"}` not exceeding 3, OR by stubbing `chromium.launch` and asserting call count).
 - A workspace exceeding its AI rate limit receives `429` with `Retry-After` header without affecting other workspaces' counters.
 - Draining the pool on graceful shutdown closes all browser contexts cleanly (no zombie processes; covered by `browser-pool.test.js`).
 - Wall-clock improvement of 40–60% on a 50-test regression run vs. pre-MNT-015 baseline (measured against `app_run_duration_seconds` p50 on the same suite; documented in PR description, not asserted in CI).
-- `ROADMAP.md` § AUTO-023 dependency line "MNT-015 (browser pool used by executor node)" is now satisfied so AUTO-023 can be promoted to Current PR.
 
 ### PR checklist (MNT-015)
 - [ ] PR title follows Conventional Commits (`perf(runner): MNT-015 — browser pool + per-tenant AI rate limiting`)
@@ -69,17 +68,20 @@ Replace the cold-start-per-test Chromium launch pattern in `backend/src/testRunn
 - [ ] ROADMAP.md `### MNT-015` section flipped to `**Status:** ✅ Complete (PR #N)` and Completed Work Summary row added
 
 **Out-of-scope for MNT-015 (intentionally deferred to AUTO-023):**
-- The DAG runner itself (`backend/src/pipeline/dagRunner.js` + `pipelineDag.js`) — that's AUTO-023's deliverable; this PR only ships the dependency it needs.
-- Per-DAG-node checkpoint/resume (Redis `setCheckpoint`/`getCheckpoint`) — AUTO-023 scope.
-- Wiring Oracle + Reviewer agents (already scaffolded by migration 058) into the orchestrator — AUTO-023 scope.
+- The multi-agent envelope schema + emitter — AUTO-023 Bundle 1 (`docs/roadmap/autonomous-multi-agent.md` § B1).
+- Reviewer↔author feedback loop + supervisor orchestrator — AUTO-023 Bundles 3 + 4.
+- Wiring Oracle + Reviewer agents (already scaffolded by migration 058) into the orchestrator — AUTO-023 Bundles 2 + 4 scope.
+- `playwright.dryRun` tool — AUTO-023 Bundle 5 (consumes this PR's `browserPool.acquire`).
 
 ---
-## ⏭ Queue (AUTO-023 track elevated — DAG runner unblocked once MNT-015 ships)
+## ⏭ Queue (AUTO-023 multi-agent track elevated — parallel-safe with MNT-015)
 
-> **Heads up:** with MNT-015 in flight, the next promotion is **AUTO-023** (LangGraph-style DAG pipeline runner) — the strategic-tier item rated Critical for the "Autonomous QA" brand promise. Migration 058 (Oracle + Reviewer per-project flags) and the Task 2/Task 3 frontend conversation feed already shipped as AUTO-023 scaffolding; once MNT-015 lands, the actual `dagRunner.js` + checkpoint/resume + pause-node refactor unblocks. Remaining queue order after AUTO-023: **AUTO-022b** (eval harness recording, deferred — needs LLM API key) → **AUTO-014** (test dependency + execution ordering) → **DIF-008** (Jira / Linear issue sync). Original "AI platform foundation" track (AI-002 → AI-007) is fully shipped — see `ROADMAP.md` § Phase 5.
+> **Heads up:** **AUTO-023** has been reframed as a 5-bundle multi-agent collaboration plan (see [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md)). Bundle 1 (envelope schema + validator + emitter) is purely additive and can land **in parallel with MNT-015** — no shared files. The legacy DAG-runner framing is retired; the supervisor orchestrator (Bundle 4) supersedes it. Remaining queue order after AUTO-023: **AUTO-022b** (eval harness recording, deferred — needs LLM API key) → **AUTO-014** (test dependency + execution ordering) → **DIF-008** (Jira / Linear issue sync). Original "AI platform foundation" track (AI-002 → AI-007) is fully shipped — see `ROADMAP.md` § Phase 5.
 
-### 1 · AUTO-023 — LangGraph-style DAG pipeline runner
-**Effort:** XL | **Priority:** 🟢 Strategic | **Dependencies:** INF-007 ✅ (OTel spans per node), **MNT-015** (browser pool used by executor node — promote AFTER MNT-015 ships) | **Source:** `ROADMAP.md` Phase 5 (AUTO-023). **Prior scaffolding shipped:** migration 058 (Oracle + Reviewer per-project flags), Task 2 per-agent SSE events (`run_agent_events` table + `agentEventEmitter.js`), Task 3 `<AgentConversation>` frontend feed, Oracle/Reviewer prompt modules (`oraclePrompt.js` + `reviewerPrompt.js`). This PR ships the **DAG runner itself** (`backend/src/pipeline/dagRunner.js` + `pipelineDag.js`), refactors `pipelineOrchestrator.js` to delegate, wires per-node retry + Redis checkpoint/resume + the human-in-the-loop pause node for the approve step, and finally activates Oracle + Reviewer at the orchestrator boundary so the per-project flags from migration 058 actually gate live LLM calls.
+### 1 · AUTO-023 — Autonomous multi-agent collaboration (5 bundles)
+**Effort:** XL (split across 5 bundles, each independently shippable) | **Priority:** 🟢 Strategic | **Dependencies:** INF-007 ✅ (OTel spans), `agent_events` ✅ (Task 2), `provider_routes` + `quotaGuard` + circuit breaker ✅ (PR #23), migration 058 ✅ (Oracle + Reviewer per-project flags), AI-005c single-agent collapse rule ✅. **Not blocked on MNT-015.** | **Source:** [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md) (full plan, schema, exit criteria per bundle, cross-bundle invariants, risk register).
+
+Replaces the legacy DAG-runner framing. The new plan ships a real multi-agent system in 5 independently-shippable bundles: **B1** `agent_messages` schema + envelope validator + emitter (purely additive, zero behaviour change), **B2** wrap each pipeline call site with envelope read/write (still linear DAG, gated by `SENTRI_AGENT_MODE=envelope`), **B3** reviewer↔author feedback loop with structured `verdict ∈ {accept, revise, reject}` + bounded `MAX_REVIEW_ROUNDS`, **B4** supervisor orchestrator that reads the thread and decides next role (`SENTRI_AGENT_MODE=autonomous`, per-workspace opt-in), **B5** thread blackboard + closed-set tool registry (`db.listExistingTests`, `playwright.dryRun`, `thread.askPeer`). Every bundle preserves zero-regression default (`SENTRI_AGENT_MODE=pipeline` = today's behaviour). The supervisor (B4) supersedes the DAG runner — flow control is LLM-driven, not hardcoded if/else.
 
 ### 2 · AUTO-022b — Eval harness: record real LLM cache + first real baseline
 **Effort:** M (4–8h focused maintainer session) | **Priority:** 🔴 Blocker (deferred — needs LLM API key) | **Dependencies:** AUTO-022 ✅ PR #17 plumbing | **Source:** `ROADMAP.md` Phase 5 (AUTO-022b) + `docs/guide/eval-harness-record-goldens.md`
