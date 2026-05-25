@@ -368,10 +368,14 @@ Counter naming uses `app_*` rather than a product-name prefix so Prometheus dash
 
 
 
-### Kubernetes + Backup
+### Kubernetes + Backup (INF-009)
 
-- `WORKER_HEALTH_PORT`: Port for worker-local `/healthz` endpoint (default `3002`).
-- `S3_BACKUP_BUCKET`: S3 bucket for nightly database backups.
-- `S3_BACKUP_REGION`: Region for S3 backup bucket.
-- `S3_BACKUP_ACCESS_KEY_ID`: Access key used by backup workflow.
-- `S3_BACKUP_SECRET_ACCESS_KEY`: Secret key used by backup workflow.
+Kubernetes deployment health probe + nightly Postgres backup credentials. The Helm chart at `helm/sentri/` wires `WORKER_HEALTH_PORT` automatically; the `S3_BACKUP_*` variables are only consumed by `.github/workflows/nightly-backup.yml`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `WORKER_HEALTH_PORT` | `3002` | Port for the worker-local `/healthz` endpoint used by the Kubernetes `readinessProbe`/`livenessProbe`. The chart's `worker.healthPort` value is injected here automatically. |
+| `S3_BACKUP_BUCKET` | — | S3 bucket name for nightly `pg_dump -Fc` snapshots. Snapshots land at `s3://<bucket>/daily/YYYY-MM-DD.dump` and `s3://<bucket>/monthly/YYYY-MM.dump`. |
+| `S3_BACKUP_REGION` | — | AWS region for the S3 backup bucket (e.g. `us-east-1`). |
+| `S3_BACKUP_ACCESS_KEY_ID` | — | Access key ID for the IAM principal that owns the backup bucket. Configure via the `S3_BACKUP_ACCESS_KEY_ID` GitHub Actions secret. |
+| `S3_BACKUP_SECRET_ACCESS_KEY` | — | Secret access key paired with `S3_BACKUP_ACCESS_KEY_ID`. Configure via the `S3_BACKUP_SECRET_ACCESS_KEY` GitHub Actions secret. |

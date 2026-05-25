@@ -57,8 +57,11 @@ jobs:
       - name: Verify rendered manifests applied
         run: |
           kubectl get deploy,statefulset,svc,ingress,configmap,secret,hpa -l 'app in (backend,worker,postgres,redis)' || true
+          # DATABASE_URL + POSTGRES_PASSWORD both live in the Secret per
+          # the security fix that moved them out of the ConfigMap (see
+          # helm/sentri/templates/configmap.yaml comment).
           kubectl get secret sentri-secrets -o jsonpath='{.data}' | grep -q POSTGRES_PASSWORD
-          kubectl get configmap sentri-config -o jsonpath='{.data.DATABASE_URL}' | grep -q 'postgres://'
+          kubectl get secret sentri-secrets -o jsonpath='{.data}' | grep -q DATABASE_URL
       - name: Dump diagnostics on failure
         if: failure()
         run: |
