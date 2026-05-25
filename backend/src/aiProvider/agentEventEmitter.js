@@ -183,11 +183,18 @@ export function emitAgentEvent(runId, { step, agent, phase, message, data, nextA
 
 
 export function emitAgentMessage(envelope = {}) {
+  // Spread `envelope` FIRST, then layer the computed defaults on top so the
+  // `||` / `??` fallbacks actually win when the caller passed a falsy /
+  // nullish value (or omitted the field entirely). Pre-fix the spread came
+  // last and clobbered the auto-generated `id` / `createdAt` / `round` with
+  // whatever the caller had on the source object — including `undefined`,
+  // which then tripped `ERR_AGENT_ENVELOPE_INVALID` instead of falling
+  // back to the generated default (lifeguard finding).
   const withDefaults = {
+    ...envelope,
     id: envelope.id || `am-${randomUUID()}`,
     createdAt: envelope.createdAt || new Date().toISOString(),
     round: envelope.round ?? 0,
-    ...envelope,
   };
   const valid = validateEnvelope(withDefaults);
 

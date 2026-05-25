@@ -6,7 +6,16 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   traceId TEXT NOT NULL,
   fromRole TEXT NOT NULL,
   toRole TEXT,
-  replyToId TEXT REFERENCES agent_messages(id),
+  -- ON DELETE SET NULL so the daily `purgeOlderThan` retention sweep can
+  -- delete a parent envelope whose child reply lives outside the cutoff
+  -- window. Without this, the self-referential FK defaults to NO ACTION
+  -- and SQLite refuses the entire DELETE statement on any reply chain
+  -- that spans the retention boundary — the sweep becomes a permanent
+  -- no-op the moment an `accept` / `request_revision` envelope lands a
+  -- day later than its `handoff` parent (lifeguard finding). Matches the
+  -- `ON DELETE SET NULL` pattern used by sibling self-ref FKs elsewhere
+  -- in the schema (`provider_routes.fallbackRouteId`, etc.).
+  replyToId TEXT REFERENCES agent_messages(id) ON DELETE SET NULL,
   intent TEXT NOT NULL,
   artifact TEXT,
   rationale TEXT,
