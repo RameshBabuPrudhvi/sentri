@@ -622,6 +622,27 @@ export function eventsToTurns(events) {
   return turns;
 }
 
+export function messagesToTurns(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return [];
+  return messages
+    .filter((m) => m && AGENT_PERSONAS[m.fromRole])
+    .map((m, idx) => {
+      const toLabel = m.toRole && AGENT_PERSONAS[m.toRole] ? AGENT_PERSONAS[m.toRole].label : "All";
+      const intent = m.intent || "handoff";
+      const detail = m.rationale || formatScalarData(m.artifact) || "";
+      const text = `[${intent}] ${AGENT_PERSONAS[m.fromRole].label} → ${toLabel}${detail ? ` — ${detail}` : ""}`;
+      return {
+        id: `msg-${m.id || idx}`,
+        agent: m.fromRole,
+        phase: "handoff",
+        step: Number(m.round) || 0,
+        text,
+        ts: m.createdAt ? Date.parse(m.createdAt) || Date.now() : Date.now(),
+        _complete: true,
+      };
+    });
+}
+
 /**
  * Build a short human-readable label for a crawled page row from
  * `run.pages` (`{ url, title, status, ... }` — see `crawlBrowser.js:340-345`).

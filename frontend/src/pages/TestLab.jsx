@@ -759,6 +759,13 @@ export default function TestLab() {
         return { ...prev, agentEvents: [...prevEvents, evt] };
       });
     }
+    if (event.type === "agent_message") {
+      const { type: _type, ...msg } = event;
+      setRunData(prev => {
+        const prevMsgs = Array.isArray(prev?.agentMessages) ? prev.agentMessages : [];
+        return { ...prev, agentMessages: [...prevMsgs, msg] };
+      });
+    }
     // The hook fires its own `type: "done"` event when SSE closes, with
     // `status` at the top level (not under `event.run`). Handle both shapes.
     const terminalStatus =
@@ -788,6 +795,16 @@ export default function TestLab() {
         const cur = prev.get(mirrorRunId) || {};
         const curEvents = Array.isArray(cur.agentEvents) ? cur.agentEvents : [];
         next.set(mirrorRunId, { ...cur, agentEvents: [...curEvents, evt] });
+        return next;
+      });
+    }
+    if (event.type === "agent_message" && mirrorRunId) {
+      const { type: _t, ...msg } = event;
+      setRunDataByRunId(prev => {
+        const next = new Map(prev);
+        const cur = prev.get(mirrorRunId) || {};
+        const curMsgs = Array.isArray(cur.agentMessages) ? cur.agentMessages : [];
+        next.set(mirrorRunId, { ...cur, agentMessages: [...curMsgs, msg] });
         return next;
       });
     }
