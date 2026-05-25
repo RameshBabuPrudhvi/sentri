@@ -99,6 +99,18 @@ function observeLoopOutcome(outcome, round) {
 }
 
 /**
+ * Best-effort `onOutcome` invocation — a throwing hook must never
+ * break the loop's return / throw path. Extracted so every terminal
+ * site uses the same defensive wrapper (the reject_final path had
+ * try/catch while the other four did not — asymmetric, and a single
+ * throwing hook on the accept path would crash the run).
+ */
+function safeOnOutcome(onOutcome, out) {
+  if (typeof onOutcome !== "function") return;
+  try { onOutcome(out); } catch { /* best-effort */ }
+}
+
+/**
  * Build a per-loop-invocation default quota gate that caches the
  * workspace's spend-cap read for the loop's lifetime.
  *
@@ -333,7 +345,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
           roundsCompleted,
           artifact: lastAuthorArtifact,
         };
-        if (typeof onOutcome === "function") onOutcome(out);
+        safeOnOutcome(onOutcome, out);
         observeLoopOutcome(out.outcome, out.round);
         return out;
       }
@@ -347,7 +359,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
         roundsCompleted,
         artifact: lastAuthorArtifact,
       };
-      if (typeof onOutcome === "function") onOutcome(out);
+      safeOnOutcome(onOutcome, out);
       observeLoopOutcome(out.outcome, out.round);
       return out;
     }
@@ -437,23 +449,13 @@ export async function runReviewerAuthorLoop(initialArtifact, {
 
     if (intent === "accept") {
       const out = { outcome: "accept", round, roundsCompleted, artifact: authorArtifact };
-      if (typeof onOutcome === "function") onOutcome(out);
+      safeOnOutcome(onOutcome, out);
       observeLoopOutcome(out.outcome, out.round);
       return out;
     }
     if (intent === "reject_final") {
-      // Surface the outcome to `onOutcome` BEFORE throwing — observers
-      // (telemetry hooks, audit-log emitters, the orchestrator that
-      // will wire this loop in Bundle 4) need symmetry across all five
-      // terminal paths. `reject_final` previously only recorded the
-      // metric and re-threw, so any `onOutcome` consumer would silently
-      // miss the rejection. The hook MUST NOT throw — the loop's
-      // `ReviewRejection` is the canonical surface for this path; any
-      // hook error is swallowed so the original rejection isn't masked.
       const out = { outcome: "reject_final", round, roundsCompleted, artifact: lastAuthorArtifact };
-      if (typeof onOutcome === "function") {
-        try { onOutcome(out); } catch { /* hook failure must not mask ReviewRejection */ }
-      }
+      safeOnOutcome(onOutcome, out);
       observeLoopOutcome("reject_final", round);
       throw new ReviewRejection();
     }
@@ -472,7 +474,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
         roundsCompleted,
         artifact: lastAuthorArtifact,
       };
-      if (typeof onOutcome === "function") onOutcome(out);
+      safeOnOutcome(onOutcome, out);
       observeLoopOutcome(out.outcome, out.round);
       return out;
     }
@@ -488,7 +490,7 @@ export async function runReviewerAuthorLoop(initialArtifact, {
     roundsCompleted,
     artifact: lastAuthorArtifact,
   };
-  if (typeof onOutcome === "function") onOutcome(out);
+  safeOnOutcome(onOutcome, out);
   observeLoopOutcome(out.outcome, out.round);
   return out;
 }
