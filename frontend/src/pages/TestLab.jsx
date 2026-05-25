@@ -15,9 +15,9 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  Link2, Zap, Play, StopCircle, CheckCircle2, Clock,
-  ArrowRight, ChevronRight, RotateCcw, Atom, Video,
-  Upload, Paperclip, Trash2, Copy, Check, RefreshCw,
+  StopCircle, Clock,
+  ArrowRight, RotateCcw, Atom, Video,
+  Copy, Check, RefreshCw,
 } from "lucide-react";
 import { api } from "../api.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
@@ -32,7 +32,8 @@ import usePageTitle from "../hooks/usePageTitle.js";
 import { fmtRelativeDate } from "../utils/formatters.js";
 import SiteGraph from "../components/crawl/SiteGraph.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
-import TestConfig from "../components/test/TestConfig.jsx";
+// `TestConfig` is consumed internally by `<TestLabConfigPanel>` —
+// no longer imported here directly.
 import EmptyState from "../components/shared/EmptyState.jsx";
 // Task 3 — multi-agent chat transcript replaces the prior single-narrator
 // `NarrativeFeed` (which lived inline in this file). `AgentConversation`
@@ -45,11 +46,12 @@ import AgentConversation from "../components/ai/AgentConversation.jsx";
 // `frontend/src/utils/pipelineState.js` for status semantics.
 import { stageStatus } from "../utils/pipelineState.js";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
-// AGENT.md §40 — helpers used by ≥2 call sites live in `utils/`, not inline.
-// `TestLabTabs` + `RetryButton` extracted from the inline IIFE + duplicated
-// banner/panel JSX that previously lived in this file.
+// AGENT.md §40 — `TestLabTabs` extracted from the inline IIFE that
+// previously lived in this file. `RetryButton` is also extracted but
+// consumed only by `RunBanners.jsx` (which imports it directly) and
+// `TestLabLaunchPanel.jsx`'s inline retry CTA — this file no longer
+// references it.
 import TestLabTabs from "../components/test-lab/TestLabTabs.jsx";
-import RetryButton from "../components/test-lab/RetryButton.jsx";
 // QueueTab extraction (AGENT.md §40) — the ~96-line inline Queue block
 // previously lived in this file; now owned by its own component. Reads
 // the same `activeQueueRuns` / `recentQueueRuns` / `queueFilter` props
@@ -60,10 +62,15 @@ import { buildRetryPayload, resolveGenerateRetryFields } from "../utils/runRetry
 // Run-center terminal banners (Done / Failed). Extracted so TestLab.jsx
 // stops growing every time we tweak the action-stack copy.
 import { RunDoneBanner, RunFailedBanner } from "../components/test-lab/RunBanners.jsx";
-// Config-panel scaffold — currently exports only `RequirementComposer`.
-// Subsequent PRs fold the dialsConfig section, environments dropdown,
-// launch stats, and Start/Generate buttons into the same module.
-import { RequirementComposer } from "../components/test-lab/TestLabConfigPanel.jsx";
+// Test Lab middle-column config body. Default export is the full
+// `tl-config` surface (error banner + Requirement composer + Test
+// Dials); the named `RequirementComposer` export is consumed
+// internally by the panel.
+import TestLabConfigPanel from "../components/test-lab/TestLabConfigPanel.jsx";
+// Test Lab right-rail launch / run-status panel — the `tl-panel`
+// surface. Pure pass-through: every value + handler is owned by this
+// page. See the component's JSDoc for the prop contract.
+import TestLabLaunchPanel from "../components/test-lab/TestLabLaunchPanel.jsx";
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -526,7 +533,7 @@ export default function TestLab() {
   // would race against the single-run driver if they shared a runId.
   // Once the migration completes, the single-run hook is removed and
   // every active run subscribes through this pool.
-  const multiSse = useMultiRunSSE();
+  useMultiRunSSE();
 
   // ── Queue state ──
   const [queueFilter, setQueueFilter]   = useState("all");
@@ -1792,451 +1799,82 @@ export default function TestLab() {
             </div>
           ) : (
             // ── Idle / Done: configuration ──
-            <div className="tl-config">
-              <div className="tl-config-scroll">
-
-                {/* Error banner — launch-time errors only; run-terminal
-                    banners live inside the run-center view above. */}
-                {error && (
-                  <div className="banner banner-error mb-md">
-                    {error}
-                  </div>
-                )}
-
-                {/* ── Requirement input + extras (Requirement tab only) ── */}
-                {tab === "requirement" && (
-                  <>
-                    {/* Test Name override — optional. Blank = auto-derive
-                        from the first line of the requirement at submit. */}
-                    <div className="tl-section">
-                      <div className="tl-section-label">
-                        Test Name
-                        <span className="tl-section-label-hint">
-                          (optional — auto-derived from the requirement if blank)
-                        </span>
-                      </div>
-                      <input
-                        className="tl-select tl-name-input"
-                        type="text"
-                        value={testName}
-                        onChange={e => setTestName(e.target.value)}
-                        placeholder="e.g. Dashboard loads all employee charts"
-                      />
-                    </div>
-
-                    {/* Requirement composer — single inline surface that
-                        bundles attachment chips, the textarea, and an action
-                        toolbar (📎 attach, Import Issue) below the input.
-                        Mirrors the chat-style composer pattern from
-                        ChatGPT / Claude / Cursor: file uploads aren't a
-                        separate section, they're an inline affordance on the
-                        message you're writing. */}
-                    <div className="tl-section">
-                      <div className="tl-section-label">Requirement / User Story</div>
-
-                      {showImportIssue && (
-                        <div className="tl-import-issue">
-                          <div className="tl-import-issue-label">
-                            Paste a Jira issue (title on first line, description below)
-                          </div>
-                          <textarea
-                            className="tl-req-area tl-import-issue-textarea"
-                            value={importIssueText}
-                            onChange={e => setImportIssueText(e.target.value)}
-                            placeholder={"PROJ-123 Login fails for SSO users\nAs a user with SSO enabled I expect to be redirected to the IdP…"}
-                            rows={4}
-                            autoFocus
-                          />
-                          <div className="tl-import-issue-actions">
-                            <button
-                              className="btn btn-ghost btn-xs"
-                              onClick={() => { setShowImportIssue(false); setImportIssueText(""); }}
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              className="btn btn-primary btn-xs"
-                              onClick={handleImportIssue}
-                              disabled={!importIssueText.trim()}
-                            >
-                              Import
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="tl-composer">
-                        {/* Attachment chips — render inline above the
-                            textarea (like Claude / ChatGPT) so users see what's
-                            attached as part of the message they're sending. */}
-                        {attachments.length > 0 && (
-                          <div className="tl-composer-chips">
-                            {attachments.map(a => (
-                              <span key={a.name} className="tl-attachment-chip" title={`${Math.round(a.content.length / 1000)}k chars`}>
-                                <Paperclip size={11} />
-                                <span className="tl-attachment-chip-name">{a.name}</span>
-                                <button
-                                  type="button"
-                                  className="tl-attachment-chip-remove"
-                                  onClick={() => removeAttachment(a.name)}
-                                  title="Remove attachment"
-                                  aria-label={`Remove ${a.name}`}
-                                >
-                                  <Trash2 size={10} />
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        <textarea
-                          ref={requirementRef}
-                          className="tl-req-area tl-composer-area"
-                          placeholder={"As a user I want to search for items so that I can find what I'm looking for…"}
-                          value={requirement}
-                          onChange={e => setRequirement(e.target.value)}
-                          // Cmd/Ctrl+Enter submits — matches GenerateTestModal's
-                          // single-key submit, but scoped to a modifier so plain
-                          // Enter still inserts a newline in this multi-line area.
-                          onKeyDown={e => {
-                            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                              e.preventDefault();
-                              if (requirement.trim() && selectedProject && !launching) {
-                                handleGenerateFromRequirement();
-                              }
-                            }
-                          }}
-                          rows={5}
-                        />
-
-                        {/* Action toolbar — paperclip + Import Issue render
-                            inside the composer footer, ChatGPT-style, so
-                            attachments aren't a parallel section the user has
-                            to scroll past. */}
-                        <div className="tl-composer-toolbar">
-                          <button
-                            type="button"
-                            className="tl-composer-action"
-                            onClick={() => fileInputRef.current?.click()}
-                            title="Attach a text file (.md, .json, .yaml, .feature, …)"
-                          >
-                            <Paperclip size={13} />
-                            <span>Attach</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="tl-composer-action"
-                            onClick={() => setShowImportIssue(v => !v)}
-                            title="Paste a Jira / GitHub issue and auto-split into name + description"
-                          >
-                            <Upload size={13} />
-                            <span>Import issue</span>
-                          </button>
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept={ACCEPTED_EXTENSIONS}
-                            multiple
-                            onChange={handleFileSelect}
-                            className="tl-file-input-hidden"
-                          />
-                          <span className="tl-composer-hint">
-                            <kbd>⌘ / Ctrl</kbd> + <kbd>Enter</kbd> to generate
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* ── Unified Test Dials surface ──
-                    Crawl tab gets the Explorer sub-tab (discovery mode + state-
-                    explorer tuning); Requirement tab hides it because the
-                    requirement flow doesn't crawl. The component is fully
-                    controlled — `dialsConfig` is the single source of truth and
-                    feeds the API call sites directly. */}
-                <TestConfig
-                  value={dialsConfig}
-                  onChange={setDialsConfig}
-                  showExplorer={tab === "crawl"}
-                  // Crawl tab: pick-a-URL vs. explore-state is the most
-                  // consequential choice on this flow, so we lift it out of
-                  // the sub-tab strip and render it as a prominent header.
-                  // Requirement tab keeps the sub-tab layout (no crawl ⇒ no
-                  // discovery decision to make).
-                  showDiscoveryHeader={tab === "crawl"}
-                  // `parallelWorkers` is consumed only by the test runner
-                  // (POST /projects/:id/run → testRunner.js). Both Test Lab
-                  // flows are pre-runner (crawl + AI generation), so the
-                  // backend silently ignores the field — hiding it avoids
-                  // surfacing a no-op control to users.
-                  showRunnerOptions={false}
-                />
-              </div>
-            </div>
+            // Full `tl-config` surface (error banner + Requirement
+            // composer + Test Dials) lives in `<TestLabConfigPanel>` —
+            // see `frontend/src/components/test-lab/TestLabConfigPanel.jsx`.
+            <TestLabConfigPanel
+              tab={tab}
+              error={error}
+              dialsConfig={dialsConfig}
+              setDialsConfig={setDialsConfig}
+              composerProps={{
+                testName,
+                setTestName,
+                requirement,
+                setRequirement,
+                requirementRef,
+                attachments,
+                onRemoveAttachment: removeAttachment,
+                showImportIssue,
+                setShowImportIssue,
+                importIssueText,
+                setImportIssueText,
+                onImportIssue: handleImportIssue,
+                onFileSelect: handleFileSelect,
+                fileInputRef,
+                acceptedExtensions: ACCEPTED_EXTENSIONS,
+                launching,
+                selectedProject,
+                onSubmit: handleGenerateFromRequirement,
+              }}
+            />
           )}
 
-          {/* ── Right: Launch panel / Run stats ── */}
-          <div className="tl-panel">
-            <div className="tl-panel-scroll">
-
-              {activeRun ? (
-                // ── Attached run: stats now live inline in the pipeline view.
-                // Right panel shows a minimal context card + quick navigation.
-                <>
-                  <div className="tl-panel-section-label">
-                    {isRunActive ? "Running" : isRunDone ? "Completed" : "Stopped"}
-                  </div>
-                  <div className="tl-stat-cell tl-stat-cell--header">
-                    <div className="tl-stat-cell__title">
-                      {selectedProject?.name ?? "—"}
-                    </div>
-                    <div className="tl-stat-cell__sub">
-                      {activeRun?.type === "crawl" ? "Crawl & Generate" : "From Requirement"}
-                    </div>
-                  </div>
-
-                  {/* Final test count — shown when done */}
-                  {(isRunDone || isRunFailed) && (
-                    <div className="tl-run-stats tl-run-stats--final">
-                      <div className="tl-run-stat tl-run-stat--accent">
-                        <div className="tl-run-stat-val">{runData?.testsGenerated ?? 0}</div>
-                        <div className="tl-run-stat-lbl">Tests generated</div>
-                      </div>
-                      <div className="tl-run-stat tl-run-stat--green">
-                        <div className="tl-run-stat-val">
-                          {ps.averageQuality != null ? ps.averageQuality : "—"}
-                        </div>
-                        <div className="tl-run-stat-lbl">Avg quality</div>
-                      </div>
-                    </div>
-                  )}
-
-                  <hr className="tl-panel-divider" />
-
-                  {isRunActive ? (
-                    <button
-                      className="btn btn-ghost tl-full-btn"
-                      onClick={handleStop}
-                      disabled={stopLoading}
-                    >
-                      <StopCircle size={15} />
-                      {stopLoading ? "Stopping…" : "Stop run"}
-                    </button>
-                  ) : (
-                    <div className="tl-btn-stack">
-                      {isRunDone && generatedOutcome.drafts > 0 && (
-                        <button
-                          className="btn btn-primary tl-full-btn"
-                          onClick={() => navigate(`/review-queue?projectId=${activeRun.projectId}`)}
-                        >
-                          Review {generatedOutcome.drafts} draft{generatedOutcome.drafts !== 1 ? "s" : ""} <ChevronRight size={13} />
-                        </button>
-                      )}
-                      {isRunDone && generatedOutcome.drafts === 0 && generatedOutcome.autoApproved > 0 && (
-                        <button
-                          className="btn btn-primary tl-full-btn"
-                          onClick={() => navigate(`/projects/${activeRun.projectId}?tab=tests`)}
-                        >
-                          View {generatedOutcome.autoApproved} auto-approved <ChevronRight size={13} />
-                        </button>
-                      )}
-                      {/* G11 — Retry shows on failed/aborted runs (not on
-                          completed runs — there's nothing to retry when the
-                          pipeline succeeded). Same handler the banner uses;
-                          the panel button is a redundant entry point for
-                          users who've scrolled past the top-of-page banner. */}
-                      {isRunFailed && (
-                        <button
-                          className="btn btn-primary tl-full-btn"
-                          onClick={handleRetry}
-                          disabled={launching}
-                          title="Re-run with the same configuration"
-                        >
-                          {launching ? (
-                            <><span className="spin"><RotateCcw size={13} /></span> Retrying…</>
-                          ) : (
-                            <><RotateCcw size={13} /> Retry run</>
-                          )}
-                        </button>
-                      )}
-                      <button
-                        className="btn btn-ghost tl-full-btn"
-                        onClick={() => navigate(`/runs/${activeRun.runId}`)}
-                      >
-                        View run detail <ChevronRight size={13} />
-                      </button>
-                      <button
-                        className="btn btn-ghost tl-full-btn"
-                        onClick={handleReset}
-                      >
-                        New run
-                      </button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                // ── Idle: launch panel + cross-project active runs ──
-                <>
-                  {tab === "crawl" && (
-                    <>
-                      <div className="tl-panel-section-label">Ready to Launch</div>
-                      <div className="tl-launch-stats">
-                        <div className="tl-stat-cell">
-                          <div className="tl-stat-val">
-                            {pagesFound != null ? pagesFound : <span className="tl-stat-placeholder">—</span>}
-                          </div>
-                          <div className="tl-stat-lbl">Pages found</div>
-                        </div>
-                        <div className="tl-stat-cell">
-                          <div className="tl-stat-val">
-                            {existingTests != null ? existingTests : <span className="tl-stat-placeholder">—</span>}
-                          </div>
-                          <div className="tl-stat-lbl">Existing tests</div>
-                        </div>
-                      </div>
-
-                      {pagesFound != null && (
-                        <div className="tl-estimate">
-                          Estimated: <strong>8–15 new tests</strong> · ~4 min
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {tab === "requirement" && (
-                    <>
-                      <div className="tl-panel-section-label">Ready to Launch</div>
-                      <div className="tl-launch-stats">
-                        <div className="tl-stat-cell">
-                          <div className="tl-stat-val">
-                            {existingTests != null ? existingTests : <span className="tl-stat-placeholder">—</span>}
-                          </div>
-                          <div className="tl-stat-lbl">Existing tests</div>
-                        </div>
-                        <div className="tl-stat-cell">
-                          <div className="tl-stat-val tl-stat-val--text">
-                            {requirement.trim() ? "Ready" : <span className="tl-stat-placeholder">—</span>}
-                          </div>
-                          <div className="tl-stat-lbl">Requirement</div>
-                        </div>
-                      </div>
-                      {requirement.trim() && (
-                        <div className="tl-estimate">
-                          Focused generation: <strong>1–5 new tests</strong> · ~1–2 min
-                        </div>
-                      )}
-                      <hr className="tl-panel-divider" />
-                      <div className="tl-panel-section-label">Examples</div>
-                      {REQ_EXAMPLES.map(ex => (
-                        <button
-                          key={ex}
-                          className="tl-example"
-                          onClick={() => setRequirement(ex)}
-                        >
-                          {ex}
-                        </button>
-                      ))}
-                      <hr className="tl-panel-divider" />
-                    </>
-                  )}
-
-                  {/* DIF-012: environment selector — only renders when the
-                      selected project has ≥ 1 environment. Same shape as the
-                      RunRegressionModal dropdown so the run/crawl/generate
-                      UX stays uniform. Styles live in `pages/test-lab.css`
-                      under `.tl-env-*` to keep this JSX inline-style free. */}
-                  {environments.length > 0 && (
-                    <div className="tl-env-section">
-                      <div className="tl-panel-section-label">Environment</div>
-                      <select
-                        className="tl-select tl-env-select"
-                        value={environmentId}
-                        onChange={(e) => setEnvironmentId(e.target.value)}
-                      >
-                        <option value="">Default (project URL)</option>
-                        {environments.map((env) => (
-                          <option key={env.id} value={env.id}>{env.name} — {env.baseUrl}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* CTA */}
-                  {!selectedProject && (
-                    <div className="banner banner-warning mb-md">
-                      Select a project to continue.
-                    </div>
-                  )}
-
-                  {tab === "crawl" && (
-                    <button
-                      className="btn btn-primary tl-full-btn--padded"
-                      disabled={!selectedProject || launching}
-                      onClick={handleStartCrawl}
-                    >
-                      {launching ? (
-                        <><span className="spin"><RotateCcw size={15} /></span> Starting…</>
-                      ) : (
-                        <><Play size={15} /> Start Crawl &amp; Generate</>
-                      )}
-                    </button>
-                  )}
-
-                  {tab === "requirement" && (
-                    <button
-                      className="btn btn-primary tl-full-btn--padded"
-                      disabled={!selectedProject || !requirement.trim() || launching}
-                      onClick={handleGenerateFromRequirement}
-                    >
-                      {launching ? (
-                        <><span className="spin"><RotateCcw size={15} /></span> Generating…</>
-                      ) : (
-                        <><Zap size={15} /> Generate Tests</>
-                      )}
-                    </button>
-                  )}
-
-                  <hr className="tl-panel-divider" />
-                  <div className="tl-panel-section-label">Active Runs</div>
-
-                  {activeQueueRuns.length === 0 ? (
-                    <div className="tl-active-run-empty">No active runs</div>
-                  ) : (
-                    activeQueueRuns.slice(0, 3).map(run => {
-                      const proj = projects.find(p => p.id === run.projectId);
-                      const pct  = run.currentStep != null
-                        ? Math.round(((run.currentStep - 1) / 7) * 100)
-                        : 0;
-                      return (
-                        <button
-                          key={run.id}
-                          type="button"
-                          className="tl-active-run-card tl-active-run-card-btn mb-sm"
-                          onClick={() => handleAttachRun(run)}
-                          title="View live pipeline for this run"
-                        >
-                          <div className="tl-arc-header">
-                            <ProjIcon project={proj} />
-                            <span className="tl-arc-name">{proj?.name ?? "—"}</span>
-                            <span className="badge badge-blue tl-arc-live-badge">live</span>
-                          </div>
-                          <div className="tl-arc-body">
-                            <div className="tl-arc-step">
-                              Step {run.currentStep ?? "?"}/8 · {PIPELINE_STAGES[(run.currentStep ?? 1) - 1]?.label}
-                            </div>
-                            <div className="progress-bar">
-                              <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+          {/* ── Right: Launch panel / Run stats ──
+              Extracted to `<TestLabLaunchPanel>` in
+              `frontend/src/components/test-lab/TestLabLaunchPanel.jsx`.
+              Pure pass-through: every value + handler is owned by this
+              page, so the visual + behavioural surface is byte-
+              identical to the inline version it replaces. */}
+          <TestLabLaunchPanel
+            // Run state
+            activeRun={activeRun}
+            runData={runData}
+            isRunActive={isRunActive}
+            isRunDone={isRunDone}
+            isRunFailed={isRunFailed}
+            ps={ps}
+            generatedOutcome={generatedOutcome}
+            stopLoading={stopLoading}
+            launching={launching}
+            // Tab + selection
+            tab={tab}
+            selectedProject={selectedProject}
+            projects={projects}
+            // Idle-mode data
+            pagesFound={pagesFound}
+            existingTests={existingTests}
+            requirement={requirement}
+            environments={environments}
+            environmentId={environmentId}
+            setEnvironmentId={setEnvironmentId}
+            activeQueueRuns={activeQueueRuns}
+            reqExamples={REQ_EXAMPLES}
+            pipelineStages={PIPELINE_STAGES}
+            setRequirement={setRequirement}
+            // DI — page-local avatar component closes over `avatarStyle`.
+            ProjIcon={ProjIcon}
+            // Handlers
+            onStop={handleStop}
+            onRetry={handleRetry}
+            onReset={handleReset}
+            onStartCrawl={handleStartCrawl}
+            onGenerate={handleGenerateFromRequirement}
+            onAttachRun={handleAttachRun}
+            onNavigateReviewQueue={(projectId) => navigate(`/review-queue?projectId=${projectId}`)}
+            onNavigateProjectTests={(projectId) => navigate(`/projects/${projectId}?tab=tests`)}
+            onNavigateRunDetail={(runId) => navigate(`/runs/${runId}`)}
+          />
         </div>
       )}
     </div>

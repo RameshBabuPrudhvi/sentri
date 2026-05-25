@@ -59,7 +59,7 @@ export async function generate(opts) {
         usage: { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens },
       };
     } finally { cleanup(); }
-  }, labelFor(provider));
+  }, labelFor(provider), signal);
 }
 
 export async function stream(opts, onToken) {

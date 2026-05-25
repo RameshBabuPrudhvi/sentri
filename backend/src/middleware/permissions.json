@@ -443,6 +443,11 @@
       "source": "backend/src/routes/settings.js",
       "$comment": "Migration 059 — pin / unpin the workspace-default AI Provider. Body: { default: true|false }. Dedicated endpoint (not part of PATCH) because setting a default has side effects on OTHER rows (clears the previous default in the same transaction) and the audit row needs a specific changed:[\"isWorkspaceDefault\"] shape so admins can filter for \"who pinned the default and when?\"."
     },
+    "GET /api/v1/settings/route-groups": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js",
+      "$comment": "B4.6 — read-only listing of route groups for the TopBar dropdown + future Settings subtab. Returns each group's strategy (weighted | latency | cost), memberCount, enabledMemberCount, and usedByRoles (agent_configs reverse-ref filtered to rg-* entries). Mutations are a follow-up roadmap item (docs/roadmap/ai-provider-bundle.md:397-405)."
+    },
     "GET /api/v1/settings/ai-requests": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"

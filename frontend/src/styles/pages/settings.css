@@ -290,6 +290,38 @@
    `.st-pr-*` prefix to stay scoped to the Settings page; no inline styles so
    the same look survives theme changes and the AGENT.md "no inline CSS" rule. */
 
+/* B3.0 — Section sub-tab strip. Mirrors the `.pd-tab-bar` / `.pd-tab` /
+   `.pd-tab--active` pattern from project-detail.css so the visual language is
+   consistent: underline-accent on the active tab, muted weight for inactive
+   tabs, no background/border on the strip itself. Used by AiProvidersSection
+   and any other Settings section that needs inner tabs. */
+.st-pr-subtabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.st-pr-subtabs .btn {
+  border: none;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  color: var(--text2);
+  font-weight: 400;
+  background: transparent;
+}
+.st-pr-subtabs .btn:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+.st-pr-subtab--active {
+  color: var(--accent) !important;
+  font-weight: 600 !important;
+  border-bottom-color: var(--accent) !important;
+}
+
 /* UX-AUDIT (May 2026) — page-level wrapper that stacks every AI Providers
    sub-card (spend caps, IO bar, create form, provider list, audit log,
    request log) with consistent vertical rhythm. Replaces the legacy

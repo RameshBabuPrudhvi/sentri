@@ -32,7 +32,7 @@ export async function generate({ messages, maxTokens, signal, model, apiKey }) {
         usage: { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens },
       };
     } finally { cleanup(); }
-  }, "Anthropic");
+  }, "Anthropic", signal);
 }
 
 export async function stream({ messages, maxTokens, signal, model, apiKey }, onToken) {

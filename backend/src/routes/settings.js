@@ -25,6 +25,11 @@ import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSe
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
+// B4.6 — read-only route-group surface for the TopBar dropdown +
+// future Settings subtab. Mutations live behind a separate roadmap item
+// (`docs/roadmap/ai-provider-bundle.md:397-405`); today this repo only
+// exposes `list` + `getById` + `listMembers`.
+import * as routeGroupRepo from "../database/repositories/routeGroupRepo.js";
 import * as aiRequestLogRepo from "../database/repositories/aiRequestLogRepo.js";
 import * as providerRouteAuditRepo from "../database/repositories/providerRouteAuditRepo.js";
 import { resetRouteBreakers } from "../aiProvider/registry.js";
@@ -154,6 +159,15 @@ router.post("/settings", requireRole("admin"), async (req, res) => {
   // ── Quick-switch: frontend sends "__use_existing__" to activate a provider
   // that already has a saved key without re-entering it. Just set the
   // active-provider override — no key is written or validated.
+  //
+  // @deprecated Phase 3 of the route-based provider switcher rollout.
+  // The TopBar dropdown no longer fires this branch — it now calls
+  // `POST /settings/ai-providers/:id/default` which flips
+  // `provider_routes.isWorkspaceDefault`. The branch is retained for
+  // backward compat with the legacy Settings UI (ProvidersSection.jsx
+  // and CompatProviderForm.jsx call `saveApiKey()` on form save which
+  // still uses this flow). See `setActiveProvider` JSDoc in
+  // `backend/src/aiProvider/registry.js` for deletion criteria.
   if (apiKey === "__use_existing__" && provider !== "local") {
     const configured = getConfiguredKeys();
     const hasCompat = isCompat && configured.compatProviders?.some((p) => p.provider === provider);
@@ -792,9 +806,22 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
     // Settings UI can show the operator what went wrong.
     const probed = await providerRouteRepo.probeAndPersist(req.workspaceId, existing.id, {
       userId: req.authUser?.sub || null,
+      // Rotation gate MUST run a fresh probe — the debounce window must
+      // not let a stale "reachable" verdict greenlight a newly-rotated
+      // bad key.
+      force: true,
     });
     const caps = probed?.capabilities;
-    const probeOk = caps && caps.reachable && caps.auth !== false && caps.model !== false;
+    // Bug 2 — strict truthiness + errorReason gate (same as ProbeBadge).
+    // Previously `caps.auth !== false` treated `null` as a pass, so a 402
+    // / unknown_error response from the candidate key could pass the
+    // rotation gate. Inverting to require explicit positive evidence
+    // closes that hole.
+    const probeOk = caps
+      && caps.reachable === true
+      && caps.auth === true
+      && caps.model === true
+      && !caps.errorReason;
     if (!probeOk) {
       // Roll back to the snapshot captured BEFORE the upsert. The
       // repo's diff-based audit emits ANOTHER rotate_key row pointing
@@ -861,8 +888,13 @@ router.post("/settings/provider-routes/:id/rotate-key", requireRole("admin"), as
 });
 
 router.post("/settings/provider-routes/:id/probe", requireRole("admin"), async (req, res) => {
+  // `force: true` bypasses the in-flight + recent-result debounce in
+  // `probeAndPersist`. An admin clicking "Re-probe" is explicitly asking
+  // for a fresh network call — the debounce only suppresses incidental
+  // duplicate auto-probes from UI mount loops, not operator-driven ones.
   const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
     userId: req.authUser?.sub || null,
+    force: true,
   });
   if (!updated) return res.status(404).json({ error: "Route not found" });
   return res.json({ ok: true, route: updated, capabilities: updated.capabilities });
@@ -1576,8 +1608,11 @@ router.delete("/settings/ai-providers/:id", requireRole("admin"), (req, res) => 
 
 /** Probe an AI Provider (network reachability + auth + model check). */
 router.post("/settings/ai-providers/:id/probe", requireRole("admin"), async (req, res) => {
+  // See `/settings/provider-routes/:id/probe` for why `force: true` —
+  // operator-driven probes bypass the debounce that guards auto-probes.
   const updated = await providerRouteRepo.probeAndPersist(req.workspaceId, req.params.id, {
     userId: req.authUser?.sub || null,
+    force: true,
   });
   if (!updated) return res.status(404).json({ error: "AI provider not found" });
   return res.json({ ok: true, route: toDisplayRoute(updated), capabilities: updated.capabilities });
@@ -1628,6 +1663,49 @@ router.post("/settings/ai-providers/:id/default", requireRole("admin"), (req, re
   }
 });
 
+/**
+ * B4.6 — Read-only route-groups listing for the TopBar AI Provider
+ * dropdown and the future Route Groups Settings subtab.
+ *
+ * Each row carries `memberCount` + `enabledMemberCount` aggregates so the
+ * frontend renders "Cheapest tier · 3 routes (2 healthy)" without a
+ * second round-trip per group. We also fold in `usedByRoles` (the same
+ * reverse-ref shape as `toDisplayRoute`) so operators see which agent
+ * roles dispatch through each group — groups are reachable today only
+ * via `agent_configs.routeId = "rg-..."`.
+ *
+ * Mutations (`POST/PATCH/DELETE`) intentionally NOT implemented here —
+ * the Settings UI for editing groups is a follow-up roadmap item
+ * (`docs/roadmap/ai-provider-bundle.md:397-405`). Today's surface is
+ * read-only so the dropdown can SHOW the operator-defined groups
+ * without claiming an editing affordance that doesn't exist yet.
+ */
+router.get("/settings/route-groups", requireRole("admin"), (req, res) => {
+  const groups = routeGroupRepo.list(req.workspaceId);
+  // Build a single reverse-ref map (routeId / groupId → role[]) so the
+  // N+1 from per-group reads is avoided. `agent_configs.routeId` carries
+  // both shapes; we partition by the `rg-` prefix.
+  const rolesByGroupId = new Map();
+  for (const cfg of agentConfigRepo.listByWorkspace(req.workspaceId)) {
+    if (!cfg.routeId) continue;
+    if (typeof cfg.routeId === "string" && cfg.routeId.startsWith("rg-")) {
+      const list = rolesByGroupId.get(cfg.routeId) || [];
+      list.push(cfg.role);
+      rolesByGroupId.set(cfg.routeId, list);
+    }
+  }
+  // Strategy → human label. Kept inline so the frontend doesn't have to
+  // duplicate the mapping — same convention as `FAMILY_DISPLAY_LABEL`.
+  const STRATEGY_LABEL = { weighted: "Weighted", latency: "Lowest latency", cost: "Cheapest" };
+  res.json({
+    groups: groups.map((g) => ({
+      ...g,
+      strategyLabel: STRATEGY_LABEL[g.strategy] || g.strategy,
+      usedByRoles: rolesByGroupId.get(g.id) || [],
+    })),
+  });
+});
+
 /** Rotate API key for an AI Provider — identical logic to provider-routes rotate-key. */
 router.post("/settings/ai-providers/:id/rotate-key", requireRole("admin"), async (req, res) => {
   // Re-use the original handler by rewriting the param and delegating to
@@ -1653,9 +1731,16 @@ router.post("/settings/ai-providers/:id/rotate-key", requireRole("admin"), async
     });
     const probed = await providerRouteRepo.probeAndPersist(req.workspaceId, existing.id, {
       userId: req.authUser?.sub || null,
+      // Rotation gate — see /settings/provider-routes/:id/rotate-key.
+      force: true,
     });
     const caps = probed?.capabilities;
-    const probeOk = caps && caps.reachable && caps.auth !== false && caps.model !== false;
+    // Strict gate — see /settings/provider-routes/:id/rotate-key (Bug 2).
+    const probeOk = caps
+      && caps.reachable === true
+      && caps.auth === true
+      && caps.model === true
+      && !caps.errorReason;
     if (!probeOk) {
       providerRouteRepo.upsert({
         id: existing.id, workspaceId: req.workspaceId,

@@ -217,6 +217,23 @@ export const api = {
   setAiProviderDefault: (id, isDefault) =>
     req("POST", `/settings/ai-providers/${id}/default`, { default: !!isDefault }),
   /**
+   * B4.6 — Read-only route-groups list. Each entry carries `strategy`
+   * (`weighted` | `latency` | `cost`), `memberCount`, `enabledMemberCount`,
+   * `strategyLabel`, and `usedByRoles` (agent_configs reverse-ref).
+   *
+   * Consumed by the TopBar AI Provider dropdown to surface operator-defined
+   * groups above the per-route list. Mutations (create / edit / delete) are
+   * a follow-up roadmap item — today the dropdown links to Agent Roles
+   * Settings as the assignment surface.
+   *
+   * Returns `{ groups: [] }` (not an error) when the backend doesn't yet
+   * expose the endpoint, so callers can `.catch(() => ({ groups: [] }))`
+   * for graceful degradation in older deployments.
+   *
+   * @returns {Promise<{groups: Array<{id: string, name: string, strategy: string, strategyLabel: string, memberCount: number, enabledMemberCount: number, usedByRoles: string[]}>}>}
+   */
+  listRouteGroups: () => req("GET", "/settings/route-groups"),
+  /**
    * B3.5 — Download a schema-v1 JSON dump of every provider_routes row
    * in the current workspace. Secrets are NEVER in the payload (only
    * `apiKeyLastFour` round-trips), so the file is safe to share with

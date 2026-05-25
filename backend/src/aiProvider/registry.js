@@ -15,7 +15,7 @@ import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 import * as compatConfigCache from "../utils/compatConfigCache.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER, getCloudModel } from "./modelCatalog.js";
+import { CLOUD_KEY_MAP, CLOUD_DETECT_ORDER, getCloudModel, getOpenRouterBaseUrl } from "./modelCatalog.js";
 import { protocolForProvider } from "./protocolForProvider.js";
 // B4.6 — route-group resolution. When `agent_configs.routeId` starts
 // with `"rg-"`, the id points at a `route_groups` row instead of a
@@ -292,7 +292,54 @@ export function setRuntimeOllama({ baseUrl, model, disabled } = {}) {
   }
 }
 
+/**
+ * @deprecated Phase 3 of the route-based provider switcher rollout.
+ *
+ * Sets the in-memory `runtimeActiveProvider` override consulted by
+ * `detectProvider()` — the legacy "active provider id enum" path.
+ * Superseded by `provider_routes.isWorkspaceDefault` (Migration 059)
+ * + `providerRouteRepo.setWorkspaceDefault()`, which `resolveRoute()`
+ * honours BEFORE falling through to env detection. The new path lets
+ * a single workspace pin one of N routes per family, surfaces the
+ * choice in the AI Providers UI, and persists across restarts —
+ * `runtimeActiveProvider` does none of those.
+ *
+ * Still called by:
+ *   • `POST /settings` (`__use_existing__` quick-switch + new-key
+ *     activation + Ollama / compat flows). The TopBar dropdown no
+ *     longer hits this path post-Phase-1, but the legacy Settings
+ *     UI (`ProvidersSection.jsx`, `CompatProviderForm.jsx`) still
+ *     does on save.
+ *   • Five test files exercising the env-only / compat-slot paths.
+ *
+ * Deletion criteria — remove this function (and the
+ * `runtimeActiveProvider` state above + the `__use_existing__` HTTP
+ * branch in `backend/src/routes/settings.js:154-171`) when:
+ *   1. Migration 061 backfills every workspace with at least one
+ *      `provider_routes` row, AND
+ *   2. Every Settings save flow has been migrated to the
+ *      `provider_routes.upsert` + `setWorkspaceDefault` pair, AND
+ *   3. The legacy tests are rewritten to drive dispatch via
+ *      `resolveRoute()` instead of `setActiveProvider()`.
+ *
+ * Tracked under "AI Provider switcher Phase 3 cleanup" in ROADMAP.md.
+ *
+ * @param {string|null} provider
+ */
+let _setActiveProviderWarned = false;
 export function setActiveProvider(provider) {
+  // One-shot deprecation log so deployments see the call site without
+  // spamming once-per-request. The warning lands in the operator's
+  // server logs (not the HTTP response) so legacy clients don't observe
+  // a behaviour change. Skipped under NODE_ENV=test so test runs stay
+  // quiet — the deprecation is a deployment signal, not a test signal.
+  if (!_setActiveProviderWarned && process.env.NODE_ENV !== "test") {
+    _setActiveProviderWarned = true;
+    console.warn(formatLogLine(
+      "warn", null,
+      "[aiProvider] setActiveProvider() is deprecated — pin a provider_routes row via setWorkspaceDefault() instead. See ROADMAP.md \"AI Provider switcher Phase 3 cleanup\".",
+    ));
+  }
   runtimeActiveProvider = provider || null;
   // User chose a provider — clear sticky fallback so detection re-evaluates.
   clearStickyFallback();
@@ -646,6 +693,21 @@ function synthesiseTransientRoute({ provider, model, workspaceId }) {
   // `getCompatConfig().model` higher up the stack.
   let effectiveModel = model || null;
   let effectiveBaseUrl = null;
+  // Bug-fix (Open-router-key-leak): family="openrouter" routes synthesised
+  // from env detection had `baseUrl: null`, which made `protocols/openai.js`
+  // fall through to the OpenAI SDK's hardcoded `api.openai.com` default —
+  // the OpenRouter key would then be sent to OpenAI's servers (rejected
+  // 401, but the wire request still happened). Populate the canonical
+  // OpenRouter endpoint here so dispatch reaches the right host.
+  // Keep this in sync with `getFamilyDefaultBaseUrl()` in
+  // `backend/src/aiProvider/protocols/openai.js` — both must honour
+  // the same `OPENROUTER_BASE_URL` env-var override.
+  if (provider === "openrouter") {
+    // Single source of truth in `modelCatalog.getOpenRouterBaseUrl()` —
+    // honours the documented `OPENROUTER_BASE_URL` override (see
+    // `REFERENCE.md` + `docker-compose.yml`) for self-hosted proxies.
+    effectiveBaseUrl = getOpenRouterBaseUrl();
+  }
   if (isCompatProvider(provider)) {
     // Compat slots carry their own baseUrl + model on the slot config
     // (not in the env). The dispatcher's SSRF-guardedFetch is gated on
