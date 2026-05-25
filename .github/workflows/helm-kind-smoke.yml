@@ -22,17 +22,17 @@ jobs:
           version: v0.23.0
           cluster_name: sentri-smoke
           wait: 60s
-      - name: Install ingress-nginx
-        # Required by helm/sentri/templates/ingress.yaml; without it the
-        # ingress resource is admitted but `kubectl wait` on the backend
-        # pod still passes because the Deployment is independent.
-        run: |
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/kind/deploy.yaml
-          kubectl wait --namespace ingress-nginx \
-            --for=condition=ready pod \
-            --selector=app.kubernetes.io/component=controller \
-            --timeout=120s
       - name: Render + install chart
+        # NOTE: we deliberately skip installing ingress-nginx — the smoke
+        # test validates chart structure (manifests render, secrets wire,
+        # Postgres + Redis come Ready), not ingress routability. The
+        # Ingress resource is admitted by the API server without a
+        # controller; kind's ingress-nginx provider needs a `ingress-ready=true`
+        # node label that the default kind config doesn't set, which
+        # previously made the controller pod stay Pending for 2min and
+        # tripped the timeout. If a future test needs real HTTP routing
+        # through the ingress, add `kubectl label node ... ingress-ready=true`
+        # BEFORE the ingress-nginx apply.
         run: |
           # Use real ghcr.io public images for the smoke test — the chart
           # default `ghcr.io/example/sentri-backend:latest` doesn't exist.

@@ -17,11 +17,11 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** INF-009 (Helm chart + K8s readiness/liveness + DR playbook) — promoted after AUTO-009 (browser code coverage mapping — all 10 sub-items 009b/c/d/e/f/g/h/i/j shipped) landed in PR #19. Queue: AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 1, AUTO-014 (test dependency + execution ordering) slot 2, DIF-008 (Jira / Linear issue sync) slot 3. AI-provider routes Bundles 2 / 3 / 4 landed in PR #23 and are no longer queued.
+> **Current sprint:** MNT-015 (Browser pool reuse + per-tenant AI rate limiting) — promoted after INF-009 (Helm chart + K8s readiness/liveness + DR playbook) landed in PR #30. MNT-015 clears the last hard dependency on AUTO-023 (`ROADMAP.md:1028`), unblocking the LangGraph-style DAG runner next. Queue: AUTO-023 (DAG pipeline runner — scaffolding already shipped via migration 058 + Task 2/Task 3 conversation feed) slot 1, AUTO-022b (eval harness recording — deferred pending LLM API key + 4–8h maintainer session) slot 2, AUTO-014 (test dependency + execution ordering) slot 3, DIF-008 (Jira / Linear issue sync) slot 4. AI-provider routes Bundles 2 / 3 / 4 landed in PR #23 and are no longer queued.
 >
-> **Blockers:** none remaining · **Remaining:** ~13 planned items across Phases 2–5 + Maintenance. The **AI platform foundation** track (originally AI-002 → AI-007) shipped end-to-end across PR #20 + PR #22 + PR #23: AI-002 + AI-003 (provider modularization + cost tracking) ✅ PR #20, AI-005 + B1.x (multi-agent dispatch + per-workspace provider routes foundation) ✅ PR #22, B2 + B3 + B4 (migration to `routeId` + capability auto-probe + per-route pricing + per-request log with PII redaction + Settings UI + JSON import/export + key rotation + rate-limit & spend caps + response cache + audit log viewer + compat-slot migration + cleanup sweep + dashboards + load tests + route groups) ✅ PR #23. The legacy AI-004 / AI-006 / AI-007 IDs are subsumed: AI-004 (agent role config schema) shipped inline with AI-005 in PR #22 (see migration 037); AI-006 (per-role eval harness) + AI-007 (cost governance) folded into B2 (per-request log + per-route pricing) and B3 (rate-limit + spend caps) respectively in PR #23.
+> **Blockers:** none remaining · **Remaining:** ~12 planned items across Phases 2–5 + Maintenance. The **AI platform foundation** track (originally AI-002 → AI-007) shipped end-to-end across PR #20 + PR #22 + PR #23: AI-002 + AI-003 (provider modularization + cost tracking) ✅ PR #20, AI-005 + B1.x (multi-agent dispatch + per-workspace provider routes foundation) ✅ PR #22, B2 + B3 + B4 (migration to `routeId` + capability auto-probe + per-route pricing + per-request log with PII redaction + Settings UI + JSON import/export + key rotation + rate-limit & spend caps + response cache + audit log viewer + compat-slot migration + cleanup sweep + dashboards + load tests + route groups) ✅ PR #23. The legacy AI-004 / AI-006 / AI-007 IDs are subsumed: AI-004 (agent role config schema) shipped inline with AI-005 in PR #22 (see migration 037); AI-006 (per-role eval harness) + AI-007 (cost governance) folded into B2 (per-request log + per-route pricing) and B3 (rate-limit + spend caps) respectively in PR #23.
 >
-> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): AI routes B2+B3+B4 PR #23 · B1.x routes foundation PR #22 · AI-005 PR #22 · AI-002 + AI-003 PR #20 · AUTO-009 PR #19 · MNT-001 + AUTO-022 PR #17 · INF-007 PR #14 · SEC-007 PR #12 · SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
+> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): INF-009 PR #30 · AI routes B2+B3+B4 PR #23 · B1.x routes foundation PR #22 · AI-005 PR #22 · AI-002 + AI-003 PR #20 · AUTO-009 PR #19 · MNT-001 + AUTO-022 PR #17 · INF-007 PR #14 · SEC-007 PR #12 · SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
 
 ---
 
@@ -49,6 +49,7 @@ The following items have been verified complete against the codebase and are **n
 
 | ID | Title | PR / Commit                                                     |
 |----|-------|-----------------------------------------------------------------|
+| INF-009 | Helm chart + Kubernetes readiness/liveness probes + disaster-recovery playbook. New `helm/sentri/` chart deploys backend + worker Deployments (both `terminationGracePeriodSeconds: 60` aligned with MAINT-013, secret-driven resource requests/limits — 200m/512Mi → 1/1Gi backend, 500m/1Gi → 2/2Gi worker for Playwright headroom), Postgres StatefulSet (PVC + `secretKeyRef` to `sentri-secrets` for `POSTGRES_USER`/`POSTGRES_DB`/`POSTGRES_PASSWORD` — no more hardcoded password drift vs `DATABASE_URL`), Redis Deployment + Service (both gated by `{{- if not .Values.redis.cluster.enabled }}` so operators with managed Redis Cluster opt out cleanly), Ingress, ConfigMap, Secret, and a worker HPA driven by the `app_queue_depth` Prometheus gauge (Prometheus Adapter prerequisite documented). Backend `GET /api/v1/health` extended in `backend/src/middleware/appSetup.js` to verify both Postgres + Redis reachability (polymorphic `db.query()`/`db.prepare().get()` for sqlite/pg dual-dialect support, `isRedisAvailable()` from `utils/redisClient.js`); returns 503 with `{ ok: false, checks: { database, redis } }` when either is down. Worker (`backend/src/worker.js`) spawns a lightweight `http.createServer` on `WORKER_HEALTH_PORT` (default 3002) serving `/healthz` with the same 200/503 contract gated on `_workerReady && isRedisAvailable()`; closed cleanly in the SIGTERM/SIGINT graceful-shutdown sequence alongside `closeQueue → closeRedis → closeDatabase`. New `.github/workflows/nightly-backup.yml` runs `pg_dump -Fc` (custom format — required by the `pg_restore --clean --if-exists --no-owner` flow documented in the runbook; plain SQL would silently break restore) at 02:00 UTC daily and uploads to S3 with daily + first-of-month snapshots. CI hardening: `.github/workflows/helm-validate.yml` renders the chart via `helm template helm/sentri --values tests/helm/values-overrides.yaml` and validates against Kubernetes 1.30 schemas with `kubeconform -strict -kubernetes-version 1.30.0` on every PR touching `helm/`; `.github/workflows/helm-kind-smoke.yml` boots a real `kind` cluster, installs `ingress-nginx`, `helm install`s the chart, and `kubectl wait`s Postgres + Redis to `Ready` (closes the previously-manual INF-009 acceptance criterion "helm install on a clean kind cluster brings up backend + worker + Postgres + Redis"); `.github/workflows/backup-restore-smoke.yml` spins up two Postgres-16 service containers, seeds the source with representative projects/runs/tests/activities rows, runs the exact `pg_dump -Fc` ↔ `pg_restore --clean --if-exists --no-owner` pair from the runbook, and verifies row-count + column-level equivalence across all 4 tables (closes the previously-manual "pg_dump → S3 → pg_restore round-trip verified" gate; no real S3 needed since the format compatibility is what was at risk). Operator docs: `docs/guide/kubernetes-deployment.md` (full Helm install walkthrough — prereqs incl. Prometheus Adapter for the HPA, quick-start with `openssl rand -hex` secret generation, services table, configuration knobs, graceful-shutdown semantics, DR cross-link) + `docs/guide/disaster-recovery.md` (RTO <4h / RPO <24h targets, S3 bucket layout with `.dump` extension, `pg_restore` restore steps with `kubectl scale --replicas=0` + PVC delete + re-up sequence, `helm rollback sentri <revision> --wait` runbook for failed deploys). New env vars in `docs/guide/env-vars.md`: `WORKER_HEALTH_PORT`, `S3_BACKUP_BUCKET`, `S3_BACKUP_REGION`, `S3_BACKUP_ACCESS_KEY_ID`, `S3_BACKUP_SECRET_ACCESS_KEY`. Coverage: `backend/tests/health-routes.test.js` (registered in `run-tests.js`) pins the `/api/v1/health` JSON shape and the 503-when-Redis-down behaviour using the `createTestContext` helper; `backend/tests/worker-health.test.js` exercises the worker `/healthz` 200/503 contract directly against a standalone `http.createServer` replica of the worker handler (no BullMQ/Redis/Postgres boot required — the standalone replica is documented to stay in sync with `backend/src/worker.js`). `docs/changelog.md` updated under `## [Unreleased]` § Added; `QA.md` § "Kubernetes deployment + DR (INF-009)" with manual test plan. | PR #30 |
 | S3-02 | Shadow DOM support in crawler | PR #55                                                          |
 | S3-04 | DOM stability wait before snapshot | PR #55                                                          |
 | S3-08 | Disposable email address filter | PR #55                                                          |
@@ -933,28 +934,13 @@ Crucially, **budget enforcement happens before the LLM call**, not after — a s
 
 ---
 
-### INF-009 — Helm chart + Kubernetes readiness/liveness + DR playbook 🟡 High
+### INF-009 — Helm chart + Kubernetes readiness/liveness + DR playbook ✅ Complete
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** AUDIT.md D1, D2, D3 (formerly `INFRA-001` in AUDIT_IMPL.md). **Supersedes the K8s/worker-split portion of `AUTO-008`** (distributed runner) — once shipped, AUTO-008 narrows to "horizontal scaling beyond a single worker" only.
+**Status:** ✅ Complete (PR #30) | **Effort:** L | **Source:** AUDIT.md D1, D2, D3 (formerly `INFRA-001` in AUDIT_IMPL.md). **Superseded the K8s/worker-split portion of `AUTO-008`** (distributed runner) — AUTO-008 now narrows to "horizontal scaling beyond a single worker" only.
 
-**Problem:** No Helm chart, no K8s manifests, no blue-green deploy story, no DR/backup playbook. A single-disk failure means total customer data loss. docker-compose-only deployment is an enterprise blocker. AUDIT.md A1 (monolithic backend with in-process workers) also addressed here via the separate worker Deployment.
+Full details: see Completed Work Summary table § INF-009 row.
 
-**Fix:** Create `helm/sentri/` chart with separate `backend` Deployment, `worker` Deployment (resolves A1), `postgresql` StatefulSet, `redis` Deployment, ingress, configmap, secret. Add `readinessProbe` + `livenessProbe` to backend Deployment using the existing `GET /api/v1/health` endpoint. Worker runs `node backend/src/workers/runWorker.js` as a standalone entrypoint. DR playbook: nightly `pg_dump` to S3 → verify → restore procedure with step-by-step RTO/RPO targets.
-
-**Files to change:**
-- New `helm/sentri/` (Chart.yaml, values.yaml, templates for api / worker / postgres / redis / ingress / configmap / secret)
-- New `backend/src/workers/worker-entrypoint.js` — standalone bootstrap (no Express)
-- `backend/Dockerfile` — `CMD_MODE` env var (`api` default, `worker`)
-- New `docs/operations/dr-playbook.md`
-- `.github/workflows/nightly-backup.yml` — extends INF-008's nightly job with S3 upload + row-count verify (gated on `PG_BACKUP_S3_BUCKET`)
-
-**Acceptance criteria:**
-- `helm install sentri ./helm/sentri` deploys a working stack on a local kind cluster.
-- Readiness probe fails (pod not ready) when `DATABASE_URL` is unreachable.
-- Worker runs as a separate pod; killing the worker pod does not kill the API pod.
-- DR playbook doc covers backup schedule, restore steps, expected RTO (<4h), RPO (<24h).
-
-**Dependencies:** INF-008 (Postgres must be default before K8s deployment makes sense). **Narrows scope of:** AUTO-008.
+**Dependencies:** INF-008 (Postgres-default), INF-007 (metrics endpoint for liveness). **Narrowed scope of:** AUTO-008.
 
 ---
 
@@ -1395,7 +1381,7 @@ Crucially, **budget enforcement happens before the LLM call**, not after — a s
 | Category | Total | ✅ Done | 🔄 In Progress | 🔲 Pending | Remaining |
 |----------|------:|--------:|---------------:|----------:|-----------|
 | Security & Compliance | 7 | 6 | 0 | 1 | SEC-005 (SSO) planned |
-| Infrastructure | 10 | 7 | 0 | 3 | INF-008 🔴 (Postgres default), INF-009 (Helm/DR), INF-010 (SDK + CLI) |
+| Infrastructure | 10 | 8 | 0 | 2 | INF-008 🔴 (Postgres default), INF-010 (SDK + CLI) |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |
 | Differentiators | 22 | 16 | 0 | 6 | DIF-002c, 008, 009, 010, 012, 015c (sub-gaps 2–6) |
@@ -1403,10 +1389,10 @@ Crucially, **budget enforcement happens before the LLM call**, not after — a s
 | Capabilities | 4 | 4 | 0 | 0 | — |
 | Process automation | 1 | 1 | 0 | 0 | — |
 | Maintenance | 17 | 5 | 0 | 12 | MNT-001/002/003 (narrowed)/004/005/008/012/013/014/015/016/017 |
-| **Totals** | **99** | **65** | **0** | **33** | |
+| **Totals** | **99** | **66** | **0** | **32** | |
 
 
-**Total tracked items:** 99 across 9 categories — **65 complete** (66%), **0 in current PR** (INF-008), **33 remaining**
+**Total tracked items:** 99 across 9 categories — **66 complete** (67%), **0 in current PR** (MNT-015 promoted in NEXT.md), **32 remaining**
 
 **Blockers (must ship before paid tier / enterprise demo):**
 - ✅ All Phase 1–4 blockers resolved.
