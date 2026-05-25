@@ -603,6 +603,29 @@ export function eventsToTurns(events) {
       });
       continue;
     }
+    // AUTO-023 B4.1 — weak-supervisor-model advisory. Backend's
+    // `supervisorAgent.maybeWarnWeakSupervisorModel` emits an
+    // `agent_event` with `phase: "finding"` + `data.kind ===
+    // "supervisor_weak_model"` once per autonomous thread when the
+    // supervisor route resolves to a low-reasoning model (Haiku/Mini/
+    // Flash/Nano/7b/8b). Same standalone-warning rendering pattern as
+    // the single-agent-collapse branch above — without it the operator
+    // never sees the "your orchestrator is on a cheap model" signal.
+    if (evt.phase === "finding" && evt.data?.kind === "supervisor_weak_model") {
+      const text = prettifyMessage(evt.message)
+        || `Supervisor running on weak model ${evt.data.model || "(unknown)"}; consider Claude Sonnet / GPT-4o / Gemini Pro.`;
+      turns.push({
+        id: `evt-${key}-supervisor-weak-${turns.length}`,
+        agent: evt.agent,
+        phase: "finding",
+        step,
+        text,
+        ts,
+        _complete: true,
+        _warning: true,
+      });
+      continue;
+    }
     if (evt.phase === "finding" || evt.phase === "progress") {
       // Merge into the open doing turn for this (step, agent). When no
       // start preceded this event (orphan finding — possible if the SSE
@@ -742,6 +765,16 @@ export function messagesToTurns(messages) {
       // "Round 1" noise on the very first turn.
       const isLoopIntent = intent === "request_revision" || intent === "accept" || intent === "reject_final";
       const showRoundBadge = isLoopIntent || (intent === "handoff" && round > 0);
+      // AUTO-023 B4 — supervisor handoffs use the `round` field to
+      // carry the autonomous-thread STEP index, not a reviewer↔author
+      // ROUND index. Flag the turn with `_supervisorStep: true` so
+      // `AgentConversation.jsx` labels the badge "Step N / 20" instead
+      // of "Round N" — same badge surface, different semantic for
+      // operators. `messagesToTurns` is also the only producer of
+      // supervisor → next-role envelopes (no `agent_event` channel
+      // emits them today), so this flag is the only place the
+      // semantic distinction can be set.
+      const isSupervisorHandoff = m.fromRole === "supervisor" && intent === "handoff";
       return {
         id: `msg-${m.id || idx}`,
         agent: m.fromRole,
@@ -750,7 +783,8 @@ export function messagesToTurns(messages) {
         text,
         ts: m.createdAt ? Date.parse(m.createdAt) || Date.now() : Date.now(),
         _complete: true,
-        _round: showRoundBadge ? round : undefined,
+        _round: showRoundBadge || isSupervisorHandoff ? round : undefined,
+        _supervisorStep: isSupervisorHandoff || undefined,
       };
     });
 }

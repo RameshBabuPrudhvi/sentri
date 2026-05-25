@@ -61,6 +61,14 @@
   --ac-reviewer-bg:     rgba(74, 222, 128, 0.10);
   --ac-reviewer-fg:     var(--green);
   --ac-reviewer-border: rgba(74, 222, 128, 0.25);
+
+  /* AUTO-023 Bundle 4 — supervisor reuses the planner-tier teal palette
+     because `AGENT_PERSONAS.supervisor.color === "planner"` (set in
+     `agentConversationSynth.js` to avoid inventing new tokens for a role
+     that shares planner-adjacent semantics). The supervisor-specific
+     badge modifier below references the planner tokens explicitly so a
+     future palette refresh that re-keys supervisor to its own colour
+     swaps in one place. */
 }
 
 /* ─── Turn (article) ──────────────────────────────────────────────────────── */
@@ -95,6 +103,13 @@
 .ac-avatar--author   { background: var(--ac-author-bg);   border-color: var(--ac-author-border); }
 .ac-avatar--oracle   { background: var(--ac-oracle-bg);   border-color: var(--ac-oracle-border); }
 .ac-avatar--reviewer { background: var(--ac-reviewer-bg); border-color: var(--ac-reviewer-border); }
+/* AUTO-023 B4 — supervisor + healer reuse planner / oracle palettes per
+   `AGENT_PERSONAS.{supervisor,healer}.color`. Explicit avatar rules so
+   the CSS lookup matches the same `--<color>` modifier chain the bubble
+   + label use. Without these the avatar would render with no background
+   when a supervisor handoff turn appears. */
+.ac-avatar--planner.ac-avatar--planner { /* no-op, keeps planner rule single-source */ }
+
 
 /* ─── Bubble ──────────────────────────────────────────────────────────────── */
 
@@ -145,6 +160,18 @@
   font-size: 0.66rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* AUTO-023 B4 — supervisor step indicator. The same `_round` field
+   carries the autonomous-thread step index (0..MAX_AUTONOMOUS_STEPS-1)
+   instead of a reviewer↔author round index, so the badge gets the
+   planner palette (matching the supervisor avatar) to visually
+   disambiguate "Step 3 / 20" from "Round 2". Same shape + size as the
+   reviewer-tier badge so the row layout stays consistent. */
+.ac-round-badge--supervisor {
+  background: var(--ac-planner-bg);
+  border-color: var(--ac-planner-border);
+  color: var(--ac-planner-fg);
 }
 
 .ac-text {

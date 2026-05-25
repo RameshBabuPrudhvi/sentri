@@ -76,6 +76,13 @@ const files = [
   // verdict → envelope intent mapping, oracle handoff round-trip,
   // unavailable-role envelopes, and dispatch-error containment.
   "tests/autonomous-dispatch.test.js",
+  // AUTO-023 B4.7 — end-to-end acceptance pin for autonomous mode:
+  // composes orchestrator + supervisor LLM bridge + role dispatcher
+  // under stubbed generateText so a workspace flagged `'autonomous'`
+  // produces tests via real supervisor routing decisions. Covers
+  // single-turn terminate, multi-turn reviewer revise loop, and
+  // supervisor parse-error safe termination.
+  "tests/autonomous-mode-e2e.test.js",
   "tests/reviewer-prompt.test.js",
   // AUTO-023 B3.3 — per-workspace `agent_configs.maxReviewRounds` override
   // (migration 059). Pins the repo-layer `[1, 10]` clamp + the loop's
