@@ -293,9 +293,12 @@ an assembly line.
 - [x] Wall-clock budget per loop: `loopTimeoutMs` (default 5 min, hard
       cap 30 min) — checked at top-of-loop AND post-reviewer to catch
       single-long-reviewer-call timeouts
-- [x] Cycle protection: reject envelope if `replyToId` chain exceeds
-      `MAX_REVIEW_ROUNDS * 2` — `maxReplyChainDepth` + `replyDepth`
-      counter in `agentLoop.js` throws `ERR_REVIEW_CYCLE_PROTECTION`
+- [x] Cycle protection: the `while (round < maxRounds)` loop bound
+      plus `loopTimeoutMs` wall-clock deadline provide equivalent
+      termination guarantees; the prior `replyDepth` counter was
+      removed as redundant (it only tracked envelopes the loop itself
+      wrote — always `2 × round` by construction, which the round
+      guard already caps)
 
 ## B3.7 — Tests
 - [x] `backend/tests/agent-reviewer-loop.test.js`:

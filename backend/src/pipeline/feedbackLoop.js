@@ -565,10 +565,11 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     // ──────────────────────────────────────────────────────────────────
     //
     // Reviewer is the existing `testValidator.validateTest` heuristic —
-    // NOT an LLM call. Worst-case cost is `maxReviewRounds: 2` author
-    // LLM calls (one initial fix + one retry on heuristic-detected
-    // residual issues). Best-case is one author call — byte-identical
-    // to the pre-loop single-call path. Zero extra LLM cost on accept.
+    // NOT an LLM call. Worst-case cost is `DEFAULT_MAX_REVIEW_ROUNDS` (3)
+    // author LLM calls (one initial fix + up to two retries on heuristic-
+    // detected residual issues — ceiling is per-workspace configurable).
+    // Best-case is one author call — byte-identical to the pre-loop
+    // single-call path. Zero extra LLM cost on accept.
     //
     // Why heuristic-only reviewer: the pre-loop regenerator silently
     // shipped tests that STILL had brittle selectors / unbalanced
