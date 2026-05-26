@@ -55,6 +55,11 @@ const files = [
   "tests/agent-envelope.test.js",
   "tests/agent-message-repo.test.js",
   "tests/agent-message-emitter.test.js",
+  "tests/agent-blackboard.test.js",
+  "tests/agent-tools-registry.test.js",
+  "tests/agent-peer-qa.test.js",
+  "tests/agent-tool-call-envelope.test.js",
+  "tests/agent-tools-orchestrator.test.js",
   "tests/agent-reviewer-loop.test.js",
   "tests/agent-orchestrator.test.js",
   // AUTO-023 B4.1 — supervisor prompt builder + decision normaliser

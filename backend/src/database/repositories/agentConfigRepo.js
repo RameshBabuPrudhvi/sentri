@@ -24,7 +24,9 @@ import { HARD_MAX_REVIEW_ROUNDS } from "../../aiProvider/agentLoopConstants.js";
  * @returns {Object|undefined} The agent-config row, or undefined when missing.
  */
 export function getByRole(workspaceId, role) {
-  return getDatabase().prepare("SELECT * FROM agent_configs WHERE workspaceId = ? AND role = ?").get(workspaceId, role);
+  const row = getDatabase().prepare("SELECT * FROM agent_configs WHERE workspaceId = ? AND role = ?").get(workspaceId, role);
+  if (!row) return row;
+  return { ...row, allowedTools: row.allowedTools ? (() => { try { return JSON.parse(row.allowedTools); } catch { return null; } })() : null };
 }
 
 /**
@@ -34,7 +36,7 @@ export function getByRole(workspaceId, role) {
  * @returns {Object[]} Zero or more agent-config rows.
  */
 export function listByWorkspace(workspaceId) {
-  return getDatabase().prepare("SELECT * FROM agent_configs WHERE workspaceId = ? ORDER BY role ASC").all(workspaceId);
+  return getDatabase().prepare("SELECT * FROM agent_configs WHERE workspaceId = ? ORDER BY role ASC").all(workspaceId).map((row) => ({ ...row, allowedTools: row.allowedTools ? (() => { try { return JSON.parse(row.allowedTools); } catch { return null; } })() : null }));
 }
 
 // B4.3 — `wouldCreateCycle` removed. Migration 053 dropped the
@@ -110,16 +112,17 @@ export function upsert(config) {
     mrr = Number.isFinite(n) ? Math.min(Math.max(n, 1), HARD_MAX_REVIEW_ROUNDS) : null;
   }
   db.prepare(`
-    INSERT INTO agent_configs (id, workspaceId, role, routeId, systemPromptOverride, temperature, maxTokens, maxReviewRounds, createdAt, updatedAt)
-    VALUES (@id, @workspaceId, @role, @routeId, @systemPromptOverride, @temperature, @maxTokens, @maxReviewRounds, @createdAt, @updatedAt)
+    INSERT INTO agent_configs (id, workspaceId, role, routeId, systemPromptOverride, temperature, maxTokens, maxReviewRounds, allowedTools, createdAt, updatedAt)
+    VALUES (@id, @workspaceId, @role, @routeId, @systemPromptOverride, @temperature, @maxTokens, @maxReviewRounds, @allowedTools, @createdAt, @updatedAt)
     ON CONFLICT(workspaceId, role) DO UPDATE SET
       routeId=excluded.routeId,
       systemPromptOverride=excluded.systemPromptOverride,
       temperature=excluded.temperature,
       maxTokens=excluded.maxTokens,
       maxReviewRounds=excluded.maxReviewRounds,
+      allowedTools=excluded.allowedTools,
       updatedAt=excluded.updatedAt
-  `).run({ ...config, routeId: config.routeId ?? null, maxReviewRounds: mrr });
+  `).run({ ...config, routeId: config.routeId ?? null, maxReviewRounds: mrr, allowedTools: Array.isArray(config.allowedTools) ? JSON.stringify(config.allowedTools) : null });
   return getByRole(config.workspaceId, config.role);
 }
 

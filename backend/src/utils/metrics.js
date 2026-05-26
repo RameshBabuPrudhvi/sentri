@@ -376,3 +376,10 @@ export const agentOrchestratorFallbackTotal = new client.Counter({
   labelNames: ["reason"],
   registers: [register],
 });
+
+export const agentToolCallsTotal = new client.Counter({
+  name: "app_agent_tool_calls_total",
+  help: "AUTO-023 B5 — total tool calls by tool and outcome.",
+  labelNames: ["tool", "outcome"],
+  registers: [register],
+});

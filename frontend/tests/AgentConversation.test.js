@@ -498,6 +498,50 @@ test("supervisor + healer envelopes render (not silently dropped by persona filt
   assert.match(turns[1].text, /Healer/);
 });
 
+
+
+test("tool_call and tool_result envelopes render explicit tool timeline text", () => {
+  const turns = messagesToTurns([
+    { id: "tc1", fromRole: "author", toRole: null, intent: "tool_call", artifact: { tool: "playwright.dryRun", args: { testCode: "test('x')" } }, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "tr1", fromRole: "author", toRole: null, intent: "tool_result", artifact: { tool: "playwright.dryRun", result: { ok: true } }, createdAt: "2026-01-01T00:00:01.000Z" },
+    { id: "tr2", fromRole: "reviewer", toRole: null, intent: "tool_result", artifact: { tool: "db.getTest", error: "not found" }, createdAt: "2026-01-01T00:00:02.000Z" },
+  ]);
+  assert.equal(turns.length, 3);
+  assert.match(turns[0].text, /Invoking playwright\.dryRun/);
+  assert.match(turns[1].text, /Tool playwright\.dryRun completed/);
+  assert.match(turns[2].text, /Tool db\.getTest failed: not found/);
+});
+
+test("tool envelopes carry a `_tool` badge payload for the dedicated timeline chip (B5.7)", () => {
+  // The renderer in `AgentConversation.jsx` keys the colour-coded chip
+  // variant on `turn._tool.kind`. Pin the shape so a future refactor of
+  // `messagesToTurns` can't silently strip the badge and revert the UI
+  // to plain narration text.
+  const turns = messagesToTurns([
+    { id: "tc1", fromRole: "author", toRole: null, intent: "tool_call",
+      artifact: { tool: "db.listExistingTests", args: { projectId: "p-1" } },
+      createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "tr1", fromRole: "author", toRole: null, intent: "tool_result",
+      artifact: { tool: "db.listExistingTests", result: { count: 12 } },
+      createdAt: "2026-01-01T00:00:01.000Z" },
+    { id: "tr2", fromRole: "reviewer", toRole: null, intent: "tool_result",
+      artifact: { tool: "playwright.dryRun", result: { ok: false, issueCount: 3 } },
+      createdAt: "2026-01-01T00:00:02.000Z" },
+    { id: "tr3", fromRole: "reviewer", toRole: null, intent: "tool_result",
+      artifact: { tool: "db.getTest", error: "not found" },
+      createdAt: "2026-01-01T00:00:03.000Z" },
+  ]);
+  assert.equal(turns.length, 4);
+  assert.deepEqual(turns[0]._tool,
+    { kind: "call", tool: "db.listExistingTests", args: { projectId: "p-1" } });
+  assert.equal(turns[1]._tool.kind, "success");
+  assert.equal(turns[1]._tool.tool, "db.listExistingTests");
+  assert.equal(turns[1]._tool.summary, "12 results");
+  assert.equal(turns[2]._tool.kind, "success"); // dryRun ok=false still maps to success kind (the tool ran), summary carries the issue count
+  assert.match(turns[2]._tool.summary, /3 issues/);
+  assert.equal(turns[3]._tool.kind, "error");
+  assert.equal(turns[3]._tool.summary, "not found");
+});
 process.on("beforeExit", () => {
   console.log(`\n  ${passed} passed, ${failed} failed\n`);
   if (failed > 0) process.exit(1);

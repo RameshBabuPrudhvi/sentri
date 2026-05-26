@@ -34,6 +34,16 @@ import { emitHandoffEnvelope, mainThreadId, readLatestEnvelope } from "../aiProv
 // existing `validateTest` heuristic — **zero extra LLM cost**: an `accept`
 // on round 0 short-circuits identically to pre-loop behaviour.
 import { runReviewerAuthorLoop, ReviewRejection } from "../aiProvider/agentLoop.js";
+// AUTO-023 B5.7 — reviewer dispatches its heuristic check through the
+// tool registry's `playwright.dryRun` so the call is observable in the
+// `agent_tool_calls_total` metric AND visible in the UI tool-call
+// timeline (the orchestrator persists `tool_call` / `tool_result`
+// envelopes for every dispatched tool). Falls back to a direct
+// `validateTest` call when the tool dispatch path is unavailable
+// (test stubs, standalone CLI).
+import { executeToolCall as executeAgentTool, redactToolArgsForPersistence } from "../aiProvider/agentTools/runtime.js";
+import { emitAgentMessage as emitToolEnvelope } from "../aiProvider/agentEventEmitter.js";
+import { getCurrentTraceId } from "../utils/observability.js";
 import { validateTest } from "./testValidator.js";
 import { PIPELINE_STEPS } from "../utils/pipelineState.js";
 import * as testRepo from "../database/repositories/testRepo.js";
@@ -677,11 +687,104 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
           return { tests: [candidate] };
         },
 
-        runReviewer: async ({ artifact }) => {
+        runReviewer: async ({ artifact, round }) => {
           throwIfAborted(signal);
           const candidate = artifact?.tests?.[0];
           if (!candidate) return { verdict: "accept" };
-          const issues = validateTest(candidate, projectUrl) || [];
+          // AUTO-023 B5.7 — dispatch the heuristic check through the
+          // tool registry as `playwright.dryRun`. This makes the
+          // reviewer's static-validator call a first-class agent tool
+          // call: `agent_tool_calls_total{tool="playwright.dryRun"}`
+          // increments per round, the round-trip is persisted as a
+          // `tool_call` → `tool_result` envelope pair (so it shows up
+          // on the UI timeline), and the `validateTest` reference path
+          // is preserved for environments where the tool dispatch
+          // isn't reachable (e.g. unit tests that DI a synthetic
+          // reviewer).
+          let issues = [];
+          let toolDispatched = false;
+          if (candidate.playwrightCode && _runId && workspaceId) {
+            // AUTO-023 B5.7 — include the candidate test id in the
+            // toolCallId so multiple per-test regenerations in the
+            // same run don't collide on `agent_messages.id` (the
+            // PRIMARY KEY). Pre-fix `applyFeedbackLoop` calls
+            // `regenerateFailingTest` once per failing test, each
+            // reviewer loop starts at round 0, and the resulting
+            // `dryrun-${runId}-0` toolCallId clashed across tests —
+            // the second INSERT failed with a UNIQUE constraint
+            // violation, swallowed by `emitAgentMessage`'s
+            // best-effort catch, leaving holes in the UI tool-call
+            // timeline. `candidate.id` is the persisted test row id
+            // (set by `runAuthor` from the original failing test);
+            // `unknown` is the fallback for the rare case where the
+            // candidate has no id yet.
+            const toolCallId = `dryrun-${_runId}-${candidate.id || "unknown"}-${round}`;
+            try {
+              emitToolEnvelope({
+                id: toolCallId, runId: _runId, workspaceId, threadId,
+                traceId: getCurrentTraceId() || `trace-${_runId}`,
+                fromRole: "reviewer", toRole: "reviewer", intent: "tool_call",
+                artifact: {
+                  tool: "playwright.dryRun",
+                  // AUTO-023 B5 — gap #8: redact secrets from the
+                  // persisted envelope (raw testCode still flows
+                  // through `executeAgentTool` below for the real
+                  // dryRun, but the DB row + UI timeline see only
+                  // the scrubbed form).
+                  args: redactToolArgsForPersistence("playwright.dryRun", { testCode: candidate.playwrightCode }),
+                },
+                rationale: `Round ${round + 1} static check`, round,
+                replyToId: null, createdAt: new Date().toISOString(),
+              });
+              const out = await executeAgentTool({
+                tool: "playwright.dryRun",
+                args: { testCode: candidate.playwrightCode },
+                role: "reviewer",
+                context: { workspaceId, threadId, runId: _runId, fromRole: "reviewer", projectUrl },
+                // AUTO-023 B5 — gap #7: forward the abort signal so a
+                // user-cancelled run doesn't burn the 30s timeout on
+                // an in-flight dryRun.
+                signal,
+              });
+              issues = Array.isArray(out?.result?.diagnostics) ? out.result.diagnostics : [];
+              emitToolEnvelope({
+                runId: _runId, workspaceId, threadId,
+                traceId: getCurrentTraceId() || `trace-${_runId}`,
+                fromRole: "reviewer", toRole: "reviewer", intent: "tool_result",
+                artifact: {
+                  toolCallId,
+                  tool: "playwright.dryRun",
+                  result: { ok: out?.result?.ok === true, issueCount: issues.length },
+                },
+                rationale: "tool_executed", round,
+                replyToId: toolCallId, createdAt: new Date().toISOString(),
+              });
+              toolDispatched = true;
+            } catch (err) {
+              // Tool dispatch failed (forbidden / timeout / unknown) —
+              // fall through to the direct validator below so the
+              // reviewer never silently passes a broken test just
+              // because the tool layer hiccuped.
+              try {
+                emitToolEnvelope({
+                  runId: _runId, workspaceId, threadId,
+                  traceId: getCurrentTraceId() || `trace-${_runId}`,
+                  fromRole: "reviewer", toRole: "reviewer", intent: "tool_result",
+                  artifact: {
+                    toolCallId,
+                    tool: "playwright.dryRun",
+                    error: err?.message || "tool_error",
+                    code: err?.code || null,
+                  },
+                  rationale: "tool_error", round,
+                  replyToId: toolCallId, createdAt: new Date().toISOString(),
+                });
+              } catch { /* best-effort */ }
+            }
+          }
+          if (!toolDispatched) {
+            issues = validateTest(candidate, projectUrl) || [];
+          }
           if (issues.length === 0) return { verdict: "accept" };
           // Cap at 5 issues — the prompt-side `runAuthor` already slices
           // to 8 as defence-in-depth. validateTest's issue strings embed

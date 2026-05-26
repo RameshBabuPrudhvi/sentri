@@ -377,13 +377,19 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
         const isStreaming = turn.status === "streaming";
         const model = run?.modelUsed;
 
+        // AUTO-023 B5.7 — tool-call timeline. `_tool` carries
+        // `{ kind: "call" | "success" | "error", tool, args?, summary? }`
+        // and replaces the handoff narration line with a chip+summary
+        // row so operators get a scannable per-thread tool timeline.
+        const tool = turn._tool;
+        const toolKindClass = tool ? ` ac-turn--tool ac-turn--tool-${tool.kind}` : "";
         return (
           <article
             key={turn.id}
             className={`ac-turn ac-turn--${persona.color} ac-turn--${turn.phase}${
               isHandoff ? " ac-turn--handoff" : ""
-            }${turn._warning ? " ac-turn--warning" : ""}`}
-            aria-label={`${persona.label} — ${turn.phase}${turn._round != null ? ` — round ${turn._round + 1}` : ""}${turn._warning ? " — warning" : ""}`}
+            }${turn._warning ? " ac-turn--warning" : ""}${toolKindClass}`}
+            aria-label={`${persona.label} — ${turn.phase}${turn._round != null ? ` — round ${turn._round + 1}` : ""}${turn._warning ? " — warning" : ""}${tool ? ` — tool ${tool.tool} ${tool.kind}` : ""}`}
             role={turn._warning ? "alert" : undefined}
           >
             <div
@@ -443,15 +449,36 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
                   )}
                 </div>
               )}
-              <div className="ac-text">
-                {isHandoff ? turn.text : turn.renderedText}
-                {/* Per-turn streaming cursor. Renders ONLY while this turn
-                    is still streaming. Note: thinking dots above are
-                    suppressed once any turn exists, so cursor + dots can
-                    never overlap (the bug the spec calls out at
-                    `TestLab.jsx:884-891`). */}
-                {isStreaming && <span className="ac-cursor" aria-hidden="true" />}
-              </div>
+              {tool ? (
+                /* AUTO-023 B5.7 — tool-call timeline row.
+                   Renders a colour-coded chip (`call` / `success` /
+                   `error`) + tool name + concise summary instead of
+                   the narration text. The text is preserved on a
+                   secondary muted line for screen-reader continuity
+                   and operators who want the full envelope detail. */
+                <>
+                  <div className="ac-tool-row" aria-label={`Tool ${tool.tool} — ${tool.kind}`}>
+                    <span className={`ac-tool-chip ac-tool-chip--${tool.kind}`}>
+                      <span className="ac-tool-icon" aria-hidden="true">
+                        {tool.kind === "call" ? "🔧" : tool.kind === "success" ? "✓" : "⚠"}
+                      </span>
+                      <code className="ac-tool-name">{tool.tool}</code>
+                    </span>
+                    {tool.summary && <span className="ac-tool-summary">· {tool.summary}</span>}
+                  </div>
+                  <div className="ac-text ac-text--tool-detail">{turn.text}</div>
+                </>
+              ) : (
+                <div className="ac-text">
+                  {isHandoff ? turn.text : turn.renderedText}
+                  {/* Per-turn streaming cursor. Renders ONLY while this turn
+                      is still streaming. Note: thinking dots above are
+                      suppressed once any turn exists, so cursor + dots can
+                      never overlap (the bug the spec calls out at
+                      `TestLab.jsx:884-891`). */}
+                  {isStreaming && <span className="ac-cursor" aria-hidden="true" />}
+                </div>
+              )}
               {/* Stat chip — scannable summary for completed finding turns.
                   Mirrors the old NarrativeFeed's green `.tl-nf-stat` pill.
                   Only renders when the turn is done streaming AND carries a

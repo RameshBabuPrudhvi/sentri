@@ -5,7 +5,11 @@
 <h2 align="center">Sentri</h2>
 
 <p align="center">
-  AI-powered end-to-end test generation, execution, and self-healing for modern web applications.
+  The autonomous QA platform — multi-agent test generation, execution, and self-healing for modern web applications.
+</p>
+
+<p align="center">
+  <em>Specialist AI agents collaborate to crawl your site, write Playwright tests, review each other's work, and self-heal broken selectors — with operators in the loop only when they want to be.</em>
 </p>
 
 <p align="center">
@@ -42,57 +46,112 @@
 
 ## What is Sentri?
 
-Sentri is an autonomous QA platform that covers the full testing lifecycle in a single tool. Point it at a URL — it crawls your application, runs an 8-stage AI pipeline to generate a Playwright test suite, routes tests through a review queue (with optional confidence-based auto-approval for high-quality output), executes approved tests in real browsers across Chromium, Firefox, and WebKit, and automatically repairs broken selectors between runs.
+Sentri is an **autonomous QA platform** built on a multi-agent system. Eight specialist AI agents — Explorer, Planner, Author, Oracle, Reviewer, Healer, Triager, and Supervisor — collaborate on a shared thread to crawl your application, write Playwright tests, critique each other's work in real revision rounds, execute the approved suite in real browsers, and self-heal broken selectors between runs. A run completes end-to-end without operator intervention; humans are in the loop only when they want to be (review queues, auto-approval threshold, mode-flip per workspace).
 
 ```
-Crawl → Generate → Deduplicate → Enhance → Validate → Review → Execute → Self-Heal
+            ┌─────────────────────────────────────────────────┐
+Supervisor  │  decides who speaks next (autonomous mode)      │
+            └─────────────────────────────────────────────────┘
+                              ↓
+Explorer → Planner → Author ⇄ Reviewer → Oracle → Healer → Triager
+   🔍        🧭       ✍️        🛡️          🎯         🩹         ⚠️
+   │         │        │         ↑                                  │
+   └─ crawl  │        │         │  rejects + force revision         │
+             └─ map   │         │                                   │
+                      └─ writes / dedups / executes                 │
+                                              │                     │
+                                              └─ runtime healing ←──┘
 ```
 
-Most AI test generators stop at code generation. Sentri treats generation as step two of eight.
+**Industry-standard pattern, Sentri-specific scope.** The orchestration model matches LangGraph / AutoGen / CrewAI (supervisor + role-based dispatch + tool calling on a shared blackboard); the agents are domain-specialised to one job — generating, running, and maintaining a Playwright test suite. The result: zero "I generated code, now you figure out how to run it" handoff to the user. Generation, execution, and maintenance are one continuous loop.
+
+Most AI test generators stop at code generation. Sentri's eight agents own the entire QA lifecycle.
+
+---
+
+## How the agents collaborate
+
+| Agent | Role | When it speaks |
+|---|---|---|
+| 🔍 **Explorer** | Crawls the site (link or state-explore mode), filters DOM noise, classifies page intents | Step 1 of every run |
+| 🧭 **Planner** | Composes classified pages into multi-step user journeys (signup, checkout, search) | After Explorer hands off |
+| ✍️ **Author** | Writes Playwright tests for each journey + page; calls `db.listExistingTests` mid-generation to avoid duplicating the catalog | Step 4 onward |
+| 🎯 **Oracle** | Strengthens weak assertions (real outcomes, not just "page loaded") | Step 6 |
+| 🛡️ **Reviewer** | Runs `playwright.dryRun` (real `testValidator`) on every generated test; can reject + force the Author to revise up to N rounds | Step 7 |
+| 🩹 **Healer** | Patches broken selectors at runtime using the adaptive selector waterfall + vision-based fallback (pixelmatch → LLM vision) | Per failing step |
+| ⚠️ **Triager** | Classifies failures (selector / timeout / assertion / navigation / bot-block) and routes to feedback loop or skip-with-reason | Post-run |
+| 🧠 **Supervisor** | In `autonomous` mode, decides which agent acts next based on thread state and routes the conversation; falls open to the linear DAG when capabilities are missing | Every step in autonomous mode |
+
+**Three operating modes** (per-workspace, hot-swappable from Settings):
+- **`pipeline`** (default, zero-regression) — the linear 8-stage DAG. Battle-tested, deterministic, lowest cost.
+- **`envelope`** — same DAG, but every handoff is a structured `agent_message` envelope persisted to the audit trail. Operators see the conversation in the UI timeline; behaviour is byte-identical to `pipeline`.
+- **`autonomous`** — the Supervisor LLM picks the next agent on each step. Reviewer can force the Author back to revise; the Author calls tools mid-generation. Fails OPEN to the linear path on any orchestrator hiccup so a misconfigured workspace never gets a worse outcome than `pipeline`.
+
+**Agents have a closed-set tool registry.** `db.listExistingTests` (Author dedup), `db.getTest` (Reviewer inspection), `crawl.getPageHtml` (Explorer drill-down), `playwright.dryRun` (Reviewer/Author sanity check via the real `testValidator`), `thread.askPeer` (any agent can ask any other agent a structured question). Each tool is workspace-scoped at the repo layer, rate-limited per `(workspace, run, tool)`, secret-scrubbed before persistence, AbortSignal-aware, and bounded-retry on transient failures.
 
 ---
 
 ## Why Sentri?
 
-| Problem | How Sentri addresses it |
+| Problem | How Sentri's agents address it |
 |---|---|
-| Writing E2E tests is slow | Point it at a URL — tests are generated in minutes |
-| Selectors break every sprint | Adaptive selector waterfall records what works and tries it first next run |
-| AI-generated tests are untrustworthy | Tests land in a Draft queue by default; opt-in confidence-based auto-approval with a full audit trail and one-click revoke for high-quality output |
-| Tests fail and nobody knows why | AI feedback loop classifies every failure and auto-regenerates failing tests |
-| No visibility into what the test is doing | Live browser screencast, real-time SSE log stream, per-step screenshots |
-| Vendor lock-in on AI providers | Switch between Anthropic, OpenAI, Google, OpenRouter, or Ollama with a single setting |
+| Writing E2E tests is slow | Explorer + Planner + Author take a URL → Playwright suite in minutes — no manual scenario authoring |
+| AI-generated tests are untrustworthy | Reviewer runs the real `testValidator` per test and can force the Author back to revise; tests still land in a Draft review queue (with opt-in confidence-based auto-approval) |
+| LLMs duplicate scenarios | Author calls `db.listExistingTests` mid-generation and writes complementary tests instead of near-duplicates |
+| Selectors break every sprint | Healer's adaptive selector waterfall records what works and tries it first next run; vision-based fallback (pixelmatch → LLM vision) recovers when DOM healing fails |
+| Tests fail and nobody knows why | Triager classifies every failure; Author auto-regenerates the broken ones; Reviewer re-validates before they go back into the pool |
+| Operators have no audit trail of why an agent did what it did | Every handoff is a persisted `agent_message` envelope — `fromRole → toRole`, intent (`handoff` / `request_revision` / `tool_call` / `accept` / `reject_final`), artifact, rationale, traceId. Visible in the UI timeline with colour-coded tool chips |
+| Vendor lock-in on AI providers | Each agent role binds to its own AI provider — Sonnet for the Supervisor, GPT-4o-mini for the Author, Ollama for the Reviewer. Mix and match per role; switch any of them with one click |
+| Cost can spiral with multi-agent loops | Per-workspace spend caps + per-tool rate limits (`AGENT_TOOL_RATE_LIMIT_PER_MIN`) + hard `MAX_AUTONOMOUS_STEPS=20` + wall-clock thread budget. Single-agent collapse (author + reviewer share a route) flags a warning instead of silently degrading |
 
 ---
 
 ## Key Features
 
+**Multi-Agent Collaboration**
+- 8 specialist agents with closed-set role vocabulary (Explorer / Planner / Author / Oracle / Reviewer / Healer / Triager / Supervisor) — no foreign agent names possible at any layer
+- Structured `agent_message` envelope on every handoff (intent, artifact, rationale, traceId) — full audit trail per run
+- Reviewer ↔ Author revision loop with `MAX_REVIEW_ROUNDS` (per-workspace configurable, hard cap 10) and `loopTimeoutMs` budget
+- Closed-set tool registry — `db.listExistingTests`, `db.getTest`, `crawl.getPageHtml`, `playwright.dryRun`, `thread.askPeer`. Per-role allowlist + workspace-narrowed via `agent_configs.allowedTools`
+- Thread-scoped blackboard with optimistic CAS (`agent_thread_state`, 64KB cap) — agents share working state without losing each other's writes
+- Supervisor orchestration in `autonomous` mode — LLM picks the next role on each step; fails OPEN to linear DAG on any hiccup
+- Cross-process peer Q&A via Redis pub/sub — `thread.askPeer` works across pods in multi-replica deployments
+- Per-tool rate limit (`AGENT_TOOL_RATE_LIMIT_PER_MIN`) + per-workspace spend caps + per-step quota gate
+
 **Test Generation**
 - Two discovery modes: Link Crawl maps `<a>` tags; State Exploration clicks, fills, and submits to discover multi-step flows
-- 8-stage AI pipeline with intent classification, deduplication, assertion enhancement, and structural validation
+- 8-stage pipeline with intent classification, deduplication, assertion enhancement, and structural validation
+- Author calls `db.listExistingTests` mid-generation so the LLM is dedup-aware (sees up to 30 existing test names + sourceUrls before writing)
 - API test generation — captures fetch/XHR traffic during crawl and produces Playwright `request` contract tests alongside UI tests
 - Natural-language test creation — describe a scenario and skip the crawl entirely
+- Data-driven test fixtures (CSV / JSON) — one test, N iterations per row, per-test iteration cap
 
 **Execution & Observability**
-- Parallel execution across 1–10 isolated browser contexts
+- Parallel execution across 1–10 isolated browser contexts; distributed sharding across N runner machines (BullMQ + Redis)
 - Cross-browser support: Chromium, Firefox, and WebKit with per-run engine selection
 - Live browser screencast at ~7 FPS via Chrome DevTools Protocol
 - Real-time log and result streaming via Server-Sent Events
+- Per-thread tool-call timeline in the UI — colour-coded chips (call / success / error) with concise summary ("12 results", "3 issues", error message)
+- Multi-environment support (staging vs production) — per-environment baseUrl + AES-encrypted credentials, env-scoped runs without mutating the project row
+- OpenTelemetry + Prometheus baseline — per-agent / per-tool / per-route metrics, Sentry error reporting, structured `traceId`-correlated logs
 
 **Self-Healing**
 - Multi-strategy selector waterfall: ARIA role → label → text → `aria-label` → title → CSS
 - Adaptive memory — records the winning strategy per element and prioritises it on subsequent runs
-- Failure classification by category (selector / timeout / assertion / navigation) with targeted regeneration
+- Vision-based healing fallback (pixelmatch → LLM vision) when DOM strategies all fail; budget-circuit-broken per workspace
+- Failure classification by category (selector / timeout / assertion / URL / bot-block / navigation) with targeted regeneration
+- Reviewer re-validates regenerated tests before they ship — broken-output bugs eliminated as a class
 
 **Operations**
-- Flaky test detection with 0–100 scoring based on run history
+- Flaky test detection with 0–100 scoring based on run history; root-cause failure clustering across the run
 - Scheduled runs with timezone support
-- CI/CD webhook trigger with per-project Bearer tokens
+- CI/CD webhook trigger with per-project Bearer tokens; GitHub PR check comments via the Sentri GitHub App
 - Diff-aware crawling — only regenerates tests for pages whose DOM fingerprint changed since the last crawl; zero LLM calls when nothing changed
 - Vercel + Netlify deployment webhooks — HMAC-signed payloads auto-launch a diff-aware crawl against the preview URL when a deployment is READY
+- Test impact analysis from git diff — only runs tests whose routes were affected by the PR's changed files
 - Failure notifications via Microsoft Teams, email, and generic webhook
-- Workspace isolation and role-based access control (Admin / QA Lead / Viewer)
-- GDPR/CCPA account export and cascade deletion
+- Workspace isolation and role-based access control (Admin / QA Lead / Viewer); GDPR/CCPA account export and cascade deletion
+- Quality gates (pass-rate / coverage / Web Vitals / PR-scoped coverage) — fail the build when budgets regress
 
 ---
 
@@ -149,6 +208,7 @@ If you plan to run multiple instances, prefer managed Postgres and set `DATABASE
 |---|---|
 | **Getting Started** | [Installation, first steps, optional services](https://rameshbabuprudhvi.github.io/sentri/docs/guide/getting-started.html) |
 | **Architecture** | [Pipeline, data flow, design decisions](https://rameshbabuprudhvi.github.io/sentri/docs/guide/architecture.html) |
+| **Multi-Agent Collaboration** | [AUTO-023 roadmap — envelope schema, reviewer↔author loop, supervisor orchestrator, tool calling](docs/roadmap/autonomous-multi-agent.md) |
 | **Auto-Approval** | [Confidence-based auto-approval, threshold tuning, audit trail, kill-switch](https://rameshbabuprudhvi.github.io/sentri/docs/guide/auto-approval.html) |
 | **Self-Healing** | [Selector waterfall, healing history, failure classification](https://rameshbabuprudhvi.github.io/sentri/docs/guide/self-healing.html) |
 | **Test Dials** | [Strategy, workflow, quality, format, language options](https://rameshbabuprudhvi.github.io/sentri/docs/guide/test-dials.html) |
