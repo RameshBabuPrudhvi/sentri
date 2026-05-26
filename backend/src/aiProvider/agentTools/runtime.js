@@ -86,6 +86,22 @@ export async function executeToolCall({ tool, args, role, allowedTools = null, c
   }
   const parsed = validateToolCall(tool, args);
   const started = Date.now();
+  // AUTO-023 B5.4 — `thread.askPeer` blocks waiting for an `answer`
+  // envelope from a peer agent that may need a full LLM round-trip
+  // (60s budget per the B5.4 roadmap). The outer 30s
+  // `DEFAULT_TOOL_TIMEOUT_MS` would otherwise always win
+  // `Promise.race`, making the inner peer timeout dead code and
+  // halving the peer Q&A budget. Resolve the effective outer timeout
+  // from the peer-specific budget plus a 100ms buffer so the inner
+  // `askPeer` timer fires first (it owns the pending-map cleanup);
+  // the outer wrapper stays as a safety net for stuck Promises.
+  let effectiveTimeoutMs = timeoutMs;
+  if (tool === "thread.askPeer") {
+    const peerTimeoutMs = Number.isFinite(context?.peerQuestionTimeoutMs)
+      ? context.peerQuestionTimeoutMs
+      : DEFAULT_PEER_TIMEOUT_MS;
+    effectiveTimeoutMs = Math.max(timeoutMs, peerTimeoutMs + 100);
+  }
   try {
     const result = await withTimeout((async () => {
       if (tool === "db.listExistingTests") {
@@ -162,7 +178,7 @@ export async function executeToolCall({ tool, args, role, allowedTools = null, c
         return askPeer({ ...context, ...parsed });
       }
       throw new Error(`unimplemented tool: ${tool}`);
-    })(), timeoutMs, tool);
+    })(), effectiveTimeoutMs, tool);
     try { agentToolCallsTotal.inc({ tool, outcome: "success" }); } catch {}
     return { result, elapsedMs: Date.now() - started };
   } catch (err) {

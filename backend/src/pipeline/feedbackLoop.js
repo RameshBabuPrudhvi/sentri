@@ -704,7 +704,21 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
           let issues = [];
           let toolDispatched = false;
           if (candidate.playwrightCode && _runId && workspaceId) {
-            const toolCallId = `dryrun-${_runId}-${round}`;
+            // AUTO-023 B5.7 — include the candidate test id in the
+            // toolCallId so multiple per-test regenerations in the
+            // same run don't collide on `agent_messages.id` (the
+            // PRIMARY KEY). Pre-fix `applyFeedbackLoop` calls
+            // `regenerateFailingTest` once per failing test, each
+            // reviewer loop starts at round 0, and the resulting
+            // `dryrun-${runId}-0` toolCallId clashed across tests —
+            // the second INSERT failed with a UNIQUE constraint
+            // violation, swallowed by `emitAgentMessage`'s
+            // best-effort catch, leaving holes in the UI tool-call
+            // timeline. `candidate.id` is the persisted test row id
+            // (set by `runAuthor` from the original failing test);
+            // `unknown` is the fallback for the rare case where the
+            // candidate has no id yet.
+            const toolCallId = `dryrun-${_runId}-${candidate.id || "unknown"}-${round}`;
             try {
               emitToolEnvelope({
                 id: toolCallId, runId: _runId, workspaceId, threadId,
