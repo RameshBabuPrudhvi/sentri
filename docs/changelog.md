@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **AUTO-023 Bundle 5** — Thread-scoped shared blackboard (`get`/`setKey`/`casUpdate`) with optimistic concurrency and a 64 KB size cap (`AGENT_THREAD_STATE_MAX_BYTES`).
-- **AUTO-023 Bundle 5** — Closed-set tool registry with five read-only tools: `db.listExistingTests`, `db.getTest`, `crawl.getPageHtml`, `playwright.dryRun`, `thread.askPeer`; per-role visibility intersected with `agent_configs.allowedTools` (migration `064`).
-- **AUTO-023 Bundle 5** — Server-side tool dispatch via envelopes with 30 s timeout, per-tool rate limiting (sliding window, Redis-backed with in-memory fallback), `AbortSignal` propagation, and secret scrubbing on persisted args.
-- **AUTO-023 Bundle 5** — Peer Q&A (`thread.askPeer`/`answerPeer`) with 60 s timeout, self-ask guard (`ERR_AGENT_PEER_SELF`), cycle protection (`MAX_PEER_NESTING=3`), and cross-process delivery via Redis pub/sub (`sentri:agent-peer-answer`).
-- **AUTO-023 Bundle 5** — Production wire-up: author dedup calls `db.listExistingTests` before prompt construction; reviewer dispatches its static check through `playwright.dryRun` with direct-call fallback.
+- **AUTO-023 Bundle 5** — Closed-set tool registry with five read-only tools and per-role visibility intersected with `agent_configs.allowedTools`. (#38)
+- **AUTO-023 Bundle 5** — Server-side tool dispatch with 30 s timeout, per-tool rate limiting, `AbortSignal` propagation, and secret scrubbing. (#38)
+- **AUTO-023 Bundle 5** — Peer Q&A (`thread.askPeer`/`answerPeer`) with 60 s timeout, self-ask guard, nesting cap, and cross-process Redis pub/sub. (#38)
+- **AUTO-023 Bundle 5** — Author dedup calls `db.listExistingTests` before prompting; reviewer dispatches `playwright.dryRun` with fallback. (#38)
 - **AUTO-023 Bundle 5** — Colour-coded tool-call timeline in the UI: `tool_call`/`tool_result` envelopes tagged with `_tool` payload; rendered as `.ac-tool-row` chips in `AgentConversation.jsx`.
 - **AUTO-023 Bundle 4** — Per-workspace `agentMode` column (migration `062`, default `pipeline`) gates a supervisor LLM that decides role handoffs; fails open to the linear path on any error.
 - **AUTO-023 Bundle 4** — Supervisor LLM bridge (`supervisorAgent.js`), role dispatcher (`autonomousDispatch.js`), and orchestrator (`agentOrchestrator.js`) with `MAX_AUTONOMOUS_STEPS=20` and a 10-minute wall-clock limit.
