@@ -112,11 +112,18 @@ export async function executeToolCall({ tool, args, role, allowedTools = null, c
         // project belongs to the calling workspace before returning
         // tests so an agent in workspace A can't enumerate workspace
         // B's tests via a guessed projectId.
+        //
+        // AUTO-023 B5.7 — push the `LIMIT` to SQL via
+        // `getRecentByProjectId(projectId, limit)` so a project with
+        // 10k tests doesn't load every row before JS-side slicing.
+        // The author-dedup callsite passes `limit: 30`; standalone /
+        // smoke-test callers that omit it default to 30 at the repo
+        // layer.
         if (context.workspaceId) {
           const proj = projectRepo.getByIdInWorkspace?.(parsed.projectId, context.workspaceId);
           if (!proj) return [];
         }
-        return testRepo.getByProjectId(parsed.projectId) || [];
+        return testRepo.getRecentByProjectId(parsed.projectId, parsed.limit ?? 30) || [];
       }
       if (tool === "db.getTest") {
         // AUTO-023 B5.5 — `testRepo.getById(id)` only takes the test

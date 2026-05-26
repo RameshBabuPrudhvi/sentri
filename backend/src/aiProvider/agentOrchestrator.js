@@ -43,6 +43,65 @@ function clampRoleLabel(role) {
 
 function nowIso() { return new Date().toISOString(); }
 
+/**
+ * AUTO-023 B5.7 — unify the `tool_result` envelope artifact shape.
+ *
+ * Two consumers historically emitted different shapes:
+ *
+ *   1. **In-process thread** (`thread.push(resultMsg)`) — the supervisor's
+ *      next-step routing reads `thread[last].artifact.result`; it needs
+ *      the FULL raw output (e.g. the array of tests for `db.listExistingTests`,
+ *      the `{ ok, diagnostics }` from `playwright.dryRun`) so a future
+ *      LLM-driven supervisor can reason over the data.
+ *
+ *   2. **Persisted envelope** (`emitAgentMessage`) — the SSE snapshot +
+ *      UI timeline render a scannable chip. The frontend `messagesToTurns`
+ *      consumer keys on a compact `result: { count | ok | issueCount }`
+ *      shape — dumping a 30-element test array into the envelope balloons
+ *      the `agent_messages.artifact` JSON column for no UI benefit.
+ *
+ * Production wire-ups in `journeyGenerator.js` + `feedbackLoop.js` already
+ * emit the summary shape; the orchestrator's own dispatch path was
+ * inconsistent, persisting raw output. Picking the summary form for
+ * envelopes (canonical) and keeping raw output in the in-process thread
+ * (where the supervisor needs it) is the documented contract going
+ * forward.
+ *
+ * @param {string} tool — Canonical tool id from `TOOL_SCHEMAS` keys.
+ * @param {unknown} raw — Whatever the tool handler returned.
+ * @returns {Object} Summary object suitable for envelope persistence.
+ */
+function summarizeToolResult(tool, raw) {
+  if (raw == null) return { ok: false };
+  if (tool === "db.listExistingTests") {
+    return { count: Array.isArray(raw) ? raw.length : 0 };
+  }
+  if (tool === "db.getTest") {
+    return { found: raw != null };
+  }
+  if (tool === "crawl.getPageHtml") {
+    // `html` can be 100KB+ of DOM — never persist it on the envelope.
+    return { url: raw?.url || null, hasHtml: !!raw?.html };
+  }
+  if (tool === "playwright.dryRun") {
+    return {
+      ok: raw?.ok === true,
+      issueCount: Array.isArray(raw?.diagnostics) ? raw.diagnostics.length : 0,
+    };
+  }
+  if (tool === "thread.askPeer") {
+    return { answered: raw?.answer != null };
+  }
+  // Unknown tool — degrade to a primitive summary the frontend can still
+  // render. Never dump arbitrary nested objects through the envelope
+  // (the `agent_messages.artifact` column is JSON-stringified per
+  // envelope and a runaway payload could blow the size budget).
+  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+    return { value: raw };
+  }
+  return { ok: true };
+}
+
 function roleEligible(workspaceId, role) {
   // Defence-in-depth — reject roles outside the dispatchable set.
   // `KNOWN_AGENT_ROLES` is used for Prometheus label clamping only;
@@ -282,12 +341,27 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
       // AUTO-023 B5.3 — persist the matching `tool_result` so the
       // `tool_call` → `tool_result` pair shows up as a single
       // round-trip in the UI timeline (replyToId chains them).
+      //
+      // AUTO-023 B5.7 — the persisted envelope carries a SUMMARY
+      // shape (`{ count | ok | issueCount | found | hasHtml }`) while
+      // the in-process `thread[]` keeps the raw tool output for
+      // supervisor routing. Matches the contract already used by the
+      // `journeyGenerator.js` + `feedbackLoop.js` production wire-ups
+      // so the frontend `messagesToTurns` consumer sees ONE envelope
+      // shape regardless of which call site emitted it.
       if (runId && workspaceId) {
+        const envelopeArtifact = resultMsg.artifact?.error
+          ? resultMsg.artifact // error envelopes pass through verbatim — `error` + `code` are already compact
+          : {
+              toolCallId,
+              tool: msg.artifact.tool,
+              result: summarizeToolResult(msg.artifact.tool, resultMsg.artifact.result),
+            };
         emitAgentMessage({
           runId, workspaceId, threadId,
           traceId: getCurrentTraceId() || `trace-${runId}`,
           fromRole: resultMsg.fromRole, toRole: resultMsg.toRole, intent: "tool_result",
-          artifact: resultMsg.artifact, rationale: resultMsg.rationale, round: step,
+          artifact: envelopeArtifact, rationale: resultMsg.rationale, round: step,
           replyToId: toolCallId, createdAt: nowIso(),
         });
       }

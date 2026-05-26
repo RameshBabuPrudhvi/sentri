@@ -194,17 +194,21 @@ export async function generateFromDescription(name, description, appUrl, onToken
   if (projectId && workspaceId && runId) {
     const toolCallId = `dedup-${runId}-${Date.now()}`;
     try {
+      // AUTO-023 B5.7 — pass `limit: 30` so SQL caps the row count at
+      // the DB layer. The prompt-side `.slice(0, 30)` is kept as
+      // defence-in-depth but is now a no-op on the happy path.
+      const DEDUP_LIMIT = 30;
       emitAgentMessage({
         id: toolCallId, runId, workspaceId, threadId,
         traceId: getCurrentTraceId() || `trace-${runId}`,
         fromRole: "author", toRole: "author", intent: "tool_call",
-        artifact: { tool: "db.listExistingTests", args: { projectId } },
+        artifact: { tool: "db.listExistingTests", args: { projectId, limit: DEDUP_LIMIT } },
         rationale: "Pre-generation dedup check", round: 0,
         replyToId: null, createdAt: new Date().toISOString(),
       });
       const out = await executeAgentTool({
         tool: "db.listExistingTests",
-        args: { projectId },
+        args: { projectId, limit: DEDUP_LIMIT },
         role: "author",
         context: { workspaceId, threadId, runId, fromRole: "author" },
       });

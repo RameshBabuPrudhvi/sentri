@@ -7,7 +7,16 @@ function fail(msg, code = "ERR_AGENT_TOOL_VALIDATION") {
 const TOOL_SCHEMAS = {
   "db.listExistingTests": (args) => {
     if (!args?.projectId) fail("projectId is required");
-    return { projectId: String(args.projectId) };
+    // AUTO-023 B5.7 — optional `limit` arg threaded into
+    // `testRepo.getRecentByProjectId` so the SQL pushes the cap
+    // instead of loading the full catalog and slicing in JS.
+    // Clamped at the repo layer too (defence-in-depth).
+    const limitRaw = args?.limit;
+    const limit = limitRaw == null ? null : Number.parseInt(String(limitRaw), 10);
+    return {
+      projectId: String(args.projectId),
+      limit: Number.isFinite(limit) && limit > 0 ? limit : null,
+    };
   },
   "db.getTest": (args) => {
     if (!args?.testId) fail("testId is required");
