@@ -800,13 +800,14 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     log(run, `🤖 Autonomous mode — supervisor will orchestrate role handoffs per journey (${journeys.length} journey${journeys.length !== 1 ? "s" : ""}).`);
     const autonomousTests = [];
     let autonomousFailures = 0;
-    for (const journey of journeys) {
+    for (let jIdx = 0; jIdx < journeys.length; jIdx += 1) {
+      const journey = journeys[jIdx];
       throwIfAborted(signal);
       // Use loop index (not autonomousTests.length) so nameless journeys
       // that produce 0 tests don't collide on the same thread ID.
       // journey.name is sanitised to 40 chars + whitespace→dash so the
-      // thread ID stays readable in the audit trail.
-      const jIdx = journeys.indexOf(journey);
+      // thread ID stays readable in the audit trail. Indexed `for` loop
+      // avoids the O(n²) `journeys.indexOf(journey)` reference scan.
       const threadId = `${mainThreadId(run.id)}-j${jIdx}-${journey.name?.replace(/\s+/g, "-").slice(0, 40) || "unnamed"}`;
       let out;
       try {

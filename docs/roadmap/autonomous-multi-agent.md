@@ -649,13 +649,13 @@ turns "agents talking" into "agents collaborating to solve problems".
 
 # Cross-bundle invariants
 These must hold across every bundle — verify before merging each PR.
-- [ ] `SENTRI_AGENT_MODE=pipeline` (default) behaves identically to
+- [x] `SENTRI_AGENT_MODE=pipeline` (default) behaves identically to
       today — zero regression for workspaces that haven't opted in
-- [ ] Envelope writes are best-effort: DB failure must NEVER break the
+- [x] Envelope writes are best-effort: DB failure must NEVER break the
       originating LLM call (mirrors `agentEventEmitter` contract)
-- [ ] All termination paths bounded: max-rounds, max-steps, wall-clock,
+- [x] All termination paths bounded: max-rounds, max-steps, wall-clock,
       and cycle protection enforced server-side
-- [ ] AI-005c single-agent collapse rule preserved across all loops
+- [x] AI-005c single-agent collapse rule preserved across all loops
       (Bundle 3's `maybeWarnSingleAgentCollapse` fires for the
       reviewer↔author loop; the autonomous orchestrator intentionally
       does NOT replicate it because the supervisor is a third-party
@@ -663,18 +663,18 @@ These must hold across every bundle — verify before merging each PR.
       scenario is structurally different when a supervisor decides who
       speaks. A future B5 enhancement may add a supervisor-aware
       variant that warns when supervisor + author share a routeId.)
-- [ ] Per-`(route, role)` circuit breaker + `quotaGuard` integration
+- [x] Per-`(route, role)` circuit breaker + `quotaGuard` integration
       maintained through loop runner and orchestrator
-- [ ] Workspace scoping enforced on every read of `agent_messages`,
+- [x] Workspace scoping enforced on every read of `agent_messages`,
       `agent_thread_state`, and tool registry calls
-- [ ] `agent_role` Prometheus label remains bounded (canonical 8 roles
+- [x] `agent_role` Prometheus label remains bounded (canonical 8 roles
       + `default` = 9 metric-role values; `nextRole` label on
       `app_agent_supervisor_decisions_total` clamped to
       `KNOWN_AGENT_ROLES ∪ "other"` via `clampRoleLabel`)
-- [ ] All new endpoints registered in `permissions.json` with correct
+- [x] All new endpoints registered in `permissions.json` with correct
       `requireRole()` gate
-- [ ] All new tests registered in `backend/tests/run-tests.js`
-- [ ] `docs/changelog.md` updated under `## [Unreleased]` for each bundle
+- [x] All new tests registered in `backend/tests/run-tests.js`
+- [x] `docs/changelog.md` updated under `## [Unreleased]` for each bundle
 
 ---
 

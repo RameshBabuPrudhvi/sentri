@@ -162,41 +162,59 @@ async function checkToolRateLimit({ workspaceId, runId, tool }) {
       const redisKey = `agent_tool_rate:${bucketKey}`;
       const now = Date.now();
       const cutoff = now - RATE_WINDOW_MS;
+      // TWO-PHASE: first ZCARD (after expiring tail) to see if we'd
+      // breach the cap; only ZADD when below the limit. Pre-fix the
+      // pipeline ZADD'd before ZCARD, so rejected attempts occupied
+      // sliding-window slots and extended the effective cooldown
+      // beyond the window — a burst of N rejected calls poisoned the
+      // bucket for the full RATE_WINDOW_MS even though only `limit`
+      // calls actually consumed resources.
+      const peekResults = await redis.multi()
+        .zremrangebyscore(redisKey, 0, cutoff)
+        .zcard(redisKey)
+        .exec();
+      const currentCount = Number(peekResults?.[1]?.[1]) || 0;
+      if (currentCount >= limit) {
+        return { ok: false, count: currentCount, limit };
+      }
       // Use ms-precision unique member id so duplicate calls in the
       // same ms don't collapse to one ZADD entry (ZADD is keyed on
-      // member, not score). The `:${counter}` suffix is per-process
-      // monotonic — bounded ms-precision uniqueness is enough since
-      // the worst case is two pods writing the same `now:counter`
-      // pair, which only loses one tick of accounting and never
-      // bypasses the cap.
+      // member, not score).
       const memberId = `${now}-${Math.random().toString(36).slice(2, 8)}`;
-      const pipeline = redis.multi();
-      pipeline.zremrangebyscore(redisKey, 0, cutoff);
-      pipeline.zadd(redisKey, now, memberId);
-      pipeline.zcard(redisKey);
       // EXPIRE 2× window as a safety net so a process crash mid-call
       // doesn't leave a stale key sitting in Redis forever. The
       // sliding window is enforced by ZREMRANGEBYSCORE above, not
       // by the TTL, so this is purely a garbage-collection hint.
-      pipeline.expire(redisKey, 120);
-      const results = await pipeline.exec();
-      // results = [[null, removedCount], [null, addedCount], [null, totalInWindow], [null, ttlSet]]
-      const count = Number(results?.[2]?.[1]) || 0;
+      const addResults = await redis.multi()
+        .zadd(redisKey, now, memberId)
+        .zcard(redisKey)
+        .expire(redisKey, 120)
+        .exec();
+      const count = Number(addResults?.[1]?.[1]) || currentCount + 1;
       return { ok: count <= limit, count, limit };
     } catch {
       return { ok: true, count: 0, limit };
     }
   }
   // In-memory fallback — per-process Map with periodic sweep.
+  // Check the post-expire count BEFORE pushing so rejected attempts
+  // don't poison the sliding window (mirrors the Redis two-phase
+  // contract above).
   const now = Date.now();
   const cutoff = now - RATE_WINDOW_MS;
   const entries = _localRateBuckets.get(bucketKey) || [];
   const recent = entries.filter((t) => t > cutoff);
+  if (recent.length >= limit) {
+    // Persist the swept list (don't push) so the next call sees the
+    // same expired-tail view without re-filtering.
+    _localRateBuckets.set(bucketKey, recent);
+    return { ok: false, count: recent.length, limit };
+  }
   recent.push(now);
   _localRateBuckets.set(bucketKey, recent);
   // Random-sampled sweep bounds memory growth without a dedicated timer.
   if (Math.random() < 0.002) _sweepLocalRateBuckets();
-  return { ok: recent.length <= limit, count: recent.length, limit };
+  return { ok: true, count: recent.length, limit };
 }
 
 // ── Args redaction for persistence (gap #8) ───────────────────────────────
@@ -297,13 +315,18 @@ async function askPeer({ threadId, workspaceId, fromRole, role, question, runId,
 
 export function answerPeer({ toolCallId, answer, runId, workspaceId, threadId, fromRole, toRole }) {
   emitAgentMessage({
-    id: `peer-answer-${Date.now()}`, runId, workspaceId, threadId, traceId: `trace-${runId || "standalone"}`,
+    // UUID suffix prevents id collisions when two `answer` envelopes
+    // land in the same millisecond (pre-fix `peer-answer-${Date.now()}`
+    // alone could collide under burst load).
+    id: `peer-answer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    runId, workspaceId, threadId, traceId: `trace-${runId || "standalone"}`,
     fromRole, toRole, intent: "answer", artifact: { toolCallId, answer }, rationale: null, round: 0, replyToId: toolCallId, createdAt: new Date().toISOString(),
   });
   // AUTO-023 B5.4 — gap #4: broadcast the answer to peer processes via
   // Redis pub/sub so a peer on pod B can resolve a question issued on
-  // pod A. Local pending Promise (if any) is resolved synchronously
-  // below; the broadcast is best-effort and never blocks.
+  // pod A. Persistence + broadcast are unconditional (cross-process
+  // case: this pod has no local pending but pod B does). Local pending
+  // Promise is resolved below when present.
   publishPeerAnswer({ toolCallId, answer });
   const pending = peerAnswers.get(toolCallId);
   if (pending) {
@@ -439,9 +462,17 @@ async function _dispatchToolBody({ tool, parsed, context }) {
         // AUTO-023 B5.5 — `runRepo.getById(id)` is single-arg; verify
         // the run's `workspaceId` column matches the caller's
         // workspace before returning page data.
+        //
+        // Deny-by-default semantics: when the caller has a workspaceId,
+        // only return page data if the run's workspaceId positively
+        // matches. A run row with `null` workspaceId (e.g. legacy data
+        // from before the column was populated) is NOT accessible from
+        // any workspace — this mirrors the `db.listExistingTests` /
+        // `db.getTest` pattern above where access is denied unless
+        // ownership can be positively confirmed.
         const run = runRepo.getById(parsed.runId);
         if (!run) return { url: parsed.url, html: null };
-        if (context.workspaceId && run.workspaceId && run.workspaceId !== context.workspaceId) {
+        if (context.workspaceId && run.workspaceId !== context.workspaceId) {
           return { url: parsed.url, html: null };
         }
         const pages = Array.isArray(run?.pages) ? run.pages : [];
