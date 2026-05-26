@@ -14,24 +14,24 @@ import {
   normalizeSupervisorDecision,
 } from "../src/prompts/supervisorPrompt.js";
 
-test("buildSupervisorPrompt: default args produce a valid string", () => {
+test("buildSupervisorPrompt: default args produce a {system, user} object", () => {
   const out = buildSupervisorPrompt();
-  assert.equal(typeof out, "string");
-  assert.ok(out.includes("Sentri supervisor agent"));
-  assert.ok(out.includes("STRICT JSON"));
-  assert.ok(out.includes("Policy: {}"));
-  assert.ok(out.includes("Last artifact: null"));
-  assert.ok(out.includes("Transcript: []"));
+  assert.equal(typeof out, "object");
+  assert.ok(out.system.includes("Sentri supervisor agent"));
+  assert.ok(out.system.includes("STRICT JSON"));
+  assert.ok(out.user.includes("Policy: {}"));
+  assert.ok(out.user.includes("Last artifact: null"));
+  assert.ok(out.user.includes("Transcript: []"));
 });
 
-test("buildSupervisorPrompt: transcript is sliced to last 40 entries", () => {
+test("buildSupervisorPrompt: transcript is sliced to last 10 entries", () => {
   const transcript = Array.from({ length: 100 }, (_, i) => ({ i }));
   const out = buildSupervisorPrompt({ transcript });
-  // The first 60 entries should NOT appear; the last 40 should.
-  assert.ok(!out.includes('"i":0'));
-  assert.ok(!out.includes('"i":59'));
-  assert.ok(out.includes('"i":60'));
-  assert.ok(out.includes('"i":99'));
+  // The first 90 entries should NOT appear; the last 10 should.
+  assert.ok(!out.user.includes('"i":0'));
+  assert.ok(!out.user.includes('"i":89'));
+  assert.ok(out.user.includes('"i":90'));
+  assert.ok(out.user.includes('"i":99'));
 });
 
 test("buildSupervisorPrompt: serialises policy + lastArtifact as JSON", () => {
@@ -39,8 +39,23 @@ test("buildSupervisorPrompt: serialises policy + lastArtifact as JSON", () => {
     policy: { maxSteps: 5 },
     lastArtifact: { tests: [{ id: "t1" }] },
   });
-  assert.ok(out.includes('Policy: {"maxSteps":5}'));
-  assert.ok(out.includes('Last artifact: {"tests":[{"id":"t1"}]}'));
+  assert.ok(out.user.includes('Policy: {"maxSteps":5}'));
+  assert.ok(out.user.includes('Last artifact: {"tests":[{"id":"t1"}]}'));
+});
+
+test("buildSupervisorPrompt: truncates large artifacts to prevent context-window overflow", () => {
+  const hugeArtifact = { data: "x".repeat(10000) };
+  const out = buildSupervisorPrompt({ lastArtifact: hugeArtifact });
+  // Artifact serialization should be capped + truncation marker present
+  assert.ok(out.user.includes("…[truncated]"));
+  assert.ok(out.user.length < 15000, "total user prompt should be bounded");
+});
+
+test("buildSupervisorPrompt: prompt lists only dispatchable roles (no healer/triager)", () => {
+  const out = buildSupervisorPrompt();
+  assert.ok(out.system.includes("explorer|planner|author|oracle|reviewer"));
+  assert.ok(!out.system.includes("healer"));
+  assert.ok(!out.system.includes("triager"));
 });
 
 test("normalizeSupervisorDecision: terminate=true returns finalArtifact path", () => {
