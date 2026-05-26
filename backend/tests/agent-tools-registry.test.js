@@ -16,3 +16,10 @@ test("validateToolCall validates schema", () => {
   assert.throws(() => tools.validateToolCall("db.getTest", {}));
   assert.throws(() => tools.validateToolCall("nope", {}));
 });
+
+test("allowlist cannot elevate role beyond baseline tool set", () => {
+  // Reviewer baseline doesn't include db.listExistingTests. Even if
+  // allowlist asks for it, intersection logic must keep it hidden.
+  const filtered = tools.listToolsForRole("reviewer", ["db.listExistingTests", "db.getTest"]);
+  assert.deepEqual(filtered, ["db.getTest"]);
+});
