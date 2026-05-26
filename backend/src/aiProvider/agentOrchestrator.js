@@ -343,6 +343,16 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
           artifact: { toolCallId, tool: msg.artifact.tool, result: out.result }, rationale: "tool_executed",
         };
       } catch (err) {
+        // AUTO-023 B5 — re-throw AbortError immediately instead of
+        // wrapping it into a tool_result envelope. Pre-fix the catch
+        // swallowed AbortError, pushed a tool_result to the thread,
+        // emitted envelopes, ran the quota check, and only then
+        // detected `signal?.aborted` on the next loop iteration —
+        // wasting one full round of DB I/O + SSE on an already-
+        // cancelled run. The `runAgent` path in `autonomousDispatch.js`
+        // already re-throws AbortError; this makes tool dispatch
+        // consistent.
+        if (err?.name === "AbortError" || signal?.aborted) throw err;
         resultMsg = {
           fromRole: nextRole, toRole: nextRole, intent: "tool_result",
           artifact: { toolCallId, tool: msg.artifact.tool, error: err?.message || "tool_error", code: err?.code || null }, rationale: "tool_error",

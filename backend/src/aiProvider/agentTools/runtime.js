@@ -66,6 +66,7 @@ const peerNestingByThread = new Map();
 const PEER_CHANNEL = "sentri:agent-peer-answer";
 const PEER_ORIGIN = process.env.HOSTNAME || `pid-${process.pid}-${Math.random().toString(36).slice(2, 6)}`;
 let _peerBridgeSubscribed = false;
+let _peerHandlerRegistered = false;
 let _peerBridgeWarned = false;
 
 function maybeWarnLocalOnlyPeerBridge() {
@@ -79,13 +80,16 @@ function maybeWarnLocalOnlyPeerBridge() {
 }
 
 function ensurePeerBridgeSubscribed() {
-  if (_peerBridgeSubscribed || !isRedisAvailable() || !redisSub) return;
-  _peerBridgeSubscribed = true;
-  redisSub.subscribe(PEER_CHANNEL).catch((err) => {
-    console.warn(formatLogLine("warn", null, `[agentTools/peer] SUBSCRIBE failed: ${err?.message || err}`));
-    _peerBridgeSubscribed = false;
-  });
-  redisSub.on("message", (channel, raw) => {
+  if (!isRedisAvailable() || !redisSub) return;
+  // Register the message handler exactly ONCE, on a separate flag from
+  // `_peerBridgeSubscribed`. Pre-fix both lived on the same flag, so a
+  // failed `subscribe()` reset the flag and the next `askPeer` call
+  // registered another `on("message")` handler — accumulating N
+  // duplicate listeners after N failures (MaxListenersExceededWarning
+  // at ~10, wasted CPU on N−1 no-op handlers per message thereafter).
+  if (!_peerHandlerRegistered && redisSub) {
+    _peerHandlerRegistered = true;
+    redisSub.on("message", (channel, raw) => {
     if (channel !== PEER_CHANNEL) return;
     try {
       const msg = JSON.parse(raw);
@@ -99,6 +103,13 @@ function ensurePeerBridgeSubscribed() {
         pending.resolve({ answer: msg.answer });
       }
     } catch { /* malformed payload — drop silently, same contract as runAbortChannel */ }
+    });
+  }
+  if (_peerBridgeSubscribed) return;
+  _peerBridgeSubscribed = true;
+  redisSub.subscribe(PEER_CHANNEL).catch((err) => {
+    console.warn(formatLogLine("warn", null, `[agentTools/peer] SUBSCRIBE failed: ${err?.message || err}`));
+    _peerBridgeSubscribed = false;
   });
 }
 
