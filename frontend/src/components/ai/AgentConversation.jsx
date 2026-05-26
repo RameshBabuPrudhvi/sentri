@@ -418,10 +418,24 @@ export default function AgentConversation({ run, isRunActive, allTests }) {
                       (`request_revision` / `accept` / `reject_final`). The
                       badge surfaces "Round N" so operators can see at a
                       glance which reviewer↔author iteration a turn belongs
-                      to without parsing the bubble text. */}
+                      to without parsing the bubble text.
+
+                      AUTO-023 B4 — when `_supervisorStep` is set the same
+                      `_round` field carries the autonomous-thread STEP
+                      index instead of a reviewer↔author ROUND index. The
+                      badge label changes accordingly ("Step N / 20" caps
+                      at the orchestrator's `MAX_AUTONOMOUS_STEPS`). Same
+                      visual surface, different semantic — operators see
+                      a single transcript with the right vocabulary for
+                      each turn's source. */}
                   {turn._round != null && (
-                    <span className="ac-round-badge" aria-label={`Round ${turn._round + 1}`}>
-                      Round {turn._round + 1}
+                    <span
+                      className={`ac-round-badge${turn._supervisorStep ? " ac-round-badge--supervisor" : ""}`}
+                      aria-label={turn._supervisorStep
+                        ? `Supervisor step ${turn._round + 1} of 20`
+                        : `Round ${turn._round + 1}`}
+                    >
+                      {turn._supervisorStep ? `Step ${turn._round + 1} / 20` : `Round ${turn._round + 1}`}
                     </span>
                   )}
                   {model && turn.phase !== "onboard" && turn.phase !== "accept" && turn.phase !== "handoff" && (

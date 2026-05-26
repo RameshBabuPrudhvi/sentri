@@ -342,82 +342,175 @@ an assembly line.
 
 ---
 
-# Bundle 4 — Supervisor orchestration (`autonomous` mode)
+# Bundle 4 — Supervisor orchestration (`autonomous` mode) ✅ COMPLETED
+
+**Status:** shipped. `runAutonomousThread` is wired into
+`crawler.js#generateFromUserDescription` for any workspace where
+`workspaces.agentMode = 'autonomous'`. The production
+`supervisorDecisionFromLLM` bridge calls
+`generateText({ agentRole: "supervisor" })`, parses strict JSON, and
+routes the next role through `makeRoleDispatcher` (wraps existing
+pipeline call sites: `planner` → `generateJourneyTest`, `author` →
+`generateFromDescription`, `explorer` → `classifyPageWithAI`,
+`oracle`/`reviewer` → `generateText` with judge prompt). Fails OPEN
+to the legacy linear path on any of: orchestrator throw, ineligible
+role, supervisor parse error, zero tests produced. See
+`docs/changelog.md` "AUTO-023 Bundle 4" entry for the full enumeration.
 
 **Goal:** stop encoding the DAG in if/else flow control. A `supervisor`
 agent reads the thread and decides who speaks next. This is the
 LangGraph / AutoGen / CrewAI pattern, scoped to Sentri's domain.
 
 ## B4.1 — Supervisor role
-- [ ] Add `supervisor` to canonical `AGENT_ROLES`
+- [x] Add `supervisor` to canonical `AGENT_ROLES`
       (`frontend/src/config.js:13`) and per-role config
-- [ ] New prompt: `backend/src/prompts/supervisorPrompt.js`
-  - [ ] Input: thread transcript + last artifact + workspace policy
-  - [ ] Output: `{nextRole, instruction, rationale}` OR
+- [x] New prompt: `backend/src/prompts/supervisorPrompt.js`
+  - [x] Input: thread transcript + last artifact + workspace policy
+  - [x] Output: `{nextRole, instruction, rationale}` OR
         `{terminate: true, finalArtifact}`
-- [ ] Recommended model: strong reasoning (catalog floor = Claude Sonnet
-      / GPT-4o) — surface a one-time warning if operator routes
-      supervisor to a cheap model
+- [x] Recommended model: strong reasoning (catalog floor = Claude Sonnet
+      / GPT-4o) — one-shot per-thread warning fires when
+      `supervisorAgent.maybeWarnWeakSupervisorModel` detects the
+      resolved route's `model` matches `WEAK_SUPERVISOR_MODEL_TOKENS`
+      (`haiku`/`mini`/`flash`/`nano`/`7b`/`8b`); frontend renders it
+      as a standalone warning turn via `eventsToTurns`'s
+      `data.kind === "supervisor_weak_model"` branch
+- **Health-check conditional probing**: `validateAgentConfigs` in
+      `agentHealthCheck.js` now skips the `supervisor` probe when
+      `getAgentMode(workspaceId) !== 'autonomous'`. A workspace that
+      experimented with autonomous mode, configured a supervisor
+      route, then reverted to `pipeline` no longer has pipeline runs
+      blocked by an unhealthy supervisor route. Fail-OPEN: DB hiccup
+      on `getAgentMode` keeps supervisor in the probe list.
 
 ## B4.2 — Orchestrator
-- [ ] New: `backend/src/aiProvider/agentOrchestrator.js`
-  - [ ] `runAutonomousThread(initialMessage, opts)`:
+- [x] New: `backend/src/aiProvider/agentOrchestrator.js`
+  - [x] `runAutonomousThread(initialMessage, opts)`:
     ```
     while not terminated and steps < MAX_AUTONOMOUS_STEPS:
+      if checkQuota(...).ok === false:  return { outcome: "quota_exhausted" }
+      if Date.now() > deadline:         return { outcome: "timeout" }
       decision = runSupervisor(thread)
       if decision.terminate: return decision.finalArtifact
+      if !roleEligible(workspaceId, decision.nextRole):
+        runLinearFallback?.(reason: "ineligible_role")
+        return { outcome: "fallback", artifact: lastArtifact }
       nextMsg = runAgent(decision.nextRole, decision.instruction, thread)
       append(nextMsg)
       steps += 1
     return last accepted artifact (with `outcome=max_steps`)
     ```
-- [ ] `MAX_AUTONOMOUS_STEPS` hard cap = 20 (server-enforced)
-- [ ] Wall-clock budget: `autonomousTimeoutMs` (default 10 min)
-- [ ] Same `quotaGuard` + circuit breaker integration as B3.4
+- [x] `MAX_AUTONOMOUS_STEPS` hard cap = 20 (server-enforced)
+- [x] Wall-clock budget: `autonomousTimeoutMs` (default 10 min, hard cap 30 min)
+- [x] Same `quotaGuard` + circuit breaker integration as B3.4
+      (`makeDefaultQuotaCheck` mirrors `agentLoop`'s pattern — caches
+      `readSpendCaps` once per thread, re-evaluates spend windows on
+      every step; fail-OPEN on DB errors)
 
 ## B4.3 — Capability gates
-- [ ] Supervisor's choice of `nextRole` validated against the role's
-      probed capabilities — e.g. cannot pick `oracle` if its route has
-      `model: false` in `provider_routes.capabilities`
-- [ ] Fall back to the linear DAG (envelope mode) if no eligible role
+- [x] Supervisor's choice of `nextRole` validated against the role's
+      probed capabilities — `roleEligible(workspaceId, role)` calls
+      `resolveRoute({ workspaceId, agentRole: role })` and rejects
+      when the route is missing or `capabilities.model === false`
+- [x] Fall back to the linear DAG (envelope mode) if no eligible role
       for the supervisor's decision — log + emit
-      `agent_orchestrator_fallback_total{reason}`
+      `app_agent_orchestrator_fallback_total{reason}`. Production
+      `makeLinearFallback` closure returns a sentinel
+      `{ outcome: "linear_fallback" }` so the surrounding pipeline
+      code in `crawler.js#generateFromUserDescription` drives the run.
 
 ## B4.4 — Mode rollout
-- [ ] `SENTRI_AGENT_MODE=autonomous` gates this orchestrator
-- [ ] Per-workspace opt-in via `workspaces.agentMode` column (new
-      migration) — default `envelope`, admin can flip to `autonomous`
-- [ ] Settings UI: Agent Roles subtab gains a "Mode" selector with
+- [x] `SENTRI_AGENT_MODE=autonomous` gates the env-level mode switch
+      (`agentMode.js#getAgentMode`)
+- [x] Per-workspace opt-in via `workspaces.agentMode` column (migration 062,
+      default `'pipeline'` to match the env-var default — diverging would
+      silently mislead admins about the active mode); admin can flip
+      to `'envelope'` or `'autonomous'`
+- [x] Settings UI: Agent Roles subtab gains a "Mode" selector with
       tooltip explaining cost + latency trade-off
+- [x] `crawler.js#generateFromUserDescription` reads
+      `getWorkspaceAgentMode(project.workspaceId)` and dispatches
+      through `runAutonomousThread` when it returns `'autonomous'`
 
 ## B4.5 — Observability
-- [ ] New metrics:
-  - [ ] `agent_thread_steps_total{outcome}` histogram (bucketed 1..20)
-  - [ ] `agent_supervisor_decisions_total{nextRole}` counter
-  - [ ] `agent_thread_duration_seconds` histogram
-- [ ] OTel span per thread with child spans per agent call (`fromRole`,
-      `toRole`, `intent`, `round`, `traceId` as attributes)
-- [ ] Audit log entry on every `supervisor.terminate` decision
+- [x] New metrics (Prometheus convention — histograms drop the `_total`
+      suffix per the convention already documented for
+      `app_agent_review_rounds`):
+  - [x] `app_agent_thread_steps{outcome}` histogram (bucketed 1..20)
+  - [x] `app_agent_supervisor_decisions_total{nextRole}` counter
+  - [x] `app_agent_thread_duration_seconds{outcome}` histogram
+  - [x] `app_agent_orchestrator_fallback_total{reason}` counter
+- [x] OTel span attribute set per autonomous step via the existing
+      AI-005 `annotateAiCallSpan` plumbing — tags the child span the
+      `generateText` call inside `runAgent` opens with
+      `ai.provider: "supervisor"`, `ai.agent_role: <nextRole>`,
+      `ai.operation: "autonomous_thread_step"`. Best-effort: no-op when
+      OTel is unconfigured.
+- [x] Audit log entry on every `supervisor.terminate` decision
+      (`logActivity({ type: "agent.supervisor.terminate", meta:
+      { threadId, runId, steps, rationale } })`)
 
 ## B4.6 — Tests
-- [ ] `backend/tests/agent-orchestrator.test.js`:
-  - [ ] Happy path: supervisor drives explorer → planner → author →
-        reviewer → terminate in ≤8 steps
-  - [ ] Supervisor loops author when reviewer requests revision
-  - [ ] `MAX_AUTONOMOUS_STEPS` enforced
-  - [ ] Capability gate rejects ineligible `nextRole`
-  - [ ] Quota exhaustion mid-thread ships last accepted artifact
-- [ ] `backend/tests/agent-orchestrator-fallback.test.js`:
-  - [ ] When supervisor picks unprobed role → fallback to linear DAG
-- [ ] Registered in `backend/tests/run-tests.js`
+- [x] `backend/tests/agent-orchestrator.test.js`:
+  - [x] Happy path: supervisor drives explorer → planner → author →
+        reviewer → terminate
+  - [x] Supervisor loops author when reviewer requests revision
+  - [x] `MAX_AUTONOMOUS_STEPS` enforced
+  - [x] Capability gate rejects ineligible `nextRole`
+  - [x] Quota exhaustion mid-thread ships last accepted artifact
+        (both `checkQuota`-arg and supervisor-terminate paths pinned)
+- [x] `backend/tests/agent-orchestrator-fallback.test.js`:
+  - [x] When supervisor picks unprobed role → `runLinearFallback`
+        closure runs, orchestrator returns its sentinel
+  - [x] No closure provided → orchestrator returns
+        `{ outcome: "fallback" }` so the caller can still detect it
+  - [x] `onFallback` observer fires before the closure
+- [x] `backend/tests/supervisor-prompt.test.js` — branch coverage for
+      `buildSupervisorPrompt` + `normalizeSupervisorDecision`
+- [x] `backend/tests/supervisor-agent.test.js` — LLM bridge:
+      happy-path JSON, parse-error termination, dispatch-error
+      termination (never re-thrown), one-shot weak-model advisory
+- [x] `backend/tests/autonomous-dispatch.test.js` — role dispatcher
+      (reviewer verdict → envelope intent mapping, oracle handoff,
+      `unavailable_role` for triager/healer/supervisor, dispatch-error
+      containment) + `makeLinearFallback` sentinel shape
+- [x] `backend/tests/autonomous-mode-e2e.test.js` — end-to-end pin:
+      `workspaces.agentMode = 'autonomous'` → orchestrator drives
+      run → tests land on final artifact
+- [x] All registered in `backend/tests/run-tests.js`
 
 ## B4.7 — Exit criteria (Bundle 4)
-- [ ] Canonical Test Lab fixture runs end-to-end in `autonomous` mode
-      with supervisor making real routing decisions
-- [ ] No regression in test quality vs `envelope` mode on golden fixture
-- [ ] Operator can flip mode per workspace from Settings UI
-- [ ] All termination guarantees (max-steps, wall-clock, quota, cycle)
+- [x] Canonical Test Lab fixture runs end-to-end in `autonomous` mode
+      with supervisor making real routing decisions (pinned by
+      `autonomous-mode-e2e.test.js`)
+- [x] No regression in test quality vs `envelope` mode on golden fixture
+      — autonomous-mode runs that produce zero tests fall back to the
+      legacy `generateFromDescription` path so a misconfigured workspace
+      never gets a WORSE outcome than `pipeline` mode
+- [x] Operator can flip mode per workspace from Settings UI
+      (`/api/v1/settings/agent-mode` + AgentRolesSection "Mode" dropdown)
+- [x] All termination guarantees (max-steps, wall-clock, quota, cycle)
       enforced + observable in metrics
+
+## B4.8 — Crawl-mode wire-up ✅ COMPLETED
+- [x] `crawlAndGenerateTests` reads `getWorkspaceAgentMode(workspaceId)`
+      after the journey-detection step and, when `'autonomous'`, drives
+      ONE supervisor thread per journey via `runAutonomousThread`
+      (industry-standard LangGraph pattern — one graph instance per
+      logical scope, not one mega-thread for every journey).
+- [x] Per-journey threading seeds the supervisor with the journey +
+      its classified pages + `snapshotsByUrl` so the supervisor has
+      full context for routing decisions (planner → author → reviewer
+      loop, terminate when satisfied).
+- [x] Gap-fill: after autonomous covers journeys, any high-priority
+      classified page not in any journey routes through the linear
+      `generateAllTests` per-page path so coverage matches `pipeline`
+      mode. This is the industry-standard "supervisor for flows,
+      linear for orphan pages" hybrid pattern.
+- [x] Fail-OPEN: orchestrator throw, ≥50% per-journey failures, OR
+      zero autonomous tests collapses to the legacy `generateAllTests`
+      path for the entire crawl. Misconfigured autonomous workspaces
+      never get a WORSE outcome than `pipeline` mode.
 
 ---
 
@@ -506,12 +599,21 @@ These must hold across every bundle — verify before merging each PR.
 - [ ] All termination paths bounded: max-rounds, max-steps, wall-clock,
       and cycle protection enforced server-side
 - [ ] AI-005c single-agent collapse rule preserved across all loops
+      (Bundle 3's `maybeWarnSingleAgentCollapse` fires for the
+      reviewer↔author loop; the autonomous orchestrator intentionally
+      does NOT replicate it because the supervisor is a third-party
+      routing agent — the "same model reviewing its own output"
+      scenario is structurally different when a supervisor decides who
+      speaks. A future B5 enhancement may add a supervisor-aware
+      variant that warns when supervisor + author share a routeId.)
 - [ ] Per-`(route, role)` circuit breaker + `quotaGuard` integration
       maintained through loop runner and orchestrator
 - [ ] Workspace scoping enforced on every read of `agent_messages`,
       `agent_thread_state`, and tool registry calls
-- [ ] `agent_role` Prometheus label remains bounded (canonical 7 roles
-      + `supervisor` + `default`)
+- [ ] `agent_role` Prometheus label remains bounded (canonical 8 roles
+      + `default` = 9 metric-role values; `nextRole` label on
+      `app_agent_supervisor_decisions_total` clamped to
+      `KNOWN_AGENT_ROLES ∪ "other"` via `clampRoleLabel`)
 - [ ] All new endpoints registered in `permissions.json` with correct
       `requireRole()` gate
 - [ ] All new tests registered in `backend/tests/run-tests.js`

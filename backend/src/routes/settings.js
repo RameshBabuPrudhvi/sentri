@@ -23,6 +23,7 @@ import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
+import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import { validateAgentConfigs, AGENT_ROLES } from "../aiProvider/agentHealthCheck.js";
 import * as providerRouteRepo from "../database/repositories/providerRouteRepo.js";
 // B4.6 — read-only route-group surface for the TopBar dropdown +
@@ -361,6 +362,18 @@ const MAX_SYSTEM_PROMPT_LEN = 32_000;
 
 router.get("/settings/agent-roles", requireRole("admin"), (req, res) => {
   res.json({ roles: agentConfigRepo.listByWorkspace(req.workspaceId) });
+});
+
+router.get("/settings/agent-mode", requireRole("admin"), (req, res) => {
+  res.json({ mode: workspaceRepo.getAgentMode(req.workspaceId) });
+});
+
+router.patch("/settings/agent-mode", requireRole("admin"), (req, res) => {
+  const mode = String(req.body?.mode || "").trim().toLowerCase();
+  if (!["pipeline", "envelope", "autonomous"].includes(mode)) {
+    return res.status(400).json({ error: "mode must be one of: pipeline, envelope, autonomous" });
+  }
+  res.json({ mode: workspaceRepo.setAgentMode(req.workspaceId, mode) });
 });
 
 router.post("/settings/agent-roles", requireRole("admin"), (req, res) => {
@@ -1770,6 +1783,5 @@ router.post("/settings/ai-providers/:id/rotate-key", requireRole("admin"), async
 });
 
 export default router;
-
 
 

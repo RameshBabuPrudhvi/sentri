@@ -20,6 +20,7 @@
  */
 
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
+import { getAgentMode } from "../database/repositories/workspaceRepo.js";
 import { generateText } from "./index.js";
 // B2.3 — `resolveRoute` replaces the legacy `resolveProvider` for both
 // the per-role provider lookup AND the dedup-bucket key. After
@@ -48,6 +49,7 @@ import { resolveRoute } from "./registry.js";
  * @type {string[]}
  */
 export const AGENT_ROLES = Object.freeze([
+  "supervisor",
   "explorer",
   "planner",
   "author",
@@ -65,8 +67,8 @@ export const AGENT_ROLES = Object.freeze([
  * the workspace-default fallback in single-agent mode).
  *
  * Used by dashboards and alert rules that enumerate the full label space.
- * Bounded cardinality contract: 8 metric-role values × 5 provider labels ×
- * 3 outcomes ≈ 120 series per metric — well under Prometheus's 10k/metric
+ * Bounded cardinality contract: 9 metric-role values (8 roles + "default") ×
+ * 5 provider labels × 3 outcomes ≈ 135 series per metric — well under Prometheus's 10k/metric
  * recommended ceiling. Adding a new role to `AGENT_ROLES` automatically
  * grows this list by one.
  *
@@ -197,6 +199,25 @@ export async function validateAgentConfigs(workspaceId, { signal, roles } = {}) 
   // prevents an unbounded `Promise.all` from spawning a probe per junk row.
   const allowed = new Set(AGENT_ROLES);
   probeRoles = [...new Set(probeRoles.filter((r) => allowed.has(r)))];
+
+  // AUTO-023 B4 — skip the `supervisor` probe when the workspace is NOT
+  // in autonomous mode. A workspace that experimented with autonomous,
+  // configured a supervisor route, then reverted to `pipeline` would
+  // otherwise have EVERY pipeline run blocked by an unhealthy supervisor
+  // route that isn't even used. The supervisor role is only meaningful
+  // when `agentMode === 'autonomous'`; in pipeline/envelope mode the
+  // orchestrator never runs and the route is dead weight.
+  // Fail-OPEN: if `getAgentMode` throws (DB hiccup), keep supervisor
+  // in the probe list — better to surface a false-positive health
+  // failure than to silently skip it when it IS needed.
+  if (probeRoles.includes("supervisor")) {
+    try {
+      const mode = getAgentMode(workspaceId);
+      if (mode !== "autonomous") {
+        probeRoles = probeRoles.filter((r) => r !== "supervisor");
+      }
+    } catch { /* fail-OPEN: keep supervisor in probe list */ }
+  }
   if (probeRoles.length === 0) return { ok: true, agentRoles: {} };
 
   // Cost optimisation: dedupe probes by resolved route id (or provider

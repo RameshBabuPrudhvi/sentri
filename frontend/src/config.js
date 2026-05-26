@@ -10,7 +10,7 @@
 // passed `agentRole: "executor"` to `generateText`, so saving it produced
 // a dead row that did nothing. The synthetic `"default"` metric label is
 // intentionally not user-configurable (it's a Prometheus catch-all).
-export const AGENT_ROLES = ["explorer", "planner", "author", "oracle", "reviewer", "healer", "triager"];
+export const AGENT_ROLES = ["supervisor", "explorer", "planner", "author", "oracle", "reviewer", "healer", "triager"];
 
 // AUTO-023 Bundle 1: mirrors the canonical envelope intent enum in
 // `backend/src/aiProvider/agentEnvelope.js#INTENTS`. Same byte-for-byte

@@ -336,3 +336,43 @@ export function classifyAiError(err) {
   if (msg.includes("econnrefused") || msg.includes("enotfound") || msg.includes("network")) return "network";
   return "unknown";
 }
+
+
+// AUTO-023 B4.5 — autonomous supervisor orchestration telemetry.
+const AUTONOMOUS_STEP_BUCKETS = [1, 2, 3, 5, 8, 13, 20];
+const AUTONOMOUS_DURATION_BUCKETS = [1, 3, 5, 10, 30, 60, 120, 300, 600];
+
+// Naming: Prometheus convention reserves the `_total` suffix for Counters
+// (so `*_total_bucket` / `*_total_sum` / `*_total_count` series read
+// cleanly when histograms auto-expand). This is a Histogram, so the
+// metric name is `app_agent_thread_steps` (no `_total`). Mirrors the
+// `app_agent_review_rounds` convention documented above.
+export const agentThreadStepsTotal = new client.Histogram({
+  name: "app_agent_thread_steps",
+  help: "AUTO-023 B4.5 — autonomous thread step count per terminal outcome.",
+  labelNames: ["outcome"],
+  buckets: AUTONOMOUS_STEP_BUCKETS,
+  registers: [register],
+});
+
+export const agentSupervisorDecisionsTotal = new client.Counter({
+  name: "app_agent_supervisor_decisions_total",
+  help: "AUTO-023 B4.5 — supervisor routing decisions by nextRole.",
+  labelNames: ["nextRole"],
+  registers: [register],
+});
+
+export const agentThreadDurationSeconds = new client.Histogram({
+  name: "app_agent_thread_duration_seconds",
+  help: "AUTO-023 B4.5 — autonomous thread wall-clock duration in seconds.",
+  labelNames: ["outcome"],
+  buckets: AUTONOMOUS_DURATION_BUCKETS,
+  registers: [register],
+});
+
+export const agentOrchestratorFallbackTotal = new client.Counter({
+  name: "app_agent_orchestrator_fallback_total",
+  help: "AUTO-023 B4.3 — orchestrator fallback count by reason when supervisor decision is ineligible.",
+  labelNames: ["reason"],
+  registers: [register],
+});

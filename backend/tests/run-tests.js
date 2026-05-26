@@ -56,6 +56,38 @@ const files = [
   "tests/agent-message-repo.test.js",
   "tests/agent-message-emitter.test.js",
   "tests/agent-reviewer-loop.test.js",
+  "tests/agent-orchestrator.test.js",
+  // AUTO-023 B4.1 — supervisor prompt builder + decision normaliser
+  // branch coverage (terminate vs. route, missing instruction, empty
+  // nextRole fallback).
+  "tests/supervisor-prompt.test.js",
+  // AUTO-023 B4.1 — supervisor LLM bridge (generateText → parseJSON →
+  // normalizeSupervisorDecision). Pins happy-path JSON, parse-error
+  // termination, dispatch-error termination (never re-thrown), and
+  // the one-shot weak-supervisor-model advisory.
+  "tests/supervisor-agent.test.js",
+  // AUTO-023 B4.3 / B4.6 — dedicated coverage for the orchestrator's
+  // ineligible-role fallback path. The roadmap lists this as a
+  // separate file so a regression in the fallback hook surfaces in
+  // isolation from the happy-path / max-steps cases.
+  "tests/agent-orchestrator-fallback.test.js",
+  // AUTO-023 B4.6 — role dispatcher + linear-fallback closure
+  // (`makeRoleDispatcher` / `makeLinearFallback`). Pins reviewer
+  // verdict → envelope intent mapping, oracle handoff round-trip,
+  // unavailable-role envelopes, and dispatch-error containment.
+  "tests/autonomous-dispatch.test.js",
+  // AUTO-023 B4.7 — end-to-end acceptance pin for autonomous mode:
+  // composes orchestrator + supervisor LLM bridge + role dispatcher
+  // under stubbed generateText so a workspace flagged `'autonomous'`
+  // produces tests via real supervisor routing decisions. Covers
+  // single-turn terminate, multi-turn reviewer revise loop, and
+  // supervisor parse-error safe termination.
+  "tests/autonomous-mode-e2e.test.js",
+  // AUTO-023 B4.4 — integration coverage for the new admin-gated
+  // `/settings/agent-mode` endpoints + workspaceRepo round-trip.
+  // Pins status codes, response shape, cross-workspace isolation,
+  // 400 on invalid mode + defence-in-depth coercion at the repo layer.
+  "tests/agent-mode-routes.test.js",
   "tests/reviewer-prompt.test.js",
   // AUTO-023 B3.3 — per-workspace `agent_configs.maxReviewRounds` override
   // (migration 059). Pins the repo-layer `[1, 10]` clamp + the loop's
