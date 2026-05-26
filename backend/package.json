@@ -1,6 +1,6 @@
 {
   "name": "sentri-backend",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "type": "module",
   "scripts": {
     "start": "node --import ./src/otel-preload.mjs src/index.js",

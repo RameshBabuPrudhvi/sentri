@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-05-26
+
 ### Added
 
 - **AUTO-023 Bundle 5** — Thread-scoped shared blackboard (`get`/`setKey`/`casUpdate`) with optimistic concurrency and a 64 KB size cap (`AGENT_THREAD_STATE_MAX_BYTES`).
