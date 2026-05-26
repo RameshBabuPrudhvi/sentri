@@ -66,8 +66,8 @@ export const AGENT_ROLES = Object.freeze([
  * the workspace-default fallback in single-agent mode).
  *
  * Used by dashboards and alert rules that enumerate the full label space.
- * Bounded cardinality contract: 8 metric-role values × 5 provider labels ×
- * 3 outcomes ≈ 120 series per metric — well under Prometheus's 10k/metric
+ * Bounded cardinality contract: 9 metric-role values (8 roles + "default") ×
+ * 5 provider labels × 3 outcomes ≈ 135 series per metric — well under Prometheus's 10k/metric
  * recommended ceiling. Adding a new role to `AGENT_ROLES` automatically
  * grows this list by one.
  *
