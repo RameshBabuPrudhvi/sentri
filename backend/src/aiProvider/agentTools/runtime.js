@@ -10,12 +10,13 @@ const MAX_PEER_NESTING = 3;
 
 const peerAnswers = new Map();
 
-function withTimeout(promise, ms, tool) {
+function withTimeout(promise, ms, tool, onTimeout = null) {
   let t;
   const timeout = new Promise((_, rej) => {
     t = setTimeout(() => {
       const err = new Error(`tool timeout: ${tool}`);
       err.code = "ERR_AGENT_TOOL_TIMEOUT";
+      try { onTimeout?.(); } catch {}
       rej(err);
     }, ms);
   });
@@ -34,9 +35,10 @@ async function askPeer({ threadId, workspaceId, fromRole, role, question, runId,
     id: callId, runId, workspaceId, threadId, traceId: `trace-${runId || "standalone"}`,
     fromRole, toRole: role, intent: "question", artifact: { question }, rationale: null, round: 0, replyToId: null, createdAt: new Date().toISOString(),
   });
-  return withTimeout(new Promise((resolve, reject) => {
+  const wait = withTimeout(new Promise((resolve, reject) => {
     peerAnswers.set(callId, { resolve, reject });
-  }), peerQuestionTimeoutMs, "thread.askPeer");
+  }), peerQuestionTimeoutMs, "thread.askPeer", () => peerAnswers.delete(callId));
+  return { toolCallId: callId, ...(await wait) };
 }
 
 export function answerPeer({ toolCallId, answer, runId, workspaceId, threadId, fromRole, toRole }) {
@@ -89,3 +91,7 @@ export async function executeToolCall({ tool, args, role, allowedTools = null, c
     throw err;
   }
 }
+
+
+export function _getPendingPeerCount() { return peerAnswers.size; }
+export function _peekPendingPeerIds() { return [...peerAnswers.keys()]; }
