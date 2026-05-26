@@ -286,6 +286,17 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
       agentRole: nextRole,
       operation: "autonomous_thread_step",
     });
+    // AUTO-023 B5.7 — emit the supervisor→nextRole handoff envelope
+    // BEFORE `runAgent` so the UI timeline reads handoff → tool_call →
+    // tool_result (logical order). Pre-fix the handoff was emitted AFTER
+    // the tool dispatch block, so `createdAt` timestamps placed tool
+    // activity chronologically before the supervisor's handoff —
+    // operators saw the agent invoke a tool before the supervisor told
+    // it to act.
+    emitAgentMessage({
+      runId, workspaceId, threadId, traceId: getCurrentTraceId() || `trace-${runId || "standalone"}`,
+      fromRole: "supervisor", toRole: nextRole, intent: "handoff", artifact: { instruction: decision.instruction }, rationale: decision.rationale || null, round: step, replyToId: null, createdAt: nowIso(),
+    });
     const msg = await runAgent({ role: nextRole, instruction: decision.instruction, thread, step, workspaceId, runId, threadId, signal });
     thread.push(msg);
     // AUTO-023 B5.3 — skip `lastArtifact` updates for tool envelopes.
@@ -413,10 +424,6 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
         });
       } catch { /* best-effort — answerPeer is decorative, never break the thread */ }
     }
-    emitAgentMessage({
-      runId, workspaceId, threadId, traceId: getCurrentTraceId() || `trace-${runId || "standalone"}`,
-      fromRole: "supervisor", toRole: nextRole, intent: "handoff", artifact: { instruction: decision.instruction }, rationale: decision.rationale || null, round: step, replyToId: null, createdAt: nowIso(),
-    });
   }
   try { agentThreadStepsTotal.observe({ outcome: "max_steps" }, Math.max(1, stepsLimit)); } catch {}
   try { agentThreadDurationSeconds.observe({ outcome: "max_steps" }, Math.max(0.001, (Date.now() - startedAt) / 1000)); } catch {}
