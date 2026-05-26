@@ -462,9 +462,17 @@ async function _dispatchToolBody({ tool, parsed, context }) {
         // AUTO-023 B5.5 — `runRepo.getById(id)` is single-arg; verify
         // the run's `workspaceId` column matches the caller's
         // workspace before returning page data.
+        //
+        // Deny-by-default semantics: when the caller has a workspaceId,
+        // only return page data if the run's workspaceId positively
+        // matches. A run row with `null` workspaceId (e.g. legacy data
+        // from before the column was populated) is NOT accessible from
+        // any workspace — this mirrors the `db.listExistingTests` /
+        // `db.getTest` pattern above where access is denied unless
+        // ownership can be positively confirmed.
         const run = runRepo.getById(parsed.runId);
         if (!run) return { url: parsed.url, html: null };
-        if (context.workspaceId && run.workspaceId && run.workspaceId !== context.workspaceId) {
+        if (context.workspaceId && run.workspaceId !== context.workspaceId) {
           return { url: parsed.url, html: null };
         }
         const pages = Array.isArray(run?.pages) ? run.pages : [];
