@@ -71,13 +71,18 @@ let _idLastMs = 0;
 let _idIntraMsCounter = 0;
 function _nextAgentMessageId() {
   const now = Date.now();
-  if (now === _idLastMs) {
+  // Use `<=` so a backwards clock jump (NTP correction) reuses the prior
+  // `_idLastMs` instead of resetting the counter to 0 with an earlier
+  // timestamp prefix. Without this, the documented `(createdAt ASC, id
+  // ASC)` ordering contract is violated when the system clock moves
+  // backwards between two emits.
+  if (now <= _idLastMs) {
     _idIntraMsCounter += 1;
   } else {
     _idLastMs = now;
     _idIntraMsCounter = 0;
   }
-  return `am-${String(now).padStart(13, "0")}-${String(_idIntraMsCounter).padStart(6, "0")}-${randomUUID()}`;
+  return `am-${String(_idLastMs).padStart(13, "0")}-${String(_idIntraMsCounter).padStart(6, "0")}-${randomUUID()}`;
 }
 // Task 2 — `model` resolution. `resolveRoute({ agentRole, workspaceId })`
 // returns the same route the pipeline's `generateText(...)` call will use

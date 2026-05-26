@@ -35,6 +35,7 @@ import { emitAgentEvent } from "./agentEventEmitter.js";
 import { buildSupervisorPrompt, normalizeSupervisorDecision } from "../prompts/supervisorPrompt.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { PIPELINE_STEPS } from "../utils/pipelineState.js";
+import { agentOrchestratorFallbackTotal } from "../utils/metrics.js";
 
 // AUTO-023 B4.1 — substring-matched (case-insensitive) against
 // `route.model` so vendor model-id variants
@@ -204,7 +205,10 @@ export async function supervisorDecisionFromLLM({
   } catch (err) {
     // Dispatch failure (rate limit, auth, network) — terminate safely.
     // Throwing here would crash the entire autonomous thread before
-    // the orchestrator's `runLinearFallback` hook ever runs.
+    // the orchestrator's `runLinearFallback` hook ever runs. Bump the
+    // fallback counter so ops can alert on broken supervisor routes
+    // (pre-fix the silent terminate was invisible in metrics).
+    try { agentOrchestratorFallbackTotal.inc({ reason: "supervisor_dispatch_error" }); } catch {}
     console.warn(formatLogLine("warn", runId,
       `[supervisorAgent] generateText failed (${err?.message || "unknown"}); terminating thread`));
     return {
@@ -220,6 +224,7 @@ export async function supervisorDecisionFromLLM({
   } catch (err) {
     // Strict-JSON contract violated — terminate. Same rationale as
     // `normalizeReviewerVerdict`'s downgrade-unknown safety net.
+    try { agentOrchestratorFallbackTotal.inc({ reason: "supervisor_parse_error" }); } catch {}
     console.warn(formatLogLine("warn", runId,
       `[supervisorAgent] parse failed (${err?.message || "unknown"}); terminating thread. raw=${String(raw).slice(0, 120)}`));
     return {

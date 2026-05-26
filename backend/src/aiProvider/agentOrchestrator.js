@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { emitAgentEvent, emitAgentMessage } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { resolveRoute } from "./registry.js";
@@ -241,6 +242,12 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
       return { outcome: "timeout", artifact: lastArtifact, steps: step };
     }
     if (signal?.aborted) {
+      // Observe metrics on the aborted branch too — every other terminal
+      // return (quota_exhausted / timeout / terminate / fallback /
+      // max_steps) records steps + duration histograms; without this
+      // `app_agent_thread_steps` underreports total terminations.
+      try { agentThreadStepsTotal.observe({ outcome: "aborted" }, Math.max(1, step)); } catch {}
+      try { agentThreadDurationSeconds.observe({ outcome: "aborted" }, Math.max(0.001, (Date.now() - startedAt) / 1000)); } catch {}
       return { outcome: "aborted", artifact: lastArtifact, steps: step };
     }
     const decision = await supervisorDecision({ thread, lastArtifact, step, workspaceId, runId, threadId, signal });
@@ -314,7 +321,11 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
 
     if (msg?.intent === "tool_call" && msg?.artifact?.tool) {
       const cfg = workspaceId ? agentConfigRepo.getByRole(workspaceId, nextRole) : null;
-      const toolCallId = msg?.id || `tool-${Date.now()}`;
+      // UUID suffix so two tool_calls emitted in the same millisecond
+      // (e.g. parallel agent dispatches) don't collide on the same
+      // `tool-${Date.now()}` id — collisions break the `replyToId`
+      // chain that pairs tool_call → tool_result in the UI timeline.
+      const toolCallId = msg?.id || `tool-${Date.now()}-${randomUUID()}`;
       // AUTO-023 B5.3 — persist the `tool_call` envelope BEFORE
       // dispatch so the SSE snapshot + UI timeline see the request
       // even if the tool throws synchronously. `emitAgentMessage` is
