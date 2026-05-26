@@ -221,7 +221,18 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
     });
     const msg = await runAgent({ role: nextRole, instruction: decision.instruction, thread, step, workspaceId, runId, threadId, signal });
     thread.push(msg);
-    lastArtifact = msg?.artifact ?? lastArtifact;
+    // AUTO-023 B5.3 — skip `lastArtifact` updates for tool envelopes.
+    // `tool_call` artifacts carry `{tool, args}` (infrastructure metadata,
+    // not work product) and `tool_result` artifacts carry `{toolCallId,
+    // tool, result}` — neither is the "last meaningful artifact" the
+    // thread should return. Without this guard, a reviewer that emits a
+    // tool_call after the author produced `{tests: [...]}` would overwrite
+    // the tests with tool metadata, and any subsequent terminate /
+    // timeout / max_steps return would surface tool noise as the final
+    // artifact (the original lifeguard finding).
+    if (msg?.intent !== "tool_call" && msg?.intent !== "tool_result") {
+      lastArtifact = msg?.artifact ?? lastArtifact;
+    }
 
     if (msg?.intent === "tool_call" && msg?.artifact?.tool) {
       const cfg = workspaceId ? agentConfigRepo.getByRole(workspaceId, nextRole) : null;
@@ -260,7 +271,14 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
         };
       }
       thread.push(resultMsg);
-      lastArtifact = resultMsg.artifact;
+      // AUTO-023 B5.3 — deliberately do NOT update `lastArtifact` with
+      // the tool_result envelope. The `tool_result` is infrastructure
+      // metadata (`{toolCallId, tool, result|error}`) that the supervisor
+      // reads off `thread[last]` for routing decisions, not a meaningful
+      // work product for the thread's terminal return value. Keeping
+      // `lastArtifact` pinned to the most recent author/oracle/reviewer
+      // handoff means a subsequent timeout / max_steps / quota_exhausted
+      // return surfaces the actual tests, not tool noise.
       // AUTO-023 B5.3 — persist the matching `tool_result` so the
       // `tool_call` → `tool_result` pair shows up as a single
       // round-trip in the UI timeline (replyToId chains them).

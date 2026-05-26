@@ -146,7 +146,15 @@ export function makeRoleDispatcher(ctx = {}) {
             // produces the same test count + dial preferences a
             // pipeline-mode call would. Pre-fix the autonomous path
             // silently used the legacy defaults.
-            { signal: effectiveSignal, workspaceId: ws, runId, dialsPrompt, testCount },
+            //
+            // AUTO-023 B5.7 — `projectId` is required for the
+            // `db.listExistingTests` dedup tool dispatch inside
+            // `generateFromDescription`. Without this the autonomous
+            // dispatch path was the only consumer of the author that
+            // didn't get dedup-aware prompts; the linear `crawler.js`
+            // call sites already pass `project.id` (see
+            // `crawler.js:387-409`).
+            { signal: effectiveSignal, workspaceId: ws, runId, dialsPrompt, testCount, projectId: project.id || null },
           );
           return { fromRole: "author", intent: "handoff", artifact: { tests }, rationale: instruction };
         }
