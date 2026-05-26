@@ -2,6 +2,8 @@ import { emitAgentEvent, emitAgentMessage } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { resolveRoute } from "./registry.js";
 import { logActivity } from "../utils/activityLogger.js";
+import { executeToolCall } from "./agentTools/runtime.js";
+import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { readSpendCaps, evaluateSpendCap } from "./quotaGuard.js";
 import {
   agentThreadStepsTotal,
@@ -220,6 +222,33 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
     const msg = await runAgent({ role: nextRole, instruction: decision.instruction, thread, step, workspaceId, runId, threadId, signal });
     thread.push(msg);
     lastArtifact = msg?.artifact ?? lastArtifact;
+
+    if (msg?.intent === "tool_call" && msg?.artifact?.tool) {
+      const cfg = workspaceId ? agentConfigRepo.getByRole(workspaceId, nextRole) : null;
+      const toolCallId = msg?.id || `tool-${Date.now()}`;
+      try {
+        const out = await executeToolCall({
+          tool: msg.artifact.tool,
+          args: msg.artifact.args || {},
+          role: nextRole,
+          allowedTools: Array.isArray(cfg?.allowedTools) ? cfg.allowedTools : null,
+          context: { workspaceId, threadId, runId, fromRole: nextRole },
+        });
+        const resultMsg = {
+          fromRole: nextRole, toRole: nextRole, intent: "tool_result",
+          artifact: { toolCallId, tool: msg.artifact.tool, result: out.result }, rationale: "tool_executed",
+        };
+        thread.push(resultMsg);
+        lastArtifact = resultMsg.artifact;
+      } catch (err) {
+        const resultMsg = {
+          fromRole: nextRole, toRole: nextRole, intent: "tool_result",
+          artifact: { toolCallId, tool: msg.artifact.tool, error: err?.message || "tool_error", code: err?.code || null }, rationale: "tool_error",
+        };
+        thread.push(resultMsg);
+        lastArtifact = resultMsg.artifact;
+      }
+    }
     emitAgentMessage({
       runId, workspaceId, threadId, traceId: getCurrentTraceId() || `trace-${runId || "standalone"}`,
       fromRole: "supervisor", toRole: nextRole, intent: "handoff", artifact: { instruction: decision.instruction }, rationale: decision.rationale || null, round: step, replyToId: null, createdAt: nowIso(),
