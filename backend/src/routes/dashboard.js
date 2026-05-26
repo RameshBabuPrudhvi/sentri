@@ -127,15 +127,32 @@ router.get("/dashboard", async (req, res) => {
   const avgRunDurationMs = durations.length ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length) : null;
 
   // ── Defect / failure category breakdown (across all test run results) ───
-  const defectBreakdown = { SELECTOR_ISSUE: 0, NAVIGATION_FAIL: 0, TIMEOUT: 0, ASSERTION_FAIL: 0, UNKNOWN: 0 };
+  // BOT_BLOCK is surfaced as its own bucket so anti-bot interstitial failures
+  // (CAPTCHA / `/sorry/` / "unusual traffic") don't get folded into UNKNOWN
+  // and lose the honest "site refused automation" signal in the dashboard.
+  const defectBreakdown = { BOT_BLOCK: 0, SELECTOR_ISSUE: 0, NAVIGATION_FAIL: 0, TIMEOUT: 0, ASSERTION_FAIL: 0, UNKNOWN: 0 };
   const testResultStatuses = {};   // testId → Set<"passed"|"failed">
   const testRunResults = runs.filter((r) => (r.type === "test_run" || r.type === "run") && r.results?.length);
   for (const r of testRunResults) {
     for (const result of r.results) {
       if (!testResultStatuses[result.testId]) testResultStatuses[result.testId] = new Set();
       if (result.status) testResultStatuses[result.testId].add(result.status);
-      if (result.status === "failed" && result.error) {
-        const cat = classifyFailure(result.error);
+      if (result.status === "failed" && (result.error || result.url)) {
+        // Pass `result.url` so the classifier can match anti-bot URLs even
+        // when the error text is just a generic locator timeout. See
+        // `classifyFailure` jsdoc in `backend/src/pipeline/feedbackLoop.js`.
+        const cat = classifyFailure(result.error, { finalUrl: result.url });
+        // Don't inflate the UNKNOWN bucket with errorless-but-URL'd failed
+        // rows that pre-PR were silently excluded. We widened the guard
+        // above to `result.url` so BOT_BLOCK URL-only detection participates
+        // (the whole point — a failed run that lands on `/sorry/` has the
+        // URL but no error text), but a failed result with no error AND a
+        // non-bot URL still classifies as UNKNOWN — and counting those
+        // would change the defect-breakdown denominator on every
+        // dashboard since this PR shipped, without anything actionable to
+        // show for it. Skip them; the original `result.error`-only guard
+        // already dropped them.
+        if (!result.error && cat === "UNKNOWN") continue;
         if (cat in defectBreakdown) defectBreakdown[cat]++;
         else defectBreakdown.UNKNOWN++;
       }

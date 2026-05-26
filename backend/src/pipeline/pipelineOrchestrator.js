@@ -17,6 +17,7 @@ import { applyHealingTransforms } from "../selfHealing.js";
 import { sanitizeDomSnapshot, createPiiContext, finalizePiiContext } from "./domSanitizer.js";
 import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
+import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
 import { structuredLog } from "../utils/logFormatter.js";
 import { setStep } from "../utils/pipelineState.js";
 import * as runRepo from "../database/repositories/runRepo.js";
@@ -90,20 +91,52 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 5);
+  emitAgentEvent(run.id, {
+    step: 5, agent: "author", phase: "start",
+    message: "Comparing all tests for overlapping scenarios.",
+    workspaceId: project.workspaceId,
+  });
   log(run, `🚫 Deduplicating...`);
   const existingTests = testRepo.getByProjectId(project.id);
   const { unique, removed, stats: dedupStats } = deduplicateTests(rawTests);
   const finalTests = deduplicateAcrossRuns(unique, existingTests);
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
   structuredLog("pipeline.dedup", { runId: run.id, input: rawTests.length, unique: unique.length, removed, final: finalTests.length });
+  emitAgentEvent(run.id, {
+    step: 5, agent: "author", phase: "finding",
+    message: removed > 0
+      ? `Removed ${removed} duplicate${removed !== 1 ? "s" : ""}.`
+      : "No duplicates found — the suite is already lean.",
+    workspaceId: project.workspaceId,
+  });
+  emitAgentEvent(run.id, {
+    step: 5, agent: "author", phase: "done",
+    workspaceId: project.workspaceId,
+  });
 
   // ── Step 6: Enhance assertions ──────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 6);
+  emitAgentEvent(run.id, {
+    step: 6, agent: "author", phase: "start",
+    message: "Reviewing assertions — upgrading weak page-load checks to meaningful behavioural ones.",
+    workspaceId: project.workspaceId,
+  });
   log(run, `✨ Enhancing assertions...`);
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
   structuredLog("pipeline.enhance", { runId: run.id, enhanced: enhancedCount, total: enhancedTests.length });
+  emitAgentEvent(run.id, {
+    step: 6, agent: "author", phase: "finding",
+    message: enhancedCount > 0
+      ? `Enhanced ${enhancedCount} test${enhancedCount !== 1 ? "s" : ""} with stronger assertions.`
+      : "No assertions needed upgrading.",
+    workspaceId: project.workspaceId,
+  });
+  emitAgentEvent(run.id, {
+    step: 6, agent: "author", phase: "done",
+    workspaceId: project.workspaceId,
+  });
 
   // ── Step 6a: Re-score quality factors against the enhanced code ─────────
   // The dedup stage (Step 5) attached `_quality` and `_qualityFactors` based
@@ -150,6 +183,11 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   // ── Step 7: Validate ────────────────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 7);
+  emitAgentEvent(run.id, {
+    step: 7, agent: "author", phase: "start",
+    message: "Final quality check — selector stability and assertion coverage.",
+    workspaceId: project.workspaceId,
+  });
   log(run, `✅ Validating generated tests...`);
   const validatedTests = [];
   let rejected = 0;
@@ -171,6 +209,17 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   }
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
   structuredLog("pipeline.validate", { runId: run.id, valid: validatedTests.length, rejected });
+  emitAgentEvent(run.id, {
+    step: 7, agent: "author", phase: "finding",
+    message: rejected > 0
+      ? `Rejected ${rejected} test${rejected !== 1 ? "s" : ""} with brittle selectors or weak coverage.`
+      : "All tests passed quality review.",
+    workspaceId: project.workspaceId,
+  });
+  emitAgentEvent(run.id, {
+    step: 7, agent: "author", phase: "done",
+    workspaceId: project.workspaceId,
+  });
 
   throwIfAborted(signal);
 

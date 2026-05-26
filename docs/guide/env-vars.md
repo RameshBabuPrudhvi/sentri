@@ -66,6 +66,14 @@ There is no `COMPAT_<ID>_API_KEY` env equivalent — OpenAI-compatible slots (De
 | `DEMO_DAILY_RUNS` | `3` | Max test runs per user per day in demo mode |
 | `DEMO_DAILY_GENERATIONS` | `5` | Max AI test generations per user per day in demo mode |
 
+### AI Provider — Capability Probe (PR #28)
+
+The capability probe verifies a provider is reachable, that its API key authenticates, and that the configured model exists. It runs on `POST /api/v1/settings/ai-providers/:id/probe` and as a fire-and-forget pass after every upsert that touches a probe-relevant field (`apiKey`, `model`, `baseUrl`, `family`, `protocol`).
+
+| Variable | Default | Description |
+|---|---|---|
+| `AI_PROBE_TIMEOUT_MS` | `30000` | Default probe timeout (ms). Per-route override on `provider_routes.probeTimeoutMs` (Migration 060) takes precedence. Clamped to `[1000, 300000]` (1s – 5min). Raise for slow free-tier providers — OpenRouter `:free` models and Gemini free tier can queue 30–90s during peak load. The per-route column is clamped to `[1000, 600000]` (1s – 10min) to additionally accommodate large local Ollama models on CPU. |
+
 ### LLM Retry & Tokens
 
 | Variable | Default | Description |
@@ -88,13 +96,31 @@ Sentri persists per-call AI request metadata to the `ai_request_log` table on ev
 
 **Built-in PII redactors:** email, phone (international + national), US SSN, credit-card (13–19 digits). Workspace-supplied custom rules apply AFTER the built-ins. Malformed custom regex is silently skipped — built-in redactors still fire.
 
-### Provider Routes Audit Log (B3.9)
+### AI Providers Audit Log (B3.9)
 
-Sentri appends a `provider_route_audit` row on every mutation to a `provider_routes` row (create / update / delete / rotate_key / probe / export / import). Retention is operator-tunable so compliance windows can be longer than the default 90 days. See [`backend/src/database/repositories/providerRouteAuditRepo.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/database/repositories/providerRouteAuditRepo.js#L92) for the sweep query.
+Sentri appends a `provider_route_audit` row on every mutation to a `provider_routes` row (create / update / delete / rotate_key / probe / export / import / workspace-default pin via Migration 059). Retention is operator-tunable so compliance windows can be longer than the default 90 days. Surfaced via **Settings → AI Providers → Audit Log** (renamed from "Provider Routes Audit Log" in PR #28; the underlying `provider_route_audit` table is unchanged). See [`backend/src/database/repositories/providerRouteAuditRepo.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/database/repositories/providerRouteAuditRepo.js#L92) for the sweep query.
 
 | Variable | Default | Description |
 |---|---|---|
 | `AI_ROUTES_AUDIT_RETENTION_DAYS` | `90` | Daily 05:00 UTC sweep deletes `provider_route_audit` rows older than this many days. Set `0` to disable retention entirely (rows accumulate forever). Distinct from `AUDIT_RETENTION_DAYS` (SEC-007 `activities` table) — the two audit logs serve different compliance scopes and are tuned independently. |
+
+### Agent Messages Retention (AUTO-023 B1.1)
+
+Sentri persists thread-scoped agent-to-agent envelopes to the `agent_messages` table on every `emitAgentMessage(envelope)` call — see [`backend/src/aiProvider/agentEventEmitter.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/aiProvider/agentEventEmitter.js). Append-only, workspace-scoped, mirrors the `run_agent_events` retention posture.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SENTRI_AGENT_MODE` | `pipeline` | Agent orchestration mode switch (AUTO-023 Bundle 2). `pipeline` = legacy linear stage-return flow (default), `envelope` = same linear DAG but reads + writes handoff envelopes (`agent_messages`) at each stage boundary, `autonomous` = supervisor LLM picks the next agent on every step (AUTO-023 Bundle 4). Fails OPEN to the linear path on orchestrator hiccup. |
+| `AGENT_MESSAGE_RETENTION_DAYS` | `90` | Daily 05:15 UTC sweep deletes `agent_messages` rows older than this many days. Set `0` to disable the retention sweep entirely (rows accumulate forever). |
+
+### Agent Shared Memory + Tool Calling (AUTO-023 Bundle 5)
+
+Bundle 5 ships a thread-scoped blackboard (`agent_thread_state`) and a closed-set tool registry (`db.listExistingTests`, `db.getTest`, `crawl.getPageHtml`, `playwright.dryRun`, `thread.askPeer`) that agents call mid-thread via envelope-mediated server-side dispatch. See [`docs/roadmap/autonomous-multi-agent.md`](../roadmap/autonomous-multi-agent.md) for the full plan.
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_THREAD_STATE_MAX_BYTES` | `65536` (64 KB) | Per-row size cap for the `agent_thread_state` blackboard (`agentThreadStateRepo.setKey`/`casUpdate`). Writes that would exceed the cap throw `ERR_AGENT_THREAD_STATE_TOO_LARGE` synchronously — the orchestrator surfaces the error to the calling agent rather than silently truncating. Bound state grows with thread complexity (per-journey scratch space for the supervisor, dedup decisions for the author); the default fits a few thousand short key/value pairs in JSON form. Raise for workloads that genuinely need richer scratch; never set above ~1 MB without also raising the `agent_messages` retention budget — large blackboard payloads can fan out into bigger envelope artifacts on subsequent handoffs. |
+| `AGENT_TOOL_RATE_LIMIT_PER_MIN` | `60` | Per `(workspaceId, runId, tool)` sliding-window cap on tool dispatches (Bundle 5 gap-5 defence against a hallucinating agent emitting hundreds of `db.*` / `playwright.dryRun` calls in one thread). Clamped server-side to `[1, 1000]`. Counted PRE-dispatch so the limiter sees the attempt even when the tool throws synchronously; rate-limited dispatches surface as `outcome=rate_limited` on `agent_tool_calls_total{tool,outcome}`. Redis-backed via a true sliding window (ZADD timestamp + ZREMRANGEBYSCORE the expired tail + ZCARD); in-memory `Map` fallback with periodic sweep when `REDIS_URL` is unset. Fail-OPEN on Redis hiccup — never blocks a run on observability infrastructure. |
 
 ### AI Spend Alert Webhook (B4.0.1)
 
@@ -358,3 +384,16 @@ Counter naming uses `app_*` rather than a product-name prefix so Prometheus dash
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | `0` | Fraction (0–1) of frontend transactions sampled for Sentry performance traces. Default `0` keeps Sentry to crash reporting + breadcrumbs only. |
 
 
+
+
+### Kubernetes + Backup (INF-009)
+
+Kubernetes deployment health probe + nightly Postgres backup credentials. The Helm chart at `helm/sentri/` wires `WORKER_HEALTH_PORT` automatically; the `S3_BACKUP_*` variables are only consumed by `.github/workflows/nightly-backup.yml`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `WORKER_HEALTH_PORT` | `3002` | Port for the worker-local `/healthz` endpoint used by the Kubernetes `readinessProbe`/`livenessProbe`. The chart's `worker.healthPort` value is injected here automatically. |
+| `S3_BACKUP_BUCKET` | — | S3 bucket name for nightly `pg_dump -Fc` snapshots. Snapshots land at `s3://<bucket>/daily/YYYY-MM-DD.dump` and `s3://<bucket>/monthly/YYYY-MM.dump`. |
+| `S3_BACKUP_REGION` | — | AWS region for the S3 backup bucket (e.g. `us-east-1`). |
+| `S3_BACKUP_ACCESS_KEY_ID` | — | Access key ID for the IAM principal that owns the backup bucket. Configure via the `S3_BACKUP_ACCESS_KEY_ID` GitHub Actions secret. |
+| `S3_BACKUP_SECRET_ACCESS_KEY` | — | Secret access key paired with `S3_BACKUP_ACCESS_KEY_ID`. Configure via the `S3_BACKUP_SECRET_ACCESS_KEY` GitHub Actions secret. |

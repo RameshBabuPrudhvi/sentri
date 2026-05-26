@@ -136,14 +136,14 @@ Means: a specific `provider_routes` row failing more than 15% of LLM calls over 
 Triage:
 1. Identify the failing route via `app_ai_provider_errors_total{route_name="..."} by reason`. `rate_limit` = vendor throttling; `server_error` = vendor outage; `timeout` = network or vendor latency; `auth` = our key is invalid (see next).
 2. Check the vendor status page for the route's `provider` (Anthropic / OpenAI / Google all publish public status pages).
-3. Verify fallback — the route's `fallbackRouteId` (Settings → Provider Routes) needs to point at a healthy sibling, otherwise pipeline roles assigned to this route are stuck.
+3. Verify fallback — the route's `fallbackRouteId` (Settings → AI Providers) needs to point at a healthy sibling, otherwise pipeline roles assigned to this route are stuck.
 4. For workspace-scoped triage, check the workspace's `ai_request_log` (Settings → AI Request Log) filtered by `routeId` and `outcome="error"` for the redacted prompts that triggered the failures.
 ### AiProviderAuthFailures
 Severity: critical. Page: yes.
 Means: ANY auth failure on a `provider_routes` row. Keys should not be invalid in production. **B4.2** — `route_name` label tells you exactly which row's key needs rotating.
 Triage:
 1. Identify the failing route from the alert's `route_name` label, or via `app_ai_provider_errors_total{reason="auth"} by route_name`.
-2. Rotate the key in Settings → Provider Routes → Rotate key for the affected route. The endpoint runs a probe-before-persist gate so the new key is verified before it replaces the old ciphertext (B3.6).
+2. Rotate the key in Settings → AI Providers → Rotate key for the affected route. The endpoint runs a probe-before-persist gate so the new key is verified before it replaces the old ciphertext (B3.6).
 3. Customer-visible — every workspace assigning this route to a pipeline role is broken until the rotation completes. Communicate via status page if outage above 10 min.
 4. Pre-routes deployments (single env-var keys) still surface here with `route_name="unknown"` — for those, update the env var and redeploy.
 ### AiProviderHighLatencyP99
@@ -152,19 +152,19 @@ Means: per-route p99 latency above 30s for successful calls. **B4.2** — keyed 
 Triage:
 1. Identify the slow route from the alert's `route_name` label. Check the vendor status page for the route's `provider`.
 2. For self-hosted / compat routes (`family: "custom"`), check the operator-set `baseUrl` — a misconfigured proxy can absorb minutes of latency before timing out.
-3. The FEA-003 fallback chain does not fire on slow calls (only hard errors), so this slowness is fully customer-visible. Configure `fallbackRouteId` on the slow route to a healthy sibling for automatic mitigation, or disable the route in Settings → Provider Routes if the outage persists.
+3. The FEA-003 fallback chain does not fire on slow calls (only hard errors), so this slowness is fully customer-visible. Configure `fallbackRouteId` on the slow route to a healthy sibling for automatic mitigation, or disable the route in Settings → AI Providers if the outage persists.
 ### AiSpendCapExceeded
 Severity: warning.
 Means: a workspace's daily or monthly AI spend cap has been hit; dispatch on the named route is being rejected with `ERR_SPEND_CAP_EXCEEDED`. The dispatcher's spend-alert webhook (B3.7 / B4.0.1) should have already notified the workspace admin via Slack / generic webhook.
 Triage:
 1. **Confirm the workspace admin saw the webhook.** `workspaces.spendAlertLastFiredAt` should be within the cooldown window. If it's NULL or stale, the webhook URL is misconfigured — check `workspaces.spendAlertWebhookUrl` and the dispatcher logs for `[spendAlert] webhook returned <status>` lines.
-2. **Decide raise vs. wait.** If the burst is legitimate (real customer load, planned campaign), raise the cap via Settings → Provider Routes → Workspace spend caps. If the burst is a runaway pipeline or unintended loop, the cap is doing its job — leave it and investigate the source (`ai_request_log` table, filter by workspaceId + recent createdAt).
+2. **Decide raise vs. wait.** If the burst is legitimate (real customer load, planned campaign), raise the cap via Settings → AI Providers → Spend Caps tab. If the burst is a runaway pipeline or unintended loop, the cap is doing its job — leave it and investigate the source (`ai_request_log` table, filter by workspaceId + recent createdAt).
 3. **Cross-reference with `app_ai_cost_usd_total`** by `(provider, route_name)` to see which route is consuming the budget. If one route dominates, consider a per-route `tpmLimit` to throttle without blocking the whole workspace.
 ### AiQuotaRejectionRateHigh
 Severity: warning.
 Means: more than 10% of dispatch attempts on a given route are being locally rejected by the B3.7 token bucket (`ERR_RATE_LIMIT_LOCAL`). The vendor never sees these calls — our own `rpmLimit` / `tpmLimit` is too tight for the workload.
 Triage:
-1. **Check the route's configured limits.** Settings → Provider Routes → click the route → RPM / TPM fields. Common cause: an admin set `rpmLimit: 60` (1/sec) on a high-throughput route.
+1. **Check the route's configured limits.** Settings → AI Providers → click the row's **Edit** → expand **Advanced** → RPM / TPM fields. Common cause: an admin set `rpmLimit: 60` (1/sec) on a high-throughput route.
 2. **Distribute load.** If the limit is correctly conservative for one vendor account, configure a sibling route (different key, same model) and chain them via `fallbackRouteId`. The dispatcher will automatically fail-over when the first route's bucket is exhausted.
 3. **Verify estimate vs. actual drift.** The pre-call gate uses `maxTokens` as an upper-bound estimate. If most calls return far fewer tokens than `maxTokens`, the bucket is being pessimistically over-charged — `reportActual` corrects post-call but the rejection still happened. Lowering `maxTokens` on hot call sites can reduce false positives.
 ### EventLoopLagHigh

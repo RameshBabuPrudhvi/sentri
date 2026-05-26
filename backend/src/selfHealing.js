@@ -32,6 +32,13 @@
 
 import * as healingRepo from "./database/repositories/healingRepo.js";
 import { looksLikeCssSelector } from "./utils/selectorHeuristics.js";
+// AUTO-023 Bundle 2 — emit a healer-thread envelope on every vision-heal
+// outcome so the run's `agent_messages` thread carries a real handoff
+// (healer → reviewer) the operator can replay alongside the per-stage
+// SSE narration. Best-effort: `emitHandoffEnvelope` already no-ops when
+// any required field is missing, so callers without a `runId` (eval
+// harness, CLI) don't trip an envelope insert against a null fk.
+import { emitHandoffEnvelope, healingThreadId } from "./aiProvider/agentHandoff.js";
 
 /**
  * Record a successful healing result.
@@ -192,6 +199,16 @@ export const VISION_STRATEGY_INDICES = Object.freeze([
  */
 export async function tryVisionHeal(ctx, deps = {}) {
   if (!ctx || !ctx.project) return null;
+  // AUTO-023 Bundle 2 — derive the healer-thread coordinates up-front so
+  // every early-return below can still emit (or skip) an envelope without
+  // duplicating the logic at each branch. `runId` and `testId` come from
+  // the caller (`executeTest.js`); `workspaceId` is sourced from the
+  // project row already loaded above. `emitHandoffEnvelope` no-ops when
+  // any field is missing, so callers without a runId don't trip an insert
+  // against a null fk.
+  const _runId = ctx.runId || null;
+  const _workspaceId = ctx.project?.workspaceId || null;
+  const _threadId = _runId && ctx.testId ? healingThreadId(_runId, ctx.testId) : null;
   // MNT-001 — emergency global kill switch documented in `QA.md` § Vision
   // healing release-verification checklist + `docs/guide/vision-healing.md`
   // § Incident disable. Operators set `VISION_HEAL_DISABLED=1` (e.g. via
@@ -221,6 +238,18 @@ export async function tryVisionHeal(ctx, deps = {}) {
       const r = await deps.pixelmatchHeal(ctx.failureScreenshot, ctx.baselineCrop, PIXEL_CONFIDENCE);
       if (r && r.confidence >= PIXEL_CONFIDENCE) {
         recordHealing(ctx.testId, ctx.action, ctx.label, STRATEGY_INDEX_PIXELMATCH);
+        emitHandoffEnvelope({
+          runId: _runId, threadId: _threadId, workspaceId: _workspaceId,
+          fromRole: "healer", toRole: "reviewer",
+          // `box` is mirrored from the return value below so a reviewer
+          // replaying the thread sees WHERE the heal landed (coordinates
+          // are what the host-side re-action uses to dispatch the verb).
+          // Pre-fix the envelope omitted box, so the thread carried a
+          // less complete record than the executeTest healing-event
+          // stream.
+          artifact: { kind: "vision_pixelmatch", testId: ctx.testId, action: ctx.action, label: ctx.label, confidence: r.confidence, box: r.box || null, healed: true },
+          rationale: "Healer pixelmatch CV heal succeeded",
+        });
         return {
           kind: "vision_pixelmatch", key,
           strategyIndex: STRATEGY_INDEX_PIXELMATCH,
@@ -275,6 +304,19 @@ export async function tryVisionHeal(ctx, deps = {}) {
     });
     if (r && r.confidence >= LLM_CONFIDENCE) {
       recordHealing(ctx.testId, ctx.action, ctx.label, STRATEGY_INDEX_LLM_VISION);
+      emitHandoffEnvelope({
+        runId: _runId, threadId: _threadId, workspaceId: _workspaceId,
+        fromRole: "healer", toRole: "reviewer",
+        artifact: {
+          kind: "vision_llm", testId: ctx.testId, action: ctx.action, label: ctx.label,
+          confidence: r.confidence, model: r.model || null,
+          costUsd: Number.isFinite(r.costUsd) ? r.costUsd : 0,
+          // Same box-symmetry rationale as the pixelmatch envelope above.
+          box: r.box || null,
+          healed: true,
+        },
+        rationale: "Healer LLM-vision heal succeeded",
+      });
       return {
         kind: "vision_llm", key,
         strategyIndex: STRATEGY_INDEX_LLM_VISION,

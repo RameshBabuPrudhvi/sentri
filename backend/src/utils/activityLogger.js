@@ -39,7 +39,7 @@ import { formatLogLine } from "./logFormatter.js";
  * @param {Object}      [opts.meta]      - Structured metadata persisted as JSON (migration 018). E.g. `{ score, threshold }` on auto-approval, `{ wasAutoApproved }` on revoke.
  * @returns {Object}    The created activity record.
  */
-export function logActivity({ type, req, projectId, projectName, testId, testName, detail, status, userId, userName, workspaceId, meta }) {
+export function logActivity({ type, req, projectId, projectName, testId, testName, runId, detail, status, userId, userName, workspaceId, meta }) {
   // Warn when a project-scoped activity is logged without a workspaceId.
   // Activities with workspaceId=NULL become orphaned — invisible to
   // workspace-scoped queries (/api/activities, /api/data/activities).
@@ -49,6 +49,13 @@ export function logActivity({ type, req, projectId, projectName, testId, testNam
   }
 
   const id = generateActivityId();
+  // ENT-004 (audit) — accept `runId` as a first-class arg so callers
+  // that previously stuffed it into `meta.runId` can promote it to the
+  // indexed column added by migration 055. Falls back to `meta.runId`
+  // when callers haven't migrated yet so the column populates
+  // retroactively for existing emitters without a code change at every
+  // call site. Pre-migration rows keep `runId = NULL`.
+  const resolvedRunId = runId || (meta && typeof meta === "object" ? meta.runId : null) || null;
   const activity = {
     id,
     type,
@@ -56,6 +63,7 @@ export function logActivity({ type, req, projectId, projectName, testId, testNam
     projectName: projectName || null,
     testId: testId || null,
     testName: testName || null,
+    runId: resolvedRunId,
     detail: detail || null,
     status: status || "completed",
     createdAt: new Date().toISOString(),

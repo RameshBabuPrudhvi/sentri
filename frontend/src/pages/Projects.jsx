@@ -16,6 +16,7 @@ import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectD
 import { fmtRelativeDate } from "../utils/formatters";
 import PassRateBar from "../components/charts/PassRateBar";
 import DeleteProjectModal from "../components/shared/DeleteProjectModal.jsx";
+import EmptyState from "../components/shared/EmptyState.jsx";
 import { api } from "../api.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -148,24 +149,26 @@ export default function Projects() {
         </div>
       )}
 
-      {/* Empty state */}
+      {/* ONB-002 (audit): empty state via shared primitive. Two branches —
+          first-run onboarding (no projects at all → primary CTA to
+          /projects/new) vs filtered-to-nothing (offer a "Clear search"
+          escape hatch so the user isn't stuck rewriting the query). */}
       {filtered.length === 0 && (
-        <div className="card empty-state">
-          <Globe size={36} color="var(--text3)" style={{ marginBottom: 14 }} />
-          <div className="empty-state-title">
-            {projects.length === 0 ? "No projects yet" : "No results"}
-          </div>
-          <div className="empty-state-desc">
-            {projects.length === 0
-              ? "Add your first web app to start generating and running tests."
-              : "Try a different search."}
-          </div>
-          {projects.length === 0 && (
-            <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
-              <Plus size={13} /> Add Project
-            </button>
-          )}
-        </div>
+        projects.length === 0 ? (
+          <EmptyState
+            icon={<Globe size={32} color="var(--accent)" />}
+            title="No projects yet"
+            description="Add your first web app to start generating and running tests."
+            action={{ label: "Add Project", onClick: () => navigate("/projects/new") }}
+          />
+        ) : (
+          <EmptyState
+            icon={<Search size={32} color="var(--text3)" />}
+            title="No results"
+            description={search ? `No projects match "${search}".` : "Try a different search."}
+            action={{ label: "Clear search", onClick: () => setSearch(""), variant: "ghost" }}
+          />
+        )
       )}
 
       {/* Compact list view */}

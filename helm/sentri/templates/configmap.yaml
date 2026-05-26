@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentri-config
+data:
+  # Non-secret operational env only. DATABASE_URL + REDIS_URL embed
+  # credentials in the connection-string format and are stored in the
+  # Secret resource (sentri-secrets) instead — ConfigMaps are plaintext
+  # in etcd and readable by anyone with `kubectl get configmap` access
+  # in the namespace. Co-locating the URL with the password also avoids
+  # the drift bug where overriding `secrets.POSTGRES_PASSWORD` without
+  # also overriding `env.DATABASE_URL` would leave the backend trying
+  # to authenticate with the old password.
+  WORKER_CONCURRENCY: {{ .Values.env.WORKER_CONCURRENCY | quote }}

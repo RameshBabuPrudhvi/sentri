@@ -1,0 +1,40 @@
+backend:
+  image: ghcr.io/example/sentri-backend:latest
+  replicas: 1
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+worker:
+  image: ghcr.io/example/sentri-worker:latest
+  replicas: 1
+  healthPort: 3002
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: "2",  memory: 2Gi }
+postgres:
+  image: postgres:16
+  storage: 10Gi
+  user: sentri
+  database: sentri
+redis:
+  image: redis:7
+  cluster:
+    # When true, the in-cluster single-node Redis Deployment/Service is NOT
+    # rendered; operators are expected to point REDIS_URL at an externally
+    # managed Redis Cluster (e.g. AWS ElastiCache, Redis Enterprise).
+    enabled: false
+ingress:
+  enabled: true
+  host: sentri.local
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 5
+  targetQueueDepth: 10
+env:
+  DATABASE_URL: postgres://sentri:sentri@sentri-postgres:5432/sentri
+  REDIS_URL: redis://sentri-redis:6379
+  WORKER_CONCURRENCY: "2"
+secrets:
+  JWT_SECRET: change-me
+  ENCRYPTION_KEY: change-me

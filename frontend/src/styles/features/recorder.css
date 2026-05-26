@@ -110,6 +110,10 @@
   color: var(--text3);
   text-transform: uppercase; letter-spacing: 0.06em;
 }
+/* DS-001 (audit): tighter spacing for the heading above the "Add verification"
+   stack in the footer — replaces `style={{ marginBottom: 2 }}` so the
+   inline-style purge for RecorderModal is complete. */
+.recorder-sidebar__heading--tight { margin-bottom: 2px; }
 .recorder-sidebar__steps-list {
   flex: 1; min-height: 0;
   border: 1px solid var(--border); border-radius: 8px;
@@ -356,3 +360,35 @@
   opacity: 0.7;
 }
 .recorder-error-banner__dismiss:hover { opacity: 1; }
+
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   The Recorder is a full-screen desktop tool — recording a flow against
+   a live remote browser canvas with pointer + keyboard event capture is
+   not a real phone use case (no canvas pointer events on touch, no
+   physical keyboard). Two surfaces still need responsive treatment for
+   tablet-class viewports (768–1024px) and for the rare case where an
+   operator lands here from a phone-class device:
+
+   1. **Idle form** (`.recorder-idle__panel`) — fixed 560px panel
+      overflows the viewport below 600px. Operators starting a recording
+      from a tablet need this to fit.
+   2. **Discard-confirm dialog** (`.recorder-confirm__dialog`) — fixed
+      380px width clips on narrow phones.
+
+   The recording-phase two-pane layout (`.recorder-stage` + `.recorder-
+   sidebar`) is intentionally NOT reflowed. The 300px sidebar is essential
+   chrome (live step list + Stop button) that has to stay visible while
+   the canvas renders the SUT; collapsing it would break the recording
+   experience without delivering value on a device that can't drive the
+   canvas anyway. */
+@media (max-width: 600px) {
+  .recorder-idle__panel { width: 100%; max-width: 560px; padding: 0 16px; }
+  .recorder-confirm__dialog {
+    width: calc(100vw - 32px);
+    max-width: 380px;
+    padding: 20px;
+  }
+  /* Topbar action row: shrink padding so the Exit button stays visible
+     alongside the recording-pulse badge + step count. */
+  .recorder-topbar { padding: 0 12px; gap: 6px; }
+}

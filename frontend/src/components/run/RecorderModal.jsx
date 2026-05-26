@@ -6,6 +6,17 @@ import { useSseStream } from "../../hooks/useSseStream.js";
 import { actionToStepText, actionRawLocator } from "../../utils/actionToStepText.js";
 import LiveBrowserView from "./LiveBrowserView.jsx";
 
+// A11Y-002 (audit follow-up) — focus trap for the full-screen recorder stage.
+// RecorderModal uses createPortal directly with a custom canvas + sidebar
+// layout rather than wrapping in ModalShell — refactoring to ModalShell
+// would conflict with the live-browser canvas and nested confirm dialogs
+// (Cypress Studio / Playwright Codegen / Selenium IDE follow the same
+// pattern). The trap is applied in-place, mirroring `pages/Login.jsx:167`
+// which made the same architectural call for the same reason (nested MFA
+// overlay). WCAG 2.1.2 satisfied at the stage root.
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 // DIF-015c Gap 5 — curated device presets. Mirrors DEVICE_PRESETS in
 // backend/src/runner/config.js and the identical list in
 // RunRegressionModal.jsx. Kept as a static list to avoid an extra API
@@ -93,6 +104,11 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const sessionIdRef = useRef(null);
   const projectIdRef = useRef(projectId);
   const lastMoveRef = useRef(0);
+  // A11Y-002 (audit follow-up) — refs for the focus trap. `stageRef` scopes
+  // the focusable query to the recorder stage; `lastFocusedRef` remembers
+  // what the user was on before launch so we can restore on close.
+  const stageRef = useRef(null);
+  const lastFocusedRef = useRef(null);
 
   const handleInput = useCallback((event) => {
     const sid = sessionIdRef.current;
@@ -191,6 +207,109 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       }
     };
   }, []);
+
+  // A11Y-002 (audit follow-up) — Focus trap for the full-screen recorder
+  // stage. Same shape as `ModalShell` and `pages/Login.jsx:169-211`:
+  //   1. On open, remember the previously-focused element and move focus
+  //      into the stage so screen readers land on something actionable.
+  //   2. Tab / Shift+Tab wrap around the focusable set inside the stage,
+  //      re-queried on every Tab press to pick up phase-driven enables
+  //      (e.g. the "Stop & save" button becoming clickable once the user
+  //      captures their first action).
+  //   3. On close, restore focus to whatever launched the recorder.
+  //
+  // Intentionally NOT trapped: the LiveBrowserView canvas itself. The
+  // canvas needs to receive arbitrary keyboard input to forward to the
+  // SUT (form fills, shortcuts, etc.), so Tab inside the canvas should
+  // forward to the page being recorded — not cycle through the sidebar.
+  // The canvas has `tabindex="-1"` so it never enters the focus cycle;
+  // operators reach it via mouse, and once focused, keyboard events
+  // forward to the recorded session.
+  useEffect(() => {
+    if (!open) return;
+    lastFocusedRef.current = document.activeElement;
+
+    // Move focus into the stage on mount. Pick the first focusable so
+    // screen readers announce the first input (typically the Project
+    // picker or Starting URL field on idle, or "Pause capture" once
+    // recording). Fall back to the stage container with a synthetic
+    // tabindex if no focusable child exists (shouldn't happen — there's
+    // always at least the Exit button — but defensive).
+    const stage = stageRef.current;
+    if (stage) {
+      const focusables = stage.querySelectorAll(FOCUSABLE_SELECTOR);
+      if (focusables.length > 0) {
+        // Skip the canvas itself (tabindex="-1") and any element that's
+        // disabled mid-transition — go straight to the first interactive
+        // control in the form / sidebar.
+        focusables[0].focus();
+      } else {
+        stage.setAttribute("tabindex", "-1");
+        stage.focus();
+      }
+    }
+
+    function onKey(e) {
+      // Escape is handled by `handleCancel` via the Exit button — we
+      // don't intercept it here because the existing button-driven flow
+      // already handles the recording-in-progress confirm prompt, which
+      // is more nuanced than a raw close.
+      if (e.key !== "Tab") return;
+
+      // A11Y-002 follow-up: when a nested sub-dialog is open (discard
+      // confirm, device-switch confirm), scope the focus cycle to that
+      // sub-dialog instead of the whole stage. The sub-dialogs are
+      // siblings inside `stageRef` rather than portaled overlays, so a
+      // naive whole-stage Tab walk would otherwise step through every
+      // disabled sidebar button behind the open dialog before reaching
+      // Cancel / Discard — the user perceives the trap as broken.
+      //
+      // Detection key: any descendant `[role="dialog"][aria-modal="true"]`
+      // that isn't the stage root itself. The two `.recorder-confirm`
+      // blocks below carry these attributes for exactly this purpose.
+      // When multiple sub-dialogs are open (shouldn't happen — they
+      // gate each other in state, but defence-in-depth), pick the LAST
+      // one in DOM order as the topmost.
+      const stage = stageRef.current;
+      if (!stage) return;
+      const subDialogs = stage.querySelectorAll(
+        '[role="dialog"][aria-modal="true"]'
+      );
+      // Filter out the stage itself (also marked role="dialog") so we
+      // only scope when a TRUE sub-dialog is open.
+      const innerDialogs = Array.from(subDialogs).filter((d) => d !== stage);
+      const scope = innerDialogs.length > 0
+        ? innerDialogs[innerDialogs.length - 1]
+        : stage;
+
+      const focusables = scope.querySelectorAll(FOCUSABLE_SELECTOR);
+      if (!focusables || focusables.length === 0) {
+        e.preventDefault();
+        scope.focus?.();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const inScope = scope.contains(active);
+      if (!inScope) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
+      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      // Restore focus on close. Wrapped in try/catch since the trigger
+      // node may have been unmounted (e.g. user clicked "Record" on a
+      // row that gets removed from the page mid-recording).
+      try { lastFocusedRef.current?.focus?.(); } catch { /* node gone */ }
+    };
+  }, [open]);
 
   async function handleStart() {
     setError(null); setActions([]); setFrames([]);
@@ -515,14 +634,20 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const isIdle = phase === "idle" || phase === "error" || phase === "starting";
 
   return createPortal(
-    <div className="recorder-modal">
+    <div
+      ref={stageRef}
+      className="recorder-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="recorder-modal-title"
+    >
 
       {/* ── Top bar ── */}
       <div className="recorder-topbar">
         <span className="recorder-topbar__emoji">🎥</span>
         <div className="recorder-topbar__title-group">
           <div>
-            <div className="recorder-topbar__title">Record a test</div>
+            <div id="recorder-modal-title" className="recorder-topbar__title">Record a test</div>
             <div className="recorder-topbar__subtitle">
               Interact with the app in the live browser — every click, fill, and navigation is captured as a Playwright step.
             </div>
@@ -832,7 +957,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 whole panel unmounts the moment the user clicks the button). */}
             {(phase === "recording" || phase === "stopping") && (
               <div className="recorder-sidebar__footer">
-                <div className="recorder-sidebar__heading" style={{ marginBottom: 2 }}>
+                <div className="recorder-sidebar__heading recorder-sidebar__heading--tight">
                   Add verification
                 </div>
                 {/* DIF-015c Gap 2 — Pick-by-click toggle. When on, the
@@ -925,9 +1050,14 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
           reset before the rebuild fires. */}
       {pendingDeviceSwitch != null && (
         <div className="recorder-confirm">
-          <div className="recorder-confirm__dialog">
+          <div
+            className="recorder-confirm__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recorder-device-switch-title"
+          >
             <div className="recorder-confirm__head">
-              <div className="recorder-confirm__title">Switch device profile?</div>
+              <div id="recorder-device-switch-title" className="recorder-confirm__title">Switch device profile?</div>
             </div>
             <p className="recorder-confirm__body">
               Switching to <strong>{DEVICE_PRESETS.find((d) => d.value === pendingDeviceSwitch)?.label || pendingDeviceSwitch || "Desktop (default)"}</strong> rebuilds the browser context at the new viewport.
@@ -949,14 +1079,19 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       {/* ── Discard confirmation dialog ── */}
       {confirmDiscard && (
         <div className="recorder-confirm">
-          <div className="recorder-confirm__dialog">
+          <div
+            className="recorder-confirm__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recorder-discard-title"
+          >
             <div className="recorder-confirm__head">
               <div className="recorder-confirm__icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
                 </svg>
               </div>
-              <div className="recorder-confirm__title">Discard recording?</div>
+              <div id="recorder-discard-title" className="recorder-confirm__title">Discard recording?</div>
             </div>
 
             <p className="recorder-confirm__body">

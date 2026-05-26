@@ -2,14 +2,293 @@
  * Notifications — bell icon + dropdown styles
  *
  * Layer: Features (ITCSS)
+ *
+ * Pattern: classes own the layout / colour / spacing rules; the React
+ * component (`NotificationBell.jsx`) carries no inline `style={}` for
+ * static visual state. Dynamic state is expressed via modifier classes
+ * (`.notif-bell-btn--open`, `.notif-bell-btn--snoozed`, etc.) so the
+ * CSS file remains the single source of truth for visual contracts.
  */
 
-/* Bell button hover */
+/* ── Container ──────────────────────────────────────────────────────────── */
+.notif-bell { position: relative; flex-shrink: 0; }
+
+/* ── Bell button ────────────────────────────────────────────────────────── */
+.notif-bell-btn {
+  position: relative;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
 .notif-bell-btn:hover {
-  background: var(--bg2) !important;
-  border-color: var(--border) !important;
+  background: var(--bg2);
+  border-color: var(--border);
+}
+.notif-bell-btn--open {
+  background: var(--bg2);
+  border-color: var(--border);
 }
 
-/* Dropdown scrollbar */
+/* Unread-count badge in the bell corner */
+.notif-bell-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 99px;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+  border: 2px solid var(--surface);
+}
+
+/* ── Dropdown panel ─────────────────────────────────────────────────────── */
+.notif-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 100;
+  width: 360px;
+  max-height: 440px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .notif-dropdown ::-webkit-scrollbar       { width: 5px; }
 .notif-dropdown ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.notif-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.notif-header__title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.notif-header__count-pill {
+  margin-left: 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: var(--accent-bg);
+  color: var(--accent);
+  padding: 1px 7px;
+  border-radius: 99px;
+}
+.notif-header__actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* Icon-button shared style for the Mark-all-read / Clear-all header
+   icons. The component sets a modifier class (`--accent` or `--danger`)
+   so the hover colour can be expressed in CSS rather than inline JS. */
+.notif-icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text3);
+  padding: 4px;
+  display: flex;
+  border-radius: 6px;
+  transition: color 0.12s;
+}
+.notif-icon-btn--accent:hover { color: var(--accent); }
+.notif-icon-btn--danger:hover { color: var(--red); }
+
+/* ── List ──────────────────────────────────────────────────────────────── */
+.notif-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.notif-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text3);
+  font-size: 0.82rem;
+}
+.notif-empty__icon { margin-bottom: 10px; }
+
+/* Individual row. Background flips between read (transparent) and unread
+   (accent-tinted). Hover paints a neutral surface tint regardless of
+   read state. */
+.notif-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  transition: background 0.12s;
+  cursor: default;
+}
+.notif-row--unread { background: var(--accent-bg); }
+.notif-row--clickable { cursor: pointer; }
+.notif-row:hover { background: var(--bg2); }
+.notif-row__icon {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.notif-row__body {
+  flex: 1;
+  min-width: 0;
+}
+.notif-row__title {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notif-row--unread .notif-row__title { font-weight: 700; }
+.notif-row__text {
+  font-size: 0.75rem;
+  color: var(--text2);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notif-row__time {
+  font-size: 0.66rem;
+  color: var(--text3);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ── Snooze banner (ENT-005) ────────────────────────────────────────────── */
+.notif-snooze-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--amber-bg);
+  border-top: 1px solid var(--border);
+  font-size: 0.74rem;
+  color: var(--amber);
+}
+.notif-snooze-banner__label { flex: 1; }
+.notif-snooze-banner__resume {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--amber);
+  font-weight: 600;
+  font-size: 0.72rem;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* ── Footer (ENT-005) ───────────────────────────────────────────────────── */
+.notif-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  position: relative;
+}
+.notif-footer__spacer { flex: 1; }
+
+.notif-footer-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text2);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.12s, color 0.12s;
+}
+.notif-footer-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ── Snooze submenu (ENT-005) ───────────────────────────────────────────── */
+.notif-snooze-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 10px;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 1;
+}
+.notif-snooze-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.78rem;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+.notif-snooze-menu__item:hover { background: var(--bg2); }
+.notif-snooze-menu__item--danger {
+  color: var(--red);
+  font-weight: 600;
+}
+.notif-snooze-menu__separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   The base `.notif-dropdown` rule sets `width: 360px` so on a 375px
+   viewport with the topbar's 12px page padding the dropdown sits flush
+   against the left edge of the viewport with no breathing room — and
+   on 360px-and-below phones it would overflow the left edge entirely.
+   Clamp to `calc(100vw - 24px)` (with the 360px cap preserved) so the
+   panel always shows a 12px gutter on both sides of small screens.
+   No `!important` needed — the base rule lives in the same file, same
+   specificity. */
+@media (max-width: 600px) {
+  .notif-dropdown {
+    width: calc(100vw - 24px);
+    max-width: 360px;
+    right: 0;
+  }
+}

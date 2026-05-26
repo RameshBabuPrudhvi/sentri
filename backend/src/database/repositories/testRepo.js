@@ -60,6 +60,7 @@ const INSERT_COLS = [
   "generatedFrom", "isApiTest", "scenario", "codeRegeneratedAt",
   "aiFixAppliedAt", "codeVersion", "workspaceId", "isStale", "flakyScore",
   "confidenceScore", "approvalSource", "approvalThreshold", "approvedAt", "approvedBy",
+  "reviewComment", // migration 054 — free-text "why is this draft?" explainer
 ];
 
 const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})
@@ -414,6 +415,33 @@ const SORT_BY_CLAUSES = {
 export function getByProjectId(projectId) {
   const db = getDatabase();
   return db.prepare("SELECT * FROM tests WHERE projectId = ? AND deletedAt IS NULL").all(projectId).map(rowToTest);
+}
+
+/**
+ * Get the N most recent non-deleted tests for a project, newest first.
+ *
+ * AUTO-023 B5.7 — pushed the `LIMIT` to SQL so the
+ * `db.listExistingTests` tool's author-dedup callsite (capped at 30 in
+ * `journeyGenerator.js`) doesn't load every test row in a project before
+ * slicing in JS. A project with 10k tests previously deserialised ~10MB
+ * of JSON + boolean coercions per dedup call; the new path bounds the
+ * cost to 30 rows regardless of catalog size. Ordering by `createdAt DESC`
+ * (newest first) matches the dedup heuristic — the LLM benefits most
+ * from anchoring against the most recently-written scenarios.
+ *
+ * @param {string} projectId
+ * @param {number} limit — Hard ceiling on returned rows. Caller-side
+ *   defence-in-depth: clamped to `[1, 1000]` so a callsite bug can't
+ *   accidentally unbound the query.
+ * @returns {Object[]}
+ */
+export function getRecentByProjectId(projectId, limit) {
+  const db = getDatabase();
+  const parsed = Number.parseInt(String(limit ?? 30), 10);
+  const clamped = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 1000) : 30;
+  return db.prepare(
+    "SELECT * FROM tests WHERE projectId = ? AND deletedAt IS NULL ORDER BY createdAt DESC LIMIT ?",
+  ).all(projectId, clamped).map(rowToTest);
 }
 
 /**

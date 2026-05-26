@@ -8,7 +8,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCircle2, XCircle, AlertTriangle, Sparkles, Trash2, CheckCheck } from "lucide-react";
+import { Bell, BellOff, CheckCircle2, XCircle, AlertTriangle, Sparkles, Trash2, CheckCheck, Settings, ChevronDown } from "lucide-react";
 import { useNotifications } from "../../context/NotificationContext.jsx";
 
 /** Relative time label (e.g. "2m ago", "1h ago", "3d ago"). */
@@ -24,6 +24,41 @@ function timeAgo(iso) {
   return `${d}d ago`;
 }
 
+/**
+ * ENT-005: human-readable wake-time label for the snooze footer.
+ * "Until 3:45 PM" / "Until tomorrow 9:00 AM" / "Until Mon 9:00 AM"
+ */
+function snoozeWakeLabel(iso) {
+  const wake = new Date(iso);
+  const now = new Date();
+  const sameDay = wake.toDateString() === now.toDateString();
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow = wake.toDateString() === tomorrow.toDateString();
+  const time = wake.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return `Snoozed until ${time}`;
+  if (isTomorrow) return `Snoozed until tomorrow ${time}`;
+  return `Snoozed until ${wake.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
+}
+
+/**
+ * ENT-005: pre-built snooze presets. Industry-standard rhythm
+ * (Slack: 30m / 1h / 2h / Until tomorrow; Linear: 1h / 4h / Tomorrow;
+ * GitHub: 1 day / 3 days / 1 week). We pick a compact set that covers
+ * "the meeting" (1h), "the rest of the workday" (8h), and "until tomorrow
+ * morning" (next 9am) so users don't need a date picker for 90% of cases.
+ */
+function snoozePresets() {
+  const now = new Date();
+  const tomorrow9am = new Date(now);
+  tomorrow9am.setDate(tomorrow9am.getDate() + 1);
+  tomorrow9am.setHours(9, 0, 0, 0);
+  return [
+    { label: "For 1 hour", until: new Date(now.getTime() + 60 * 60 * 1000) },
+    { label: "For 8 hours", until: new Date(now.getTime() + 8 * 60 * 60 * 1000) },
+    { label: "Until tomorrow 9:00 AM", until: tomorrow9am },
+  ];
+}
+
 /** Icon for notification type. */
 function TypeIcon({ type }) {
   if (type === "success") return <CheckCircle2 size={14} color="var(--green)" />;
@@ -33,19 +68,34 @@ function TypeIcon({ type }) {
 }
 
 export default function NotificationBell() {
-  const { notifications, unreadCount, markRead, markAllRead, clearAll } = useNotifications();
+  const {
+    notifications, unreadCount, markRead, markAllRead, clearAll,
+    isSnoozed, snoozedUntil, setSnoozedUntil, clearSnooze,
+  } = useNotifications();
   const [open, setOpen] = useState(false);
+  // ENT-005: snooze submenu state is local — opens inline when the user
+  // clicks "Snooze ▾" in the header. Auto-closes when the dropdown itself
+  // closes (the `open` effect below resets it).
+  const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
 
   // Close dropdown when clicking outside
   useEffect(() => {
     function onClickOutside(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target)) {
+        setOpen(false);
+        setSnoozeMenuOpen(false);
+      }
     }
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
+
+  // Auto-collapse the snooze submenu whenever the dropdown closes, so
+  // re-opening the bell always starts from the clean "Snooze ▾" affordance
+  // state rather than a stale open submenu the user already saw.
+  useEffect(() => { if (!open) setSnoozeMenuOpen(false); }, [open]);
 
   function handleClick(notif) {
     markRead(notif.id);
@@ -55,34 +105,33 @@ export default function NotificationBell() {
     }
   }
 
+  /** ENT-005: navigate to per-project notification settings.
+   *  There's no global Settings → Notifications page (notification settings
+   *  are per-project — `backend/src/routes/projects.js#/:id/notifications`),
+   *  so the most useful destination is the projects list where the user
+   *  picks the project whose channels they want to configure. */
+  function openNotificationSettings() {
+    navigate("/projects");
+    setOpen(false);
+  }
+
   return (
-    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
+    <div ref={ref} className="notif-bell">
       {/* Bell button */}
       <button
         onClick={() => setOpen(v => !v)}
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
-        className="notif-bell-btn"
-        style={{
-          position: "relative",
-          background: open ? "var(--bg2)" : "none",
-          border: "1px solid transparent",
-          borderColor: open ? "var(--border)" : "transparent",
-          borderRadius: 8, padding: 6, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          transition: "background 0.15s, border-color 0.15s",
-        }}
+        className={`notif-bell-btn${open ? " notif-bell-btn--open" : ""}`}
       >
-        <Bell size={18} color="var(--text2)" />
+        {/* ENT-005: the bell icon flips to BellOff while snoozed so the
+            user sees state at a glance without opening the dropdown.
+            Matches Slack's bell-with-Z affordance — the icon itself is
+            the badge for "you've explicitly muted me". */}
+        {isSnoozed
+          ? <BellOff size={18} color="var(--text3)" />
+          : <Bell size={18} color="var(--text2)" />}
         {unreadCount > 0 && (
-          <span style={{
-            position: "absolute", top: 2, right: 2,
-            minWidth: 16, height: 16, borderRadius: 99,
-            background: "var(--red)", color: "#fff",
-            fontSize: "0.62rem", fontWeight: 700,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: "0 4px", lineHeight: 1,
-            border: "2px solid var(--surface)",
-          }}>
+          <span className="notif-bell-badge">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
@@ -90,42 +139,24 @@ export default function NotificationBell() {
 
       {/* Dropdown */}
       {open && (
-        <div className="notif-dropdown" style={{
-          position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 100,
-          width: 360, maxHeight: 440,
-          background: "var(--surface)", border: "1px solid var(--border)",
-          borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-          display: "flex", flexDirection: "column", overflow: "hidden",
-        }}>
+        <div className="notif-dropdown">
           {/* Header */}
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "12px 14px", borderBottom: "1px solid var(--border)",
-          }}>
-            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--text)" }}>
+          <div className="notif-header">
+            <span className="notif-header__title">
               Notifications
               {unreadCount > 0 && (
-                <span style={{
-                  marginLeft: 8, fontSize: "0.68rem", fontWeight: 600,
-                  background: "var(--accent-bg)", color: "var(--accent)",
-                  padding: "1px 7px", borderRadius: 99,
-                }}>
+                <span className="notif-header__count-pill">
                   {unreadCount} new
                 </span>
               )}
             </span>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div className="notif-header__actions">
               {unreadCount > 0 && (
                 <button
                   onClick={markAllRead}
                   title="Mark all read"
-                  style={{
-                    background: "none", border: "none", cursor: "pointer",
-                    color: "var(--text3)", padding: 4, display: "flex",
-                    borderRadius: 6, transition: "color 0.12s",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.color = "var(--accent)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.color = "var(--text3)"; }}
+                  aria-label="Mark all notifications as read"
+                  className="notif-icon-btn notif-icon-btn--accent"
                 >
                   <CheckCheck size={15} />
                 </button>
@@ -134,13 +165,8 @@ export default function NotificationBell() {
                 <button
                   onClick={clearAll}
                   title="Clear all"
-                  style={{
-                    background: "none", border: "none", cursor: "pointer",
-                    color: "var(--text3)", padding: 4, display: "flex",
-                    borderRadius: 6, transition: "color 0.12s",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.color = "var(--red)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.color = "var(--text3)"; }}
+                  aria-label="Clear all notifications"
+                  className="notif-icon-btn notif-icon-btn--danger"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -149,66 +175,130 @@ export default function NotificationBell() {
           </div>
 
           {/* List */}
-          <div style={{ flex: 1, overflowY: "auto" }}>
+          <div className="notif-list">
             {notifications.length === 0 ? (
-              <div style={{
-                padding: "40px 20px", textAlign: "center",
-                color: "var(--text3)", fontSize: "0.82rem",
-              }}>
-                <Bell size={28} color="var(--border2)" style={{ marginBottom: 10 }} />
+              <div className="notif-empty">
+                <Bell size={28} color="var(--border2)" className="notif-empty__icon" />
                 <div>No notifications yet</div>
               </div>
             ) : (
-              notifications.map(notif => (
-                <button
-                  key={notif.id}
-                  onClick={() => handleClick(notif)}
-                  style={{
-                    display: "flex", alignItems: "flex-start", gap: 10,
-                    width: "100%", padding: "10px 14px",
-                    background: notif.read ? "none" : "var(--accent-bg)",
-                    border: "none", borderBottom: "1px solid var(--border)",
-                    cursor: notif.link ? "pointer" : "default",
-                    textAlign: "left", transition: "background 0.12s",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = notif.read ? "none" : "var(--accent-bg)"; }}
-                >
-                  <div style={{ marginTop: 2, flexShrink: 0 }}>
-                    <TypeIcon type={notif.type} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: "0.8rem", fontWeight: notif.read ? 500 : 700,
-                      color: "var(--text)", marginBottom: 2,
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                    }}>
-                      {/* Defensive String() — older callsites occasionally
-                          stuffed structured objects (e.g. `{ type, message }`
-                          error envelopes) into the notification. React throws
-                          "Objects are not valid as a React child" the moment
-                          one of those persisted entries lands here from
-                          localStorage, breaking the entire dropdown. Coercing
-                          to a string at the leaf keeps the surface working
-                          even when bad legacy data is in storage. */}
-                      {typeof notif.title === "string" ? notif.title : String(notif.title ?? "")}
+              notifications.map(notif => {
+                const rowCls = [
+                  "notif-row",
+                  notif.read ? "" : "notif-row--unread",
+                  notif.link ? "notif-row--clickable" : "",
+                ].filter(Boolean).join(" ");
+                return (
+                  <button
+                    key={notif.id}
+                    onClick={() => handleClick(notif)}
+                    className={rowCls}
+                  >
+                    <div className="notif-row__icon">
+                      <TypeIcon type={notif.type} />
                     </div>
-                    <div style={{
-                      fontSize: "0.75rem", color: "var(--text2)", lineHeight: 1.4,
-                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                      overflow: "hidden",
-                    }}>
-                      {typeof notif.body === "string" ? notif.body : String(notif.body ?? "")}
+                    <div className="notif-row__body">
+                      <div className="notif-row__title">
+                        {/* Defensive String() — older callsites occasionally
+                            stuffed structured objects (e.g. `{ type, message }`
+                            error envelopes) into the notification. React throws
+                            "Objects are not valid as a React child" the moment
+                            one of those persisted entries lands here from
+                            localStorage, breaking the entire dropdown. Coercing
+                            to a string at the leaf keeps the surface working
+                            even when bad legacy data is in storage. */}
+                        {typeof notif.title === "string" ? notif.title : String(notif.title ?? "")}
+                      </div>
+                      <div className="notif-row__text">
+                        {typeof notif.body === "string" ? notif.body : String(notif.body ?? "")}
+                      </div>
                     </div>
-                  </div>
-                  <div style={{
-                    fontSize: "0.66rem", color: "var(--text3)",
-                    whiteSpace: "nowrap", flexShrink: 0, marginTop: 2,
-                  }}>
-                    {timeAgo(notif.createdAt)}
-                  </div>
-                </button>
-              ))
+                    <div className="notif-row__time">
+                      {timeAgo(notif.createdAt)}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {/* ENT-005: snoozed-state banner. Surfaces when the user has an
+              active snooze so they know "no badges right now" is by
+              their own choice, with a one-click resume. */}
+          {isSnoozed && (
+            <div className="notif-snooze-banner">
+              <BellOff size={13} />
+              <span className="notif-snooze-banner__label">
+                {snoozeWakeLabel(snoozedUntil)}
+              </span>
+              <button
+                onClick={() => clearSnooze()}
+                className="notif-snooze-banner__resume"
+              >
+                Resume
+              </button>
+            </div>
+          )}
+
+          {/* ENT-005: footer with Snooze submenu + Notification settings
+              link. Industry-standard discoverability — top-level affordances
+              the user expects (Slack, Linear, GitHub all put settings here)
+              instead of forcing a hunt through the Settings page. The
+              snooze button toggles a small in-place menu; the settings
+              button deep-links to the project list since notification
+              channels are per-project (`backend/src/routes/projects.js`). */}
+          <div className="notif-footer">
+            <button
+              onClick={() => setSnoozeMenuOpen(v => !v)}
+              aria-haspopup="menu"
+              aria-expanded={snoozeMenuOpen}
+              className="notif-footer-btn"
+            >
+              <BellOff size={12} />
+              Snooze
+              <ChevronDown size={11} />
+            </button>
+
+            <div className="notif-footer__spacer" />
+
+            <button
+              onClick={openNotificationSettings}
+              className="notif-footer-btn"
+            >
+              <Settings size={12} />
+              Notification settings
+            </button>
+
+            {/* Snooze submenu — absolutely positioned over the list so it
+                doesn't push the footer up and shift layout. */}
+            {snoozeMenuOpen && (
+              <div role="menu" className="notif-snooze-menu">
+                {snoozePresets().map(p => (
+                  <button
+                    key={p.label}
+                    role="menuitem"
+                    onClick={() => {
+                      setSnoozedUntil(p.until);
+                      setSnoozeMenuOpen(false);
+                    }}
+                    className="notif-snooze-menu__item"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                {isSnoozed && (
+                  <>
+                    <div className="notif-snooze-menu__separator" />
+                    <button
+                      role="menuitem"
+                      onClick={() => { clearSnooze(); setSnoozeMenuOpen(false); }}
+                      className="notif-snooze-menu__item notif-snooze-menu__item--danger"
+                    >
+                      Resume notifications
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>

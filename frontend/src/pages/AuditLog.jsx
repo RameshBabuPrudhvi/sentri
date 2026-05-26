@@ -528,6 +528,21 @@ export default function AuditLog() {
   const [searchParams, setSearchParams] = useSearchParams();
   const projectId = searchParams.get("projectId") || "all";
   const sortOrder = searchParams.get("sort")    || "newest";
+  // ENT-004 (audit) — per-test slice. When TestDetail's "View activity →"
+  // link deep-links here with `?testId=…`, the toolbar surfaces a dismiss
+  // chip and the fetch narrows server-side via the new `testId` filter on
+  // `getWorkspaceAuditLog`. `"all"` (or absent) means "no test filter".
+  const testIdFilter = searchParams.get("testId") || "";
+  // ENT-004 (migration 055) — matching per-run slice. RunDetail's "View
+  // activity →" link uses `?runId=…`; same dismiss-chip pattern.
+  const runIdFilter = searchParams.get("runId") || "";
+  // SEC-007 UX: meta-audit `audit.read` / `audit.export` rows are emitted
+  // every time the Audit Log page loads (PCI-DSS 10.2.6 / SOC 2 CC7.2),
+  // which on low-activity workspaces dominates the feed with the
+  // operator's own page reloads. Default to hiding them — admins doing
+  // forensic review opt back in via the "Audit reads" toggle in the
+  // toolbar. URL-driven so the toggle state survives reload + share.
+  const includeAuditReads = searchParams.get("includeAuditReads") === "true";
 
   function setParam(key, value) {
     setSearchParams((prev) => {
@@ -610,9 +625,15 @@ export default function AuditLog() {
     today.setHours(0, 0, 0, 0);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
+    // ENT-004: include `audit.read` / `audit.export` meta-audit rows in
+    // the stats batch so "Events today" reflects workspace-wide volume,
+    // not just the filtered feed shape. Without `includeAuditReads`, the
+    // backend's new default `excludeTypes = ["audit.read","audit.export"]`
+    // silently drops those rows from the count — contradicting the comment
+    // above that promised workspace-wide totals independent of UI filters.
     Promise.all([
-      api.getWorkspaceAuditLog(workspaceId, { dateFrom: today.toISOString(),       limit: 500 }),
-      api.getWorkspaceAuditLog(workspaceId, { dateFrom: sevenDaysAgo.toISOString(), limit: 1000 }),
+      api.getWorkspaceAuditLog(workspaceId, { dateFrom: today.toISOString(),       limit: 500,  includeAuditReads: "true" }),
+      api.getWorkspaceAuditLog(workspaceId, { dateFrom: sevenDaysAgo.toISOString(), limit: 1000, includeAuditReads: "true" }),
     ])
       .then(([todayRes, weekRes]) => {
         const todayArr  = Array.isArray(todayRes?.rows) ? todayRes.rows : [];
@@ -679,7 +700,16 @@ export default function AuditLog() {
 
     const filters = {
       projectId: projectId !== "all" ? projectId : undefined,
+      // ENT-004 (audit) — forward the optional per-test filter from the URL
+      // so `/audit-log?testId=TST-…` narrows the feed server-side.
+      testId: testIdFilter || undefined,
+      // ENT-004 (migration 055) — matching per-run filter for RunDetail's
+      // deep-link case (`/audit-log?runId=RUN-…`).
+      runId: runIdFilter || undefined,
       type: filterTypes || undefined,
+      // Forwarded to the backend's `excludeTypes` filter — see comment on
+      // the URL-driven `includeAuditReads` flag above for the rationale.
+      includeAuditReads: includeAuditReads ? "true" : undefined,
       limit: PAGE_SIZE,
     };
 
@@ -716,7 +746,7 @@ export default function AuditLog() {
     // Including them here would trigger a server fetch (and a meta-audit
     // `audit.read` row) on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, typeKey, projectId, sortOrder, filterTypes]);
+  }, [workspaceId, typeKey, projectId, sortOrder, filterTypes, includeAuditReads, testIdFilter, runIdFilter]);
 
   // ── Load more (cursor-paginated) ───────────────────────────────────────────
   async function loadMore() {
@@ -725,7 +755,15 @@ export default function AuditLog() {
     try {
       const filters = {
         projectId: projectId !== "all" ? projectId : undefined,
+        // ENT-004 — keep the test filter on every page of the cursor walk
+        // so subsequent pages don't widen scope back to the full workspace.
+        testId: testIdFilter || undefined,
+        // ENT-004 (migration 055) — same invariant for the per-run filter.
+        runId: runIdFilter || undefined,
         type: filterTypes || undefined,
+        // Keep the same `includeAuditReads` shape on subsequent pages so
+        // the cursor walk sees the same row set as the initial fetch.
+        includeAuditReads: includeAuditReads ? "true" : undefined,
         cursor: nextCursor,
         limit: PAGE_SIZE,
       };
@@ -789,6 +827,13 @@ export default function AuditLog() {
     params.set("format", format);
     if (projectId !== "all") params.set("projectId", projectId);
     if (filterTypes) filterTypes.forEach((t) => params.append("type", t));
+    // ENT-004: forward the URL-driven entity + meta-audit filters so the
+    // exported file matches the row set the admin sees on screen. Without
+    // these, deep-linking to `/audit-log?testId=…` and clicking Export CSV
+    // dumps the entire workspace's audit log, defeating the filter chip.
+    if (testIdFilter) params.set("testId", testIdFilter);
+    if (runIdFilter) params.set("runId", runIdFilter);
+    if (includeAuditReads) params.set("includeAuditReads", "true");
     if (debouncedQ) {
       // The server has no `q` param yet; document the limitation in the
       // notification so an evidence-pulling admin knows the file matches
@@ -1410,6 +1455,56 @@ export default function AuditLog() {
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
         </select>
+
+        {/* ENT-004 (audit) — active testId filter chip. Surfaces when the
+            URL carries `?testId=…` (typically arrived via the "View activity"
+            link on TestDetail). Clicking the × clears the filter and falls
+            back to the workspace-wide feed. */}
+        {testIdFilter && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs al-toolbar__filter-chip"
+            onClick={() => setParam("testId", null)}
+            title={`Filter scoped to ${testIdFilter} — click to clear`}
+          >
+            Test: <code className="al-toolbar__filter-chip-code">{testIdFilter}</code>
+            <span aria-hidden="true">×</span>
+          </button>
+        )}
+
+        {/* ENT-004 (migration 055) — matching runId filter chip. Same
+            shape as the testId chip above; RunDetail's "View activity →"
+            link deep-links here with `?runId=…` and admins clear back to
+            the workspace feed with one click. */}
+        {runIdFilter && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs al-toolbar__filter-chip"
+            onClick={() => setParam("runId", null)}
+            title={`Filter scoped to ${runIdFilter} — click to clear`}
+          >
+            Run: <code className="al-toolbar__filter-chip-code">{runIdFilter}</code>
+            <span aria-hidden="true">×</span>
+          </button>
+        )}
+
+        {/* SEC-007: include `audit.read` / `audit.export` meta-audit rows.
+            Hidden by default — these fire on every page load + filter
+            change and otherwise dominate the feed. The rows still get
+            persisted server-side (PCI-DSS 10.2.6 / SOC 2 CC7.2 require
+            this) so an auditor who flips the toggle on sees the full
+            trail. */}
+        <label
+          className="al-toolbar__toggle"
+          title="Include meta-audit rows that record reads of the audit log itself. Hidden by default to keep the feed readable."
+        >
+          <input
+            type="checkbox"
+            checked={includeAuditReads}
+            onChange={(e) => setParam("includeAuditReads", e.target.checked ? "true" : null)}
+          />
+          <span>Audit reads</span>
+        </label>
       </div>
 
       {/* ── Type chips ── */}

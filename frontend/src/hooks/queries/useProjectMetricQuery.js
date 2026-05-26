@@ -2,8 +2,9 @@
  * @module hooks/queries/useProjectMetricQuery
  * @description TanStack Query wrapper around `api.getProjectMetric` —
  * fetches a single time-series for a project's metric key (MET-001 +
- * AUTO-017.3). Used by `ProjectQualityCard`'s Web Vitals tab to feed
- * the four `<TrendChart>` instances (LCP / CLS / INP / TTFB).
+ * AUTO-017.3). Used by `QualityGatesSection`'s Web Vitals block
+ * (`features/project-settings/sections/quality-gates/QualityGatesSection.jsx`)
+ * to feed the four `<TrendChart>` instances (LCP / CLS / INP / TTFB).
  *
  * The query returns the raw `samples` array (already shaped as
  * `[{ ts, value, tags }, ...]`) so call sites can pass it directly to

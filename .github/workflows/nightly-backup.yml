@@ -1,0 +1,34 @@
+name: Nightly Postgres Backup
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump postgres
+        # -Fc = custom format so pg_restore (documented in
+        # docs/guide/disaster-recovery.md) can apply --clean / --if-exists /
+        # --no-owner. A plain-SQL dump would need `psql` to restore and would
+        # not honour those flags.
+        run: pg_dump -Fc "$DATABASE_URL" > backup.dump
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Upload daily backup
+        run: aws s3 cp backup.dump "s3://${S3_BACKUP_BUCKET}/daily/$(date -u +%F).dump"
+        env:
+          S3_BACKUP_BUCKET: ${{ secrets.S3_BACKUP_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_BACKUP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_BACKUP_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.S3_BACKUP_REGION }}
+      - name: Upload monthly backup snapshot
+        run: |
+          if [ "$(date -u +%d)" = "01" ]; then
+            aws s3 cp backup.dump "s3://${S3_BACKUP_BUCKET}/monthly/$(date -u +%Y-%m).dump"
+          fi
+        env:
+          S3_BACKUP_BUCKET: ${{ secrets.S3_BACKUP_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_BACKUP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_BACKUP_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.S3_BACKUP_REGION }}

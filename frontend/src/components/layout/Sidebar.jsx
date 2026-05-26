@@ -2,47 +2,72 @@ import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { Home, FolderKanban, SquareCheckBig, PlayCircle, BarChart3, Bot, Server,
     Settings, ChevronDown, Check, ChevronRight, PanelLeftClose, PanelLeftOpen,
-    Atom, Shield, ClipboardCheck, ScrollText,
+    Atom, Shield, ClipboardCheck, ScrollText, Inbox,
 } from "lucide-react";
 import AppLogo from "./AppLogo.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { userHasRole } from "../../utils/roles.js";
 import { api } from "../../api.js";
 import useAutoApprovalsQuery from "../../hooks/queries/useAutoApprovalsQuery.js";
+import { useReviewQueueCounts } from "../../hooks/queries/useReviewQueueQuery.js";
 
-// Review Queue intentionally has no sidebar entry — it's reached via the
-// "Review Drafts" quick-action card on the Tests page (`Tests.jsx`), which
-// carries the live draft count and project-scoped deep-link. Adding a
-// sidebar entry here would duplicate that surface; the `/review-queue`
-// route itself remains registered in `App.jsx` for the card's navigate().
+// NAV-001 (audit) — Sidebar IA restructured per the audit's recommended
+// grouping in `docs/roadmap/sentri-ux-audit-22May2026.md`:
+//
+//   Core:       Dashboard, Projects, Tests
+//   Work:       Runs, Review Queue, Approvals
+//   Automation: Test Lab, Healing, Automation
+//   Insights:   Reports, Audit Log (admin), System
+//   (Settings stays in the footer, admin-only.)
+//
+// Rationale highlights:
+//   - "Test Lab" demoted from Core → Automation (advanced feature, not a
+//     top-level destination alongside Dashboard/Projects/Tests).
+//   - "Approvals" lifted to Work (it's a sub-workflow of test management,
+//     not "automation"). Same group as Runs + Review Queue.
+//   - Review Queue gains a first-class entry — the prior assumption that
+//     the Tests-page quick-action card was sufficient was the source of
+//     the GAP-004 audit finding (drafts accumulating silently). The
+//     pending-review badge that already lives on the Tests entry stays;
+//     this entry is the canonical destination, the Tests-page card is
+//     a contextual shortcut.
+//   - Reports + Audit log + System grouped under Insights (admin
+//     observability surfaces). System is read-only telemetry, semantically
+//     closer to Audit log than to Automation.
 const NAV_GROUPS = [
   {
     label: "Core",
     items: [
-      { to: "/dashboard",     icon: Home,          label: "Dashboard",     tour: "tour-dashboard" },
-      { to: "/projects",      icon: FolderKanban,  label: "Projects",      tour: "tour-projects"  },
-      { to: "/tests",         icon: SquareCheckBig,label: "Tests",         tour: "tour-tests"     },
-      { to: "/test-lab",      icon: Atom,          label: "Test Lab"                              },
+      { to: "/dashboard",     icon: Home,          label: "Dashboard"     },
+      { to: "/projects",      icon: FolderKanban,  label: "Projects"      },
+      { to: "/tests",         icon: SquareCheckBig,label: "Tests"         },
     ],
   },
   {
-    label: "Activity",
+    label: "Work",
     items: [
-      { to: "/runs",    icon: PlayCircle, label: "Runs"    },
-      { to: "/reports", icon: BarChart3,  label: "Reports" },
+      { to: "/runs",          icon: PlayCircle,    label: "Runs"          },
+      { to: "/review-queue",  icon: Inbox,         label: "Review Queue"  },
+      { to: "/approvals",     icon: ClipboardCheck,label: "Approvals"     },
     ],
   },
   {
     label: "Automation",
     items: [
-      { to: "/automation", icon: Bot,    label: "Automation" },
-      { to: "/approvals",  icon: ClipboardCheck, label: "Approvals" },
-      { to: "/healing", icon: Shield, label: "Healing" },
+      { to: "/test-lab",      icon: Atom,          label: "Test Lab"      },
+      { to: "/healing",       icon: Shield,        label: "Healing"       },
+      { to: "/automation",    icon: Bot,           label: "Automation"    },
+    ],
+  },
+  {
+    label: "Insights",
+    items: [
+      { to: "/reports",       icon: BarChart3,     label: "Reports"       },
       // SEC-007: `/audit-log` is gated by `<ProtectedRoute requiredRole="admin">`
       // in App.jsx, so we hide the nav item from non-admins to avoid leading them
       // to a 403 panel — same pattern as the Settings link in the footer.
-      { to: "/audit-log",  icon: ScrollText,     label: "Audit log", adminOnly: true },
-      { to: "/system",     icon: Server, label: "System"     },
+      { to: "/audit-log",     icon: ScrollText,    label: "Audit log", adminOnly: true },
+      { to: "/system",        icon: Server,        label: "System"        },
     ],
   },
 ];
@@ -99,6 +124,20 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
   // doesn't render on error).
   const autoTodayQuery = useAutoApprovalsQuery({ scope: "today" });
   const autoTodayCount = (autoTodayQuery.data || []).length;
+
+  // ── GAP-004 (audit): pending-review badge on the Tests nav entry ──────────
+  // QA Leads previously had no persistent indicator that draft tests were
+  // waiting for human action — the Review Queue is only reachable via the
+  // "Review Drafts" card on the Tests page, so leads who don't habitually
+  // open Tests would miss accumulating drafts. The audit calls this out as
+  // P0 / XS effort in `docs/roadmap/sentri-ux-audit-22May2026.md`.
+  //
+  // Reuses the existing `useReviewQueueCounts` hook (TanStack Query) so the
+  // ReviewQueue page and this badge share a single cache. No filters: we
+  // want the workspace-wide draft count regardless of which project the
+  // user has selected on the ReviewQueue page. Failures render no badge.
+  const reviewCounts = useReviewQueueCounts({ projectId: "all" });
+  const pendingReviewCount = reviewCounts.draft || 0;
 
   // Force-expand the dropdown closed when the sidebar collapses to a rail —
   // the dropdown is anchored to the wide-mode workspace switcher and would
@@ -159,15 +198,22 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
             // surfaces in the tooltip (`title`) so users on the rail can
             // still see the magnitude without expanding.
             const showAutoDot = item.to === "/approvals" && autoTodayCount > 0;
+            // GAP-004 (audit): rail-mode equivalent of the expanded pending-
+            // review pill on the Tests icon. Red palette via the
+            // `--pending` modifier (drafts are an action-required signal,
+            // not a passive notification like auto-approvals).
+            const showReviewDot = item.to === "/tests" && pendingReviewCount > 0;
+            const tooltip = showAutoDot
+              ? `${item.label} — ${autoTodayCount} auto-approved today`
+              : showReviewDot
+              ? `${item.label} — ${pendingReviewCount} draft${pendingReviewCount === 1 ? "" : "s"} awaiting review`
+              : item.label;
             return (
               <NavLink
                 key={item.to}
                 to={item.to}
                 className="nav-link sidebar-rail__nav-item"
-                data-tour={item.tour || undefined}
-                title={showAutoDot
-                  ? `${item.label} — ${autoTodayCount} auto-approved today`
-                  : item.label}
+                title={tooltip}
               >
                 {({ isActive }) => (
                   <>
@@ -176,6 +222,12 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
                       <span
                         className="sidebar-rail__nav-dot"
                         aria-label={`${autoTodayCount} auto-approved today`}
+                      />
+                    )}
+                    {showReviewDot && (
+                      <span
+                        className="sidebar-rail__nav-dot sidebar-rail__nav-dot--pending"
+                        aria-label={`${pendingReviewCount} draft${pendingReviewCount === 1 ? "" : "s"} awaiting review`}
                       />
                     )}
                   </>
@@ -192,7 +244,6 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
             <NavLink
               to="/settings"
               className="nav-link sidebar-rail__footer-link"
-              data-tour="tour-settings"
               title="Settings"
             >
               <Settings size={16} strokeWidth={1.8} />
@@ -286,12 +337,17 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
                 // of which page the user is on. Suppressed when zero —
                 // an empty badge is visual noise.
                 const showAutoBadge = item.to === "/approvals" && autoTodayCount > 0;
+                // GAP-004 (audit): pending-review count on the Tests entry.
+                // Red palette (action-required), distinct from the amber
+                // auto-approval pill (passive notification). Same right-
+                // aligned slot as the auto-badge — only one ever shows per
+                // nav item.
+                const showReviewBadge = item.to === "/tests" && pendingReviewCount > 0;
                 return (
                   <NavLink
                     key={item.to}
                     to={item.to}
                     className="nav-link sidebar-nav__item"
-                    data-tour={item.tour || undefined}
                   >
                     {({ isActive }) => (
                       <>
@@ -308,6 +364,15 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
                             aria-label={`${autoTodayCount} auto-approved today`}
                           >
                             🤖 {autoTodayCount}
+                          </span>
+                        )}
+                        {showReviewBadge && (
+                          <span
+                            className="sidebar-nav__auto-badge sidebar-nav__auto-badge--pending"
+                            title={`${pendingReviewCount} draft test${pendingReviewCount === 1 ? "" : "s"} awaiting review`}
+                            aria-label={`${pendingReviewCount} draft${pendingReviewCount === 1 ? "" : "s"} awaiting review`}
+                          >
+                            {pendingReviewCount}
                           </span>
                         )}
                         {isActive && (
@@ -333,7 +398,6 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
           <NavLink
             to="/settings"
             className="nav-link sidebar-footer__link"
-            data-tour="tour-settings"
           >
             <Settings size={15} strokeWidth={1.8} />
             <span>Settings</span>

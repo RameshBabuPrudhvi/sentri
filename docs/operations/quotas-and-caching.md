@@ -47,7 +47,7 @@ in-memory path runs as fallback (logged at warn level).
 | `monthlySpendCapUsd` | REAL | NULL (unlimited) | Month-to-date (calendar-month UTC) USD cap |
 | `spendAlertThresholdPct` | INTEGER | 80 | Alert fires when spend crosses `cap × pct/100` |
 
-Set via **Settings → Provider Routes → Workspace spend caps** or
+Set via **Settings → AI Providers → Spend Caps** tab or
 `PATCH /api/v1/workspaces/current`.
 
 ### How spend is measured
@@ -78,7 +78,7 @@ is planned for a follow-up commit.
 ### Enabling
 
 Set `cacheEnabled = true` and `cacheTtlSec > 0` on the route row
-(via Settings UI or `PATCH /settings/provider-routes/:id`).
+(via Settings → AI Providers UI or `PATCH /settings/ai-providers/:id`).
 
 ### Cache key
 

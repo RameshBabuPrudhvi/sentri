@@ -31,6 +31,25 @@ export const CLOUD_KEY_MAP = {
 // slots (handled by the orchestrator), then Ollama.
 export const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google", "openrouter"];
 
+/**
+ * Canonical default endpoint for OpenRouter dispatch. Single source of
+ * truth shared by:
+ *
+ *   • `dispatcher.js#OPENROUTER_BASE_URL` (legacy provider-driven path)
+ *   • `registry.js#synthesiseTransientRoute` (synthesised env-route baseUrl)
+ *   • `protocols/openai.js#getFamilyDefaultBaseUrl` (route-driven safety net)
+ *
+ * Reading `process.env.OPENROUTER_BASE_URL` at call time honours the
+ * documented self-hosted-proxy override (see `REFERENCE.md` +
+ * `docker-compose.yml`) without freezing the value at module load.
+ * Returning the URL string keeps every consumer's wiring identical.
+ *
+ * @returns {string} The OpenRouter API base URL.
+ */
+export function getOpenRouterBaseUrl() {
+  return process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+}
+
 // Per-provider default models — overridable via env vars. B4.1: the
 // `color` field is the brand-aligned hex for Settings UI / dropdowns.
 // Co-located here so `providerInfo.js#buildProviderMeta` derives the
@@ -176,6 +195,45 @@ export const MODEL_PRICING = {
 export function pricingFor(model) {
   if (!model) return null;
   return MODEL_PRICING[model] || null;
+}
+
+/**
+ * Brand emoji for each provider family. Used by the Settings UI → AI Providers
+ * section and Agent Roles dropdown to give operators instant visual recognition
+ * without relying on colour alone (accessibility). Kept here as a pure-data
+ * constant so the UI and any future CLI surface share one definition.
+ *
+ * @type {Record<string, string>}
+ */
+export const FAMILY_EMOJI = {
+  anthropic:  "🔶",
+  openai:     "🟢",
+  google:     "🔷",
+  openrouter: "🧭",
+  local:      "🦙",
+  custom:     "🔧",
+};
+
+/**
+ * Produce a human-readable cost-tier string for a model, suitable for
+ * compact display in dropdowns and badges (e.g. "$3 / $15 per M tokens").
+ * Returns "Free" for Ollama local models, "Variable" for OpenRouter auto,
+ * and "Unknown pricing" when the model isn't in the catalog.
+ *
+ * @param {string} model
+ * @returns {string}
+ */
+export function formatCostTier(model) {
+  const p = pricingFor(model);
+  if (!p) return "Unknown pricing";
+  if (p.inputPer1k === 0 && p.outputPer1k === 0) return "Free (local)";
+  if (p.inputPer1k == null || p.outputPer1k == null) return "Variable";
+  const fmt = (n) => {
+    if (n == null) return "?";
+    const perM = n * 1000;
+    return perM < 1 ? `$${(perM).toFixed(2)}` : `$${perM % 1 === 0 ? perM.toFixed(0) : perM.toFixed(1)}`;
+  };
+  return `${fmt(p.inputPer1k)} / ${fmt(p.outputPer1k)} per M`;
 }
 
 /**

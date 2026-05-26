@@ -56,6 +56,7 @@ const HTTP_BUCKETS = [0.01, 0.05, 0.1, 0.3, 1, 3, 10];
 const RUN_BUCKETS = [1, 5, 15, 30, 60, 120, 300, 600, 1800];
 const AI_BUCKETS = [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120];
 const PIPELINE_BUCKETS = [0.5, 1, 3, 10, 30, 60, 180];
+const REVIEW_ROUND_BUCKETS = [0, 1, 2, 3];
 
 // ─── Run lifecycle ───────────────────────────────────────────────────────────
 export const runsTotal = new client.Counter({
@@ -248,6 +249,33 @@ export const activeRuns = new client.Gauge({
   registers: [register],
 });
 
+// AUTO-023 B3.3 — reviewer↔author loop termination visibility.
+//
+// `outcome` is the bounded terminal enum from `agentLoop.js`:
+// `accept` | `max_rounds` | `timeout` | `quota_exhausted` | `reject_final`.
+//
+// Naming: Prometheus convention reserves the `_total` suffix for Counters
+// (so `*_total_bucket` / `*_total_sum` / `*_total_count` series read
+// cleanly when histograms auto-expand). This is a Histogram, so the
+// metric name is `app_agent_review_rounds` (no `_total`). The JS export
+// keeps a literal name match.
+//
+// Observation contract: the loop calls `observe({ outcome }, round)` once
+// per terminal path with the 0-indexed round (-1 sentinel for "timeout /
+// quota_exhausted fired before round 0 completed"). The metric clamps
+// `round` into the `[0, 1, 2, 3]` bucket range via `Math.max(0, …)` at
+// the call site (`agentLoop.js#observeLoopOutcome`), so the `-1`
+// sentinel collapses into the same bucket as "accept on round 0" in
+// the histogram. The structured `round` field on `runReviewerAuthorLoop`'s
+// return value preserves the distinction for callers that need it.
+export const agentReviewRounds = new client.Histogram({
+  name: "app_agent_review_rounds",
+  help: "Reviewer↔author loop rounds completed before termination. `round` index is 0-based and bucketed 0..3 to mirror Bundle-3 defaults. Labelled by terminal outcome (`accept` / `max_rounds` / `timeout` / `quota_exhausted` / `reject_final`) for operator debugging.",
+  labelNames: ["outcome"],
+  buckets: REVIEW_ROUND_BUCKETS,
+  registers: [register],
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -308,3 +336,50 @@ export function classifyAiError(err) {
   if (msg.includes("econnrefused") || msg.includes("enotfound") || msg.includes("network")) return "network";
   return "unknown";
 }
+
+
+// AUTO-023 B4.5 — autonomous supervisor orchestration telemetry.
+const AUTONOMOUS_STEP_BUCKETS = [1, 2, 3, 5, 8, 13, 20];
+const AUTONOMOUS_DURATION_BUCKETS = [1, 3, 5, 10, 30, 60, 120, 300, 600];
+
+// Naming: Prometheus convention reserves the `_total` suffix for Counters
+// (so `*_total_bucket` / `*_total_sum` / `*_total_count` series read
+// cleanly when histograms auto-expand). This is a Histogram, so the
+// metric name is `app_agent_thread_steps` (no `_total`). Mirrors the
+// `app_agent_review_rounds` convention documented above.
+export const agentThreadStepsTotal = new client.Histogram({
+  name: "app_agent_thread_steps",
+  help: "AUTO-023 B4.5 — autonomous thread step count per terminal outcome.",
+  labelNames: ["outcome"],
+  buckets: AUTONOMOUS_STEP_BUCKETS,
+  registers: [register],
+});
+
+export const agentSupervisorDecisionsTotal = new client.Counter({
+  name: "app_agent_supervisor_decisions_total",
+  help: "AUTO-023 B4.5 — supervisor routing decisions by nextRole.",
+  labelNames: ["nextRole"],
+  registers: [register],
+});
+
+export const agentThreadDurationSeconds = new client.Histogram({
+  name: "app_agent_thread_duration_seconds",
+  help: "AUTO-023 B4.5 — autonomous thread wall-clock duration in seconds.",
+  labelNames: ["outcome"],
+  buckets: AUTONOMOUS_DURATION_BUCKETS,
+  registers: [register],
+});
+
+export const agentOrchestratorFallbackTotal = new client.Counter({
+  name: "app_agent_orchestrator_fallback_total",
+  help: "AUTO-023 B4.3 — orchestrator fallback count by reason when supervisor decision is ineligible.",
+  labelNames: ["reason"],
+  registers: [register],
+});
+
+export const agentToolCallsTotal = new client.Counter({
+  name: "app_agent_tool_calls_total",
+  help: "AUTO-023 B5 — total tool calls by tool and outcome.",
+  labelNames: ["tool", "outcome"],
+  registers: [register],
+});

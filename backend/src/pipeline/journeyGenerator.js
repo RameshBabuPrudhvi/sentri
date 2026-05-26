@@ -12,6 +12,19 @@
 import { generateText, streamText, parseJSON, isRateLimitError, isTransientServerError } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+// Task 2 — per-agent SSE events. Every LLM call site emits a start/done pair
+// so the NarrativeFeed can render real-time per-agent attribution without a
+// second round-trip. `runId` is threaded through every public generator on
+// this module; when null (eval-harness, CLI), emitAgentEvent is a no-op.
+import { emitAgentEvent, emitAgentMessage } from "../aiProvider/agentEventEmitter.js";
+import { emitHandoffEnvelope, mainThreadId, readLatestEnvelope } from "../aiProvider/agentHandoff.js";
+// AUTO-023 B5.7 — author dispatches `db.listExistingTests` mid-generation so
+// the LLM prompt is dedup-aware (sees existing test names instead of being
+// blind to the project's catalog). Tool dispatch is best-effort: when the
+// tool fails or no projectId is available, fall through to the original
+// dedup-blind prompt path.
+import { executeToolCall as executeAgentTool } from "../aiProvider/agentTools/runtime.js";
+import { getCurrentTraceId } from "../utils/observability.js";
 import { withDials } from "./promptHelpers.js";
 import { extractTestsArray, sanitiseSteps } from "./stepSanitiser.js";
 import { buildJourneyPrompt } from "./prompts/journeyPrompt.js";
@@ -161,8 +174,83 @@ function parseEndpointHints(description, appUrl) {
  * methods, status codes, etc.), automatically routes to the API test prompt
  * which generates Playwright `request` API tests instead of UI tests.
  */
-export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null, projectId = null } = {}) {
+  const threadId = runId ? mainThreadId(runId) : null;
+  // AUTO-023 Bundle 2 — read the inbound envelope and feed its id into
+  // the outbound `replyToId` so the thread reads as a true reply chain
+  // (not a discarded read). See `intentClassifier.js` for the contract.
+  const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
   const apiIntent = isApiIntent(name, description);
+
+  // AUTO-023 B5.7 — call `db.listExistingTests` BEFORE prompt construction so
+  // the author LLM is dedup-aware. Pre-fix the author was blind to the
+  // project's existing test catalog and the deduplicator's post-hoc pass
+  // could only catch near-identical AI output (semantic duplicates with
+  // different wording slipped through). Surfacing the names + `sourceUrl`
+  // of existing tests lets the LLM avoid re-generating known scenarios at
+  // generation time. Best-effort: missing `projectId` (eval-harness, CLI)
+  // or tool failure falls through to the dedup-blind prompt path.
+  let existingTestsHint = "";
+  if (projectId && workspaceId && runId) {
+    const toolCallId = `dedup-${runId}-${Date.now()}`;
+    try {
+      // AUTO-023 B5.7 — pass `limit: 30` so SQL caps the row count at
+      // the DB layer. The prompt-side `.slice(0, 30)` is kept as
+      // defence-in-depth but is now a no-op on the happy path.
+      const DEDUP_LIMIT = 30;
+      emitAgentMessage({
+        id: toolCallId, runId, workspaceId, threadId,
+        traceId: getCurrentTraceId() || `trace-${runId}`,
+        fromRole: "author", toRole: "author", intent: "tool_call",
+        artifact: { tool: "db.listExistingTests", args: { projectId, limit: DEDUP_LIMIT } },
+        rationale: "Pre-generation dedup check", round: 0,
+        replyToId: null, createdAt: new Date().toISOString(),
+      });
+      const out = await executeAgentTool({
+        tool: "db.listExistingTests",
+        args: { projectId, limit: DEDUP_LIMIT },
+        role: "author",
+        context: { workspaceId, threadId, runId, fromRole: "author" },
+        // AUTO-023 B5 — gap #7: forward the abort signal so a
+        // user-cancelled run doesn't burn the 30s timeout on an
+        // in-flight dedup query.
+        signal,
+      });
+      const existing = Array.isArray(out?.result) ? out.result : [];
+      emitAgentMessage({
+        runId, workspaceId, threadId,
+        traceId: getCurrentTraceId() || `trace-${runId}`,
+        fromRole: "author", toRole: "author", intent: "tool_result",
+        artifact: { toolCallId, tool: "db.listExistingTests", result: { count: existing.length } },
+        rationale: "tool_executed", round: 0,
+        replyToId: toolCallId, createdAt: new Date().toISOString(),
+      });
+      if (existing.length > 0) {
+        // Only the first 30 existing tests are surfaced — keeps the prompt
+        // bounded for very large catalogs while still anchoring the LLM
+        // against the most recent / common scenarios. `name` + `sourceUrl`
+        // are sufficient signal for the LLM's dedup judgement; the full
+        // playwrightCode would balloon the prompt past most context windows.
+        const sample = existing.slice(0, 30).map((t) => `- "${t.name}" (${t.sourceUrl || "—"})`).join("\n");
+        const overflow = existing.length > 30 ? `\n…and ${existing.length - 30} more.` : "";
+        existingTestsHint = `\n\nEXISTING TESTS IN THIS PROJECT (avoid generating duplicates of these):\n${sample}${overflow}\n\nIf the user's request overlaps with one of these, generate a complementary test (different scenario / edge case / negative path) rather than a near-duplicate.`;
+      }
+    } catch (err) {
+      // Best-effort — log a tool_result envelope with the error so the UI
+      // timeline shows the dedup attempt was made, then continue with the
+      // dedup-blind prompt path.
+      try {
+        emitAgentMessage({
+          runId, workspaceId, threadId,
+          traceId: getCurrentTraceId() || `trace-${runId}`,
+          fromRole: "author", toRole: "author", intent: "tool_result",
+          artifact: { toolCallId, tool: "db.listExistingTests", error: err?.message || "tool_error", code: err?.code || null },
+          rationale: "tool_error", round: 0,
+          replyToId: toolCallId, createdAt: new Date().toISOString(),
+        });
+      } catch { /* best-effort */ }
+    }
+  }
 
   let prompt;
   if (apiIntent) {
@@ -176,15 +264,32 @@ export async function generateFromDescription(name, description, appUrl, onToken
     // Inject the user's original name + description so the AI has full context
     // beyond just the parsed endpoint hints (e.g. "write API tests for register
     // endpoint with valid and invalid payloads" gives intent the parser can't capture).
-    apiPrompt.user = `USER REQUEST: ${name}\n${description ? `USER DESCRIPTION: ${description}\n\n` : "\n"}${apiPrompt.user}`;
+    apiPrompt.user = `USER REQUEST: ${name}\n${description ? `USER DESCRIPTION: ${description}\n\n` : "\n"}${apiPrompt.user}${existingTestsHint}`;
     prompt = withDials(apiPrompt, dialsPrompt);
   } else {
-    prompt = withDials(buildUserRequestedPrompt(name, description, appUrl, { testCount }), dialsPrompt);
+    const uiPrompt = buildUserRequestedPrompt(name, description, appUrl, { testCount });
+    if (existingTestsHint) {
+      uiPrompt.user = `${uiPrompt.user}${existingTestsHint}`;
+    }
+    prompt = withDials(uiPrompt, dialsPrompt);
   }
 
-  const text = onToken
-    ? await streamText(prompt, onToken, { signal, agentRole: "author", workspaceId })
-    : await generateText(prompt, { signal, agentRole: "author", workspaceId });
+  // Step 4 — Generate. The `author` agent writes one or more tests from the
+  // user-supplied requirement. Start/done bracket the LLM call so the
+  // NarrativeFeed can pulse the author chip in real time.
+  // `workspaceId` is forwarded so `emitAgentEvent` can resolve the same
+  // route/model `generateText` will dispatch against — populates the
+  // per-event `model` column for operator attribution.
+  emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
+    message: apiIntent ? "Generating API tests from requirement" : "Generating UI tests from requirement" });
+  let text;
+  try {
+    text = onToken
+      ? await streamText(prompt, onToken, { signal, agentRole: "author", workspaceId, runId })
+      : await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
+  } finally {
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
+  }
   const parsed = parseJSON(text);
   const tests = extractTestsArray(parsed);
 
@@ -203,6 +308,11 @@ export async function generateFromDescription(name, description, appUrl, onToken
 
   // Convert Playwright code steps to human-readable descriptions (Mistral/small LLMs)
   sanitiseSteps(tests);
+  emitHandoffEnvelope({
+    runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+    replyToId: inbound?.id || null,
+    artifact: { tests }, rationale: "Author generated tests",
+  });
 
   return tests;
 }
@@ -212,15 +322,33 @@ export async function generateFromDescription(name, description, appUrl, onToken
 /**
  * generateJourneyTest(journey, snapshotsByUrl) → array of test objects or []
  */
-export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   try {
+    const threadId = runId ? mainThreadId(runId) : null;
+    const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "planner" });
     const prompt = withDials(buildJourneyPrompt(journey, snapshotsByUrl, { testCount }), dialsPrompt);
-    const text = await generateText(prompt, { signal, agentRole: "planner", workspaceId });
+    // Step 3 — Classify / Map journeys. `planner` decomposes a journey
+    // (start page → expected outcome) into the test scaffolding the
+    // author agent later fleshes out. Step-3 is the multi-agent stage —
+    // intentClassifier.aiClassifyPage emits `explorer` on the same step.
+    emitAgentEvent(runId, { step: 3, agent: "planner", phase: "start", workspaceId,
+      message: `Planning journey: ${journey?.name || "unnamed"}` });
+    let text;
+    try {
+      text = await generateText(prompt, { signal, agentRole: "planner", workspaceId, runId });
+    } finally {
+      emitAgentEvent(runId, { step: 3, agent: "planner", phase: "done", workspaceId });
+    }
     const result = parseJSON(text);
     const tests = extractTestsArray(result);
     if (tests.length === 0) return [];
 
     sanitiseSteps(tests);
+    emitHandoffEnvelope({
+      runId, threadId, workspaceId, fromRole: "planner", toRole: "author",
+      replyToId: inbound?.id || null,
+      artifact: { journey: journey?.name || null, tests }, rationale: "Planner journey decomposition",
+    });
     return tests;
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
@@ -236,15 +364,32 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
 /**
  * generateIntentTests(classifiedPage, snapshot) → Array of test objects
  */
-export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   try {
+    const threadId = runId ? mainThreadId(runId) : null;
+    const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
     const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot, { testCount }), dialsPrompt);
-    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId });
+    // Step 4 — Generate. `author` writes per-page intent tests for each
+    // high-priority classified page.
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
+      message: `Writing tests for ${classifiedPage?.url || "page"}` });
+    let text;
+    try {
+      text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
+    } finally {
+      emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
+    }
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);
     if (tests.length === 0) return [];
 
     sanitiseSteps(tests);
+    emitHandoffEnvelope({
+      runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+      replyToId: inbound?.id || null,
+      artifact: { url: classifiedPage?.url || null, intent: classifiedPage?.dominantIntent || null, tests },
+      rationale: "Author generated intent tests",
+    });
     return tests;
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
@@ -264,7 +409,7 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
  *
  * @returns {{ tests: object[], rateLimitHit: boolean, rateLimitError: string|null }}
  */
-export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   const allTests = [];
   let rateLimitHit = false;
   let rateLimitError = null;
@@ -361,7 +506,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     throwIfAborted(signal);
     onProgress?.(`🗺️  Generating journey tests: ${journey.name}`);
     const journeyTests = await safeGenerate(`Journey "${journey.name}"`, () =>
-      generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt, testCount, signal, workspaceId })
+      generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt, testCount, signal, workspaceId, runId })
     );
     for (const jt of journeyTests) {
       allTests.push({ ...jt, sourceUrl: journey.pages[0]?.url, pageTitle: journey.name });
@@ -382,7 +527,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     if (!snapshot) continue;
 
     const tests = await safeGenerate(`Intent tests for ${classifiedPage.url}`, () =>
-      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal, workspaceId })
+      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal, workspaceId, runId })
     );
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
@@ -412,7 +557,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
 
     onProgress?.(`📄 Generating tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
     const tests = await safeGenerate(`Tests for ${classifiedPage.url}`, () =>
-      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal, workspaceId })
+      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal, workspaceId, runId })
     );
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
@@ -448,13 +593,24 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
  *   configured for the author stage.
  * @returns {Promise<object[]>}
  */
-export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null } = {}) {
+export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
   if (!apiEndpoints || apiEndpoints.length === 0) return [];
 
   try {
     throwIfAborted(signal);
+    const threadId = runId ? mainThreadId(runId) : null;
+    const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
     const prompt = withDials(buildApiTestPrompt(apiEndpoints, appUrl, { testCount }), dialsPrompt);
-    const text = await generateText(prompt, { signal, agentRole: "author", workspaceId });
+    // Step 4 — Generate. `author` writes Playwright `request` API tests from
+    // HAR-captured endpoint summaries (mirrors the UI test path).
+    emitAgentEvent(runId, { step: 4, agent: "author", phase: "start", workspaceId,
+      message: `Writing API tests for ${apiEndpoints.length} endpoint${apiEndpoints.length !== 1 ? "s" : ""}` });
+    let text;
+    try {
+      text = await generateText(prompt, { signal, agentRole: "author", workspaceId, runId });
+    } finally {
+      emitAgentEvent(runId, { step: 4, agent: "author", phase: "done", workspaceId });
+    }
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);
     if (tests.length === 0) return [];
@@ -471,6 +627,12 @@ export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "",
     }
 
     sanitiseSteps(tests);
+    emitHandoffEnvelope({
+      runId, threadId, workspaceId, fromRole: "author", toRole: "reviewer",
+      replyToId: inbound?.id || null,
+      artifact: { appUrl, endpointCount: apiEndpoints.length, tests },
+      rationale: "Author generated API tests",
+    });
     return tests;
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;

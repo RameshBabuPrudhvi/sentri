@@ -631,8 +631,8 @@ export default function ProjectDetail() {
 
       {/* Bulk action confirmation modal */}
       {bulkConfirm && (
-        <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
-          <div className="pd-confirm-title">Confirm bulk action</div>
+        <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" ariaLabelledBy="pd-bulk-confirm-title" style={{ padding: "28px 32px" }}>
+          <div id="pd-bulk-confirm-title" className="pd-confirm-title">Confirm bulk action</div>
           <div className="pd-confirm-body">
             You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong> on this page{bulkConfirm.action === "delete" ? ". They will be moved to the recycle bin." : ". This cannot be undone easily."}
           </div>

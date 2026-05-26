@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ShieldCheck, TrendingUp, Wrench, Clock } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ShieldCheck, TrendingUp, Wrench, Clock, BarChart3, Wrench as WrenchIcon } from "lucide-react";
 import { api } from "../api.js";
 import StatCard from "../components/shared/StatCard.jsx";
+import EmptyState from "../components/shared/EmptyState.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import VisionHealPanel from "../components/healing/VisionHealPanel.jsx";
 
@@ -35,7 +37,7 @@ function parseSelector(raw = "") {
 }
 
 // ─── Savings trend chart ──────────────────────────────────────────────────────
-function SavingsTrendChart({ samples = [] }) {
+function SavingsTrendChart({ samples = [], navigate }) {
   const visible = samples.slice(-30);
   const avg = visible.length
     ? visible.reduce((s, x) => s + Number(x.value || 0), 0) / visible.length
@@ -46,11 +48,18 @@ function SavingsTrendChart({ samples = [] }) {
   const avgBottomPct  = `${(avg / max) * 100}%`;
   const firstTs = visible[0]?.ts;
 
+  // ONB-002 (audit): bare "No savings data yet." replaced with the shared
+  // empty-state shape — icon + title + description + CTA pointing at the
+  // primary action that produces healing telemetry (running tests).
   if (visible.length === 0) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-desc">No savings data yet.</div>
-      </div>
+      <EmptyState
+        variant="bare"
+        icon={<BarChart3 size={32} color="var(--text3)" />}
+        title="No savings data yet"
+        description="Self-healing telemetry appears here once tests run and the waterfall successfully repairs broken selectors."
+        action={{ label: "Run tests", onClick: () => navigate?.("/runs"), variant: "ghost" }}
+      />
     );
   }
 
@@ -147,12 +156,18 @@ function StrategyBars({ strategies = [] }) {
 }
 
 // ─── Top healed selectors table ───────────────────────────────────────────────
-function SelectorsTable({ selectors = [] }) {
+function SelectorsTable({ selectors = [], navigate }) {
+  // ONB-002 (audit): bare empty-state lifted to the shared shape. CTA links
+  // to Runs — the surface that produces healing rows once selectors break.
   if (selectors.length === 0) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-desc">No healed selectors yet.</div>
-      </div>
+      <EmptyState
+        variant="bare"
+        icon={<WrenchIcon size={32} color="var(--text3)" />}
+        title="No healed selectors yet"
+        description="The self-healing waterfall logs every selector it repairs here. Run an approved test against a changed page to see entries."
+        action={{ label: "Run tests", onClick: () => navigate?.("/runs"), variant: "ghost" }}
+      />
     );
   }
 
@@ -189,6 +204,7 @@ function SelectorsTable({ selectors = [] }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function HealingDashboard() {
   usePageTitle("Healing");
+  const navigate = useNavigate();
 
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
@@ -296,7 +312,7 @@ export default function HealingDashboard() {
           <p className="text-sm text-sub" style={{ marginBottom: 12, marginTop: -8 }}>
             Tests that would have failed without healing
           </p>
-          <SavingsTrendChart samples={data?.savingsTrend || []} />
+          <SavingsTrendChart samples={data?.savingsTrend || []} navigate={navigate} />
         </div>
 
         <div className="card card-padded">
@@ -313,7 +329,7 @@ export default function HealingDashboard() {
             <span className="badge badge-gray">{data.topSelectors.length} selectors</span>
           )}
         </div>
-        <SelectorsTable selectors={data?.topSelectors || []} />
+        <SelectorsTable selectors={data?.topSelectors || []} navigate={navigate} />
       </div>
 
     </div>

@@ -714,7 +714,7 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 **Preconditions:** Project exists with `qa_lead` or `admin` access. Endpoints documented in `backend/src/routes/projects.js` (PATCH threshold), `backend/src/routes/tests.js` (revoke + approval-stats), and `backend/src/middleware/permissions.json`.
 
-**Threshold configuration** (`/automation` → expand a project → **Auto-Approval** inner tab, `frontend/src/components/automation/ProjectQualityCard.jsx`):
+**Threshold configuration** (Project page → **Settings** → **Review** section at `/projects/:id/settings/review`, `frontend/src/features/project-settings/sections/review/AutoApprovalPanel.jsx`):
 1. Default state: `autoApproveThreshold` is `null` → all generated tests still land in **Draft** (zero behaviour change for projects that haven't opted in).
 2. Enter a threshold of `0.8` and click **Save** → since this is the *first* enable, a confirmation modal appears showing how many of the last 30 generated tests would have been auto-approved at this threshold (`getTests()` + client-side filter on `confidenceScore >= threshold`).
 3. Click **Enable auto-approval** in the modal → `PATCH /api/v1/projects/:id` with body `{ autoApproveThreshold: 0.8 }` → toast "Auto-approval threshold set to 0.8".
@@ -745,7 +745,7 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 20. Revoke writes a `test.revoke` activity with `meta.wasAutoApproved` set to `true` for auto-approved tests, `false` for human-approved.
 
 **ReviewQueue 24h auto-approval tray** (`frontend/src/pages/ReviewQueue.jsx`, AUTO-003b):
-21. With a single project selected (project filter, not "All") AND `autoApproveThreshold` set, open the Draft tab → a tray strip renders above the draft list: `🤖 N auto-approved (24h):` followed by clickable test chips with `Q:NN` quality scores (`qualityColor()` styling).
+21. With a single project selected (project filter, not "All") AND `autoApproveThreshold` set, open the Draft tab → a tray strip renders above the draft list: `🤖 N auto-approved (24h):` followed by clickable test chips with `Q:NN` quality scores (tier-aware green/amber/red via `quality-explainer--<tier>` modifier).
 22. Click a chip → navigates to `/tests/:testId` for a 30-second spot-audit.
 23. Tray is suppressed on the Approved / Rejected tabs, when "All projects" is selected, or when the selected project has no threshold configured.
 24. Tray is empty (renders nothing) when no auto-approvals have fired in the last 24h.
@@ -1024,9 +1024,9 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 The Quality Gates and Web Vitals Budgets panels live exclusively on the `/automation` page now. The legacy ProjectDetail → Settings tab was removed in this PR (see the comment at `frontend/src/pages/ProjectDetail.jsx:601-603`); do not look for it.
 
-- **`/automation` → Quality Gates tab** (sole surface, PR #6) — per-project accordion (`ProjectQualityCard`) with inner tab bar switching between **Quality Gates** and **Web Vitals**. Collapsed header shows status chips (`Gates configured` / `No gates`, `Budgets set` / `No budgets`).
+- **Project page → Settings → Quality Gates section** (sole surface, post-PR #28) — `/projects/:id/settings/quality-gates` renders three stacked blocks under `<h2>` headers: **Quality Gates**, **Web Vitals Budgets** (with per-metric trend charts), and **Coverage**. Status chips moved to the project Settings sidebar entry. Previously lived as a per-project accordion (`ProjectQualityCard`) on `/automation` → **Quality Gates** tab with an inner tab bar — both the outer tab and the inner accordion were retired in the Project Settings restructure. Legacy `?tab=quality&project=:id` deep-links redirect to the new URL.
 
-20. On `/automation` → **Quality Gates** tab, expand a project → inner tab **Quality Gates** active by default → form renders. As `qa_lead`/`admin`, the form is editable; as `viewer`, fields are disabled and a "Read-only" hint shows.
+20. Open a project → click **Settings** in the project header → the Quality Gates section opens by default at `/projects/:id/settings/quality-gates` → form renders. As `qa_lead`/`admin`, the form is editable; as `viewer`, fields are disabled and a "Read-only" hint shows.
 21. Configure thresholds and click **Save** → toast "Quality gates saved"; reload tab → values persist.
 22. Click **Clear all** → confirmation prompt → on confirm, gates removed; toast "Quality gates cleared"; subsequent runs report `gateResult: null`.
 23. Enter all-blank fields and click Save → server-side `DELETE` is sent (config cleared) instead of saving an empty object — toast reads "Quality gates cleared".
@@ -1738,6 +1738,18 @@ For each surface: open → fill → submit → close behavior.
 40. Simulate a stuck DLQ row via SQLite CLI: `INSERT INTO audit_dlq(id, workspaceId, rowSnapshot, lastError, attempts, createdAt) VALUES ('DLQ-1', '<WS-id>', '{"id":"ACT-1","type":"test.create"}', 'siem upstream 500', 1, datetime('now'))`.
 41. Reload `/audit-log` → header reads **DLQ (1)** → click → row listed with columns `id`, `createdAt`, `attempts`, `lastError`, **Replay** button.
 42. Click **Replay** → `POST .../dlq/DLQ-1/replay` returns **503 `SIEM_NOT_CONFIGURED`**. UI surfaces this as an info notification: "SIEM forwarding isn't configured on this server yet (Part C)." Row stays in the DLQ.
+
+#### L. ENT-004 — Per-entity deep links + "Audit reads" toggle (PR #26)
+
+**New surfaces:** TestDetail "View activity →" button, RunDetail "View activity →" button, AuditLog `?testId=` / `?runId=` URL filters with dismiss chips, "Audit reads" toolbar toggle, TestDetail "Review note" callout (`reviewComment` column).
+
+> Numbered 45–49 (after section J's 43–44) so the audit-section checklist stays monotonically increasing — section K (Standards mapping reference) below is unnumbered.
+
+45. Open any test in TestDetail → sidebar quick-actions section shows **View activity →** button. Click → navigates to `/audit-log?testId=TST-xxx`. The Audit Log page loads with a **Test: TST-xxx ×** dismiss chip in the toolbar; only rows matching that test are shown (approve, reject, regenerate, heal events). Click the × → chip clears, feed returns to workspace-wide.
+46. Open any run in RunDetail → header actions row shows **View activity →** button. Click → navigates to `/audit-log?runId=RUN-xxx`. The Audit Log page loads with a **Run: RUN-xxx ×** dismiss chip; only run-lifecycle rows (start, complete, fail, abort, regenerate) are shown. Click × → clears.
+47. **"Audit reads" toggle** — on `/audit-log` without any entity filter, the feed no longer shows `audit.read` / `audit.export` meta-audit rows by default (these fire on every page load and previously dominated the feed). A checkbox labelled **Audit reads** sits in the toolbar next to the sort selector — unchecked by default. Tick it → URL gains `?includeAuditReads=true`; the feed shows the meta-audit rows. Untick → they disappear. State is URL-driven so it survives reload + share.
+48. **Review note callout** — open a test that was auto-regenerated by the feedback loop (run a test that fails, wait for the feedback loop to fire) → TestDetail sidebar shows an amber "Review note" callout with text like `Auto-regenerated by feedback loop after failure (SELECTOR_ISSUE). Original code preserved in run results.` When no `reviewComment` is set (most tests), the row is absent.
+49. **Cross-workspace ACL on deep links** — as User D (outsider), navigate to `/audit-log?testId=TST-xxx` for a test in WS-1 → admin gate blocks (403 / redirect to login). Even if the outsider were admin in their own workspace, the `workspaceId = ?` predicate in `getWorkspaceAuditLog` prevents cross-workspace data leakage — the runId / testId filter only narrows within the authenticated workspace.
 43. **Permissions** — as User C (`viewer`), call the DLQ list endpoint → 403. Replay endpoint → 403.
 44. **Cross-workspace replay** — manually POST to `.../workspaces/<OTHER-WS>/audit-log/dlq/<some-dlq-id>/replay` → 403 `AUDIT_WORKSPACE_MISMATCH`.
 
@@ -2061,3 +2073,10 @@ Once-per-release smoke. Pass all 8 sections before tagging.
 2. Run tests twice and verify dashboard Coverage section shows 30-day points.
 3. Verify project with coverage disabled shows empty-state prompt.
 4. Verify run coverage summary includes sourceMapStatus fallback when no sourcemaps.
+
+
+## Kubernetes deployment + DR (INF-009)
+- [ ] `helm template helm/sentri --set ingress.host=test.local` renders manifests.
+- [ ] Worker `/healthz` returns 200 when queue is connected and 503 on Redis outage.
+- [ ] Nightly backup workflow configured with S3 secrets and uploads snapshot artifacts.
+- [ ] DR runbook restore steps verified with `pg_restore`.

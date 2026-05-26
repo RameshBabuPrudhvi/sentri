@@ -44,6 +44,7 @@
 import OpenAI from "openai";
 import { withRetry, composeSignal, CLOUD_TIMEOUT_MS } from "../retry.js";
 import { throwIfAborted } from "../../utils/abortHelper.js";
+import { getOpenRouterBaseUrl } from "../modelCatalog.js";
 
 // B2.4 — protocol modules return raw `{ input, output }` token usage
 // only. Cost is computed by the dispatcher's
@@ -53,15 +54,67 @@ import { throwIfAborted } from "../../utils/abortHelper.js";
 // UI-suggestion catalog for the Settings UI defaults (B3.1).
 
 /**
+ * Per-family default `baseURL` for OpenAI-protocol routes whose row
+ * has no explicit `baseUrl` set. Without this fallback, a route with
+ * `family: "openrouter"` and `baseUrl: null` would fall through to the
+ * OpenAI SDK's hardcoded `api.openai.com` default and the OpenRouter
+ * API key would be sent to OpenAI's servers (rejected with a 401
+ * "Incorrect API key" — TLS protected, but the wire request still
+ * happened, which is a leak surface we don't want).
+ *
+ * Implemented as a function (not a frozen object) so we can read the
+ * `OPENROUTER_BASE_URL` env var at call time — deployments using a
+ * self-hosted OpenRouter proxy set this var (see `REFERENCE.md` and
+ * `docker-compose.yml`), and a static object literal would freeze the
+ * default at module-load time before `.env` had a chance to apply.
+ *
+ * `openai` is intentionally absent — returning `null` lets the SDK use
+ * its built-in `api.openai.com` default, which is correct for that
+ * family. Compat slots (`family` starting with `compat:`) carry their
+ * baseUrl on the slot config and must never reach here with a null
+ * baseUrl — `synthesiseTransientRoute` and the route repo both enforce
+ * that.
+ *
+ * @param {string} family - The route's `family` value.
+ * @returns {string|null} Canonical endpoint, or null when unknown.
+ */
+function getFamilyDefaultBaseUrl(family) {
+  if (family === "openrouter") return getOpenRouterBaseUrl();
+  return null;
+}
+
+/**
  * Build an OpenAI SDK client from a route + caller-supplied opts.
  * `baseUrl` is `undefined` for the canonical openai.com endpoint and
  * an explicit URL for openrouter / compat / self-hosted gateways —
  * the SDK treats `undefined` as "use default" so the same builder
  * handles every variant.
+ *
+ * When `route.baseUrl` is null/empty but the family has a known
+ * canonical endpoint (see {@link getFamilyDefaultBaseUrl}), we
+ * resolve to that endpoint here rather than letting the SDK silently
+ * dispatch to `api.openai.com`. Any unknown family without an explicit
+ * baseUrl throws — failing closed is safer than leaking credentials to
+ * the wrong endpoint.
  */
 function mkClient(route, opts) {
   const config = { apiKey: opts.apiKey };
-  if (route.baseUrl) config.baseURL = route.baseUrl;
+  let baseUrl = route.baseUrl || null;
+  if (!baseUrl && route.family) {
+    baseUrl = getFamilyDefaultBaseUrl(route.family);
+  }
+  // Fail closed: a family that isn't `openai` and has no baseUrl
+  // (explicit or default) would otherwise leak the apiKey to
+  // `api.openai.com`. Compat / self-hosted routes always require an
+  // explicit baseUrl; openrouter is handled by the default map above.
+  if (!baseUrl && route.family && route.family !== "openai") {
+    const err = new Error(
+      `OpenAI-protocol route missing baseUrl for family="${route.family}" (route.id=${route.id || "unknown"})`,
+    );
+    err.code = "ERR_ROUTE_MISSING_BASE_URL";
+    throw err;
+  }
+  if (baseUrl) config.baseURL = baseUrl;
   if (opts.defaultHeaders) config.defaultHeaders = opts.defaultHeaders;
   if (opts.guardedFetch) config.fetch = opts.guardedFetch;
   return new OpenAI(config);
@@ -94,8 +147,22 @@ function toOpenAiMessages(messages) {
 export async function generate(route, messages, opts) {
   const client = mkClient(route, opts);
   const label = `OpenAI-protocol (${route.family || "openai"}/${route.name || route.id})`;
+  // Per-attempt timeout — defaults to `CLOUD_TIMEOUT_MS` (120s) for
+  // dispatch traffic. Capability probes pass a smaller value via
+  // `opts.attemptTimeoutMs` so a bad-key probe fails in a few seconds
+  // rather than burning the full dispatch budget on a hopeless retry
+  // chain (3 retries × 30s backoff ≈ 113s, the symptom that prompted
+  // this knob — see `capabilityProbe.runCapabilityProbe`).
+  const attemptTimeoutMs = Number.isFinite(opts.attemptTimeoutMs)
+    ? opts.attemptTimeoutMs
+    : CLOUD_TIMEOUT_MS;
+  // Thread `opts.signal` through `withRetry` so the inter-attempt backoff
+  // sleep also aborts when the caller's signal fires. Without this, a
+  // probe / dispatch call with a 90s wall-clock budget could stretch
+  // past the budget because `await sleep(delay)` ignored aborts —
+  // surfaced by Bug 3 (probe ran 117s under a 90s `probeTimeoutMs`).
   return withRetry(async () => {
-    const { signal: composedSignal, cleanup } = composeSignal(opts.signal, CLOUD_TIMEOUT_MS);
+    const { signal: composedSignal, cleanup } = composeSignal(opts.signal, attemptTimeoutMs);
     try {
       const params = {
         model: route.model,
@@ -112,7 +179,7 @@ export async function generate(route, messages, opts) {
         },
       };
     } finally { cleanup(); }
-  }, label);
+  }, label, opts.signal, { maxRetries: opts.maxRetries });
 }
 
 /**

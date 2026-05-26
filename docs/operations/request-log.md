@@ -6,7 +6,7 @@ per-call observability, billing reconciliation, and prompt replay.
 ## Storage modes
 
 Each workspace controls how much prompt/response content is persisted.
-Set via **Settings → Provider Routes** (admin) or direct SQL on the
+Set via **Settings → AI Providers** (admin) or direct SQL on the
 `workspaces.aiRequestLogMode` column.
 
 | Mode | Prompt/response stored | Replay available | Default |

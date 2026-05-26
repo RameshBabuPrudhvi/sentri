@@ -37,6 +37,15 @@ const BASE = API_PATH;
 const TIMEOUT_DEFAULT = 30_000;
 /** @type {number} Extended timeout for long-running operations like crawl and test runs (5 minutes). */
 const TIMEOUT_LONG    = 300_000;
+/**
+ * @type {number} Probe timeout for `/settings/ai-providers/:id/probe` and
+ * `/rotate-key`. The backend caps per-route `probeTimeoutMs` at 10 minutes
+ * (`backend/src/routes/settings.js:572`, `providerRouteRepo.js:554`) — the
+ * documented use case is Ollama 70B+ models on CPU. We add a 60s margin so
+ * the client doesn't abort while the backend's own probe-after-persist DB
+ * write is still flushing.
+ */
+const TIMEOUT_PROBE   = 660_000;
 
 const BASE_URL = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ? import.meta.env.BASE_URL : "/";
 
@@ -149,6 +158,8 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
 export const api = {
   
   getAgentRoles: () => req("GET", "/settings/agent-roles"),
+  getAgentMode: () => req("GET", "/settings/agent-mode"),
+  setAgentMode: (mode) => req("PATCH", "/settings/agent-mode", { mode }),
   createAgentRole: (data) => req("POST", "/settings/agent-roles", data),
   updateAgentRole: (role, data) => req("PATCH", `/settings/agent-roles/${role}`, data),
   deleteAgentRole: (role) => req("DELETE", `/settings/agent-roles/${role}`),
@@ -162,51 +173,68 @@ export const api = {
    */
   testAgentRole: (role) => req("POST", `/settings/agent-roles/${role}/test`),
 
-  // ── Provider Routes (B2/B3 — Settings UI) ──────────────────────────────────
-  // Backend endpoints assumed per the B3.1 spec; companion PR adds them.
-  // Until that lands, every call here returns a 404 and the tab renders its
-  // empty / error state — no other surface depends on these helpers.
-  /**
-   * List every `provider_routes` row in the current workspace. Secret
-   * blobs (`apiKeyEncrypted`, `apiKeyNonce`) are omitted by the repo's
-   * default SELECT — only `apiKeyLastFour` comes back for UI display.
-   * @returns {Promise<{routes: Array<Object>}>}
-   */
+  // ── AI Providers (= provider_routes) ──────────────────────────────────────
+  // The old "Provider Routes" name was merged into "AI Providers" in the
+  // provider-rename refactor. Each row returned includes three extra display
+  // fields: displayLabel, familyEmoji, costTier — computed server-side so the
+  // UI never has to re-derive them. `listProviderRoutes` is retained as a
+  // fallback path for graceful degradation when the new endpoint isn't
+  // available (e.g. older backend versions); the create/update/delete/probe/
+  // rotate-key mutation helpers were dropped because the legacy
+  // ProviderRoutesSection.jsx that consumed them has been deleted.
+  /** List AI Providers (= provider_routes) with display enrichment. */
+  listAiProviders:      () => req("GET", "/settings/ai-providers"),
+  /** Legacy fallback — used by AgentRolesSection if listAiProviders 404s. */
   listProviderRoutes:   () => req("GET", "/settings/provider-routes"),
+  /** Create a new AI Provider. */
+  createAiProvider:     (payload) => req("POST", "/settings/ai-providers", payload),
+  /** Partial-update an AI Provider. Omit apiKey — use rotateAiProviderKey. */
+  updateAiProvider:     (id, payload) => req("PATCH", `/settings/ai-providers/${id}`, payload),
+  /** Delete an AI Provider (409 if any agent role references it). */
+  deleteAiProvider:     (id) => req("DELETE", `/settings/ai-providers/${id}`),
   /**
-   * Create a new provider route. `apiKey` is plaintext on the wire,
-   * encrypted server-side via `secrets.encryptKey` before persist.
-   * @param {{name: string, family: string, protocol: string, baseUrl?: string|null, model: string, apiKey?: string|null, enabled?: boolean, rpmLimit?: number|null, tpmLimit?: number|null, cacheEnabled?: boolean, cacheTtlSec?: number, fallbackRouteId?: string|null}} payload
+   * Network probe — reachability + auth + model check. Uses TIMEOUT_PROBE
+   * (660s) instead of TIMEOUT_LONG (300s) because the backend allows per-
+   * route probe timeouts up to 600s (`backend/src/routes/settings.js:572`,
+   * the documented Ollama-70B-on-CPU use case). With TIMEOUT_LONG, an
+   * operator who set `probeTimeoutMs > 300_000` would see a misleading
+   * "Request timed out" error in the UI even though the backend probe
+   * eventually succeeds and persists its result.
    */
-  createProviderRoute:  (payload) => req("POST", "/settings/provider-routes", payload),
+  probeAiProvider:      (id) => req("POST", `/settings/ai-providers/${id}/probe`, undefined, TIMEOUT_PROBE),
   /**
-   * Partial-patch an existing route. Omit `apiKey` to keep the stored
-   * key intact — rotation MUST go through `rotateProviderRouteKey`
-   * (B3.6) so the audit row is tagged `action: "rotate_key"`.
+   * Rotate API key for an AI Provider. Runs probe-before-persist on the
+   * server, so it inherits the same per-route probe-timeout ceiling as
+   * `probeAiProvider` above — must use TIMEOUT_PROBE for the same reason.
+   */
+  rotateAiProviderKey:  (id, apiKey) => req("POST", `/settings/ai-providers/${id}/rotate-key`, { apiKey }, TIMEOUT_PROBE),
+  /**
+   * Migration 059 — pin / unpin the workspace-default AI Provider. The
+   * default handles every agent role that has no per-role override in
+   * Agent Roles. Pass `true` to pin, `false` to clear the workspace's
+   * default entirely (dispatch then falls back to env detection).
    * @param {string} id
-   * @param {Object} payload
+   * @param {boolean} isDefault
    */
-  updateProviderRoute:  (id, payload) => req("PATCH", `/settings/provider-routes/${id}`, payload),
-  /** @param {string} id */
-  deleteProviderRoute:  (id) => req("DELETE", `/settings/provider-routes/${id}`),
+  setAiProviderDefault: (id, isDefault) =>
+    req("POST", `/settings/ai-providers/${id}/default`, { default: !!isDefault }),
   /**
-   * B2.2 — Run a real network capability probe and persist the result
-   * to `provider_routes.capabilities`. Response carries the updated
-   * row regardless of probe outcome — caller inspects
-   * `capabilities.reachable` to render the badge.
-   * @param {string} id
-   * @returns {Promise<{ok: boolean, route: Object, capabilities: Object}>}
+   * B4.6 — Read-only route-groups list. Each entry carries `strategy`
+   * (`weighted` | `latency` | `cost`), `memberCount`, `enabledMemberCount`,
+   * `strategyLabel`, and `usedByRoles` (agent_configs reverse-ref).
+   *
+   * Consumed by the TopBar AI Provider dropdown to surface operator-defined
+   * groups above the per-route list. Mutations (create / edit / delete) are
+   * a follow-up roadmap item — today the dropdown links to Agent Roles
+   * Settings as the assignment surface.
+   *
+   * Returns `{ groups: [] }` (not an error) when the backend doesn't yet
+   * expose the endpoint, so callers can `.catch(() => ({ groups: [] }))`
+   * for graceful degradation in older deployments.
+   *
+   * @returns {Promise<{groups: Array<{id: string, name: string, strategy: string, strategyLabel: string, memberCount: number, enabledMemberCount: number, usedByRoles: string[]}>}>}
    */
-  probeProviderRoute:   (id) => req("POST", `/settings/provider-routes/${id}/probe`),
-  /**
-   * B3.6 — Rotate the route's API key. New plaintext on the wire,
-   * encrypted server-side. Server is expected to gate on a probe pass
-   * before accepting the rotation (B3.6 "rejects on probe fail").
-   * @param {string} id
-   * @param {string} apiKey
-   * @returns {Promise<{ok: boolean, lastFour: string}>}
-   */
-  rotateProviderRouteKey: (id, apiKey) => req("POST", `/settings/provider-routes/${id}/rotate-key`, { apiKey }),
+  listRouteGroups: () => req("GET", "/settings/route-groups"),
   /**
    * B3.5 — Download a schema-v1 JSON dump of every provider_routes row
    * in the current workspace. Secrets are NEVER in the payload (only
@@ -427,6 +455,30 @@ export const api = {
     const qs = params.toString();
     return req("GET", `/tests/counts${qs ? `?${qs}` : ""}`);
   },
+  /**
+   * GAP-001 (audit) — Global data search across tests, projects, and runs.
+   * Powers the ⌘K command palette's data-search layer. Workspace-scoped
+   * server-side; cross-tenant rows are filtered out by `projectRepo.getAll`
+   * before the LIKE queries run.
+   *
+   * Returns an empty payload (not an error) when `q.length < 2` so the
+   * palette can render a "type to search" hint cleanly.
+   *
+   * @param {string} q - Free-text search query (caller is responsible for
+   *                     debouncing the keystroke firehose; backend caps q
+   *                     at 200 chars).
+   * @returns {Promise<{
+   *   query: string,
+   *   groups: {
+   *     projects: Array<{id: string, name: string, url: string}>,
+   *     tests:    Array<{id: string, name: string, projectId: string, projectName: string|null, reviewStatus: string}>,
+   *     runs:     Array<{id: string, projectId: string, projectName: string|null, type: string, status: string, startedAt: string}>,
+   *   },
+   *   totalCount: number,
+   *   truncated: boolean,
+   * }>}
+   */
+  search: (q) => req("GET", `/search?q=${encodeURIComponent(q || "")}`),
   /** @returns {Promise<Array>} All tests across all projects. */
   getAllTests:   ()                  => req("GET",    "/tests"),
   /**
@@ -478,10 +530,10 @@ export const api = {
   deleteTest:   (projectId, testId) => req("DELETE", `/projects/${projectId}/tests/${testId}`),
 
   // ── Test review actions ─────────────────────────────────────────────────────
-  /** @param {string} projectId @param {string} testId - Promote Draft → Approved. */
-  approveTest:     (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/approve`),
-  /** @param {string} projectId @param {string} testId - Mark as Rejected. */
-  rejectTest:      (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/reject`),
+  /** @param {string} projectId @param {string} testId @param {Object} [body] - `{ reviewComment?: string }` */
+  approveTest:     (projectId, testId, body) => req("PATCH", `/projects/${projectId}/tests/${testId}/approve`, body || undefined),
+  /** @param {string} projectId @param {string} testId @param {Object} [body] - `{ reviewComment?: string }` */
+  rejectTest:      (projectId, testId, body) => req("PATCH", `/projects/${projectId}/tests/${testId}/reject`, body || undefined),
   /** @param {string} projectId @param {string} testId - Restore to Draft. */
   restoreTest:     (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/restore`),
   /**
@@ -503,6 +555,15 @@ export const api = {
     const params = new URLSearchParams();
     if (filters.type) params.set("type", filters.type);
     if (filters.projectId) params.set("projectId", filters.projectId);
+    // ENT-004 (audit) — per-entity scoping. Pass-through to the route's
+    // `testId = ?` filter so TestDetail's "View activity" link can hit
+    // the same workspace-scoped activities endpoint without pulling the
+    // whole project's feed and filtering client-side.
+    if (filters.testId) params.set("testId", filters.testId);
+    // ENT-004 (migration 055) — matching per-run filter. RunDetail's
+    // "View activity →" deep-link uses `?runId=` for server-side
+    // filtering via the indexed `activities.runId` column.
+    if (filters.runId) params.set("runId", filters.runId);
     if (filters.after) params.set("after", filters.after);
     if (filters.before) params.set("before", filters.before);
     if (filters.limit != null) params.set("limit", String(filters.limit));
@@ -657,6 +718,9 @@ export const api = {
     req("GET", `/projects/${id}/runs?page=${page}&pageSize=${pageSize}`),
   /** @param {string} runId - Get full run detail with per-test results. */
   getRun:    (runId) => req("GET", `/runs/${runId}`),
+  /** GAP-005 (migration 056): per-run AI request log for the Agent Call Timeline.
+   *  Admin-gated — returns [] for non-admin callers (backend returns 403). */
+  getRunAIRequests: (runId) => req("GET", `/runs/${runId}/ai-requests`),
   getRunCompare: (runId, otherRunId) => req("GET", `/runs/${runId}/compare/${otherRunId}`),
   /** @param {string} runId - Abort a running crawl or test run. */
   abortRun:  (runId) => req("POST", `/runs/${runId}/abort`),
@@ -734,9 +798,11 @@ export const api = {
   // ── Project metric samples (MET-001 / AUTO-017.3) ───────────────────────────
   /**
    * Read a project's time-series samples for a single `metricKey`. Powers
-   * the `<TrendChart>` instances in `ProjectQualityCard`'s Web Vitals tab
-   * (`webVitals.lcp` / `.cls` / `.inp` / `.ttfb`) and any future per-project
-   * trend surface. Server caps `limit` at 200; the chart slices to 30.
+   * the `<TrendChart>` instances in the Quality Gates section's Web Vitals
+   * block (`features/project-settings/sections/quality-gates/QualityGatesSection.jsx`)
+   * for `webVitals.lcp` / `.cls` / `.inp` / `.ttfb`, and any future
+   * per-project trend surface. Server caps `limit` at 200; the chart
+   * slices to 30.
    *
    * @param {string} projectId
    * @param {string} metricKey - e.g. `"webVitals.lcp"`.
@@ -816,11 +882,11 @@ export const api = {
    * Backed by `GET /api/v1/dashboard`'s `coverageTrend` block. The
    * `projectId` parameter narrows the series to one project client-side.
    *
-   * **Consumers:** `ProjectQualityCard.jsx` → Coverage tab (fetches the
-   * per-project series on mount to render a latest-% badge + text sparkline
-   * without navigating to the Dashboard). The Dashboard `CoveragePanel`
-   * reads `data.coverageTrend` directly from `getDashboard()` instead
-   * (avoids a second fetch for the workspace-wide view).
+   * **Consumers:** `features/project-settings/sections/quality-gates/CoveragePanel.jsx`
+   * (fetches the per-project series on mount to render a latest-% badge +
+   * text sparkline without navigating to the Dashboard). The Dashboard
+   * `CoveragePanel` reads `data.coverageTrend` directly from `getDashboard()`
+   * instead (avoids a second fetch for the workspace-wide view).
    *
    * @param {string} [projectId] — Narrow the series to one project.
    * @returns {Promise<Object|null>}
@@ -1291,6 +1357,19 @@ export const api = {
    * @returns {Promise<{available: boolean, model: string|null}>}
    */
   getVisionProviderStatus: () => req("GET", "/system/vision-provider-status"),
+  /**
+   * Read-only snapshot of AI dispatcher state — open circuit breakers +
+   * active sticky fallbacks. Admin-only. Powers the Systems page's "AI
+   * provider state" panel so operators can diagnose "tests stopped
+   * generating, what happened?" without grepping log lines.
+   *
+   * @returns {Promise<{
+   *   breakers: Array<{key: string, provider: string, agentRole: string|null, failures: number, disabledUntil: number, openNow: boolean, remainingMs: number}>,
+   *   stickyFallbacks: Array<{key: string, provider: string, agentRole: string|null, expiry: number, remainingMs: number}>,
+   *   constants: {CIRCUIT_BREAKER_THRESHOLD: number, CIRCUIT_BREAKER_COOLDOWN_MS: number, STICKY_FALLBACK_TTL_MS: number},
+   * }>}
+   */
+  getAiState: () => req("GET", "/system/ai-state"),
   /** @returns {Promise<{cleared: number}>} Clear all run history. */
   clearRuns:       () => req("DELETE", "/data/runs"),
   // NOTE: `getActivities` is defined once above (in the Test review actions

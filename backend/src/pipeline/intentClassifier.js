@@ -14,6 +14,12 @@
  */
 
 import { generateText, parseJSON, hasProvider } from "../aiProvider.js";
+// Task 2 — per-agent SSE events. `aiClassifyPage` is currently dead-code
+// (the `classifyPageWithAI` fallback early-returns above the AI call to
+// conserve provider quota), but the wrapping stays in place so the moment
+// the early-return is removed the NarrativeFeed lights up automatically.
+import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
+import { emitHandoffEnvelope, mainThreadId, readLatestEnvelope } from "../aiProvider/agentHandoff.js";
 
 // ── Intent patterns ───────────────────────────────────────────────────────────
 
@@ -122,7 +128,15 @@ export function classifyElement(element) {
 
 const AI_THRESHOLD = parseInt(process.env.AI_CLASSIFY_THRESHOLD, 10) || 40;
 
-async function aiClassifyPage(snapshot, signal, workspaceId = null) {
+async function aiClassifyPage(snapshot, signal, workspaceId = null, runId = null) {
+  const threadId = runId ? mainThreadId(runId) : null;
+  // AUTO-023 Bundle 2 — read the latest envelope addressed to this role
+  // and thread its id into the outbound emit as `replyToId`. This honours
+  // the B2.2 roadmap contract literally: the stage's read result FEEDS
+  // the write, completing a real reply chain (not a discarded read).
+  // In `pipeline` mode the helper short-circuits via `isEnvelopeReadEnabled`
+  // and returns null — `replyToId` becomes null, preserving zero-regression.
+  const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "explorer" });
   const elements = (snapshot.elements || []).slice(0, 15).map(e => ({
     tag: e.tag, text: (e.text || "").slice(0, 40), role: e.role, type: e.type,
   }));
@@ -155,11 +169,31 @@ Return ONLY valid JSON (no markdown):
   "reason": "one-sentence explanation"
 }`;
 
-  const text = await generateText(prompt, { maxTokens: 256, signal, agentRole: "explorer", workspaceId });
+  // Step 3 — Classify. `explorer` reads page structure to identify intent.
+  // Co-stage with `planner` (journeyGenerator.generateJourneyTest) — the
+  // NarrativeFeed renders both badges side-by-side for step 3.
+  emitAgentEvent(runId, { step: 3, agent: "explorer", phase: "start", workspaceId,
+    message: `Classifying intent for ${snapshot?.url || "page"}` });
+  let text;
+  try {
+    text = await generateText(prompt, { maxTokens: 256, signal, agentRole: "explorer", workspaceId, runId });
+  } finally {
+    emitAgentEvent(runId, { step: 3, agent: "explorer", phase: "done", workspaceId });
+  }
   const result = parseJSON(text);
   const intent = (result.intent || "").toUpperCase();
   const validIntents = ["AUTH", "CHECKOUT", "SEARCH", "FORM_SUBMISSION", "CRUD", "NAVIGATION", "CONTENT"];
   if (!validIntents.includes(intent)) return null;
+  emitHandoffEnvelope({
+    runId,
+    threadId,
+    workspaceId,
+    fromRole: "explorer",
+    toRole: "planner",
+    replyToId: inbound?.id || null,
+    artifact: { url: snapshot?.url || null, intent, confidence: result.confidence || 70 },
+    rationale: "Intent classification handoff",
+  });
   return { intent, confidence: result.confidence || 70 };
 }
 
@@ -218,7 +252,7 @@ export function classifyPage(snapshot, filteredElements) {
  *
  * @param {AbortSignal} [signal] — forwarded to AI calls so abort stops classification
  */
-export async function classifyPageWithAI(snapshot, filteredElements, { signal, workspaceId } = {}) {
+export async function classifyPageWithAI(snapshot, filteredElements, { signal, workspaceId, runId } = {}) {
   // AI fallback disabled to conserve LLM API quota (Gemini free tier: 20 calls/day).
   // The heuristic classifier has been improved with better keyword scoring and
   // element-type weighting, so AI assistance is not needed for typical pages.
@@ -231,7 +265,11 @@ export async function classifyPageWithAI(snapshot, filteredElements, { signal, w
   try {
     if (!hasProvider()) return heuristic;
     if (signal?.aborted) return heuristic;
-    const aiResult = await aiClassifyPage(snapshot, signal, workspaceId || null);
+    // Task 2 — thread `runId` so the `emitAgentEvent` start/done bracketing
+    // inside `aiClassifyPage` actually fires when the AI fallback is
+    // re-enabled. A null runId silent-no-ops the emitter, so eval-harness /
+    // CLI callers stay safe.
+    const aiResult = await aiClassifyPage(snapshot, signal, workspaceId || null, runId || null);
     if (!aiResult) return heuristic;
     const isHighPriority = HIGH_PRIORITY_INTENTS.has(aiResult.intent);
     return {

@@ -1,0 +1,38 @@
+-- Migration 056: Per-run scoping on the AI request log
+--
+-- GAP-005 (audit, Path B) — adds a `runId` column + index to
+-- `ai_request_log` so RunDetail can render a per-call agent timeline
+-- ("Author agent · claude-sonnet-4 · 1.2s · 847 in / 234 out tokens · $0.003")
+-- correlated to a specific run.
+--
+-- Pre-this-migration `ai_request_log` carried `workspaceId` + `routeId`
+-- + `agentRole` + `traceId` (all from migration 047) but no link back to
+-- the originating run. The frontend's GAP-005 first slice (PipelineCard
+-- agent badges + outcome counts) used `run.pipelineStats` only — it
+-- showed *which* agent ran each stage but not the per-call telemetry
+-- (latency, tokens, cost, prompt) the audit asks for.
+--
+-- This migration is the foundation for the per-call drill-down. Writers
+-- (`requestLog.js#logRequest`) gain a `runId` field; readers
+-- (`aiRequestLogRepo.listByRun`) gain a method to fetch all calls for
+-- a given run. The matching frontend `<AgentCallTimeline>` component +
+-- `GET /api/v1/runs/:runId/ai-requests` route ship in subsequent commits
+-- on this PR.
+--
+-- Idempotency: bare `ALTER TABLE ... ADD COLUMN` + `CREATE INDEX IF NOT
+-- EXISTS` per the convention used by migrations 003 / 006 / 007 / 011 /
+-- 014 / 015 / 017 / 018 / 054 / 055. The migration runner tracks applied
+-- versions in `schema_migrations`, so re-running this file is a no-op.
+--
+-- Pre-migration rows get `runId = NULL` and remain reachable via the
+-- existing `workspaceId` / `traceId` filters — no backfill required.
+-- Calls outside any run context (chat, healthchecks, replay endpoint)
+-- continue to write `runId = NULL` and are naturally excluded from
+-- `WHERE runId = ?` queries. The leading `workspaceId = ?` predicate
+-- is the security boundary; the `runId` narrow is purely a render-time
+-- concern.
+--
+-- Both SQLite and PostgreSQL accept this syntax unchanged.
+
+ALTER TABLE ai_request_log ADD COLUMN runId TEXT;
+CREATE INDEX IF NOT EXISTS idx_ai_log_runId ON ai_request_log(runId);

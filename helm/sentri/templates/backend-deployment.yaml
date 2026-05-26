@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentri-backend
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector: { matchLabels: { app: backend } }
+  template:
+    metadata: { labels: { app: backend } }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: backend
+          image: {{ .Values.backend.image }}
+          ports: [{ containerPort: 3001 }]
+          envFrom:
+            - configMapRef: { name: sentri-config }
+            - secretRef: { name: sentri-secrets }
+          # readinessProbe checks DB + Redis reachability so kubelet stops
+          # routing traffic to a pod that can't serve requests. A failed
+          # readiness probe ONLY removes the pod from the Service endpoints
+          # — it does not restart the pod.
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: 3001 }
+          # livenessProbe MUST NOT check external dependencies (DB/Redis).
+          # A failed liveness probe causes kubelet to KILL and restart the
+          # pod — restarting the backend doesn't fix a Redis outage, it
+          # just amplifies a transient blip into a restart loop across
+          # every replica. `GET /health` (backend/src/index.js:346) is the
+          # process-alive endpoint that always returns 200 if Express is
+          # responsive.
+          livenessProbe:
+            httpGet: { path: /health, port: 3001 }
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}

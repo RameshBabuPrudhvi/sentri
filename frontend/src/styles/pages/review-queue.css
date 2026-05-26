@@ -372,8 +372,10 @@
    relative to the chip rather than escaping into the parent flex row. */
 .rq-quality-chip-wrap { position: relative; display: inline-flex; }
 
-/* The clickable chip itself — colour comes from `qualityColor()` inline so
-   the value-driven hue stays out of CSS. */
+/* The clickable chip itself — tier colour comes from the
+   `.quality-chip--<tier>` modifier class on the button (defined in
+   `components.css`), which sets `currentColor`. The score number, caret,
+   and ring arc all inherit so this rule stays colour-neutral. */
 .rq-quality-chip {
   display: inline-flex;
   align-items: center;
@@ -416,6 +418,20 @@
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--text);
+}
+
+/* AI-001 (audit) — plain-English tier copy at the top of the popover.
+   Sits between the header (score / tier label) and the factor list, so
+   reviewers see WHY this score matters before scanning rewards/penalties.
+   Slightly de-emphasised vs the header so the score itself stays the
+   primary read. */
+.rq-quality-popover__tier-copy {
+  padding: 4px 12px 8px;
+  margin-bottom: 4px;
+  font-size: 0.72rem;
+  color: var(--text2);
+  line-height: 1.5;
+  border-bottom: 1px solid var(--border);
 }
 
 .rq-quality-popover__list {
@@ -479,6 +495,11 @@
   font-family: var(--font-sans);
   line-height: 1.4;
 }
+/* Reward / penalty colour cues — matches the `.rq-quality-popover__item`
+   ramp so the inline summary and the popover reward/penalty rows share
+   the same red/green semantics. */
+.rq-quality-summary__line--reward  { color: var(--green); }
+.rq-quality-summary__line--penalty { color: var(--red); }
 
 /* List-row worst-penalty hint — label only (no delta) to save horizontal
    space. Hidden on healthy tests via the conditional render in JSX so this
@@ -731,7 +752,15 @@
   font-weight: 700;
   min-width: 32px;
   flex-shrink: 0;
+  color: var(--text3);
 }
+/* Tier-aware score colour — modifier classes set the same green/amber/red
+   ramp the chip and bar fill use. Driven by `qualityTierKey()` so
+   adding a tier upstream automatically lights up the right class. */
+.rq-quality-score--high    { color: var(--green); }
+.rq-quality-score--medium  { color: var(--amber); }
+.rq-quality-score--low     { color: var(--red);   }
+.rq-quality-score--unknown { color: var(--text3); }
 
 .rq-quality-bar {
   flex: 1;
@@ -986,8 +1015,10 @@
   text-overflow: ellipsis;
 }
 
-/* Score readout — colour is set inline from `qualityColor()` so the
-   value-driven hue stays out of CSS (same pattern as `.rq-quality-chip`). */
+/* Score readout — tier colour comes from the `.quality-explainer--<tier>`
+   modifier class shared with the chip + explainer (defined in
+   `components.css`). This rule keeps font-weight + tabular-nums and lets
+   the modifier class pick the colour. */
 .rq-auto-tray__chip-score {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1060,6 +1091,16 @@
   color: var(--text2);
   line-height: 1.6;
   margin-bottom: 20px;
+}
+
+/* ENT-004: review-comment textarea inside the reject/approve modal.
+   Matches the `.input` base but adds vertical rhythm so it sits between
+   the body copy and the action buttons without extra margin hacks. */
+.rq-confirm__comment {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  resize: vertical;
+  min-height: 60px;
 }
 
 .rq-confirm__actions {

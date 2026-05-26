@@ -265,7 +265,19 @@ async function reportActualViaRedis(routeId, estimatedTokens, actualTokens) {
 //
 // Both caps apply: if EITHER is exceeded, dispatch is blocked.
 
-function readSpendCaps(workspaceId) {
+/**
+ * Read the per-workspace spend-cap configuration row. Exposed (not
+ * internal) so callers that hit `checkSpendCap` many times in quick
+ * succession (e.g. `agentLoop.makeDefaultQuotaCheck` — one read per
+ * loop round) can cache the cap config for the lifetime of the call
+ * pattern while still refreshing the live spend windows on every
+ * invocation. The returned shape matches the `caps` object the
+ * private helper consumed before this split.
+ *
+ * @param {string} workspaceId
+ * @returns {Object|null}  `{ dailySpendCapUsd, monthlySpendCapUsd, spendAlertThresholdPct }` or null
+ */
+export function readSpendCaps(workspaceId) {
   if (!workspaceId) return null;
   try {
     return getDatabase().prepare(
@@ -358,6 +370,28 @@ export async function reportActual(routeId, estimatedTokens, actualTokens, _cost
 export function checkSpendCap(workspaceId) {
   if (!workspaceId) return { ok: true, remainingUsd: null };
   const caps = readSpendCaps(workspaceId);
+  return evaluateSpendCap(workspaceId, caps);
+}
+
+/**
+ * Compute spend-cap outcome from a pre-resolved caps row + a fresh
+ * windowed-spend read. Split out of `checkSpendCap` so loop runners
+ * (`agentLoop.makeDefaultQuotaCheck`) can cache the caps row across
+ * rounds — the `workspaces` SELECT only fires once per loop instead
+ * of once per round, while the `ai_request_log` sum still fires per
+ * round so mid-loop spend accruals are detected on the very next
+ * gate check.
+ *
+ * Public so the loop runner can compose it with its own caching layer
+ * without re-reading `workspaces` on every round.
+ *
+ * @param {string} workspaceId
+ * @param {Object|null} caps  Output of `readSpendCaps(workspaceId)`. Pass
+ *   `null` to short-circuit the same way `checkSpendCap` does when the
+ *   workspace row is missing (DB hiccup + fail-open).
+ * @returns {Object}  Same shape as `checkSpendCap`'s return value.
+ */
+export function evaluateSpendCap(workspaceId, caps) {
   const dailyCap = caps?.dailySpendCapUsd;
   const monthlyCap = caps?.monthlySpendCapUsd;
   if ((!dailyCap || dailyCap <= 0) && (!monthlyCap || monthlyCap <= 0)) {

@@ -1,0 +1,233 @@
+/**
+ * styles/features/llm-stream.css
+ *
+ * `<LLMStreamPanel>` (`frontend/src/components/ai/LLMStreamPanel.jsx`) —
+ * the collapsible card that shows live AI-token output during a generate
+ * run. Used by `GenerateView.jsx` and `RunDetail.jsx`.
+ *
+ * AI-004 (audit) + DS-001 (audit): every inline `style={{}}` block in the
+ * component was migrated here. Includes the new AI-004 context-row that
+ * sits between the title row and the streaming body (renders agent role +
+ * stage label + "Stage N/M" progress + model name).
+ *
+ * Layer: Features (ITCSS).
+ */
+
+/* ── Outer card ───────────────────────────────────────────────────────────── */
+.llm-stream {
+  padding: 0;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+/* ── Header row (chevron + title + token count + mode toggle) ─────────────── */
+.llm-stream__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.llm-stream__header--open {
+  border-bottom: 1px solid var(--border);
+}
+
+.llm-stream__chevron {
+  color: var(--text3);
+  display: flex;
+  flex-shrink: 0;
+}
+
+.llm-stream__title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.llm-stream__title-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--blue);
+  animation: pulse 1.4s ease-in-out infinite;
+  margin-left: 2px;
+}
+
+.llm-stream__token-count {
+  font-size: 0.67rem;
+  color: var(--text3);
+  font-family: var(--font-mono);
+  margin-left: auto;
+}
+
+/* Mode toggle (Raw vs JSON preview) */
+.llm-stream__mode-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: 10px;
+}
+/* Variant when the token counter is hidden — push mode toggle to the right. */
+.llm-stream__mode-toggle--no-count {
+  margin-left: auto;
+}
+.llm-stream__mode-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.llm-stream__mode-btn--active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+/* ── AI-004 context row — sits between header and body ───────────────────── */
+.llm-stream__context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text3);
+  background: var(--bg2);
+  flex-wrap: wrap;
+}
+.llm-stream__context-role {
+  font-weight: 600;
+  color: var(--text2);
+}
+.llm-stream__context-model {
+  font-family: var(--font-mono);
+}
+.llm-stream__context-progress {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+/* ── Body (the actual streaming token area) ──────────────────────────────── */
+.llm-stream__body {
+  max-height: 280px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0d1117;
+  color: #c9d1d9;
+}
+.llm-stream__body--padded {
+  padding: 12px 14px;
+}
+
+/* Truncation banner (rendered above the streaming text when output
+   exceeded the 50k-character cap and older content was trimmed). */
+.llm-stream__truncated {
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  border-radius: 6px;
+  font-size: 0.68rem;
+  color: #f5a623;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Empty state (rendered when there are no tokens yet). */
+.llm-stream__empty {
+  padding: 24px 14px;
+  text-align: center;
+  color: var(--text3);
+  font-size: 0.78rem;
+}
+.llm-stream__empty-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.llm-stream__empty-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--blue);
+  border-top-color: transparent;
+  animation: spin 0.9s linear infinite;
+  display: inline-block;
+}
+
+/* JSON-preview mode override of the streaming body. */
+.llm-stream__json {
+  margin: 0;
+  color: #a5d6ff;
+}
+
+/* Blinking cursor at the end of the live token stream. */
+.llm-stream__cursor {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  background: #58a6ff;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: cursor-blink 1s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+/* ── Responsive (MOB-001 follow-up) ────────────────────────────────────────
+   The streaming panel header is a single non-wrapping flex row that
+   carries: chevron + title + pulsing dot + token-count + mode-toggle.
+   On a 375px viewport that's ~360px of content trying to fit in ~340px
+   of available width — the title truncates and the mode-toggle pushes
+   the token-counter off the visible area.
+
+   The AI-004 context row beneath it already has `flex-wrap: wrap` so
+   it degrades cleanly; the issue is the header row and the streaming
+   `.llm-stream__body` max-height (280px = ~30% of an iPhone 14 viewport,
+   eats half the screen on a vertical-orientation phone). */
+@media (max-width: 600px) {
+  /* Header row: allow wrap so the mode-toggle drops to a second line
+     beneath the title when the title is long. */
+  .llm-stream__header {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+  /* Token-count: hidden on narrow viewports — the streaming body itself
+     is the canonical signal, the counter is a meta-metric. */
+  .llm-stream__token-count { display: none; }
+  /* Mode-toggle: when token-count is hidden, the `--no-count` variant's
+     `margin-left: auto` would push it to the right; preserve that but
+     give it a stable position. */
+  .llm-stream__mode-toggle { margin-left: auto; }
+
+  /* Streaming body: cap at a reasonable phone-screen fraction. 280px
+     desktop → 200px mobile (≈25% of 812px iPhone 14 viewport height). */
+  .llm-stream__body { max-height: 200px; }
+}
+
+@media (max-width: 480px) {
+  /* Tighter padding + smaller font for the streaming body on phones —
+     a monospace font at 0.71rem is still legible at 0.68rem. */
+  .llm-stream__body { font-size: 0.68rem; line-height: 1.6; }
+  .llm-stream__body--padded { padding: 10px 12px; }
+}

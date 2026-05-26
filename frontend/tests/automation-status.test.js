@@ -107,8 +107,8 @@ test("regression: data.budgets wrapper must be ignored (key is webVitalsBudgets)
 // ── isValidPageTab / tab-switching contract ──────────────────────────────────
 console.log("\n\uD83E\uDDEA isValidPageTab");
 
-test("accepts all four documented tab ids", () => {
-  for (const id of ["triggers", "quality", "integrations", "snippets"]) {
+test("accepts all three documented tab ids", () => {
+  for (const id of ["triggers", "integrations", "snippets"]) {
     assert.equal(isValidPageTab(id), true, `expected '${id}' to be valid`);
   }
 });
@@ -117,8 +117,16 @@ test("rejects unknown ids (would-be deep-link injection)", () => {
   assert.equal(isValidPageTab(""), false);
   assert.equal(isValidPageTab(null), false);
 });
+// Legacy `"quality"` was retired in PR #28 — project-scoped quality config
+// moved to `/projects/:id/settings/quality-gates`. `Automation.jsx` redirects
+// old `?tab=quality` deep-links to the new URL before this whitelist check
+// runs, so dropping the id from `PAGE_TAB_IDS` doesn't break existing
+// bookmarks / PR-check summary URLs / scheduled-run notifications.
+test("rejects legacy 'quality' tab id (moved to /projects/:id/settings/quality-gates)", () => {
+  assert.equal(isValidPageTab("quality"), false);
+});
 test("PAGE_TAB_IDS preserves the documented order", () => {
-  assert.deepEqual(PAGE_TAB_IDS, ["triggers", "quality", "integrations", "snippets"]);
+  assert.deepEqual(PAGE_TAB_IDS, ["triggers", "integrations", "snippets"]);
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────────
