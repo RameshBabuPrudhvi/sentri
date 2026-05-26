@@ -56,8 +56,34 @@ export function casUpdate(threadId, workspaceId, expectedVersion, updater) {
   const ts = nowIso();
   const db = getDatabase();
   if (curr.version === 0) {
-    db.prepare("INSERT INTO agent_thread_state (threadId, workspaceId, state, version, updatedAt) VALUES (?, ?, ?, ?, ?)")
-      .run(threadId, workspaceId, stateJson, nextVersion, ts);
+    // Translate UNIQUE-constraint violations into the same
+    // `ERR_AGENT_THREAD_STATE_VERSION_MISMATCH` the UPDATE path raises.
+    // The `get → check → INSERT` sequence has a TOCTOU window on
+    // PostgreSQL adapters (better-sqlite3 is synchronous so this is
+    // unreachable under SQLite, but the codebase supports both per
+    // STANDARDS.md). Without this translation, a concurrent caller
+    // that reads version 0 + races to INSERT would surface a raw
+    // SQLite/PG UNIQUE error to the caller instead of the documented
+    // 409 contract.
+    try {
+      db.prepare("INSERT INTO agent_thread_state (threadId, workspaceId, state, version, updatedAt) VALUES (?, ?, ?, ?, ?)")
+        .run(threadId, workspaceId, stateJson, nextVersion, ts);
+    } catch (err) {
+      const msg = String(err?.message || "");
+      const code = String(err?.code || "");
+      // SQLite: `SQLITE_CONSTRAINT_PRIMARYKEY` / `SQLITE_CONSTRAINT_UNIQUE`
+      // PostgreSQL: `23505` (unique_violation)
+      if (code === "SQLITE_CONSTRAINT_PRIMARYKEY"
+          || code === "SQLITE_CONSTRAINT_UNIQUE"
+          || code === "23505"
+          || /UNIQUE constraint failed|duplicate key value/i.test(msg)) {
+        const mismatch = new Error("version mismatch");
+        mismatch.code = "ERR_AGENT_THREAD_STATE_VERSION_MISMATCH";
+        mismatch.status = 409;
+        throw mismatch;
+      }
+      throw err;
+    }
   } else {
     const info = db.prepare("UPDATE agent_thread_state SET state = ?, version = ?, updatedAt = ? WHERE threadId = ? AND workspaceId = ? AND version = ?")
       .run(stateJson, nextVersion, ts, threadId, workspaceId, curr.version);

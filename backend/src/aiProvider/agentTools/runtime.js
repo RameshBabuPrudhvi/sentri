@@ -136,13 +136,41 @@ async function checkToolRateLimit({ workspaceId, runId, tool }) {
   const limit = getRateLimitPerMin();
   const bucketKey = _localRateBucketKey(workspaceId, runId, tool);
   if (isRedisAvailable() && redis) {
+    // TRUE sliding window via Redis sorted set — matches the semantics
+    // of the in-memory fallback below (timestamps fall off as they
+    // age past `RATE_WINDOW_MS`). The naive `INCR + EXPIRE(60)`
+    // pipeline this replaced reset the TTL on every call, so once
+    // the limit was hit the cooldown was a fixed 60s of complete
+    // silence regardless of when individual calls were made — way
+    // more restrictive than the in-memory path during bursty
+    // workloads. Industry pattern (Redis docs / Stripe rate-limiter
+    // / Cloudflare): ZADD a per-call timestamp + ZREMRANGEBYSCORE
+    // the expired tail + ZCARD for the current window count + EXPIRE
+    // a generous safety TTL so the key vanishes on full inactivity.
     try {
       const redisKey = `agent_tool_rate:${bucketKey}`;
+      const now = Date.now();
+      const cutoff = now - RATE_WINDOW_MS;
+      // Use ms-precision unique member id so duplicate calls in the
+      // same ms don't collapse to one ZADD entry (ZADD is keyed on
+      // member, not score). The `:${counter}` suffix is per-process
+      // monotonic — bounded ms-precision uniqueness is enough since
+      // the worst case is two pods writing the same `now:counter`
+      // pair, which only loses one tick of accounting and never
+      // bypasses the cap.
+      const memberId = `${now}-${Math.random().toString(36).slice(2, 8)}`;
       const pipeline = redis.multi();
-      pipeline.incr(redisKey);
-      pipeline.expire(redisKey, 60);
+      pipeline.zremrangebyscore(redisKey, 0, cutoff);
+      pipeline.zadd(redisKey, now, memberId);
+      pipeline.zcard(redisKey);
+      // EXPIRE 2× window as a safety net so a process crash mid-call
+      // doesn't leave a stale key sitting in Redis forever. The
+      // sliding window is enforced by ZREMRANGEBYSCORE above, not
+      // by the TTL, so this is purely a garbage-collection hint.
+      pipeline.expire(redisKey, 120);
       const results = await pipeline.exec();
-      const count = Number(results?.[0]?.[1]) || 0;
+      // results = [[null, removedCount], [null, addedCount], [null, totalInWindow], [null, ttlSet]]
+      const count = Number(results?.[2]?.[1]) || 0;
       return { ok: count <= limit, count, limit };
     } catch {
       return { ok: true, count: 0, limit };

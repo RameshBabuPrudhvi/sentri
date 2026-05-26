@@ -110,8 +110,17 @@ Sentri persists thread-scoped agent-to-agent envelopes to the `agent_messages` t
 
 | Variable | Default | Description |
 |---|---|---|
-| `SENTRI_AGENT_MODE` | `pipeline` | Agent orchestration mode switch (AUTO-023 Bundle 2). `pipeline` = legacy linear stage-return flow (default), `envelope` = same linear DAG but reads + writes handoff envelopes (`agent_messages`) at each stage boundary, `autonomous` = reserved for supervisor orchestration bundles (currently treated as non-default advanced mode). |
+| `SENTRI_AGENT_MODE` | `pipeline` | Agent orchestration mode switch (AUTO-023 Bundle 2). `pipeline` = legacy linear stage-return flow (default), `envelope` = same linear DAG but reads + writes handoff envelopes (`agent_messages`) at each stage boundary, `autonomous` = supervisor LLM picks the next agent on every step (AUTO-023 Bundle 4). Fails OPEN to the linear path on orchestrator hiccup. |
 | `AGENT_MESSAGE_RETENTION_DAYS` | `90` | Daily 05:15 UTC sweep deletes `agent_messages` rows older than this many days. Set `0` to disable the retention sweep entirely (rows accumulate forever). |
+
+### Agent Shared Memory + Tool Calling (AUTO-023 Bundle 5)
+
+Bundle 5 ships a thread-scoped blackboard (`agent_thread_state`) and a closed-set tool registry (`db.listExistingTests`, `db.getTest`, `crawl.getPageHtml`, `playwright.dryRun`, `thread.askPeer`) that agents call mid-thread via envelope-mediated server-side dispatch. See [`docs/roadmap/autonomous-multi-agent.md`](../roadmap/autonomous-multi-agent.md) for the full plan.
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_THREAD_STATE_MAX_BYTES` | `65536` (64 KB) | Per-row size cap for the `agent_thread_state` blackboard (`agentThreadStateRepo.setKey`/`casUpdate`). Writes that would exceed the cap throw `ERR_AGENT_THREAD_STATE_TOO_LARGE` synchronously — the orchestrator surfaces the error to the calling agent rather than silently truncating. Bound state grows with thread complexity (per-journey scratch space for the supervisor, dedup decisions for the author); the default fits a few thousand short key/value pairs in JSON form. Raise for workloads that genuinely need richer scratch; never set above ~1 MB without also raising the `agent_messages` retention budget — large blackboard payloads can fan out into bigger envelope artifacts on subsequent handoffs. |
+| `AGENT_TOOL_RATE_LIMIT_PER_MIN` | `60` | Per `(workspaceId, runId, tool)` sliding-window cap on tool dispatches (Bundle 5 gap-5 defence against a hallucinating agent emitting hundreds of `db.*` / `playwright.dryRun` calls in one thread). Clamped server-side to `[1, 1000]`. Counted PRE-dispatch so the limiter sees the attempt even when the tool throws synchronously; rate-limited dispatches surface as `outcome=rate_limited` on `agent_tool_calls_total{tool,outcome}`. Redis-backed via a true sliding window (ZADD timestamp + ZREMRANGEBYSCORE the expired tail + ZCARD); in-memory `Map` fallback with periodic sweep when `REDIS_URL` is unset. Fail-OPEN on Redis hiccup — never blocks a run on observability infrastructure. |
 
 ### AI Spend Alert Webhook (B4.0.1)
 

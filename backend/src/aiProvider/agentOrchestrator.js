@@ -72,7 +72,13 @@ function nowIso() { return new Date().toISOString(); }
  * @returns {Object} Summary object suitable for envelope persistence.
  */
 function summarizeToolResult(tool, raw) {
-  if (raw == null) return { ok: false };
+  // Tool-specific branches MUST run BEFORE the generic `raw == null`
+  // guard so a meaningful null-shape ("test not found", "no html
+  // captured", "no peer answer") emits the right discriminator. Pre-fix
+  // the generic null guard fired first, every null collapsed to
+  // `{ ok: false }`, and the frontend's `messagesToTurns` then keyed
+  // on `ok === false` and rendered the misleading `"0 issues"` chip
+  // (the dryRun-shaped failure summary) for unrelated tools.
   if (tool === "db.listExistingTests") {
     return { count: Array.isArray(raw) ? raw.length : 0 };
   }
@@ -92,6 +98,8 @@ function summarizeToolResult(tool, raw) {
   if (tool === "thread.askPeer") {
     return { answered: raw?.answer != null };
   }
+  // Unknown tool with null/undefined output — generic fallback.
+  if (raw == null) return { ok: false };
   // Unknown tool — degrade to a primitive summary the frontend can still
   // render. Never dump arbitrary nested objects through the envelope
   // (the `agent_messages.artifact` column is JSON-stringified per
