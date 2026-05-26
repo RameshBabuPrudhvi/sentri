@@ -52,6 +52,37 @@ Sentri:
 > each one. Treat this list as a target architecture, not a vendor
 > claim.
 
+## Pre-existing Sentri capabilities v2 builds on
+
+Before adding new bundles, v2 must integrate cleanly with what is
+**already shipped**. The following capabilities are present in `main`
+(verified against `ROADMAP.md` Completed Work Summary) — v2 does NOT
+re-implement them; v2 teaches the autonomous agents to USE them.
+
+| Capability | Shipped as | What v2 reuses |
+|---|---|---|
+| Visual regression + baselines | `DIF-001` ✅ (PR #94), `DIF-002b` ✅ browser-aware baselines (PR #107, #110) | Reviewer agent reads existing diff results; no new baseline store |
+| Cross-browser execution (Chrome / Firefox / WebKit) | `DIF-002` ✅ (PR #94), `DIF-002b` ✅ polish | Goal-driven runs (B9) opt into the existing matrix |
+| Mobile viewport / device emulation | `DIF-003` ✅ (PR #94) | Agent passes existing viewport profiles, no new profile system |
+| Geolocation / locale / timezone | `AUTO-007` ✅ (PR #94) | Existing per-run config consumed by the agent |
+| Network throttling / offline | `AUTO-006` ✅ (PR #3) | Agent toggles existing throttling, no new tool |
+| HAR capture (observe-only) | `pipeline/harCapture.js` | v2 extends with `route()` interception (B13) |
+| Accessibility scan (axe-core) | `AUTO-016` ✅ (PR #121), `AUTO-016b` ✅ frontend panel | Reviewer agent reads existing findings, no new scan engine |
+| Web Vitals budgets (LCP / CLS / INP / TTFB) | `AUTO-017` ✅ (PR #8), `AUTO-017.3` ✅ trend charts (PR #9) | Reviewer consumes existing budget evaluation, no new perf tool |
+| Flaky test detection + auto-retry | `DIF-004` ✅ (PR #99), `AUTO-005` ✅ (PR #2) | Agent reads existing flake signals, no new classifier |
+| Data-driven test fixtures (CSV / JSON) | `CAP-001` ✅ (PR #1) | Goal-driven runs (B9) accept existing fixture refs |
+| Interactive browser recorder | `DIF-015` ✅ (PR #94) + gap completion (PR #8, #11) | v2 adds agent-proposed-change diff on top of existing recorder |
+| GitHub Actions / PR checks | `ENH-011` ✅ (PR #86), `INT-002` / `INT-002b` ✅ (PR #15, #17) | Goal-driven results post via existing webhook layer |
+| Distributed runner / sharding | `AUTO-008` ✅ (PR #9), `CAP-002` ✅ (PR #3) | v2 threads share the existing BullMQ + Redis fan-out |
+| Auth: credential editing + auto-detect login fields | `ENH-036` / `ENH-036b` ✅ (PR #127) | v2 extends with OAuth / 2FA / magic-link kinds (B12) |
+| SLA / quality gates | `AUTO-012` ✅ (PR #2) | v2 reviewer rejects when an existing gate fails |
+| Trace viewer (embedded) | `DIF-005` ✅ (PR #9) | Reviewer agent links to existing trace UI on failure |
+| Self-healing (DOM + vision) | shipped pre-AUTO-023 + `MNT-001` ✅ (PR #17) | Already integrated; v2's `playwright.run` reuses existing healing waterfall |
+
+**Implication for v2 scope:** the bundles below describe **only the
+deltas** required to make these capabilities accessible to an
+autonomous agent. v2 is not a re-platforming exercise.
+
 ## Relationship to AUTO-023
 
 AUTO-023 is the **substrate**. v2 is the **execution surface**. v2
@@ -454,3 +485,290 @@ System guarantees:
 `❓` reflects honest status — none of these can be ticked until the
 corresponding code lands and is verified. **No checkbox in this
 document gets ticked speculatively.**
+
+---
+
+# Bundle 11 — Multi-tab, multi-window, multi-origin flows
+
+**Goal:** real apps trigger OAuth popups, email-verification new tabs,
+payment redirects to third-party origins, and Stripe Checkout-style
+modals. v2's B6 ships ONE `BrowserContext` per thread — that's not
+enough.
+
+## B11.1 — Page graph per thread
+- [ ] Track every `Page` opened in the thread's `BrowserContext` —
+      including popups (`window.open`), `target="_blank"` clicks,
+      and OAuth redirects
+- [ ] New tool: `browser.listPages()` → `[{pageId, url, title, openedAt}]`
+- [ ] New tool: `browser.switchPage({pageId})` — subsequent
+      `browser.click/type/snapshot` calls operate on the active page
+- [ ] Auto-close inactive popup pages after N minutes (configurable)
+
+## B11.2 — Cross-origin handling
+- [ ] Allowlist policy per project: which third-party origins the
+      agent may interact with (Stripe Checkout, OAuth providers, etc.)
+- [ ] Anything outside the allowlist → tool call returns
+      `{ok: false, reason: "cross_origin_denied", origin}`
+- [ ] Settings UI: project-level "Allowed third-party origins" field
+- [ ] Default policy: same-origin only (safest), operator opts in
+
+## B11.3 — Frame / iframe traversal
+- [ ] `browser.listFrames({pageId?})` → `[{frameId, url, name?}]`
+- [ ] `browser.switchFrame({frameId|name})` — operates on a frame
+      within the active page
+- [ ] Frame switch resets on `browser.navigate` (Playwright contract)
+
+## B11.4 — Tests
+- [ ] `backend/tests/agent-multipage-graph.test.js`
+- [ ] `backend/tests/agent-cross-origin-allowlist.test.js`
+- [ ] `backend/tests/agent-iframe-traversal.test.js`
+
+## B11.5 — Exit criteria
+- [ ] Agent completes an OAuth flow end-to-end (login → consent →
+      callback → app)
+- [ ] Agent completes a Stripe Checkout test redirect → return
+- [ ] Cross-origin policy blocks unlisted origins; allowlisted origins
+      work transparently
+
+---
+
+# Bundle 12 — Authentication flows
+
+**Goal:** modern apps use OAuth, SSO, 2FA, magic links, captchas.
+v2's `project.credentials` is username/password only — not enough.
+
+## B12.1 — Credential vault (extended)
+
+> **Reuse note:** Sentri already ships `ENH-036` / `ENH-036b` ✅
+> (credential editing + auto-detect login fields, PR #127) and
+> tracks `DIF-010` 🔲 (multi-auth profiles per project) as still-
+> planned. B12.1 is the **superset schema** — coordinate with
+> `DIF-010` so we don't ship two competing credential models.
+
+- [ ] Extend existing `project.credentials` schema (from `ENH-036`)
+      to support:
+      `{kind: "userpass" | "oauth" | "magiclink" | "session", ...}`
+- [ ] `oauth` kind: stored access token + refresh logic
+- [ ] `session` kind: pre-captured `storageState.json` from a manual
+      browser login (operator does the hard part once)
+- [ ] All new kinds encrypted at rest via existing CAP-003
+      `utils/encryption.js` plumbing
+- [ ] Named profiles (admin / viewer / guest) are `DIF-010`'s scope,
+      not B12 — B12 adds the credential kinds, `DIF-010` adds the
+      multi-profile container
+
+## B12.2 — Auth tool family
+- [ ] `auth.useStoredSession({kind})` — agent loads the stored
+      session into the active `BrowserContext` before any test step
+- [ ] `auth.waitForMagicLink({email, timeoutMs})` — polls a mailbox
+      inbox (uses existing webhook/IMAP integration or new email
+      sandbox) for the magic link, extracts URL, navigates
+- [ ] `auth.solve2faTotp({secret})` — generates TOTP from a stored
+      secret and types it into the active page
+- [ ] NO captcha-solving tool. Captcha-bypass is a non-goal (legal +
+      ethical risk); operator must pre-capture sessions that bypass
+      captcha walls
+
+> ASSUMPTION: Sentri has no email-sandbox integration today.
+> `auth.waitForMagicLink` needs a new B12 sub-bundle to add one
+> (mailtrap-style or local SMTP catch-all).
+
+## B12.3 — Tests
+- [ ] `backend/tests/agent-auth-stored-session.test.js`
+- [ ] `backend/tests/agent-auth-magic-link.test.js`
+- [ ] `backend/tests/agent-auth-totp.test.js`
+- [ ] `backend/tests/agent-credentials-encryption.test.js` — all new
+      credential kinds encrypted at rest
+
+## B12.4 — Exit criteria
+- [ ] Agent logs in via stored Google OAuth session
+- [ ] Agent completes a magic-link login flow end-to-end
+- [ ] Agent completes a 2FA-protected login with stored TOTP secret
+- [ ] No plaintext credentials ever land in `agent_messages.artifact`
+
+---
+
+# Bundle 13 — Network interception + mocking
+
+**Goal:** real platforms stub backends to force error states, replay
+HAR fixtures, and assert on network contracts. Sentri's existing HAR
+capture is observe-only.
+
+## B13.1 — Network observation tool
+- [ ] `network.listRequests({pageId?, since?})` → request log
+      (URL, method, status, headers, optionally body)
+- [ ] Workspace-scoped log retention (per-thread; not cross-thread)
+
+## B13.2 — Network interception tool
+- [ ] `network.intercept({urlPattern, response: {status, headers, body}})`
+- [ ] Active until thread terminates OR `network.clearIntercept`
+- [ ] Pattern syntax: glob + regex (Playwright `route()` compatible)
+- [ ] Per-thread limit: max N active intercepts (default 20, hard
+      ceiling 100)
+
+## B13.3 — HAR replay tool
+- [ ] `network.replayHar({harRef})` — loads a stored HAR file and
+      installs route handlers from it
+- [ ] HAR storage uses the same blob-store pattern as B7 screenshots
+- [ ] Operator can upload HAR via Settings UI; per-project library
+
+## B13.4 — Tests
+- [ ] `backend/tests/agent-network-observe.test.js`
+- [ ] `backend/tests/agent-network-intercept.test.js`
+- [ ] `backend/tests/agent-har-replay.test.js`
+
+## B13.5 — Exit criteria
+- [ ] Agent forces a 500 response on an API call and asserts the app's
+      error UI shows correctly
+- [ ] HAR replay produces deterministic test runs independent of
+      backend availability
+
+---
+
+# Bundle 14 — Agent integration with shipped Sentri capabilities
+
+**Goal:** teach the autonomous agents (supervisor / author / reviewer)
+to USE the capabilities Sentri already ships. None of these sub-items
+re-implements existing functionality — each one is the small agent-
+side delta that makes an existing surface accessible to a v2 agent.
+
+This bundle replaces what earlier drafts of this roadmap called
+"visual regression", "accessibility + Web Vitals", "cross-browser
+matrix", and most of "flakiness / test data / CI/CD" — those features
+are already shipped (see the "Pre-existing Sentri capabilities" table
+at the top). What's missing is the agent integration.
+
+## B14.1 — Reviewer consumes visual diff results
+- [ ] `playwright.run` (B8.1) result extended with `visualDiffs: [...]`
+      populated from Sentri's existing `DIF-001` / `DIF-002b` diff
+      engine — agent does NOT call the diff engine directly; the
+      runner attaches the results
+- [ ] Reviewer prompt updated to read `visualDiffs[]` and emit
+      `request_revision` when a diff exceeds tolerance, even if the
+      test functionally passed
+- [ ] `agent_messages.artifact` carries the diff REF-ID, not the
+      diff payload (size budget)
+
+## B14.2 — Reviewer consumes a11y findings
+- [ ] `playwright.run` result extended with `a11yFindings: [...]`
+      populated from `AUTO-016` axe-core scan — runner-attached
+- [ ] Reviewer prompt reads findings; per-project WCAG conformance
+      level (already shipped via `AUTO-016`) determines the
+      `request_revision` threshold
+- [ ] No new scan engine; no new persistence
+
+## B14.3 — Reviewer consumes Web Vitals budget evaluation
+- [ ] `playwright.run` result extended with `webVitalsResult` from
+      `AUTO-017`'s existing evaluator — runner-attached
+- [ ] Reviewer reads `webVitalsResult.violations` and emits
+      `request_revision` when budgets fail
+- [ ] No new perf tool; no new budget config
+
+## B14.4 — Goal-driven runs reuse shipped browser matrix
+- [ ] Goal-driven entry (B9.1) accepts existing `browsers: ["chromium",
+      "firefox", "webkit"]` (DIF-002 surface) and existing viewport
+      profiles (DIF-003 surface) — no new matrix system
+- [ ] One supervisor thread per (browser × viewport) cell; results
+      aggregated under the parent runId via the existing sharding
+      infrastructure (`CAP-002`)
+- [ ] Cross-browser divergence detection: reviewer flags a test that
+      passes on Chrome but fails on Firefox/WebKit as a real
+      cross-browser bug, distinguishing it from generic flake (which
+      `DIF-004` already classifies)
+
+## B14.5 — Mobile-gesture tool extensions
+- [ ] `browser.tap({selector|aiHint})` — touch-event variant of
+      `browser.click` (B6.2). Genuinely new — Sentri's existing
+      mobile support is viewport/UA emulation only
+- [ ] `browser.swipe({fromHint, toHint})` — gesture support
+- [ ] These extend the B6 tool family; not a separate bundle
+
+## B14.6 — Goal-driven runs consume existing fixtures
+- [ ] Goal-driven entry (B9.1) accepts an existing `CAP-001` fixture
+      ID — agent loads the fixture via the same iteration mechanism
+      `executeTestIterations` already uses
+- [ ] No new `data.*` tools; no new fixture store
+- [ ] Per-thread fixture isolation is inherited from the existing
+      iteration cap
+
+## B14.7 — Reviewer consumes flake signals
+- [ ] Reviewer prompt reads existing per-test flake score (DIF-004)
+      and `AUTO-005` retry status when deciding whether a failure
+      is real or transient
+- [ ] No new flake classifier; no new auto-retry policy
+- [ ] Existing quarantine signals consumed verbatim
+
+## B14.8 — Goal-driven results post via existing CI/CD layer
+- [ ] Goal-driven run completions flow through the existing
+      `ENH-011` webhook system and `INT-002` / `INT-002b` GitHub
+      PR check infrastructure unchanged
+- [ ] PR comment format extended to include the goal text + agent
+      reasoning summary — purely a template change, not a new
+      integration
+
+## B14.9 — Tests
+- [ ] `backend/tests/agent-reviewer-visual-diff.test.js` — reviewer
+      rejects when an existing diff exceeds tolerance
+- [ ] `backend/tests/agent-reviewer-a11y.test.js` — reviewer rejects
+      on existing axe-core critical findings
+- [ ] `backend/tests/agent-reviewer-webvitals.test.js` — reviewer
+      rejects on existing Web Vitals budget violations
+- [ ] `backend/tests/agent-goal-browser-matrix.test.js` — goal-driven
+      run dispatches one thread per browser cell
+- [ ] `backend/tests/agent-goal-fixture-load.test.js` — goal-driven
+      run consumes a CAP-001 fixture
+- [ ] `backend/tests/agent-mobile-gestures.test.js` — `browser.tap`
+      and `browser.swipe` smoke
+
+## B14.10 — Exit criteria
+- [ ] A test that passes Playwright but fails visual diff → reviewer
+      `request_revision` with diff evidence
+- [ ] A test that passes Playwright but fails WCAG-AA → reviewer
+      `request_revision` with a11y evidence
+- [ ] A test that passes Chrome but fails Firefox → reviewer flags
+      cross-browser bug (not flake)
+- [ ] Goal-driven run with `fixtureId: "user_premium"` loads the
+      existing fixture and runs N iterations per the project's
+      existing iteration cap
+- [ ] Zero new persistence: no `visual_baselines`, no
+      `run_a11y_findings`, no `run_perf_findings`, no
+      `test_flake_signals` tables added by v2
+
+---
+
+# Bundle 15 — Non-engineer UX for agent-proposed changes
+
+**Goal:** the one remaining gap that the existing recorder
+(`DIF-015` ✅) doesn't cover — letting a non-engineer **review and
+accept agent-proposed test changes** without reading code.
+
+## B15.1 — Diff view for agent revisions
+- [ ] Existing `ENH-029` ✅ "Diff view for AI-regenerated test code"
+      surface extended to handle multi-round reviewer↔author loop
+      outputs — each round's author artifact shown as a diff against
+      the previous round
+- [ ] Operator can accept the final round, reject all, or step back
+      to a prior round
+
+## B15.2 — Step-level accept/reject
+- [ ] Test editor lets the operator accept agent-proposed changes
+      **per step** rather than all-or-nothing
+- [ ] Backed by existing test step storage; no new schema
+
+## B15.3 — Role-based simplified view
+- [ ] Existing `ACL-002` ✅ RBAC extended with a "Viewer+Editor" UI
+      preference toggle: hide raw Playwright code, show a step
+      ladder with dropdowns for assertion type / action type
+- [ ] Pure frontend; backend already supports the operations
+
+## B15.4 — Tests
+- [ ] `frontend/tests/AgentRevisionDiffView.test.js`
+- [ ] `frontend/tests/StepLevelAcceptReject.test.js`
+- [ ] `frontend/tests/SimplifiedEditorView.test.js`
+
+## B15.5 — Exit criteria
+- [ ] Non-engineer operator can review a 3-round reviewer↔author
+      revision sequence and accept any intermediate version
+- [ ] Non-engineer can edit a test's assertion via dropdown without
+      touching Playwright code
+- [ ] No backend changes — pure frontend bundle
