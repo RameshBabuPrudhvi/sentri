@@ -174,16 +174,29 @@ Update the changelog in every PR that adds a user-visible feature, bug fix, secu
 - Entries go under `## [Unreleased]`.
 - Group under these headings (omit empty ones): `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`
 - One bullet per change: `- **Area**: what changed for the user. (#PR)`
-- Write from the user's perspective — not internal implementation detail.
+- **Keep each bullet to a single sentence (≤200 chars).** If a multi-bundle / multi-feature PR has more than one user-visible change, write one bullet per change — NOT one mega-bullet that runs paragraphs. Big infrastructure PRs can have 5–10 short bullets under the same heading; that's correct and expected.
+- Write from the user's perspective — not internal implementation detail. Operator-visible nouns (`Settings → AI Providers`, `agent_messages` table, env vars, role names) are fine. SDK-level internals (renamed functions, refactored modules, test helpers, migration script flags) are not.
+- The bullet should make sense to someone reading the changelog at release time — not to a reviewer reading the diff. If a reviewer needs the detail, it belongs in the PR description or commit body.
 - Skip: internal refactors, test-only changes, doc-only changes, CI changes.
 
-### Example
+### What NOT to do
+
+```markdown
+<!-- ❌ Too long, implementation-heavy, mixes 8 different changes into one bullet -->
+- **AUTO-023 Bundle 5** — Thread blackboard (migration `063`, `agentThreadStateRepo.get`/`setKey`/`casUpdate`, optimistic CAS via `ERR_AGENT_THREAD_STATE_VERSION_MISMATCH` with HTTP 409 semantics, 64KB cap via `AGENT_THREAD_STATE_MAX_BYTES`); tool registry at `aiProvider/agentTools/index.js` with five tools, per-role visibility intersected with `agent_configs.allowedTools` (migration `064`); server-side dispatch via `executeToolCall` with `withTimeout` 30s helper, `agent_tool_calls_total{tool,outcome}` Prometheus counter, `tool_call`/`tool_result` envelope intents added to `agentEnvelope.INTENTS`; peer Q&A with `MAX_PEER_NESTING=3` guard via `peerNestingByThread` Map, cross-process Redis pub/sub bridge on `sentri:agent-peer-answer` channel via `ensurePeerBridgeSubscribed` + `publishPeerAnswer`; production wire-up in `journeyGenerator.generateFromDescription` (author dedup) + `feedbackLoop.runReviewerAuthorLoop` (reviewer dryRun); UI tool-call timeline with `.ac-tool-chip--{call,success,error}` chips in `AgentConversation.jsx`. (#38)
+```
+
+### Example (correct)
 
 ```markdown
 ## [Unreleased]
 
 ### Added
 - **API**: Three-tier global rate limiting — 300 req/15 min general, 20/hr for crawl/run, 30/hr for AI generation. (#78)
+- **Multi-agent**: Thread-scoped shared blackboard with optimistic concurrency and a 64 KB size cap (`AGENT_THREAD_STATE_MAX_BYTES`). (#38)
+- **Multi-agent**: Closed-set tool registry with five read-only tools (`db.listExistingTests`, `db.getTest`, `crawl.getPageHtml`, `playwright.dryRun`, `thread.askPeer`); per-role visibility intersected with `agent_configs.allowedTools`. (#38)
+- **Multi-agent**: Per-tool rate limiting (sliding window, Redis-backed with in-memory fallback) configurable via `AGENT_TOOL_RATE_LIMIT_PER_MIN`. (#38)
+- **UI**: Colour-coded tool-call timeline in the Test Lab conversation feed — chips show tool name, result summary, and call/success/error variant. (#38)
 
 ### Fixed
 - **Auth**: Password reset tokens now survive server restarts. (#78)
@@ -191,6 +204,8 @@ Update the changelog in every PR that adds a user-visible feature, bug fix, secu
 ### Security
 - **Auth**: Atomic token claim prevents concurrent replay of password reset tokens. (#78)
 ```
+
+Multi-bundle PRs: emit one bullet per shipped feature, with the bundle id prefixed in the bold area tag (`**AUTO-023 Bundle 5**`) so a reader scanning the changelog sees grouping at a glance without paragraph-blob density.
 
 ---
 
