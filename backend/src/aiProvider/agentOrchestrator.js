@@ -2,7 +2,7 @@ import { emitAgentEvent, emitAgentMessage } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { resolveRoute } from "./registry.js";
 import { logActivity } from "../utils/activityLogger.js";
-import { executeToolCall, answerPeer } from "./agentTools/runtime.js";
+import { executeToolCall, answerPeer, redactToolArgsForPersistence } from "./agentTools/runtime.js";
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { readSpendCaps, evaluateSpendCap } from "./quotaGuard.js";
 import {
@@ -306,7 +306,12 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
           id: toolCallId, runId, workspaceId, threadId,
           traceId: getCurrentTraceId() || `trace-${runId}`,
           fromRole: nextRole, toRole: nextRole, intent: "tool_call",
-          artifact: { tool: msg.artifact.tool, args: msg.artifact.args || {} },
+          // AUTO-023 B5 — gap #8: scrub potential secrets from args
+          // before persistence so the SSE snapshot + DB row never hold
+          // plaintext credentials a hallucinating LLM may have inlined
+          // (only `playwright.dryRun.testCode` is scanned today; other
+          // tools' args are non-free-form).
+          artifact: { tool: msg.artifact.tool, args: redactToolArgsForPersistence(msg.artifact.tool, msg.artifact.args || {}) },
           rationale: msg.rationale || null, round: step, replyToId: null, createdAt: nowIso(),
         });
       }
@@ -318,6 +323,12 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
           role: nextRole,
           allowedTools: Array.isArray(cfg?.allowedTools) ? cfg.allowedTools : null,
           context: { workspaceId, threadId, runId, fromRole: nextRole },
+          // AUTO-023 B5 — gap #7: forward the orchestrator's abort
+          // signal so a user-cancelled autonomous thread doesn't burn
+          // the per-tool 30s timeout. `effectiveSignal` inside
+          // `executeToolCall` falls back to `context.signal` when
+          // `signal` is null, so either wiring works.
+          signal,
         });
         resultMsg = {
           fromRole: nextRole, toRole: nextRole, intent: "tool_result",

@@ -41,7 +41,7 @@ import { runReviewerAuthorLoop, ReviewRejection } from "../aiProvider/agentLoop.
 // envelopes for every dispatched tool). Falls back to a direct
 // `validateTest` call when the tool dispatch path is unavailable
 // (test stubs, standalone CLI).
-import { executeToolCall as executeAgentTool } from "../aiProvider/agentTools/runtime.js";
+import { executeToolCall as executeAgentTool, redactToolArgsForPersistence } from "../aiProvider/agentTools/runtime.js";
 import { emitAgentMessage as emitToolEnvelope } from "../aiProvider/agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { validateTest } from "./testValidator.js";
@@ -726,7 +726,12 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
                 fromRole: "reviewer", toRole: "reviewer", intent: "tool_call",
                 artifact: {
                   tool: "playwright.dryRun",
-                  args: { testCode: candidate.playwrightCode },
+                  // AUTO-023 B5 — gap #8: redact secrets from the
+                  // persisted envelope (raw testCode still flows
+                  // through `executeAgentTool` below for the real
+                  // dryRun, but the DB row + UI timeline see only
+                  // the scrubbed form).
+                  args: redactToolArgsForPersistence("playwright.dryRun", { testCode: candidate.playwrightCode }),
                 },
                 rationale: `Round ${round + 1} static check`, round,
                 replyToId: null, createdAt: new Date().toISOString(),
@@ -736,6 +741,10 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
                 args: { testCode: candidate.playwrightCode },
                 role: "reviewer",
                 context: { workspaceId, threadId, runId: _runId, fromRole: "reviewer", projectUrl },
+                // AUTO-023 B5 — gap #7: forward the abort signal so a
+                // user-cancelled run doesn't burn the 30s timeout on
+                // an in-flight dryRun.
+                signal,
               });
               issues = Array.isArray(out?.result?.diagnostics) ? out.result.diagnostics : [];
               emitToolEnvelope({

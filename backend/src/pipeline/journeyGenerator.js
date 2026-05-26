@@ -211,6 +211,10 @@ export async function generateFromDescription(name, description, appUrl, onToken
         args: { projectId, limit: DEDUP_LIMIT },
         role: "author",
         context: { workspaceId, threadId, runId, fromRole: "author" },
+        // AUTO-023 B5 — gap #7: forward the abort signal so a
+        // user-cancelled run doesn't burn the 30s timeout on an
+        // in-flight dedup query.
+        signal,
       });
       const existing = Array.isArray(out?.result) ? out.result : [];
       emitAgentMessage({
