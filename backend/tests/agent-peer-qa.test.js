@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setupTestEnvironment } from "./helpers/test-base.js";
-setupTestEnvironment();
+import { resetDb } from "./helpers/test-base.js";
+
+// `resetDb()` initializes the SQLite singleton + clears prior test rows.
+// `executeToolCall` for `thread.askPeer` calls `emitAgentMessage` which
+// validates the envelope; the underlying repo write needs the DB open.
+resetDb();
 
 const runtime = await import("../src/aiProvider/agentTools/runtime.js");
 

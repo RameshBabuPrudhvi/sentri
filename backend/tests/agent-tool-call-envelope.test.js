@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setupTestEnvironment } from "./helpers/test-base.js";
+import { resetDb } from "./helpers/test-base.js";
 
-setupTestEnvironment();
+// `resetDb()` initializes the SQLite singleton + clears prior test rows.
+// `playwright.dryRun` itself is pure (no DB read) but the runtime imports
+// repos at the top of the module, so an uninitialised DB connection would
+// fail at module-load time.
+resetDb();
 
 const runtime = await import("../src/aiProvider/agentTools/runtime.js");
 

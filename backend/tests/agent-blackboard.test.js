@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setupTestEnvironment } from "./helpers/test-base.js";
+import { resetDb } from "./helpers/test-base.js";
 
-setupTestEnvironment();
+// `resetDb()` initializes the SQLite singleton (runs migrations) AND
+// clears the rows from previous tests in the same process. The blackboard
+// repo's `agent_thread_state` table is materialised by migration 063 which
+// runs as part of the DB open in `resetDb`.
+resetDb();
 
 const repo = await import("../src/database/repositories/agentThreadStateRepo.js");
 
