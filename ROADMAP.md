@@ -13,9 +13,9 @@
 
 > **Working on the next PR? Read [`NEXT.md`](./NEXT.md) instead — it has the current item spec, files to change, and acceptance criteria. You do not need to read further in this file.**
 >
-> **AI-provider routes — Bundles 1–4 shipped.** PR #22 landed B1.x foundation; PR #23 landed B2 + B3 + B4. The full plan, schema, exit criteria, cross-bundle invariants, and risk register live in [`docs/roadmap/ai-provider-bundle.md`](./docs/roadmap/ai-provider-bundle.md) for reference. Operators adopting Provider Routes — see [`docs/guide/provider-routes.md`](./docs/guide/provider-routes.md).
+> **AI-provider routes — ✅ shipped.** All 4 bundles landed (PR #22, #23). Plan at [`docs/roadmap/ai-provider-bundle.md`](./docs/roadmap/ai-provider-bundle.md) · operator guide at [`docs/guide/provider-routes.md`](./docs/guide/provider-routes.md).
 >
-> **Autonomous multi-agent collaboration — parallel track.** [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md) reframes AUTO-023 as a 5-bundle multi-agent system (envelope schema → linear handoff → reviewer↔author loop → supervisor orchestrator → tool calling). Bundle 1 is purely additive and parallelisable with MNT-015 — no shared files, no blocker dependency.
+> **Autonomous multi-agent collaboration — ✅ shipped.** All 5 bundles landed (PR #34–#38). Full plan + exit criteria at [`docs/roadmap/autonomous-multi-agent.md`](./docs/roadmap/autonomous-multi-agent.md).
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
