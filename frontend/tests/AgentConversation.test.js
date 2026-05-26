@@ -498,6 +498,19 @@ test("supervisor + healer envelopes render (not silently dropped by persona filt
   assert.match(turns[1].text, /Healer/);
 });
 
+
+
+test("tool_call and tool_result envelopes render explicit tool timeline text", () => {
+  const turns = messagesToTurns([
+    { id: "tc1", fromRole: "author", toRole: null, intent: "tool_call", artifact: { tool: "playwright.dryRun", args: { testCode: "test('x')" } }, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "tr1", fromRole: "author", toRole: null, intent: "tool_result", artifact: { tool: "playwright.dryRun", result: { ok: true } }, createdAt: "2026-01-01T00:00:01.000Z" },
+    { id: "tr2", fromRole: "reviewer", toRole: null, intent: "tool_result", artifact: { tool: "db.getTest", error: "not found" }, createdAt: "2026-01-01T00:00:02.000Z" },
+  ]);
+  assert.equal(turns.length, 3);
+  assert.match(turns[0].text, /Invoking playwright\.dryRun/);
+  assert.match(turns[1].text, /Tool playwright\.dryRun completed/);
+  assert.match(turns[2].text, /Tool db\.getTest failed: not found/);
+});
 process.on("beforeExit", () => {
   console.log(`\n  ${passed} passed, ${failed} failed\n`);
   if (failed > 0) process.exit(1);

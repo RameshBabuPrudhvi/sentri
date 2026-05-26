@@ -728,6 +728,15 @@ export function messagesToTurns(messages) {
         roundAuthorTests.set(round, map);
       }
       let detail = m.rationale || formatScalarData(m.artifact) || "";
+      if (intent === "tool_call") {
+        const tool = m.artifact?.tool || "unknown";
+        detail = `Invoking ${tool}`;
+      }
+      if (intent === "tool_result") {
+        const tool = m.artifact?.tool || "unknown";
+        const isErr = !!m.artifact?.error;
+        detail = isErr ? `Tool ${tool} failed: ${m.artifact?.error}` : `Tool ${tool} completed`;
+      }
       if (intent === "request_revision") {
         // Per-round diff is only meaningful when there's a PRIOR round
         // to compare against. On round 0 (the very first revision request)
