@@ -2,7 +2,7 @@ import { emitAgentEvent, emitAgentMessage } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
 import { resolveRoute } from "./registry.js";
 import { logActivity } from "../utils/activityLogger.js";
-import { executeToolCall } from "./agentTools/runtime.js";
+import { executeToolCall, answerPeer } from "./agentTools/runtime.js";
 import * as agentConfigRepo from "../database/repositories/agentConfigRepo.js";
 import { readSpendCaps, evaluateSpendCap } from "./quotaGuard.js";
 import {
@@ -226,6 +226,21 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
     if (msg?.intent === "tool_call" && msg?.artifact?.tool) {
       const cfg = workspaceId ? agentConfigRepo.getByRole(workspaceId, nextRole) : null;
       const toolCallId = msg?.id || `tool-${Date.now()}`;
+      // AUTO-023 B5.3 — persist the `tool_call` envelope BEFORE
+      // dispatch so the SSE snapshot + UI timeline see the request
+      // even if the tool throws synchronously. `emitAgentMessage` is
+      // best-effort: a missing `runId`/`workspaceId` (standalone
+      // smoke-test path) degrades to a logged warn + null return.
+      if (runId && workspaceId) {
+        emitAgentMessage({
+          id: toolCallId, runId, workspaceId, threadId,
+          traceId: getCurrentTraceId() || `trace-${runId}`,
+          fromRole: nextRole, toRole: nextRole, intent: "tool_call",
+          artifact: { tool: msg.artifact.tool, args: msg.artifact.args || {} },
+          rationale: msg.rationale || null, round: step, replyToId: null, createdAt: nowIso(),
+        });
+      }
+      let resultMsg;
       try {
         const out = await executeToolCall({
           tool: msg.artifact.tool,
@@ -234,20 +249,48 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
           allowedTools: Array.isArray(cfg?.allowedTools) ? cfg.allowedTools : null,
           context: { workspaceId, threadId, runId, fromRole: nextRole },
         });
-        const resultMsg = {
+        resultMsg = {
           fromRole: nextRole, toRole: nextRole, intent: "tool_result",
           artifact: { toolCallId, tool: msg.artifact.tool, result: out.result }, rationale: "tool_executed",
         };
-        thread.push(resultMsg);
-        lastArtifact = resultMsg.artifact;
       } catch (err) {
-        const resultMsg = {
+        resultMsg = {
           fromRole: nextRole, toRole: nextRole, intent: "tool_result",
           artifact: { toolCallId, tool: msg.artifact.tool, error: err?.message || "tool_error", code: err?.code || null }, rationale: "tool_error",
         };
-        thread.push(resultMsg);
-        lastArtifact = resultMsg.artifact;
       }
+      thread.push(resultMsg);
+      lastArtifact = resultMsg.artifact;
+      // AUTO-023 B5.3 — persist the matching `tool_result` so the
+      // `tool_call` → `tool_result` pair shows up as a single
+      // round-trip in the UI timeline (replyToId chains them).
+      if (runId && workspaceId) {
+        emitAgentMessage({
+          runId, workspaceId, threadId,
+          traceId: getCurrentTraceId() || `trace-${runId}`,
+          fromRole: resultMsg.fromRole, toRole: resultMsg.toRole, intent: "tool_result",
+          artifact: resultMsg.artifact, rationale: resultMsg.rationale, round: step,
+          replyToId: toolCallId, createdAt: nowIso(),
+        });
+      }
+    }
+
+    // AUTO-023 B5.4 — peer Q&A: route an `answer` envelope back to the
+    // waiting `thread.askPeer` caller. Pre-fix `answerPeer` had no
+    // production caller — only unit tests invoked it directly, so the
+    // round-trip only worked under test. Now any agent that emits
+    // `intent: "answer"` with `{ toolCallId, answer }` resolves the
+    // peer's pending Promise and the askPeer caller continues.
+    if (msg?.intent === "answer" && msg?.artifact?.toolCallId) {
+      try {
+        answerPeer({
+          toolCallId: msg.artifact.toolCallId,
+          answer: msg.artifact.answer ?? msg.artifact,
+          runId, workspaceId, threadId,
+          fromRole: nextRole,
+          toRole: msg.toRole || null,
+        });
+      } catch { /* best-effort — answerPeer is decorative, never break the thread */ }
     }
     emitAgentMessage({
       runId, workspaceId, threadId, traceId: getCurrentTraceId() || `trace-${runId || "standalone"}`,

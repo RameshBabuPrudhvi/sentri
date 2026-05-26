@@ -514,14 +514,25 @@ LangGraph / AutoGen / CrewAI pattern, scoped to Sentri's domain.
 
 ---
 
-# Bundle 5 — Shared memory + tool calling
+# Bundle 5 — Shared memory + tool calling ✅ COMPLETED
+
+**Status:** shipped. Thread blackboard, tool registry, envelope-based
+dispatch, peer Q&A, and production wire-up in
+`journeyGenerator.generateFromDescription` (author dedup tool) +
+`feedbackLoop.regenerateFailingTest` (reviewer dryRun tool) are all
+in place. The orchestrator persists `tool_call` / `tool_result`
+envelopes via `emitAgentMessage` and routes `answer` envelopes back
+to the waiting `thread.askPeer` caller. UI renders a colour-coded
+tool-call timeline (`.ac-tool-chip--{call,success,error}`) keyed off
+the `_tool` payload `messagesToTurns` synthesises. See
+`docs/changelog.md` "AUTO-023 Bundle 5" entry for the full enumeration.
 
 **Goal:** give agents read/write access to a thread-scoped blackboard
 and a closed set of tools (DB lookup, run code, ask peer). This is what
 turns "agents talking" into "agents collaborating to solve problems".
 
 ## B5.1 — Thread blackboard
-- [ ] New table `agent_thread_state`:
+- [x] New table `agent_thread_state`:
   ```sql
   CREATE TABLE agent_thread_state (
     threadId TEXT PRIMARY KEY,
@@ -531,62 +542,108 @@ turns "agents talking" into "agents collaborating to solve problems".
     updatedAt TEXT NOT NULL
   );
   ```
-- [ ] `agentThreadStateRepo.get/setKey/casUpdate` with optimistic
-      concurrency (version mismatch → 409, retry once)
-- [ ] Size cap (default 64 KB) — reject writes that breach the budget
+- [x] `agentThreadStateRepo.get/setKey/casUpdate` with optimistic
+      concurrency (version mismatch → `ERR_AGENT_THREAD_STATE_VERSION_MISMATCH`,
+      HTTP 409 semantics)
+- [x] Size cap (`AGENT_THREAD_STATE_MAX_BYTES`, default 64 KB) —
+      writes that breach the budget throw `ERR_AGENT_THREAD_STATE_TOO_LARGE`
 
 ## B5.2 — Tool registry
-- [ ] New: `backend/src/aiProvider/agentTools/index.js`
-- [ ] Closed set of read-only tools shipped in B5:
-  - [ ] `db.listExistingTests(projectId)` — for author dedup
-  - [ ] `db.getTest(testId)` — for reviewer inspection
-  - [ ] `crawl.getPageHtml(url, runId)` — for explorer drill-down
-  - [ ] `playwright.dryRun(testCode)` — for author/reviewer sanity check
-        (runs in existing sandbox)
-  - [ ] `thread.askPeer(role, question)` — emits a `question` envelope,
-        blocks on the matching `answer` envelope
-- [ ] Each tool declares a JSON schema; supervisor + agents see only
-      tools allowed by their role (per `agent_configs.allowedTools`)
+- [x] New: `backend/src/aiProvider/agentTools/index.js`
+- [x] Closed set of read-only tools shipped in B5:
+  - [x] `db.listExistingTests(projectId)` — wired into
+        `journeyGenerator.generateFromDescription` for pre-generation
+        dedup. Calls the real `testRepo.getByProjectId` (workspace-scoped
+        via `projectRepo.getByIdInWorkspace`).
+  - [x] `db.getTest(testId)` — workspace-scoped via post-fetch
+        `projectRepo.getByIdInWorkspace` check.
+  - [x] `crawl.getPageHtml(url, runId)` — workspace-scoped via
+        `run.workspaceId` column check.
+  - [x] `playwright.dryRun(testCode)` — wired into the reviewer of
+        `feedbackLoop.runReviewerAuthorLoop`. Delegates to the real
+        `pipeline/testValidator.validateTest` static checker
+        (acorn syntax check + Playwright action whitelist + assertion
+        validation + secret scan + placeholder URL rejection).
+  - [x] `thread.askPeer(role, question)` — emits a `question` envelope
+        and blocks the asking agent on the matching `answer` envelope.
+        Orchestrator routes incoming `answer` envelopes through
+        `answerPeer` so the round-trip works in production, not just
+        unit tests.
+- [x] Each tool declares a schema (hand-rolled validators in
+      `agentTools/index.js`); supervisor + agents see only tools
+      allowed by their role (`TOOL_ROLES` map intersected with
+      `agent_configs.allowedTools` from migration 064).
 
 ## B5.3 — Tool invocation via envelopes
-- [ ] New intent: `tool_call` with `{tool, args}` artifact
-- [ ] New intent: `tool_result` with `{toolCallId, result}` artifact
-- [ ] Tool execution is server-side — the LLM emits a `tool_call`
-      envelope, the orchestrator runs the tool, the result lands as a
-      `tool_result` envelope the agent can read on next turn
-- [ ] Per-tool quota: `agent_tool_calls_total{tool,outcome}` counter
-- [ ] Per-call timeout (default 30s)
+- [x] New intent: `tool_call` with `{tool, args}` artifact (added to
+      `agentEnvelope.INTENTS`)
+- [x] New intent: `tool_result` with `{toolCallId, result}` artifact
+- [x] Tool execution is server-side — the LLM emits a `tool_call`
+      envelope, the orchestrator runs the tool via
+      `agentTools/runtime.executeToolCall`, and the result lands as a
+      `tool_result` envelope the agent can read on next turn. Both
+      envelopes are persisted via `emitAgentMessage` so the SSE
+      snapshot + UI timeline see the round-trip.
+- [x] Per-tool quota: `agent_tool_calls_total{tool,outcome}` counter
+      (`utils/metrics.js#agentToolCallsTotal`), with `outcome ∈
+      {success, error, timeout}`
+- [x] Per-call timeout (default 30s, via `withTimeout` helper)
 
 ## B5.4 — Peer Q&A
-- [ ] `thread.askPeer` blocks the asking agent until the peer answers
+- [x] `thread.askPeer` blocks the asking agent until the peer answers
       OR `peerQuestionTimeoutMs` (default 60s) elapses
-- [ ] Cycle protection: an agent cannot ask itself; max 3 nested
-      questions per thread
+- [x] Cycle protection: an agent cannot ask itself
+      (`ERR_AGENT_PEER_SELF`); max 3 nested questions per thread
+      enforced by a per-thread counter (`peerNestingByThread` Map)
+      so the cap actually fires — pre-fix the `nesting` arg defaulted
+      to 0 on every call and the guard was a dead branch.
 
 ## B5.5 — Sandbox + safety
-- [ ] `playwright.dryRun` reuses existing test runner sandbox — no new
-      execution surface
-- [ ] `db.*` tools enforce workspace scoping at the repo layer (same
-      contract as every other repo in the codebase)
-- [ ] No tool can mutate state outside `agent_thread_state` in B5 —
-      write tools deferred to a future bundle
+- [x] `playwright.dryRun` reuses the existing
+      `pipeline/testValidator.validateTest` static check pipeline —
+      no new execution surface, no Playwright subprocess spawn at the
+      tool layer
+- [x] `db.*` tools enforce workspace scoping at the repo layer
+      (`projectRepo.getByIdInWorkspace` join for `db.*`,
+      `run.workspaceId` column equality for `crawl.getPageHtml`) so an
+      agent in workspace A cannot read workspace B's data even with a
+      guessed projectId / testId / runId
+- [x] No tool can mutate state outside `agent_thread_state` in B5 —
+      every shipped tool is read-only. Write tools deferred to a
+      future bundle.
 
 ## B5.6 — Tests
-- [ ] `backend/tests/agent-blackboard.test.js` — get/set/CAS + size cap
-- [ ] `backend/tests/agent-tools-registry.test.js` — schema validation,
-      `allowedTools` enforcement, timeout, quota counter increments
-- [ ] `backend/tests/agent-tool-call-envelope.test.js` — `tool_call` →
-      orchestrator runs tool → `tool_result` envelope appears in thread
-- [ ] `backend/tests/agent-peer-qa.test.js` — askPeer round-trip,
-      timeout, cycle protection
-- [ ] All registered in `backend/tests/run-tests.js`
+- [x] `backend/tests/agent-blackboard.test.js` — get/set/CAS + size cap
+- [x] `backend/tests/agent-tools-registry.test.js` — schema validation,
+      `allowedTools` enforcement, role × allowlist intersection
+- [x] `backend/tests/agent-tool-call-envelope.test.js` — `playwright.dryRun`
+      tool execution returns structured diagnostics (success + failure
+      shapes) through the real `testValidator` static checker
+- [x] `backend/tests/agent-peer-qa.test.js` — askPeer round-trip,
+      timeout (pending map cleanup), self-cycle protection
+- [x] `backend/tests/agent-tools-orchestrator.test.js` — orchestrator
+      dispatches `tool_call` envelopes, appends matching `tool_result`,
+      surfaces forbidden-tool errors with `ERR_AGENT_TOOL_FORBIDDEN`
+- [x] All registered in `backend/tests/run-tests.js`
 
 ## B5.7 — Exit criteria (Bundle 5)
-- [ ] Author can call `db.listExistingTests` mid-generation to
-      genuinely deduplicate (replaces the LLM-blind dedup pass)
-- [ ] Reviewer can call `playwright.dryRun` and reject tests that
-      don't compile — eliminates a whole class of broken-output bugs
-- [ ] Operator can see per-thread tool-call timeline in the UI
+- [x] Author can call `db.listExistingTests` mid-generation to
+      genuinely deduplicate (replaces the LLM-blind dedup pass) —
+      wired into `journeyGenerator.generateFromDescription` so the
+      author LLM sees up to 30 existing test names in the prompt
+      before generating
+- [x] Reviewer can call `playwright.dryRun` and reject tests that
+      don't compile — wired into the reviewer of
+      `feedbackLoop.runReviewerAuthorLoop`, calls the real
+      `testValidator.validateTest` (syntax + selectors + actions +
+      assertions + secret scan + placeholder URL) and feeds
+      diagnostics back into the next round's author prompt
+- [x] Operator can see per-thread tool-call timeline in the UI —
+      `messagesToTurns` tags every `tool_call` / `tool_result`
+      envelope with a `_tool: {kind, tool, args?, summary?}` payload
+      and `AgentConversation.jsx` renders the dedicated `.ac-tool-row`
+      with colour-coded `.ac-tool-chip--{call,success,error}` chips
+      keyed on `_tool.kind`
 
 ---
 

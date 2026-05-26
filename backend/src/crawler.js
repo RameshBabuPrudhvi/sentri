@@ -384,7 +384,7 @@ export async function generateFromUserDescription(project, run, { name, descript
       log(run, `↩️  Linear fallback (${out.reason || "unspecified"}) — using legacy description path.`);
       rawTests = await generateFromDescription(name, description, project.url, (token) => {
         emitRunEvent(run.id, "llm_token", { token });
-      }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
+      }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id, projectId: project.id });
     } else {
       // Orchestrator-produced artifact carries the author's tests as
       // the last accepted artifact regardless of terminal outcome
@@ -399,13 +399,13 @@ export async function generateFromUserDescription(project, run, { name, descript
         log(run, `↩️  Autonomous produced 0 tests — falling back to linear pipeline.`);
         rawTests = await generateFromDescription(name, description, project.url, (token) => {
           emitRunEvent(run.id, "llm_token", { token });
-        }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
+        }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id, projectId: project.id });
       }
     }
   } else {
     rawTests = await generateFromDescription(name, description, project.url, (token) => {
       emitRunEvent(run.id, "llm_token", { token });
-    }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id });
+    }, { dialsPrompt, testCount, signal, workspaceId: project.workspaceId || null, runId: run.id, projectId: project.id });
   }
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 

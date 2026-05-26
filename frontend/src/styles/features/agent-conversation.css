@@ -320,10 +320,86 @@
   35%           { opacity: 1;    transform: translateY(-3px); }
 }
 
+/* ─── Tool-call timeline (B5.7) ────────────────────────────────────────────
+ *
+ * Renders `tool_call` and `tool_result` envelopes as a scannable chip
+ * + summary row instead of the regular narration bubble. Three variants:
+ *   • `.ac-tool-chip--call`    — neutral, "🔧 db.listExistingTests"
+ *   • `.ac-tool-chip--success` — green check, "✓ db.listExistingTests · 12 results"
+ *   • `.ac-tool-chip--error`   — amber/red, "⚠ playwright.dryRun · 3 issues"
+ *
+ * The narration text (e.g. "[tool_result] Author → All — Tool …") is
+ * preserved on a secondary muted line for screen-reader continuity and
+ * for operators who want the full envelope detail.
+ */
+
+.ac-turn--tool .ac-text--tool-detail {
+  background: transparent;
+  border-color: transparent;
+  padding: 2px 0 0 0;
+  font-size: 0.72rem;
+  color: var(--text3);
+  font-style: italic;
+}
+
+.ac-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.ac-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.ac-tool-icon {
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.ac-tool-name {
+  font-family: var(--mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 0.7rem;
+}
+
+.ac-tool-summary {
+  color: var(--text2);
+  font-size: 0.72rem;
+}
+
+.ac-tool-chip--call {
+  background: rgba(99, 102, 241, 0.10);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #4f46e5;
+}
+
+.ac-tool-chip--success {
+  background: var(--green-bg, rgba(74, 222, 128, 0.10));
+  border-color: rgba(74, 222, 128, 0.45);
+  color: var(--green, #16a34a);
+}
+
+.ac-tool-chip--error {
+  background: rgba(239, 68, 68, 0.10);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #dc2626;
+}
+
 /* ─── Responsive ──────────────────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
   .ac-feed { padding: 12px 12px; gap: 12px; }
   .ac-avatar { width: 28px; height: 28px; font-size: 14px; }
   .ac-text { padding: 7px 10px; font-size: 0.82rem; }
+  .ac-tool-chip { font-size: 0.68rem; padding: 2px 7px; }
+  .ac-tool-name { font-size: 0.66rem; }
 }

@@ -728,14 +728,37 @@ export function messagesToTurns(messages) {
         roundAuthorTests.set(round, map);
       }
       let detail = m.rationale || formatScalarData(m.artifact) || "";
+      // AUTO-023 B5.7 — surface a dedicated tool-call timeline by tagging
+      // tool envelopes with a `_tool` payload `AgentConversation.jsx`
+      // renders as a chip+detail-row pair rather than a generic narration
+      // bubble. Operators see "🔧 db.listExistingTests · 12 results" with
+      // colour-coded result/error variants instead of an opaque "[tool_result]
+      // Author → All — Tool db.listExistingTests completed".
+      let toolBadge = null;
       if (intent === "tool_call") {
         const tool = m.artifact?.tool || "unknown";
         detail = `Invoking ${tool}`;
+        toolBadge = { kind: "call", tool, args: m.artifact?.args || null };
       }
       if (intent === "tool_result") {
         const tool = m.artifact?.tool || "unknown";
         const isErr = !!m.artifact?.error;
         detail = isErr ? `Tool ${tool} failed: ${m.artifact?.error}` : `Tool ${tool} completed`;
+        toolBadge = {
+          kind: isErr ? "error" : "success",
+          tool,
+          // Result summary: prefer a scalar `count`, then `ok` boolean,
+          // then `issueCount` for the dryRun shape, else null.
+          summary: isErr
+            ? (m.artifact?.error || "error")
+            : (m.artifact?.result?.count != null
+                ? `${m.artifact.result.count} result${m.artifact.result.count !== 1 ? "s" : ""}`
+                : m.artifact?.result?.ok === true
+                  ? "ok"
+                  : m.artifact?.result?.ok === false
+                    ? `${m.artifact?.result?.issueCount || 0} issue${(m.artifact?.result?.issueCount || 0) !== 1 ? "s" : ""}`
+                    : null),
+        };
       }
       if (intent === "request_revision") {
         // Per-round diff is only meaningful when there's a PRIOR round
@@ -794,6 +817,10 @@ export function messagesToTurns(messages) {
         _complete: true,
         _round: showRoundBadge || isSupervisorHandoff ? round : undefined,
         _supervisorStep: isSupervisorHandoff || undefined,
+        // AUTO-023 B5.7 — when set, `AgentConversation.jsx` renders the
+        // turn with a tool-call chip variant (colour-coded by `kind`)
+        // instead of the regular handoff narration line.
+        _tool: toolBadge || undefined,
       };
     });
 }

@@ -16,8 +16,15 @@ import { formatLogLine } from "../utils/logFormatter.js";
 // so the NarrativeFeed can render real-time per-agent attribution without a
 // second round-trip. `runId` is threaded through every public generator on
 // this module; when null (eval-harness, CLI), emitAgentEvent is a no-op.
-import { emitAgentEvent } from "../aiProvider/agentEventEmitter.js";
+import { emitAgentEvent, emitAgentMessage } from "../aiProvider/agentEventEmitter.js";
 import { emitHandoffEnvelope, mainThreadId, readLatestEnvelope } from "../aiProvider/agentHandoff.js";
+// AUTO-023 B5.7 — author dispatches `db.listExistingTests` mid-generation so
+// the LLM prompt is dedup-aware (sees existing test names instead of being
+// blind to the project's catalog). Tool dispatch is best-effort: when the
+// tool fails or no projectId is available, fall through to the original
+// dedup-blind prompt path.
+import { executeToolCall as executeAgentTool } from "../aiProvider/agentTools/runtime.js";
+import { getCurrentTraceId } from "../utils/observability.js";
 import { withDials } from "./promptHelpers.js";
 import { extractTestsArray, sanitiseSteps } from "./stepSanitiser.js";
 import { buildJourneyPrompt } from "./prompts/journeyPrompt.js";
@@ -167,13 +174,75 @@ function parseEndpointHints(description, appUrl) {
  * methods, status codes, etc.), automatically routes to the API test prompt
  * which generates Playwright `request` API tests instead of UI tests.
  */
-export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null } = {}) {
+export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal, workspaceId = null, runId = null, projectId = null } = {}) {
   const threadId = runId ? mainThreadId(runId) : null;
   // AUTO-023 Bundle 2 — read the inbound envelope and feed its id into
   // the outbound `replyToId` so the thread reads as a true reply chain
   // (not a discarded read). See `intentClassifier.js` for the contract.
   const inbound = readLatestEnvelope({ threadId, workspaceId, toRole: "author" });
   const apiIntent = isApiIntent(name, description);
+
+  // AUTO-023 B5.7 — call `db.listExistingTests` BEFORE prompt construction so
+  // the author LLM is dedup-aware. Pre-fix the author was blind to the
+  // project's existing test catalog and the deduplicator's post-hoc pass
+  // could only catch near-identical AI output (semantic duplicates with
+  // different wording slipped through). Surfacing the names + `sourceUrl`
+  // of existing tests lets the LLM avoid re-generating known scenarios at
+  // generation time. Best-effort: missing `projectId` (eval-harness, CLI)
+  // or tool failure falls through to the dedup-blind prompt path.
+  let existingTestsHint = "";
+  if (projectId && workspaceId && runId) {
+    const toolCallId = `dedup-${runId}-${Date.now()}`;
+    try {
+      emitAgentMessage({
+        id: toolCallId, runId, workspaceId, threadId,
+        traceId: getCurrentTraceId() || `trace-${runId}`,
+        fromRole: "author", toRole: "author", intent: "tool_call",
+        artifact: { tool: "db.listExistingTests", args: { projectId } },
+        rationale: "Pre-generation dedup check", round: 0,
+        replyToId: null, createdAt: new Date().toISOString(),
+      });
+      const out = await executeAgentTool({
+        tool: "db.listExistingTests",
+        args: { projectId },
+        role: "author",
+        context: { workspaceId, threadId, runId, fromRole: "author" },
+      });
+      const existing = Array.isArray(out?.result) ? out.result : [];
+      emitAgentMessage({
+        runId, workspaceId, threadId,
+        traceId: getCurrentTraceId() || `trace-${runId}`,
+        fromRole: "author", toRole: "author", intent: "tool_result",
+        artifact: { toolCallId, tool: "db.listExistingTests", result: { count: existing.length } },
+        rationale: "tool_executed", round: 0,
+        replyToId: toolCallId, createdAt: new Date().toISOString(),
+      });
+      if (existing.length > 0) {
+        // Only the first 30 existing tests are surfaced — keeps the prompt
+        // bounded for very large catalogs while still anchoring the LLM
+        // against the most recent / common scenarios. `name` + `sourceUrl`
+        // are sufficient signal for the LLM's dedup judgement; the full
+        // playwrightCode would balloon the prompt past most context windows.
+        const sample = existing.slice(0, 30).map((t) => `- "${t.name}" (${t.sourceUrl || "—"})`).join("\n");
+        const overflow = existing.length > 30 ? `\n…and ${existing.length - 30} more.` : "";
+        existingTestsHint = `\n\nEXISTING TESTS IN THIS PROJECT (avoid generating duplicates of these):\n${sample}${overflow}\n\nIf the user's request overlaps with one of these, generate a complementary test (different scenario / edge case / negative path) rather than a near-duplicate.`;
+      }
+    } catch (err) {
+      // Best-effort — log a tool_result envelope with the error so the UI
+      // timeline shows the dedup attempt was made, then continue with the
+      // dedup-blind prompt path.
+      try {
+        emitAgentMessage({
+          runId, workspaceId, threadId,
+          traceId: getCurrentTraceId() || `trace-${runId}`,
+          fromRole: "author", toRole: "author", intent: "tool_result",
+          artifact: { toolCallId, tool: "db.listExistingTests", error: err?.message || "tool_error", code: err?.code || null },
+          rationale: "tool_error", round: 0,
+          replyToId: toolCallId, createdAt: new Date().toISOString(),
+        });
+      } catch { /* best-effort */ }
+    }
+  }
 
   let prompt;
   if (apiIntent) {
@@ -187,10 +256,14 @@ export async function generateFromDescription(name, description, appUrl, onToken
     // Inject the user's original name + description so the AI has full context
     // beyond just the parsed endpoint hints (e.g. "write API tests for register
     // endpoint with valid and invalid payloads" gives intent the parser can't capture).
-    apiPrompt.user = `USER REQUEST: ${name}\n${description ? `USER DESCRIPTION: ${description}\n\n` : "\n"}${apiPrompt.user}`;
+    apiPrompt.user = `USER REQUEST: ${name}\n${description ? `USER DESCRIPTION: ${description}\n\n` : "\n"}${apiPrompt.user}${existingTestsHint}`;
     prompt = withDials(apiPrompt, dialsPrompt);
   } else {
-    prompt = withDials(buildUserRequestedPrompt(name, description, appUrl, { testCount }), dialsPrompt);
+    const uiPrompt = buildUserRequestedPrompt(name, description, appUrl, { testCount });
+    if (existingTestsHint) {
+      uiPrompt.user = `${uiPrompt.user}${existingTestsHint}`;
+    }
+    prompt = withDials(uiPrompt, dialsPrompt);
   }
 
   // Step 4 — Generate. The `author` agent writes one or more tests from the
