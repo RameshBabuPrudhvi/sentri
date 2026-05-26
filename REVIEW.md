@@ -174,7 +174,7 @@ Update the changelog in every PR that adds a user-visible feature, bug fix, secu
 - Entries go under `## [Unreleased]`.
 - Group under these headings (omit empty ones): `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`
 - One bullet per change: `- **Area**: what changed for the user. (#PR)`
-- **Keep each bullet to a single sentence (≤200 chars).** If a multi-bundle / multi-feature PR has more than one user-visible change, write one bullet per change — NOT one mega-bullet that runs paragraphs. Big infrastructure PRs can have 5–10 short bullets under the same heading; that's correct and expected.
+- **Keep each bullet to a single sentence (≤300 chars).** If a multi-bundle / multi-feature PR has more than one user-visible change, write one bullet per change — NOT one mega-bullet that runs paragraphs. Big infrastructure PRs can have 5–10 short bullets under the same heading; that's correct and expected.
 - Write from the user's perspective — not internal implementation detail. Operator-visible nouns (`Settings → AI Providers`, `agent_messages` table, env vars, role names) are fine. SDK-level internals (renamed functions, refactored modules, test helpers, migration script flags) are not.
 - The bullet should make sense to someone reading the changelog at release time — not to a reviewer reading the diff. If a reviewer needs the detail, it belongs in the PR description or commit body.
 - Skip: internal refactors, test-only changes, doc-only changes, CI changes.
