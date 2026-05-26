@@ -375,6 +375,13 @@ LangGraph / AutoGen / CrewAI pattern, scoped to Sentri's domain.
       (`haiku`/`mini`/`flash`/`nano`/`7b`/`8b`); frontend renders it
       as a standalone warning turn via `eventsToTurns`'s
       `data.kind === "supervisor_weak_model"` branch
+- **Health-check conditional probing**: `validateAgentConfigs` in
+      `agentHealthCheck.js` now skips the `supervisor` probe when
+      `getAgentMode(workspaceId) !== 'autonomous'`. A workspace that
+      experimented with autonomous mode, configured a supervisor
+      route, then reverted to `pipeline` no longer has pipeline runs
+      blocked by an unhealthy supervisor route. Fail-OPEN: DB hiccup
+      on `getAgentMode` keeps supervisor in the probe list.
 
 ## B4.2 — Orchestrator
 - [x] New: `backend/src/aiProvider/agentOrchestrator.js`
@@ -592,12 +599,21 @@ These must hold across every bundle — verify before merging each PR.
 - [ ] All termination paths bounded: max-rounds, max-steps, wall-clock,
       and cycle protection enforced server-side
 - [ ] AI-005c single-agent collapse rule preserved across all loops
+      (Bundle 3's `maybeWarnSingleAgentCollapse` fires for the
+      reviewer↔author loop; the autonomous orchestrator intentionally
+      does NOT replicate it because the supervisor is a third-party
+      routing agent — the "same model reviewing its own output"
+      scenario is structurally different when a supervisor decides who
+      speaks. A future B5 enhancement may add a supervisor-aware
+      variant that warns when supervisor + author share a routeId.)
 - [ ] Per-`(route, role)` circuit breaker + `quotaGuard` integration
       maintained through loop runner and orchestrator
 - [ ] Workspace scoping enforced on every read of `agent_messages`,
       `agent_thread_state`, and tool registry calls
-- [ ] `agent_role` Prometheus label remains bounded (canonical 7 roles
-      + `supervisor` + `default`)
+- [ ] `agent_role` Prometheus label remains bounded (canonical 8 roles
+      + `default` = 9 metric-role values; `nextRole` label on
+      `app_agent_supervisor_decisions_total` clamped to
+      `KNOWN_AGENT_ROLES ∪ "other"` via `clampRoleLabel`)
 - [ ] All new endpoints registered in `permissions.json` with correct
       `requireRole()` gate
 - [ ] All new tests registered in `backend/tests/run-tests.js`

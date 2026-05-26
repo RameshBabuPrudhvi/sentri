@@ -14,9 +14,19 @@
  *   1. Supervisor LLM bridge dispatches → orchestrator loop produces
  *      tests via `makeRoleDispatcher`.
  *   2. Final artifact carries the `tests[]` array on terminate.
- *   3. Reviewer's revise verdict round-trips as `request_revision`
- *      so the supervisor can re-route to author (the multi-turn case
- *      that distinguishes autonomous mode from the linear pipeline).
+ *   3. Supervisor parse error terminates safely with last artifact.
+ *
+ * ### Scope limitation (acknowledged)
+ *
+ * These tests call `runAutonomousThread` directly — they do NOT
+ * exercise the `crawler.js#generateFromUserDescription` wire-up that
+ * reads `workspaces.agentMode` from the DB and branches into the
+ * orchestrator. That production entry-point is covered by:
+ *   - `agent-mode-routes.test.js` (DB flag round-trip + API endpoints)
+ *   - QA.md Golden flow (manual E2E with a live workspace)
+ * A full integration test would require mocking the entire pipeline
+ * graph (Playwright + LLM SDKs + DB seed) which is out of scope for
+ * unit-level coverage.
  */
 
 import test from "node:test";
