@@ -26,6 +26,15 @@ const KNOWN_AGENT_ROLES = new Set([
   "oracle", "reviewer", "healer", "triager",
 ]);
 
+// Roles the dispatcher can actually execute (have a wired pipeline
+// call site). `supervisor` self-routing wastes a step (the dispatcher
+// returns `unavailable_role`); `triager`/`healer` are runtime-only
+// today. Filtering here prevents the supervisor LLM from burning a
+// step on a role that immediately no-ops.
+const DISPATCHABLE_ROLES = new Set([
+  "explorer", "planner", "author", "oracle", "reviewer",
+]);
+
 function clampRoleLabel(role) {
   return KNOWN_AGENT_ROLES.has(String(role || "")) ? String(role) : "other";
 }
@@ -33,13 +42,13 @@ function clampRoleLabel(role) {
 function nowIso() { return new Date().toISOString(); }
 
 function roleEligible(workspaceId, role) {
-  // Defence-in-depth — even when workspaceId is null (smoke-test /
-  // CLI standalone caller), reject roles outside the canonical set.
-  // Pre-fix the null-workspace short-circuit allowed the supervisor
-  // to dispatch arbitrary strings like `"analyzer"` which the role
-  // dispatcher then handled with an empty `unknown_role:*` envelope —
-  // wasted step + misleading "the run produced nothing" UX.
-  if (!KNOWN_AGENT_ROLES.has(String(role || ""))) return false;
+  // Defence-in-depth — reject roles outside the dispatchable set.
+  // `KNOWN_AGENT_ROLES` is used for Prometheus label clamping only;
+  // `DISPATCHABLE_ROLES` is the subset the dispatcher can actually
+  // execute. `supervisor` self-routing, `triager`, and `healer` are
+  // in KNOWN but not DISPATCHABLE — they'd pass the old check but
+  // the dispatcher would return `unavailable_role`, wasting a step.
+  if (!DISPATCHABLE_ROLES.has(String(role || ""))) return false;
   if (!workspaceId) return true;
   try {
     const { route } = resolveRoute({ workspaceId, agentRole: role });
@@ -98,16 +107,18 @@ function makeDefaultQuotaCheck(workspaceId) {
  * annotate orchestrator spans — and exporting would create a second
  * surface for the same convention.
  */
-function annotateThreadSpan(attrs) {
+async function annotateThreadSpan(attrs) {
   // Reuses the existing OTel API plumbing in `utils/observability.js`
   // via a dynamic import so this module stays import-graph-clean for
   // deployments that don't enable OTel (the underlying module
   // short-circuits on `!otelApi`, so the import itself is safe).
+  // Awaited so the span attributes land on the current span BEFORE
+  // the next `runAgent` call opens a child span — pre-fix the
+  // fire-and-forget `.then()` raced with `runAgent` and typically
+  // annotated the wrong (or no) span.
   try {
-    // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
-    import("../utils/observability.js").then(({ annotateAiCallSpan }) => {
-      try { annotateAiCallSpan?.(attrs); } catch { /* best-effort */ }
-    }).catch(() => { /* best-effort */ });
+    const { annotateAiCallSpan } = await import("../utils/observability.js");
+    try { annotateAiCallSpan?.(attrs); } catch { /* best-effort */ }
   } catch { /* best-effort */ }
 }
 
@@ -131,7 +142,7 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
   const startedAt = Date.now();
   const deadline = Date.now() + Math.min(autonomousTimeoutMs, 30 * 60 * 1000);
   const stepsLimit = Math.min(Math.max(1, maxSteps), MAX_AUTONOMOUS_STEPS);
-  const thread = [{ fromRole: "supervisor", intent: "handoff", artifact: initialMessage }];
+  const thread = [{ fromRole: "supervisor", intent: "handoff", artifact: initialMessage?.artifact ?? initialMessage }];
   // `??` not `||` so a valid falsy artifact (`0`, `false`, `""`) on
   // the seed message survives. The per-step update at line ~169
   // already uses `??`; pre-fix this initializer was the only
@@ -201,7 +212,7 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
     // `generateText` call inside `runAgent`) with thread metadata so
     // traces split cleanly by thread + step + supervisor → next-role
     // edge. No-op when OTel is unconfigured.
-    annotateThreadSpan({
+    await annotateThreadSpan({
       provider: "supervisor",
       agentRole: nextRole,
       operation: "autonomous_thread_step",

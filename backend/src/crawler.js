@@ -802,7 +802,12 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     let autonomousFailures = 0;
     for (const journey of journeys) {
       throwIfAborted(signal);
-      const threadId = `${mainThreadId(run.id)}-j${journey.name?.replace(/\s+/g, "-") || autonomousTests.length}`;
+      // Use loop index (not autonomousTests.length) so nameless journeys
+      // that produce 0 tests don't collide on the same thread ID.
+      // journey.name is sanitised to 40 chars + whitespace→dash so the
+      // thread ID stays readable in the audit trail.
+      const jIdx = journeys.indexOf(journey);
+      const threadId = `${mainThreadId(run.id)}-j${jIdx}-${journey.name?.replace(/\s+/g, "-").slice(0, 40) || "unnamed"}`;
       let out;
       try {
         out = await runAutonomousThread(
@@ -857,7 +862,13 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     // half-empty test suite when the supervisor LLM is wobbly.
     const halfFailed = autonomousFailures >= Math.ceil(journeys.length / 2);
     if (autonomousTests.length === 0 || halfFailed) {
-      log(run, `↩️  Autonomous produced ${autonomousTests.length} tests (${autonomousFailures}/${journeys.length} journey failures) — falling back to linear pipeline for remaining coverage.`);
+      // Discard partial autonomous results and regenerate everything
+      // via the linear path. Keeping both would produce duplicates
+      // for journeys that succeeded autonomously AND get re-generated
+      // by `generateAllTests`. The downstream dedup pass (step 5)
+      // catches exact duplicates but not semantic near-duplicates
+      // (same journey, different wording), so a clean slate is safer.
+      log(run, `↩️  Autonomous produced ${autonomousTests.length} tests (${autonomousFailures}/${journeys.length} journey failures) — discarding partial results, falling back to full linear pipeline.`);
       genResult = await generateAllTests(
         effectiveClassifiedPages,
         journeys,

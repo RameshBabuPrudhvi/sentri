@@ -77,8 +77,11 @@ function markWeakWarningFired(threadKey) {
     return;
   }
   if (!threadKey) return;
-  // Map preserves insertion order — re-set bumps to most-recent. When
-  // the LRU is over capacity, evict the oldest entry (Map.keys().next()).
+  // Map preserves insertion order. Note: `Map.set()` on an existing
+  // key does NOT move it to the end — but this code path is only
+  // reached when `hasWeakWarningFired` returned false, so the same
+  // key is never re-set. Eviction uses FIFO (oldest insertion first)
+  // which is equivalent to LRU for write-once keys.
   weakWarningFiredByString.set(threadKey, true);
   if (weakWarningFiredByString.size > WEAK_WARNING_LRU_MAX) {
     const oldest = weakWarningFiredByString.keys().next().value;
