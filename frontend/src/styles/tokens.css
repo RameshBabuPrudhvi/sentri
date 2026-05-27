@@ -14,7 +14,29 @@
  * Layer: Settings (ITCSS)
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* ── Web fonts ────────────────────────────────────────────────────────────────
+ *
+ * Fonts are self-hosted via the `@fontsource/inter` and `@fontsource/jetbrains-mono`
+ * npm packages. The actual `@font-face` declarations are imported as JS side-effects
+ * in `frontend/src/main.jsx` (before `./index.css`) so Vite bundles the .woff2
+ * payloads into the build output and serves them from our own origin.
+ *
+ * Why not `@import url('https://fonts.googleapis.com/...')` here?
+ *   - GDPR: the Google Fonts CDN sees every visitor's IP + User-Agent on every
+ *     page load. EU deployments without a documented data-processing agreement
+ *     would be in breach (CJEU C-101/01 / Munich VG 2022 ruling).
+ *   - CSP: any hardening of `style-src` / `font-src` beyond `'self' data:` would
+ *     break the CSS at runtime. Self-hosting lets us tighten CSP without an
+ *     allowlist-by-vendor exception.
+ *   - Performance: the Google Fonts stylesheet is render-blocking and adds a
+ *     ~120ms DNS + TLS + 304 round-trip on cold loads. Self-hosting lets the
+ *     fonts share the same connection as the rest of the bundle.
+ *   - Offline / air-gapped: a self-hosted enterprise deploy with no outbound
+ *     internet would silently fall back to the next stack item (`-apple-system`,
+ *     `BlinkMacSystemFont`, `sans-serif`) and look subtly off.
+ *
+ * The five Inter weights (300/400/500/600/700) and two JetBrains Mono weights
+ * (400/500) match the previous Google Fonts URL exactly — no visual diff. */
 
 /* ── Light tokens (default) ─────────────────────────────────────────────────── */
 :root {

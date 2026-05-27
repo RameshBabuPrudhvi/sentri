@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **UX-001** — `useToast()` hook and `<ToastProvider>` at `frontend/src/context/ToastContext.jsx`. Single source of truth: `showToast(msg, type)` with `success` / `error` / `info` levels; error toasts linger 5s, success/info 3.5s; auto-dismiss with imperative `hideToast()` for early close; throws if called outside the provider. Unit tests at `frontend/src/context/__tests__/ToastContext.test.jsx`.
 
+### Changed
+
+- **SEC / Perf** — Web fonts (Inter, JetBrains Mono) self-hosted via `@fontsource` instead of `@import url('https://fonts.googleapis.com/...')`. The Google Fonts CDN saw every visitor's IP + User-Agent on every page load, blocking GDPR-compliant EU deployments (CJEU C-101/01 / Munich VG 2022) and preventing CSP hardening of `style-src` / `font-src` beyond `'self' data:`. Also removes a ~120ms render-blocking external request on cold loads and makes the app work in air-gapped enterprise deployments. Imports added to `frontend/src/main.jsx`; bundle size impact is offset by eliminating the external stylesheet round-trip.
+
 ## [1.9.0] — 2026-05-26
 
 ### Added

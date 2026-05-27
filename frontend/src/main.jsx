@@ -4,6 +4,25 @@ import * as Sentry from "@sentry/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App.jsx";
 import { queryClient } from "./queryClient";
+
+// Self-hosted web fonts — see the rationale block at the top of
+// `frontend/src/styles/tokens.css` (GDPR / CSP / perf / air-gapped).
+// `@fontsource/<family>/<weight>.css` registers ONE @font-face per weight and
+// ships only that .woff2 in the build output, so we don't pull in every
+// numeric weight (100..900) the npm package ships. The five Inter weights +
+// two JetBrains Mono weights match the previous Google Fonts URL exactly.
+// Loaded BEFORE `./index.css` so the `font-family: "Inter"` declarations in
+// tokens.css resolve to the registered face on first paint instead of
+// flashing the system fallback. `font-display: swap` is the default in the
+// `@fontsource` build so a missing weight still renders text immediately.
+import "@fontsource/inter/300.css";
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+
 import "./index.css";
 
 // INF-007: Sentry frontend init. No-op when `VITE_SENTRY_DSN` is unset — the
