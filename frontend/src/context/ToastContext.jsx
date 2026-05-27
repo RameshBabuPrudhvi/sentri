@@ -129,13 +129,22 @@ export function ToastProvider({ children }) {
           // hanging until the auto-dismiss timer fires, confusingly
           // suggesting the undo hasn't happened yet.
           //
+          // Dismiss order matters: we hide BEFORE invoking the handler, not
+          // after. The handler often calls `showToast(...)` itself to surface
+          // its outcome (e.g. ReviewQueue's Undo fires "Restored N tests").
+          // If we hid in a `finally` AFTER the handler, that `hideToast()`
+          // would run synchronously when the handler's promise resolves —
+          // tearing down the timer + visibility flag that the follow-up
+          // `showToast` just set, so the user would see no result feedback.
+          // Hiding first gives the handler a clean slate.
+          //
           // `await Promise.resolve(...)` lets the wrapper handle BOTH sync
           // and async onClick handlers uniformly: a sync handler that
-          // throws is caught by the `try`, and an async handler that
-          // rejects is awaited so the rejection lands in the `catch`
-          // instead of becoming an unhandled promise rejection. The
-          // `finally` still dismisses the toast either way.
+          // throws is caught, and an async handler that rejects is awaited
+          // so the rejection lands in the `catch` instead of becoming an
+          // unhandled promise rejection.
           onClick: async () => {
+            hideToast();
             try {
               await Promise.resolve(toast.action.onClick?.());
             } catch (err) {
@@ -144,8 +153,6 @@ export function ToastProvider({ children }) {
               // synthesize a generic one when nothing else handled it.
               // eslint-disable-next-line no-console
               console.error("Toast action handler failed:", err);
-            } finally {
-              hideToast();
             }
           },
         } : null}
