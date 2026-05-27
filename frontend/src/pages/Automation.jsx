@@ -78,9 +78,12 @@ export default function Automation() {
     // ProjectQualityCard callsites to `(msg, type)` in a follow-up commit
     // without breaking the page during the transition.
     if (msg && typeof msg === "object") {
-      showToast(msg.message ?? "", msg.type ?? "info");
+      const message = msg.message ?? "";
+      if (!message) return;
+      showToast(message, msg.type ?? "info");
       return;
     }
+    if (!msg) return;
     showToast(msg, type);
   }, [showToast]);
 

@@ -23,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Security** — Defence-in-depth XSS sanitization on AI-generated markdown rendered through `dangerouslySetInnerHTML` in `frontend/src/pages/AIChat.jsx`, `frontend/src/pages/ChatHistory.jsx`, and other consumers of `frontend/src/utils/markdown.js`. The hand-rolled parser was already XSS-safe by construction (every span is escaped via `escapeHtml()` before transforms; no `[text](url)` link rule exists to introduce attacker-controlled `href` / `src`), but the audit recommended defence-in-depth via `DOMPurify` with an explicit `ALLOWED_TAGS` / `ALLOWED_ATTR` allowlist. Catches future grammar expansions (e.g. adding link rendering) that might forget to guard `javascript:` URLs.
 
-### Fixed
-
 - **UI** — Generated Playwright code preview on `/review-queue` was mislabelled "TypeScript" in the code toolbar. Now correctly reads "JavaScript" to match the actual emitted language. (`frontend/src/pages/ReviewQueue.jsx`, audit §6.1)
 
 - **UX** — Bulk approve / reject on `/review-queue` now surfaces an inline **Undo** CTA on the success toast (industry pattern, matches Gmail / Linear / GitHub). Clicking Undo calls `bulkUpdateTests(projectId, ids, "restore")` per-project for every test that the forward action succeeded on, sending them back to `draft`. Partial-success undo skips the project groups whose forward action failed (it would 404 again). Toast linger time is extended to 5s when an action button is present so the user has time to react. Audit §6.1.

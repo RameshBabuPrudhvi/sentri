@@ -658,7 +658,6 @@ export default function ReviewQueue() {
     );
 
     const failedCount = results.filter(r => r.status === "rejected").length;
-    const successCount = ids.length - failedCount;
 
     // Capture the per-project breakdown of ids that DID succeed so the Undo
     // CTA can address only those (a partial-success Undo for the failed
@@ -668,6 +667,10 @@ export default function ReviewQueue() {
     Object.entries(byProject).forEach(([pid, pIds], i) => {
       if (results[i].status === "fulfilled") successByProject[pid] = pIds;
     });
+    // Count actual test IDs that succeeded — NOT `ids.length - failedCount`
+    // which mixes test-ID count with project-group count and inflates
+    // the number when a multi-test project group fails.
+    const successCount = Object.values(successByProject).reduce((n, arr) => n + arr.length, 0);
 
     if (failedCount > 0) {
       setBulkError(`${failedCount} project group${failedCount !== 1 ? "s" : ""} failed to ${action}. Others updated.`);

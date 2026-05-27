@@ -57,7 +57,7 @@ export default function IntegrationsSection() {
       load();
       window.history.replaceState(null, "", window.location.pathname);
     }
-  }, [load]);
+  }, [load, showToast]);
 
   function updateRow(projectId, patch) {
     setRows((prev) => prev.map((row) => row.projectId === projectId ? { ...row, ...patch } : row));

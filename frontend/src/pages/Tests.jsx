@@ -292,7 +292,11 @@ export default function Tests() {
         )
       );
       const failedCount = results.filter(r => r.status === "rejected").length;
-      const successCount = ids.length - failedCount;
+      // Count actual test IDs that succeeded — NOT `ids.length - failedCount`
+      // which mixes test-ID count with project-group count.
+      const successCount = Object.entries(byProject)
+        .filter((_, i) => results[i].status === "fulfilled")
+        .reduce((n, [, pIds]) => n + pIds.length, 0);
       if (failedCount > 0) {
         setBulkError(`Some tests failed to delete. The rest were removed successfully.`);
         setTimeout(() => setBulkError(null), 6000);

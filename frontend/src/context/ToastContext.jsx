@@ -31,7 +31,7 @@
  * form (currently only `ProjectQualityCard.jsx`) should be migrated to
  * `(msg, type)` in the same PR — see the audit task list.
  */
-import React, { createContext, useCallback, useContext, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import RunToast from "../components/project/RunToast.jsx";
 
 const ToastContext = createContext(null);
@@ -108,7 +108,7 @@ export function ToastProvider({ children }) {
   }, []);
 
   return (
-    <ToastContext.Provider value={{ showToast, hideToast }}>
+    <ToastContext.Provider value={useMemo(() => ({ showToast, hideToast }), [showToast, hideToast])}>
       {children}
       {/* RunToast is the existing visual primitive (bottom-right floating
           pill with a coloured status dot). Reused verbatim so this provider
