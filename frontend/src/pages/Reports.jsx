@@ -11,6 +11,7 @@ import StatCard from "../components/shared/StatCard";
 import StatusBadge from "../components/shared/StatusBadge";
 import PassFailChart from "../components/charts/PassFailChart";
 import PassRateBar from "../components/charts/PassRateBar";
+import EmptyState from "../components/shared/EmptyState.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
 
@@ -163,18 +164,28 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* No data state */}
+      {/* ONB-002 (audit §6.4): empty state via shared `<EmptyState>` primitive.
+          Three coached CTAs — `Run regression tests` is the primary path, with
+          `Create a project` for first-run users and `Browse tests` as the
+          escape hatch. Mirrors the coaching pattern used by Runs / Tests /
+          Projects so the empty experience is uniform across the workspace. */}
       {!hasData ? (
-        <div className="card empty-state">
-          <BarChart2 size={36} color="var(--text3)" style={{ marginBottom: 14 }} />
-          <div className="empty-state-title">No test runs yet</div>
-          <div className="empty-state-desc">
-            Run tests to start generating reports and analytics.
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate("/tests")}>
-            Go to Tests
-          </button>
-        </div>
+        projects.length === 0 ? (
+          <EmptyState
+            icon={<BarChart2 size={32} color="var(--accent)" />}
+            title="No test runs yet"
+            description="Create your first project to start crawling and generating tests. Reports light up automatically as runs complete."
+            action={{ label: "Create a project", onClick: () => navigate("/projects/new") }}
+          />
+        ) : (
+          <EmptyState
+            icon={<BarChart2 size={32} color="var(--accent)" />}
+            title="No test runs yet"
+            description="You have projects configured but no runs have completed. Run your approved regression suite or generate new tests to see analytics here."
+            action={{ label: "Run regression tests", onClick: () => navigate("/tests") }}
+            secondaryAction={{ label: "Browse tests", onClick: () => navigate("/tests"), variant: "ghost" }}
+          />
+        )
       ) : (
         <>
           {/* Stats row */}

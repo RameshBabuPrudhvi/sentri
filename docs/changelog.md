@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **UX** — Bulk approve / reject on `/review-queue` now surfaces an inline **Undo** CTA on the success toast (industry pattern, matches Gmail / Linear / GitHub). Clicking Undo calls `bulkUpdateTests(projectId, ids, "restore")` per-project for every test that the forward action succeeded on, sending them back to `draft`. Partial-success undo skips the project groups whose forward action failed (it would 404 again). Toast linger time is extended to 5s when an action button is present so the user has time to react. Audit §6.1.
 
+- **UX** — Coached empty states on `/reports` and `/projects/:id` review tab. Previously bare text ("No test runs yet" / "No drafts") with no recovery path; now every empty branch surfaces a primary CTA. `frontend/src/pages/Reports.jsx` migrated from bare `.empty-state` markup to the shared `<EmptyState>` primitive — first-run users see `Create a project`, existing-projects-no-runs users see `Run regression tests` + `Browse tests`. `frontend/src/pages/ProjectDetail.jsx` review-tab filter results branch per-filter: draft-empty → "Inbox zero" with `Generate more tests →` + `Audit approvals` CTAs (matches `frontend/src/pages/ReviewQueue.jsx`'s coached branch); approved-empty → `Review N drafts`; rejected-empty → status copy; filtered-empty → `Clear filters`. New `.pd-empty-sm--coached` BEM modifier in `frontend/src/styles/pages/project-detail.css`. Audit §6.4.
+
 ## [1.9.0] — 2026-05-26
 
 ### Added

@@ -478,8 +478,79 @@ export default function ProjectDetail() {
 
               <div className="card pd-review-table">
                 {filteredByReview.length === 0 ? (
-                  <div className="pd-empty-sm">
-                    No {reviewFilter !== "all" ? reviewFilter : ""} tests
+                  // ONB-002 (audit §6.4): the bare "No drafts" text used to
+                  // sit here with no recovery path. Per-filter coaching:
+                  // - draft empty → reviewer cleared the inbox (Inbox-zero
+                  //   moment). Suggest generating more tests OR auditing
+                  //   recent approvals, matching ReviewQueue's branch at
+                  //   `frontend/src/pages/ReviewQueue.jsx:973-1007`.
+                  // - approved/rejected empty → just an empty filter; offer
+                  //   to switch back to Draft or All.
+                  // - search/category active and empty → coach to clear.
+                  <div className="pd-empty-sm pd-empty-sm--coached">
+                    {reviewFilter === "draft" ? (
+                      <>
+                        <div className="pd-empty-sm__title">Inbox zero — all drafts reviewed</div>
+                        <div className="pd-empty-sm__desc">
+                          Nice work. Generate more tests or audit recent approvals to keep coverage growing.
+                        </div>
+                        <div className="pd-empty-sm__actions">
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => navigate(`/projects/${id}/test-lab`)}
+                          >
+                            Generate more tests →
+                          </button>
+                          {testCounts.approved > 0 && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => { setReviewFilter("approved"); setReviewPage(1); }}
+                            >
+                              Audit approvals
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    ) : reviewFilter === "approved" ? (
+                      <>
+                        <div className="pd-empty-sm__title">No approved tests yet</div>
+                        <div className="pd-empty-sm__desc">
+                          Tests move here once a reviewer approves them. Start with the Draft queue.
+                        </div>
+                        <button
+                          className="btn btn-primary btn-sm pd-empty-sm__cta"
+                          onClick={() => { setReviewFilter("draft"); setReviewPage(1); }}
+                          disabled={testCounts.draft === 0}
+                        >
+                          Review {testCounts.draft} draft{testCounts.draft !== 1 ? "s" : ""}
+                        </button>
+                      </>
+                    ) : reviewFilter === "rejected" ? (
+                      <>
+                        <div className="pd-empty-sm__title">No rejected tests</div>
+                        <div className="pd-empty-sm__desc">
+                          Tests a reviewer rejects show up here. The queue is currently clean.
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="pd-empty-sm__title">No tests match this filter</div>
+                        <div className="pd-empty-sm__desc">
+                          Try clearing the category filter or search box.
+                        </div>
+                        <button
+                          className="btn btn-ghost btn-sm pd-empty-sm__cta"
+                          onClick={() => {
+                            setReviewFilter("draft");
+                            setCategoryFilter("all");
+                            setSearchInput("");
+                            setReviewPage(1);
+                          }}
+                        >
+                          Clear filters
+                        </button>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <table className="table">
