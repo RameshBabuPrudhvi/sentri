@@ -95,6 +95,56 @@ describe("ToastContext", () => {
     expect(pill).toHaveAttribute("data-toast-type", "success");
   });
 
+  it("renders the action button when `action` is passed and fires the handler", () => {
+    function ActionHarness() {
+      const { showToast } = useToast();
+      return (
+        <button onClick={() => showToast("Approved 5 tests", "success", {
+          action: { label: "Undo", onClick: () => { window.__undoFired = true; } },
+        })}>fire-action</button>
+      );
+    }
+    delete window.__undoFired;
+    render(
+      <MemoryRouter>
+        <ToastProvider><ActionHarness /></ToastProvider>
+      </MemoryRouter>
+    );
+    act(() => screen.getByText("fire-action").click());
+    const undoBtn = screen.getByRole("button", { name: "Undo" });
+    expect(undoBtn).toBeInTheDocument();
+    act(() => undoBtn.click());
+    expect(window.__undoFired).toBe(true);
+    // Clicking the action also dismisses the toast — the ToastContext
+    // wraps the caller's handler to call hideToast() after.
+    const pill = screen.getByText("Approved 5 tests").closest(".rt-toast");
+    expect(pill).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("action toast lingers for the longer (error) 5s window", () => {
+    function LingerHarness() {
+      const { showToast } = useToast();
+      return (
+        <button onClick={() => showToast("Done", "success", {
+          action: { label: "Undo", onClick: () => {} },
+        })}>fire</button>
+      );
+    }
+    render(
+      <MemoryRouter>
+        <ToastProvider><LingerHarness /></ToastProvider>
+      </MemoryRouter>
+    );
+    act(() => screen.getByText("fire").click());
+    const pill = screen.getByText("Done").closest(".rt-toast");
+    // A plain success toast would have dismissed by 3.5s; an action toast
+    // gets the error-duration treatment (5s) so the user has time to react.
+    act(() => vi.advanceTimersByTime(3500));
+    expect(pill).toHaveAttribute("aria-hidden", "false");
+    act(() => vi.advanceTimersByTime(1500));
+    expect(pill).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("useToast() throws outside the provider", () => {
     // Suppress React's expected-error console noise for this assertion.
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});

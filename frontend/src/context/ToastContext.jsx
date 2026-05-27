@@ -50,25 +50,48 @@ export function ToastProvider({ children }) {
     visible: false,
     showLink: false,
     runId: null,
+    action: null,
   });
   const timerRef = useRef(null);
 
   /**
-   * Show a toast. Pass either `(msg, type)` or `(msg, type, runId)` — the
-   * `runId` form is used by ProjectDetail.jsx's "Regression run started"
-   * toast and renders a "View run" button in the bottom-right of the toast.
+   * Show a toast.
+   *
+   * Three call shapes — kept backward-compatible with every existing site:
+   *   - `showToast("Saved", "success")`                — plain
+   *   - `showToast("Run started", "info", runId)`      — adds "View run" CTA
+   *   - `showToast("47 tests approved", "success", { action: { label: "Undo", onClick: () => ... } })`
+   *
+   * The third arg discriminates on type: a string is treated as a runId for
+   * the "View run" link (legacy), an object as a generic options bag. Action
+   * toasts linger for the error-toast duration (5s) regardless of `type` so
+   * the user has time to react — a 3.5s success-toast window is too short
+   * for an "Undo" decision on a bulk action.
    *
    * @param {string} msg
    * @param {ToastType} [type="info"]
-   * @param {string|null} [runId=null]
+   * @param {string|{action?:{label:string,onClick:Function},runId?:string}|null} [opts=null]
    */
-  const showToast = useCallback((msg, type = "info", runId = null) => {
+  const showToast = useCallback((msg, type = "info", opts = null) => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    setToast({ msg, type, visible: true, showLink: !!runId, runId });
-    const dur = TIMING[type] ?? TIMING.info;
+    // Normalise the legacy `runId` string form vs. the object form. Keeping
+    // the positional contract avoids touching the ~30 existing call sites.
+    const runId = typeof opts === "string" ? opts : opts?.runId ?? null;
+    const action = (opts && typeof opts === "object" && opts.action) ? opts.action : null;
+    setToast({
+      msg,
+      type,
+      visible: true,
+      showLink: !!runId,
+      runId,
+      action,
+    });
+    // Actionable toasts (Undo / View run) get a longer window so the user
+    // can actually react. Plain success/info still auto-dismiss at 3.5s.
+    const dur = action ? TIMING.error : (TIMING[type] ?? TIMING.info);
     timerRef.current = setTimeout(() => {
       setToast((t) => ({ ...t, visible: false }));
       timerRef.current = null;
@@ -99,6 +122,16 @@ export function ToastProvider({ children }) {
         onViewRun={toast.showLink ? () => {} : undefined}
         runId={toast.runId}
         onDismiss={hideToast}
+        action={toast.action ? {
+          label: toast.action.label,
+          // Wrap the caller's handler so clicking the action also dismisses
+          // the toast — without this, an "Undo" click would leave the toast
+          // hanging until the auto-dismiss timer fires, confusingly
+          // suggesting the undo hasn't happened yet.
+          onClick: () => {
+            try { toast.action.onClick?.(); } finally { hideToast(); }
+          },
+        } : null}
       />
     </ToastContext.Provider>
   );

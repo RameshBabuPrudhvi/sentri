@@ -87,7 +87,10 @@ function CodeView({ code }) {
   return (
     <div className="rq-code-wrap">
       <div className="rq-code-toolbar">
-        <span className="rq-code-lang">TypeScript</span>
+        {/* Generated Playwright code is JavaScript — the chip used to read
+            "TypeScript" which was incorrect and misled reviewers about
+            what language the snippet would run as. Audit §6.1. */}
+        <span className="rq-code-lang">JavaScript</span>
         <button
           className="btn btn-ghost btn-xs rq-code-toolbar__copy"
           onClick={handleCopy}
@@ -656,6 +659,16 @@ export default function ReviewQueue() {
 
     const failedCount = results.filter(r => r.status === "rejected").length;
     const successCount = ids.length - failedCount;
+
+    // Capture the per-project breakdown of ids that DID succeed so the Undo
+    // CTA can address only those (a partial-success Undo for the failed
+    // group would just 404 again). `successByProject` is referenced by
+    // closure inside the toast's `action.onClick` below.
+    const successByProject = {};
+    Object.entries(byProject).forEach(([pid, pIds], i) => {
+      if (results[i].status === "fulfilled") successByProject[pid] = pIds;
+    });
+
     if (failedCount > 0) {
       setBulkError(`${failedCount} project group${failedCount !== 1 ? "s" : ""} failed to ${action}. Others updated.`);
       setTimeout(() => setBulkError(null), 5000);
@@ -663,7 +676,33 @@ export default function ReviewQueue() {
     }
     if (successCount > 0) {
       const verb = action === "approve" ? "approved → regression" : "rejected";
-      showToast(`${successCount} test${successCount !== 1 ? "s" : ""} ${verb}`, "success");
+      // Industry-standard Undo affordance (Gmail / Linear / GitHub) — the
+      // CTA fires `bulkUpdateTests(pid, ids, "restore")` which sends every
+      // affected test back to `draft`. Same `Promise.allSettled` fan-out
+      // pattern as the forward action so a partial Undo failure on one
+      // project doesn't cancel the others. Toast dismisses itself when the
+      // Undo handler completes (wired at the ToastContext layer).
+      showToast(`${successCount} test${successCount !== 1 ? "s" : ""} ${verb}`, "success", {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const undoResults = await Promise.allSettled(
+              Object.entries(successByProject).map(([pid, pIds]) =>
+                api.bulkUpdateTests(pid, pIds, "restore"),
+              ),
+            );
+            const undoFailed = undoResults.filter(r => r.status === "rejected").length;
+            invalidateReviewQueueCache();
+            invalidateProjectDataCache();
+            invalidateAutoApprovalsCache();
+            if (undoFailed > 0) {
+              showToast(`Undo partially failed (${undoFailed} project group${undoFailed !== 1 ? "s" : ""}).`, "error");
+            } else {
+              showToast(`Restored ${successCount} test${successCount !== 1 ? "s" : ""} to draft`, "info");
+            }
+          },
+        },
+      });
     }
 
     invalidateReviewQueueCache();

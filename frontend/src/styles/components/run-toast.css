@@ -74,6 +74,22 @@
      longer messages. */
 }
 
+/* Inline action CTA (Undo / Retry / etc.) — same size/border treatment as
+   the View-run button but tinted with the active toast colour so the
+   primary recovery action reads as the most prominent thing in the row.
+   Tint is sourced from the `data-toast-type` attr via the dot colour
+   declarations above; we re-bind via `currentColor` on the button text
+   and a tinted background. */
+.rt-toast__action-btn {
+  margin-left: 8px;
+  pointer-events: auto;
+  font-weight: 600;
+}
+
+.rt-toast[data-toast-type="success"] .rt-toast__action-btn { color: var(--green); }
+.rt-toast[data-toast-type="error"]   .rt-toast__action-btn { color: var(--red);   }
+.rt-toast[data-toast-type="info"]    .rt-toast__action-btn { color: var(--accent); }
+
 /* "View run" CTA — reuses `.btn.btn-ghost.btn-xs` from components.css
    for size/border/hover treatment; this rule only sets the
    margin-left + pointer-events so the button keeps working while the
