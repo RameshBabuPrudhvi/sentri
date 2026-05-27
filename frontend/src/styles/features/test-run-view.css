@@ -160,3 +160,13 @@
 .trv-running__no-steps { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px; color: var(--text3); }
 .trv-running__no-steps-spinner { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--blue); animation: spin 0.9s linear infinite; }
 .trv-running__no-steps-text { font-size: 0.82rem; }
+
+/* ── Remaining inline-style sweep (audit §7.5) ─────────────────────────────── */
+/* Pending-row skeleton shimmer bars */
+.trv-pending-skeleton__bar1 { height: 10px; border-radius: 4px; width: 65%; }
+.trv-pending-skeleton__bar2 { height: 8px; border-radius: 4px; width: 30%; }
+/* OutcomeBanner spans both grid columns */
+.trv-outcome-full { grid-column: 1 / -1; }
+/* Chrome traffic-light dots — the three fixed colours are iterated from
+   an array in JSX, so they stay as inline `background` per AGENT.md §127
+   (loop-data). No class needed — already on `.trv-chrome__light`. */

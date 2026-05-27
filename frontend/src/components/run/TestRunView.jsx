@@ -461,8 +461,8 @@ export default function TestRunView({ run, frames = [] }) {
                     </>
                   ) : (
                     <div className="trv-pending-skeleton">
-                      <div className="skeleton" style={{ height: 10, borderRadius: 4, width: "65%" }} />
-                      <div className="skeleton" style={{ height: 8, borderRadius: 4, width: "30%" }} />
+                      <div className="skeleton trv-pending-skeleton__bar1" />
+                      <div className="skeleton trv-pending-skeleton__bar2" />
                     </div>
                   )}
                 </div>
@@ -529,7 +529,7 @@ export default function TestRunView({ run, frames = [] }) {
           subtitle={failed > 0
             ? "Review failing tests, fix the issues, then re-run to verify."
             : "Your regression suite is green. No action needed."}
-          style={{ gridColumn: "1 / -1" }}
+          className="trv-outcome-full"
         >
           {failed > 0 && run?.projectId && (
             <button
