@@ -3,7 +3,31 @@
  * @description Playwright/JS syntax highlighter for the code editor.
  * Tokenises the code first so strings/comments are never double-highlighted.
  * Returns an HTML string safe for dangerouslySetInnerHTML.
+ *
+ * Security — two-layer defence (audit §3.2):
+ *   1. `escHtml()` escapes `&` / `<` / `>` on every span of user-supplied
+ *      source before the keyword/regex transforms run, so the tokeniser
+ *      itself cannot reintroduce attacker-controlled HTML.
+ *   2. `DOMPurify` is applied to the assembled HTML as defence-in-depth
+ *      against future regressions in the hand-rolled escaper (e.g. a new
+ *      KEYWORDS pattern that accidentally captures `<` again). Allowlist
+ *      is `<span>` + `style` — the only tag/attr this function emits.
  */
+import DOMPurify from "dompurify";
+
+/**
+ * Allowlist mirrors exactly what `highlightFragment` + the token map emit:
+ * a tree of `<span style="color:#xxx[;font-style:italic]">…</span>` nodes.
+ * DOMPurify's built-in CSS filter still neutralises `expression()` /
+ * `javascript:url()` / `@import` inside the `style` attribute if a future
+ * change ever lets attacker-controlled text reach the style position.
+ */
+const PURIFY_CONFIG = {
+  ALLOWED_TAGS: ["span"],
+  ALLOWED_ATTR: ["style"],
+  ALLOW_DATA_ATTR: false,
+  KEEP_CONTENT: true,
+};
 
 /**
  * @param {string} code - JavaScript/TypeScript source code.
@@ -40,9 +64,16 @@ export default function highlightCode(code) {
       .replace(ARROWS,   '<span style="color:#89ddff">$1</span>');
   }
 
-  return tokens.map(t => {
+  const html = tokens.map(t => {
     if (t.type === "comment") return `<span style="color:#546174;font-style:italic">${escHtml(t.text)}</span>`;
     if (t.type === "string")  return `<span style="color:#c3e88d">${escHtml(t.text)}</span>`;
     return highlightFragment(t.text);
   }).join("");
+
+  // Audit §3.2 — belt-and-braces sanitization. The tokeniser is already
+  // escape-first safe by construction (every user-supplied span passes
+  // through `escHtml` before any transform), so this strips nothing in
+  // practice today. It exists to catch a future regression where a new
+  // highlighting rule forgets the escape step.
+  return DOMPurify.sanitize(html, PURIFY_CONFIG);
 }

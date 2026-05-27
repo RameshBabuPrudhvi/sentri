@@ -11,6 +11,20 @@ import { cleanTestName } from "../../utils/formatTestName.js";
 import { fmtMs, fmtBytes } from "../../utils/formatters.js";
 import { escapeHtml } from "../../utils/markdown.js";
 import { api } from "../../api.js";
+import DOMPurify from "dompurify";
+
+// Audit §3.2 — DOM-tree attribute strings are built from AI/crawler-supplied
+// attribute keys + values. Keys/values are already `escapeHtml`-wrapped at the
+// build site below, but we additionally route the assembled HTML through
+// DOMPurify as defence-in-depth against a future regression in `escapeHtml`
+// or in the attribute-rendering loop. Allowlist mirrors exactly what the loop
+// emits: `<span style="color:#xxx">…</span>` only.
+const DOM_ATTR_PURIFY_CONFIG = {
+  ALLOWED_TAGS: ["span"],
+  ALLOWED_ATTR: ["style"],
+  ALLOW_DATA_ATTR: false,
+  KEEP_CONTENT: true,
+};
 
 // ─── Infer per-step status ────────────────────────────────────────────────────
 // Preferred path: `result.stepStatuses` is the authoritative array emitted by
@@ -711,13 +725,17 @@ function DomNode({ node, depth = 0 }) {
 
   // Escape AI-supplied attribute keys/values before interpolation — otherwise
   // a malicious site under test could inject markup via dangerouslySetInnerHTML
-  // below (e.g. an attribute value of `"><script>…</script>`).
-  const attrs = Object.entries(node.attrs || {})
+  // below (e.g. an attribute value of `"><script>…</script>`). The assembled
+  // HTML is then run through DOMPurify with the `<span>` + `style`-only
+  // allowlist (audit §3.2) as defence-in-depth against a regression in
+  // `escapeHtml`.
+  const rawAttrs = Object.entries(node.attrs || {})
     .map(([k, v]) =>
       ` <span style="color:#f59e0b">${escapeHtml(String(k))}</span>=` +
       `<span style="color:#34d399">"${escapeHtml(String(v))}"</span>`
     )
     .join("");
+  const attrs = DOMPurify.sanitize(rawAttrs, DOM_ATTR_PURIFY_CONFIG);
 
   const hasChildren = node.children?.length > 0;
 
