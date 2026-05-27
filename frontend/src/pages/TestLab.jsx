@@ -65,27 +65,20 @@ import {
   persistRun,
   clearPersistedRun,
 } from "../utils/testLabPersistence.js";
-import {
-  ACCEPTED_EXTENSIONS,
-  MAX_ATTACHMENT_SIZE,
-  MAX_TOTAL_ATTACHMENT,
-  isTextMime,
-} from "../utils/testLabAttachments.js";
+// `ACCEPTED_EXTENSIONS` is the only attachment constant the page still
+// references directly (it flows into `<TestLabConfigPanel>`'s file-input
+// accept attr). The MIME guard + size caps are consumed inside
+// `useTestLabAttachments`, so the page no longer imports them.
+import { ACCEPTED_EXTENSIONS } from "../utils/testLabAttachments.js";
+// Pass-3 decomposition — attachment state + env fetch + outcome split.
+// Each owns one concern and ships its own JSDoc; the page is now ~140
+// lines lighter and easier to read end-to-end.
+import useTestLabAttachments from "../hooks/useTestLabAttachments.js";
+import useProjectEnvironments from "../hooks/useProjectEnvironments.js";
+import { splitGeneratedOutcome } from "../utils/generatedOutcome.js";
 
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-// GAP-005 (audit, fix) — `STEP_TO_AGENT_ROLE` removed in favour of the
-// shared `getStageAgentRoles` helper imported above. The old map was both
-// incomplete (only `planner` + `author`, missing `explorer` and 3 other
-// configurable roles) and wrong on step 3 (the real call site is
-// `backend/src/pipeline/intentClassifier.js#L158` with `explorer`, plus
-// `journeyGenerator.js#L218` with `planner` — multi-agent stage).
-
-// Coverage / perspective / quality / test-count / profile option lists used to
-// live here; they have moved to the shared <TestConfig /> component which
-// composes them from `frontend/src/config/testDialsConfig.js` (the same
-// canonical source the legacy CrawlProjectModal / GenerateTestModal used).
+// ── Module-scoped helpers ────────────────────────────────────────────────────
 
 const REQ_EXAMPLES = [
   "User login with valid credentials",
@@ -103,35 +96,6 @@ const REQ_EXAMPLES = [
 // Module-scoped so React's dependency analysis doesn't see a new function
 // reference every render.
 const isGenerationRun = (r) => r.type === "crawl" || r.type === "generate";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-// All previously-inline helpers moved out per audit §3.1:
-//   - `loadPersistedRun` / `persistRun` / `clearPersistedRun` / `STORAGE_KEY`
-//     / `LOG_CAP` → `frontend/src/utils/testLabPersistence.js`
-//   - `ProjIcon` + `avatarStyle` → `frontend/src/components/test-lab/ProjIcon.jsx`
-//   - `PipelinePanel` + `PIPELINE_STAGES` →
-//     `frontend/src/components/test-lab/PipelinePanel.jsx`
-//   - `LiveLog` → `frontend/src/components/test-lab/LiveLog.jsx`
-//   - `QueueRow` → `frontend/src/components/test-lab/QueueRow.jsx`
-//   - `isTextMime` + attachment caps → `frontend/src/utils/testLabAttachments.js`
-//
-// `stageStatus` (status derivation for the pipeline) continues to live in
-// `frontend/src/utils/pipelineState.js` as the single source of truth shared
-// with `AgentConversation`.
-
-// ── (NarrativeFeed removed — see `frontend/src/components/ai/AgentConversation.jsx`)
-//
-// Task 3 replaced the inline single-narrator NarrativeFeed with the
-// multi-agent AgentConversation transcript. The supporting NARRATIVE_STAGES
-// array (per-stage line scripts) + the resolveNarrativeLine helper + the
-// `tl-nf-*` CSS in `pages/test-lab.css` are all dead code now and removed.
-// AgentConversation is imported above and rendered below in place of
-// `<NarrativeFeed>`.
-
-// (NARRATIVE_STAGES + resolveNarrativeLine removed — superseded by
-// AgentConversation's per-agent TURN_TEMPLATES.)
-
-// (NarrativeFeed body removed — replaced by AgentConversation.)
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -166,13 +130,34 @@ export default function TestLab() {
   // at submit time (matches GenerateTestModal's old behaviour, just gives the
   // user a chance to fix a noisy auto-derived name).
   const [testName, setTestName]           = useState("");
-  // Plain-text attachments folded into the AI prompt's `description`. Mirrors
-  // GenerateTestModal — same 40 KB / 45 KB caps, same MIME allowlist.
-  const [attachments, setAttachments]     = useState([]); // [{ name, content }]
-  const [showImportIssue, setShowImportIssue] = useState(false);
-  const [importIssueText, setImportIssueText] = useState("");
-  const fileInputRef    = useRef(null);
   const requirementRef  = useRef(null);
+  // Page-level error banner (composer + launch surface). Declared up
+  // here because `useTestLabAttachments` below needs `setError` for
+  // file-validation failures.
+  const [error, setError]                 = useState(null);
+
+  // Attachment state + handlers (file upload, Jira import, dedup, MIME
+  // guard, binary detection). Owned by `useTestLabAttachments` —
+  // `setError` flows in so the hook can surface validation failures
+  // through the page's existing error banner; `setTestName` /
+  // `setRequirement` / `clearError` are wired so the Import-issue panel
+  // can mutate the launch form on commit.
+  const {
+    attachments,
+    showImportIssue,
+    setShowImportIssue,
+    importIssueText,
+    setImportIssueText,
+    fileInputRef,
+    handleFileSelect,
+    removeAttachment,
+    handleImportIssue,
+  } = useTestLabAttachments({
+    setError,
+    setTestName,
+    setRequirement,
+    clearError: () => setError(null),
+  });
 
   // ── Run state ──
   // Rehydrate from sessionStorage so navigating away and back resumes the live
@@ -186,7 +171,8 @@ export default function TestLab() {
   const [launching, setLaunching]   = useState(false);
   const [innerTab, setInnerTab]     = useState("pipeline");
   const [stopLoading, setStopLoading] = useState(false);
-  const [error, setError]           = useState(null);
+  // `error` is declared up by the config-state block so `useTestLabAttachments`
+  // can wire `setError` for file-validation failures.
 
   // G9 — parallel-runs state. Lives ALONGSIDE the single-run state above
   // during the migration window. Every launch / attach / dismiss handler
@@ -250,21 +236,10 @@ export default function TestLab() {
   // bounce back to the Tests page to start a recording session.
   const [showRecorder, setShowRecorder] = useState(false);
 
-  // ── DIF-012: per-project environments (crawl + generate + recorder) ──
-  // Fetched lazily on project change; viewer roles get a 403 which we swallow
-  // (the picker hides itself when the list is empty). `environmentId === ""`
-  // means "default — use project.url"; the API call omits the field entirely.
-  const [environments, setEnvironments] = useState([]);
-  const [environmentId, setEnvironmentId] = useState("");
-  useEffect(() => {
-    if (!selectedId) { setEnvironments([]); setEnvironmentId(""); return; }
-    let cancelled = false;
-    setEnvironmentId("");
-    api.getProjectEnvironments(selectedId)
-      .then((rows) => { if (!cancelled) setEnvironments(Array.isArray(rows) ? rows : []); })
-      .catch(() => { if (!cancelled) setEnvironments([]); }); // 403 for viewers — clutter-free
-    return () => { cancelled = true; };
-  }, [selectedId]);
+  // DIF-012: per-project environments (crawl + generate + recorder).
+  // Fetch lifecycle + viewer-403 swallow + project-switch reset all live
+  // in `useProjectEnvironments` — the page just consumes the tuple.
+  const [environments, environmentId, setEnvironmentId] = useProjectEnvironments(selectedId);
 
   // ── Seed selected project from route / project list ──
   // `useProjectData` owns the actual fetch; this effect just syncs the
@@ -327,74 +302,11 @@ export default function TestLab() {
     return () => clearTimeout(t);
   }, [tab, activeRun]);
 
-  // ── Attachment helpers ──
-  // Read user-supplied text files into memory so we can fold them into the
-  // requirement when launching. Each file is MIME-checked and binary-scanned
-  // (>5% non-printable bytes in the first 1 KB → reject) before being added,
-  // and we strip common prompt-injection markers (matches the backend
-  // `testDials.js` sanitisation).
-  function handleFileSelect(e) {
-    const files = Array.from(e.target.files || []);
-    e.target.value = ""; // allow re-selecting the same file after removal
-    for (const file of files) {
-      if (!isTextMime(file)) {
-        setError(`"${file.name}" appears to be a binary file (${file.type || "unknown type"}). Only text-based files are supported.`);
-        continue;
-      }
-      if (file.size > MAX_ATTACHMENT_SIZE) {
-        setError(`"${file.name}" is too large (${Math.round(file.size / 1000)} KB). Max is 40 KB per file.`);
-        continue;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const raw = reader.result;
-        const sample = raw.slice(0, 1024);
-        const nonPrintable = [...sample].filter(c => {
-          const code = c.charCodeAt(0);
-          return code < 32 && code !== 9 && code !== 10 && code !== 13;
-        }).length;
-        if (sample.length > 0 && nonPrintable / sample.length > 0.05) {
-          setError(`"${file.name}" contains binary data and cannot be used as a text attachment.`);
-          return;
-        }
-        const content = raw
-          .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
-          .replace(/```/g, "");
-        setAttachments(prev => {
-          if (prev.some(a => a.name === file.name)) return prev;
-          const totalSize = prev.reduce((n, a) => n + a.content.length, 0) + content.length;
-          if (totalSize > MAX_TOTAL_ATTACHMENT) {
-            setError("Total attachment size would exceed 45 KB. Remove an existing file first.");
-            return prev;
-          }
-          return [...prev, { name: file.name, content }];
-        });
-      };
-      reader.onerror = () => setError(`Failed to read "${file.name}".`);
-      reader.readAsText(file);
-    }
-  }
-
-  function removeAttachment(fileName) {
-    setAttachments(prev => prev.filter(a => a.name !== fileName));
-  }
-
-  // Parse pasted Jira issue text into name + description. Accepts:
-  //   "PROJ-123 Login fails for SSO users\nAs a user…"
-  //   "Login fails for SSO users\nAs a user…"
-  function handleImportIssue() {
-    const raw = importIssueText.trim();
-    if (!raw) return;
-    const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
-    const firstLine = lines[0] || "";
-    const parsedName = firstLine.replace(/^[A-Z][A-Z0-9]+-\d+\s*[-:.]?\s*/, "").trim();
-    const parsedDesc = lines.slice(1).join("\n").trim();
-    if (parsedName) setTestName(parsedName);
-    if (parsedDesc) setRequirement(prev => prev ? `${prev}\n\n${parsedDesc}` : parsedDesc);
-    setImportIssueText("");
-    setShowImportIssue(false);
-    if (error) setError(null);
-  }
+  // Attachment helpers — `handleFileSelect`, `removeAttachment`,
+  // `handleImportIssue` are owned by `useTestLabAttachments` (see the
+  // hook call up by the config-state block). Destructured above; the
+  // bodies of those handlers live in
+  // `frontend/src/hooks/useTestLabAttachments.js`.
 
   // ── SSE handler for active run ──
   // G9 — every state write here mirrors into the parallel-runs Maps so the
@@ -1094,38 +1006,15 @@ export default function TestLab() {
   const isRunFailed = runStatus === "failed" || runStatus === "aborted";
   const ps          = runData?.pipelineStats || {};
 
-  // ── Split generated-test outcomes (drafts vs auto-approved) ────────────
-  // The run payload reports `testsGenerated` as a single count and the SSE
-  // `done` event only carries that total — it has no per-outcome breakdown.
-  // Without splitting, the completion banner labels every test a "draft"
-  // even when the project's auto-approval threshold cleared some of them,
-  // contradicting what the user sees the moment they land in Review Queue.
-  //
-  // `runData.tests` is the canonical array of test IDs persisted on the run
-  // row (see `backend/src/database/repositories/runRepo.js#INSERT_COLS`),
-  // and `allTests` (from `useProjectData`) already carries the authoritative
-  // `reviewStatus` + `approvalSource` columns refreshed by the
-  // `invalidateProjectDataCache()` we fire on the SSE done event. So the
-  // split is a pure client-side derivation against data we already have.
-  const generatedOutcome = useMemo(() => {
-    const total = runData?.testsGenerated ?? 0;
-    const ids = Array.isArray(runData?.tests) ? runData.tests : [];
-    if (!ids.length || !allTests.length) {
-      // Fall back to the legacy "treat as drafts" shape until the tests
-      // cache refreshes — this matches pre-fix behaviour and avoids
-      // flashing "0 drafts" while the refetch is in flight.
-      return { total, drafts: total, autoApproved: 0 };
-    }
-    const idSet = new Set(ids);
-    let drafts = 0;
-    let autoApproved = 0;
-    for (const t of allTests) {
-      if (!idSet.has(t.id)) continue;
-      if (t.reviewStatus === "approved" && t.approvalSource === "auto") autoApproved++;
-      else if (!t.reviewStatus || t.reviewStatus === "draft") drafts++;
-    }
-    return { total, drafts, autoApproved };
-  }, [runData?.testsGenerated, runData?.tests, allTests]);
+  // Split generated-test outcomes (drafts vs auto-approved) — derivation
+  // lives in `frontend/src/utils/generatedOutcome.js`. See that file's
+  // module JSDoc for the rationale (run payload only carries a single
+  // total, so banner copy would mislabel auto-approved tests as drafts
+  // without this split).
+  const generatedOutcome = useMemo(
+    () => splitGeneratedOutcome(runData, allTests),
+    [runData?.testsGenerated, runData?.tests, allTests],
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
