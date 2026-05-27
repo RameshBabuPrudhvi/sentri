@@ -98,6 +98,7 @@ export function ToastProvider({ children }) {
         visible={toast.visible}
         onViewRun={toast.showLink ? () => {} : undefined}
         runId={toast.runId}
+        onDismiss={hideToast}
       />
     </ToastContext.Provider>
   );
