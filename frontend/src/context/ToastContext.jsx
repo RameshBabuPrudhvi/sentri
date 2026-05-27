@@ -128,8 +128,25 @@ export function ToastProvider({ children }) {
           // the toast — without this, an "Undo" click would leave the toast
           // hanging until the auto-dismiss timer fires, confusingly
           // suggesting the undo hasn't happened yet.
-          onClick: () => {
-            try { toast.action.onClick?.(); } finally { hideToast(); }
+          //
+          // `await Promise.resolve(...)` lets the wrapper handle BOTH sync
+          // and async onClick handlers uniformly: a sync handler that
+          // throws is caught by the `try`, and an async handler that
+          // rejects is awaited so the rejection lands in the `catch`
+          // instead of becoming an unhandled promise rejection. The
+          // `finally` still dismisses the toast either way.
+          onClick: async () => {
+            try {
+              await Promise.resolve(toast.action.onClick?.());
+            } catch (err) {
+              // The action handler may surface its own error toast (e.g.
+              // ReviewQueue's Undo emits a partial-failure toast). Only
+              // synthesize a generic one when nothing else handled it.
+              // eslint-disable-next-line no-console
+              console.error("Toast action handler failed:", err);
+            } finally {
+              hideToast();
+            }
           },
         } : null}
       />

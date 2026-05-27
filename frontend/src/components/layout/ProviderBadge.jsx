@@ -194,7 +194,7 @@ export default function ProviderBadge({ style }) {
     } finally {
       setSwitching(null);
     }
-  }, []);
+  }, [showToast]);
 
   // ── Render: loading ────────────────────────────────────────────────────────
   if (!config) {

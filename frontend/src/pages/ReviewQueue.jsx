@@ -672,10 +672,22 @@ export default function ReviewQueue() {
     // the number when a multi-test project group fails.
     const successCount = Object.values(successByProject).reduce((n, arr) => n + arr.length, 0);
 
+    // The inline `setBulkError` banner persists for 5s when any project
+    // group fails, so partial-failure detail stays visible in the bulk-
+    // action area regardless of what the toast surface shows.
     if (failedCount > 0) {
       setBulkError(`${failedCount} project group${failedCount !== 1 ? "s" : ""} failed to ${action}. Others updated.`);
       setTimeout(() => setBulkError(null), 5000);
-      showToast(`${failedCount} project group${failedCount !== 1 ? "s" : ""} failed to ${action}.`, "error");
+    }
+    // The global ToastProvider only renders one toast at a time, so a
+    // success toast fired right after an error toast in the same tick
+    // would overwrite the error and the user would see it for 0ms. We
+    // surface a single toast that reflects the dominant outcome:
+    //   - any successes → success toast (with Undo) — the inline banner
+    //     already calls out the partial failure separately.
+    //   - all failed → error toast.
+    if (successCount === 0 && failedCount > 0) {
+      showToast(`Failed to ${action} ${failedCount} project group${failedCount !== 1 ? "s" : ""}.`, "error");
     }
     if (successCount > 0) {
       const verb = action === "approve" ? "approved → regression" : "rejected";
