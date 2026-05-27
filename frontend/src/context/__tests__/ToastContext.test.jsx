@@ -45,12 +45,14 @@ describe("ToastContext", () => {
       </MemoryRouter>
     );
     act(() => screen.getByText("fire-success").click());
-    // Toast pill remains in DOM (opacity transition), but pointer-events
-    // are gone — assert on the visibility prop indirectly via the style.
-    const pill = screen.getByText("Saved").parentElement;
-    expect(pill).toHaveStyle({ opacity: "1" });
+    // Visibility is driven by `aria-hidden` (the CSS hook the toast
+    // partial reads — `frontend/src/styles/components/run-toast.css`).
+    // JSDOM doesn't load the stylesheet, so we assert on the attribute
+    // directly rather than `toHaveStyle({ opacity })`.
+    const pill = screen.getByText("Saved").closest(".rt-toast");
+    expect(pill).toHaveAttribute("aria-hidden", "false");
     act(() => vi.advanceTimersByTime(3500));
-    expect(pill).toHaveStyle({ opacity: "0" });
+    expect(pill).toHaveAttribute("aria-hidden", "true");
   });
 
   it("error toast lingers 5s, not 3.5s", () => {
@@ -60,11 +62,37 @@ describe("ToastContext", () => {
       </MemoryRouter>
     );
     act(() => screen.getByText("fire-error").click());
-    const pill = screen.getByText("Boom").parentElement;
+    const pill = screen.getByText("Boom").closest(".rt-toast");
     act(() => vi.advanceTimersByTime(3500));
-    expect(pill).toHaveStyle({ opacity: "1" }); // still visible
+    expect(pill).toHaveAttribute("aria-hidden", "false"); // still visible
     act(() => vi.advanceTimersByTime(1500));
-    expect(pill).toHaveStyle({ opacity: "0" });
+    expect(pill).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("error toast uses role=alert + aria-live=assertive (WAI-ARIA)", () => {
+    render(
+      <MemoryRouter>
+        <ToastProvider><Harness /></ToastProvider>
+      </MemoryRouter>
+    );
+    act(() => screen.getByText("fire-error").click());
+    const pill = screen.getByText("Boom").closest(".rt-toast");
+    expect(pill).toHaveAttribute("role", "alert");
+    expect(pill).toHaveAttribute("aria-live", "assertive");
+    expect(pill).toHaveAttribute("data-toast-type", "error");
+  });
+
+  it("success toast uses role=status + aria-live=polite (WAI-ARIA)", () => {
+    render(
+      <MemoryRouter>
+        <ToastProvider><Harness /></ToastProvider>
+      </MemoryRouter>
+    );
+    act(() => screen.getByText("fire-success").click());
+    const pill = screen.getByText("Saved").closest(".rt-toast");
+    expect(pill).toHaveAttribute("role", "status");
+    expect(pill).toHaveAttribute("aria-live", "polite");
+    expect(pill).toHaveAttribute("data-toast-type", "success");
   });
 
   it("useToast() throws outside the provider", () => {

@@ -16,9 +16,12 @@ import { useNavigate } from "react-router-dom";
  * @param {string|null} props.runId
  * @param {Function} [props.onDismiss] - Optional close handler. When provided, renders a × button.
  * @returns {React.ReactElement}
+ *
+ * AGENT.md:127 — all styles live in `frontend/src/styles/components/run-toast.css`.
+ * This component is JSX-only: ARIA wiring + class names + the `data-toast-type`
+ * hook the CSS reads to swatch the status dot. No inline styles.
  */
 export default function RunToast({ msg, type, visible, onViewRun, runId, onDismiss }) {
-  const colors = { success: "var(--green)", error: "var(--red)", info: "var(--accent)" };
   const navigate = useNavigate();
 
   // WAI-ARIA: error toasts use `role="alert"` + `aria-live="assertive"` so
@@ -27,32 +30,25 @@ export default function RunToast({ msg, type, visible, onViewRun, runId, onDismi
   // `aria-atomic="true"` ensures the full message is read on each update
   // rather than only the diff. Matches the WCAG 2.2 / WAI-ARIA APG pattern
   // used by GitHub flash banners and Linear's toast surface.
+  //
+  // `aria-hidden={!visible}` doubles as the visibility hook the CSS uses
+  // for the fade-out transition (see `.rt-toast[aria-hidden="true"]`).
   const isError = type === "error";
 
   return (
     <div
+      className="rt-toast"
+      data-toast-type={type || "info"}
       role={isError ? "alert" : "status"}
       aria-live={isError ? "assertive" : "polite"}
       aria-atomic="true"
-      // `aria-hidden` while invisible so AT doesn't announce a stale
-      // toast that's mid-fade-out. The role/live attrs above only kick
-      // in when the toast becomes visible.
       aria-hidden={!visible}
-      style={{
-        position: "fixed", bottom: 24, right: 28, zIndex: 9999,
-        background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8,
-        fontSize: "0.83rem", fontWeight: 500, boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
-        transition: "all 0.25s", opacity: visible ? 1 : 0,
-        transform: visible ? "translateY(0)" : "translateY(12px)", pointerEvents: visible ? "auto" : "none",
-      }}
     >
-      <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors[type] || colors.info, flexShrink: 0 }} />
-      <span>{msg}</span>
+      <div className="rt-toast__dot" />
+      <span className="rt-toast__msg">{msg}</span>
       {onViewRun && runId && (
         <button
-          className="btn btn-ghost btn-xs"
-          style={{ marginLeft: 8, pointerEvents: "auto" }}
+          className="btn btn-ghost btn-xs rt-toast__view-btn"
           onClick={() => navigate(`/runs/${runId}`)}
         >
           View run <ArrowRight size={11} />
@@ -64,13 +60,9 @@ export default function RunToast({ msg, type, visible, onViewRun, runId, onDismi
       {onDismiss && (
         <button
           type="button"
+          className="rt-toast__dismiss-btn"
           aria-label="Dismiss notification"
           onClick={onDismiss}
-          style={{
-            marginLeft: 4, background: "none", border: "none", cursor: "pointer",
-            color: "var(--text3)", padding: 2, display: "flex", alignItems: "center",
-            borderRadius: 4, pointerEvents: "auto",
-          }}
         >
           <X size={13} />
         </button>

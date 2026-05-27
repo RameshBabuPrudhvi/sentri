@@ -1,0 +1,110 @@
+/**
+ * components/run-toast.css — Floating toast pill used by the global
+ * `<ToastProvider>` (`frontend/src/context/ToastContext.jsx`) and the
+ * legacy local instance on `ProjectDetail.jsx`. WCAG 2.2 SC 2.2.1 +
+ * WAI-ARIA APG live-region pattern.
+ *
+ * Visibility is driven by the `aria-hidden` attribute (set by the React
+ * component when `visible === false`), not a per-instance state class.
+ * This keeps the styling layer declarative — JSX flips one attribute and
+ * CSS handles the fade-out + pointer-events disable.
+ *
+ * Per-type colour is selected via the `data-toast-type` attribute so the
+ * status-dot colour stays in lockstep with the four `--green` / `--red`
+ * / `--accent` design tokens defined in `styles/tokens.css`. Avoiding
+ * inline `style={{ background: ... }}` here keeps the cascade flat and
+ * lets us swap the token mapping in one place if the palette ever
+ * changes (e.g. dark-mode amber for `info`).
+ */
+
+.rt-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 28px;
+  z-index: 9999;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.83rem;
+  font-weight: 500;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  /* Animate opacity + transform together so the toast slides in/out
+     instead of a jarring fade. `pointer-events: none` while hidden is
+     critical — without it the invisible toast still intercepts clicks
+     on whatever's behind it (e.g. dropdown menus near the bottom-right). */
+  transition: opacity 0.25s, transform 0.25s;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.rt-toast[aria-hidden="true"] {
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+}
+
+/* Status dot — coloured per toast type via the `data-toast-type` attr.
+   Sized 8px to match the 7px focus-ring outline pattern in components.css
+   so the visual weight of the dot reads as "secondary" relative to the
+   message text. */
+.rt-toast__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent); /* default = info */
+}
+
+.rt-toast[data-toast-type="success"] .rt-toast__dot { background: var(--green); }
+.rt-toast[data-toast-type="error"]   .rt-toast__dot { background: var(--red);   }
+.rt-toast[data-toast-type="info"]    .rt-toast__dot { background: var(--accent); }
+
+/* The message itself — wrapped in a `<span>` so flex layout doesn't
+   collapse adjacent text nodes. No font-size override (inherits the
+   toast's `0.83rem`). */
+.rt-toast__msg {
+  /* Flex child — no min-width:0 yet because messages are short single-
+     line strings by design. Add `min-width: 0; overflow: hidden;
+     text-overflow: ellipsis; white-space: nowrap;` if/when we surface
+     longer messages. */
+}
+
+/* "View run" CTA — reuses `.btn.btn-ghost.btn-xs` from components.css
+   for size/border/hover treatment; this rule only sets the
+   margin-left + pointer-events so the button keeps working while the
+   toast itself is mid-fade-in (the parent's `pointer-events` cascades
+   from `none` at first paint to `auto` once the entrance transition
+   completes — without this override, fast clickers can miss the
+   button on the first 250ms). */
+.rt-toast__view-btn {
+  margin-left: 8px;
+  pointer-events: auto;
+}
+
+/* Dismiss × — WCAG 2.2 SC 2.2.1 user-dismissable affordance. Borderless
+   icon button. `.rt-toast__dismiss-btn:focus-visible` inherits the
+   global 2px outline rule from `components.css` (A11Y-001) so keyboard
+   focus is announced consistently with every other ghost button. */
+.rt-toast__dismiss-btn {
+  margin-left: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text3);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  pointer-events: auto;
+  transition: color 0.12s, background 0.12s;
+}
+
+.rt-toast__dismiss-btn:hover {
+  color: var(--text);
+  background: var(--bg2);
+}
