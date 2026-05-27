@@ -92,8 +92,8 @@ function TestsEmptyState({ projects, tests, search, reviewFilter, onCreateTest, 
   let hint = null;
   if (reviewFilter === "Approved" && draftCount > 0) {
     hint = (
-      <div className="banner banner-warning" style={{ marginBottom: 16, textAlign: "left" }}>
-        <span style={{ fontSize: "1rem" }}>💡</span>
+      <div className="banner banner-warning mb-md text-left">
+        <span>💡</span>
         <span>
           You have <strong>{draftCount} draft {draftCount === 1 ? "test" : "tests"}</strong> waiting for review.
           Switch to <strong>Draft</strong> to approve them and add them to your regression suite.
@@ -102,8 +102,8 @@ function TestsEmptyState({ projects, tests, search, reviewFilter, onCreateTest, 
     );
   } else if (reviewFilter === "Draft" && approvedCount > 0) {
     hint = (
-      <div className="banner banner-info" style={{ marginBottom: 16, textAlign: "left" }}>
-        <span style={{ fontSize: "1rem" }}>ℹ️</span>
+      <div className="banner banner-info mb-md text-left">
+        <span>ℹ️</span>
         <span>No draft tests — all <strong>{approvedCount}</strong> tests have already been reviewed.</span>
       </div>
     );
@@ -253,10 +253,10 @@ export default function Tests() {
   function SortHeader({ col, children }) {
     const active = sortCol === col;
     return (
-      <th style={{ cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort(col)}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <th className="t-sort-th" onClick={() => toggleSort(col)}>
+        <span className="t-sort-th__inner">
           {children}
-          <ArrowUpDown size={10} style={{ opacity: active ? 1 : 0.3, color: active ? "var(--accent)" : "var(--text3)" }} />
+          <ArrowUpDown size={10} className={active ? "t-sort-icon--active" : "t-sort-icon"} />
         </span>
       </th>
     );
@@ -400,7 +400,7 @@ export default function Tests() {
   return (
     <div className="fade-in">
       {/* ── Header ── */}
-      <div className="page-header" style={{ marginBottom: 20 }}>
+      <div className="page-header t-page-header">
         <div>
           <h1 className="page-title">Tests</h1>
           <p className="page-subtitle">Manage, run, and review test cases across all projects</p>
@@ -408,7 +408,7 @@ export default function Tests() {
         {/* Right-side controls: project dropdown + export — mirrors the
             Review Queue header (`.rq-header` / `.at-header__controls`)
             so the two audit surfaces share a layout vocabulary. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <div className="t-header-controls">
           {projects.length > 1 && (
             <select
               className="input tests-header-select"
@@ -447,7 +447,7 @@ export default function Tests() {
           Cards stay project-aware: when a single project is selected in
           the dropdown, deep-links carry `?projectId=…`/`/projects/:id/…`
           so the user lands in the same scope they're filtering on. */}
-      <div className="stat-grid mb-lg" style={{ marginBottom: 20 }}>
+      <div className="stat-grid mb-lg t-quick-grid">
         {[
           {
             icon: <Atom size={16} />,
@@ -485,37 +485,27 @@ export default function Tests() {
             action: () => projects.length === 0 ? navigate("/projects/new") : setShowRunModal(true),
           },
         ].map((a, i) => (
+          // `:hover` box-shadow is now in CSS (`.t-quick-card:hover`) — drops
+          // the previous onMouseEnter / onMouseLeave handlers entirely.
+          // Per-card colours flow through CSS custom properties (`--t-card-bg`
+          // / `--t-card-fg` / `--t-badge-bg`) — only the data-driven swatch
+          // values stay inline, per AGENT.md §127.
           <div
             key={i}
-            className="card"
-            style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s", position: "relative" }}
+            className="card t-quick-card"
+            style={{ "--t-card-bg": a.color, "--t-card-fg": a.iconColor, "--t-badge-bg": a.iconColor }}
             onClick={a.action}
-            onMouseEnter={e => e.currentTarget.style.boxShadow = "var(--shadow)"}
-            onMouseLeave={e => e.currentTarget.style.boxShadow = ""}
           >
             {a.badge != null && (
-              <span style={{
-                position: "absolute", top: 10, right: 10,
-                minWidth: 20, height: 20, borderRadius: 10,
-                background: a.iconColor, color: "#fff",
-                fontSize: "0.68rem", fontWeight: 700,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                padding: "0 5px", lineHeight: 1,
-              }}>
+              <span className="t-quick-badge">
                 {a.badge > 99 ? "99+" : a.badge}
               </span>
             )}
-            <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-              <div style={{
-                width: 34, height: 34, borderRadius: 9,
-                background: a.color, display: "flex", alignItems: "center",
-                justifyContent: "center", fontSize: 16, flexShrink: 0, color: a.iconColor,
-              }}>
-                {a.icon}
-              </div>
+            <div className="t-quick-body">
+              <div className="t-quick-icon">{a.icon}</div>
               <div>
-                <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: 2 }}>{a.title}</div>
-                <div style={{ fontSize: "0.75rem", color: "var(--text2)", lineHeight: 1.5 }}>{a.desc}</div>
+                <div className="t-quick-title">{a.title}</div>
+                <div className="t-quick-desc">{a.desc}</div>
               </div>
             </div>
           </div>
@@ -524,45 +514,40 @@ export default function Tests() {
 
             {/* Tests table */}
       <div className="card tests-table">
-        <div className="tests-filter-bar" style={{
-          padding: "14px 16px", borderBottom: "1px solid var(--border)",
-          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
-        }}>
-          <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: "0 0 auto" }}>
+        <div className="tests-filter-bar t-toolbar">
+          <div className="t-toolbar-title">
             {categoryFilter !== "All" ? `${categoryFilter} Tests` : reviewFilter === "Draft" ? "Draft Tests" : reviewFilter === "All Tests" ? "All Tests" : "Regression Tests"} ({filtered.length})
           </div>
           {/* Search — constrained width so it doesn't dominate the bar */}
-          <div style={{ width: 220, flexShrink: 0, position: "relative" }}>
-            <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
+          <div className="t-search-wrap">
+            <Search size={13} color="var(--text3)" className="t-search-icon" />
             <input
               ref={searchRef}
-              className="input"
+              className={`input t-search-input${search ? " t-search-input--has-clear" : ""}`}
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search tests… (/)"
-              style={{ paddingLeft: 28, paddingRight: search ? 30 : 12, height: 32, fontSize: "0.82rem" }}
             />
             {search && (
-              <button onClick={() => setSearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0, display: "flex" }}>
+              <button onClick={() => setSearch("")} className="t-search-clear">
                 <X size={13} />
               </button>
             )}
           </div>
 
-          {/* Spacer pushes filter group to the right */}
-          <div className="tests-filter-spacer" style={{ flex: 1 }} />
+          {/* Spacer pushes filter group to the right — `flex: 1` lives on
+              the existing `.tests-filter-spacer` rule in tests.css. */}
+          <div className="tests-filter-spacer" />
 
           {/* ── Icon-only filter pill bar ─────────────────────────────── */}
-          <div className="tests-filter-pills" style={{
-            display: "flex", alignItems: "center", gap: 1,
-            background: "var(--bg2)", padding: "3px 4px",
-            borderRadius: "var(--radius)", border: "1px solid var(--border)",
-          }}>
-            <span style={{ fontSize: "0.68rem", color: "var(--text3)", fontWeight: 600, padding: "0 6px 0 2px", userSelect: "none", letterSpacing: "0.02em" }}>
-              Filters
-            </span>
+          <div className="tests-filter-pills t-pill-group">
+            <span className="t-pill-group__label">Filters</span>
 
-            {/* Status filter icons */}
+            {/* Status filter icons. The pill shell + count dot are CSS
+                (`.t-pill` / `.t-pill-count`); per-filter colours flow
+                through CSS custom properties so the rule cascade stays
+                in one place. AGENT.md §127 carve-out for data-driven
+                colour. */}
             {STATUS_FILTERS.map(f => {
               const active = filter === f.key;
               const count  = statusCounts[f.key] ?? 0;
@@ -571,27 +556,16 @@ export default function Tests() {
                   key={f.key}
                   title={`${f.tooltip} · ${count} test${count !== 1 ? "s" : ""} · click again to clear`}
                   onClick={() => setFilter(active ? "All" : f.key)}
-                  style={{
-                    position: "relative",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    width: 30, height: 28, borderRadius: 6, border: "none",
-                    cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
-                    background: active ? f.activeBg      : "transparent",
-                    color:      active ? f.activeColor   : "var(--text3)",
-                    boxShadow:  active ? `0 0 0 1.5px ${f.activeColor}55` : "none",
-                  }}
+                  className={`t-pill${active ? " t-pill--active" : ""}`}
+                  style={active ? {
+                    "--t-active-bg": f.activeBg,
+                    "--t-active-color": f.activeColor,
+                    "--t-active-shadow": `${f.activeColor}55`,
+                  } : undefined}
                 >
                   {f.icon}
-                  {/* Count dot on active */}
                   {active && (
-                    <span style={{
-                      position: "absolute", top: 2, right: 2,
-                      minWidth: 14, height: 14, borderRadius: 7,
-                      background: f.activeColor, color: "#fff",
-                      fontSize: "0.55rem", fontWeight: 700,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      lineHeight: 1, padding: "0 2px",
-                    }}>
+                    <span className="t-pill-count">
                       {count > 99 ? "99+" : count}
                     </span>
                   )}
@@ -599,10 +573,9 @@ export default function Tests() {
               );
             })}
 
-            {/* Divider */}
-            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+            <div className="t-pill-divider" />
 
-            {/* Review filter icons */}
+            {/* Review filter icons — same `.t-pill` pattern as Status above. */}
             {REVIEW_FILTERS.map(f => {
               const active = reviewFilter === f.key;
               const count  = reviewCounts[f.key] ?? 0;
@@ -611,26 +584,16 @@ export default function Tests() {
                   key={f.key}
                   title={`${f.tooltip} · ${count} test${count !== 1 ? "s" : ""} · click again to clear`}
                   onClick={() => setReviewFilter(active ? "All Tests" : f.key)}
-                  style={{
-                    position: "relative",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    width: 30, height: 28, borderRadius: 6, border: "none",
-                    cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
-                    background: active ? f.activeBg      : "transparent",
-                    color:      active ? f.activeColor   : "var(--text3)",
-                    boxShadow:  active ? `0 0 0 1.5px ${f.activeColor}55` : "none",
-                  }}
+                  className={`t-pill${active ? " t-pill--active" : ""}`}
+                  style={active ? {
+                    "--t-active-bg": f.activeBg,
+                    "--t-active-color": f.activeColor,
+                    "--t-active-shadow": `${f.activeColor}55`,
+                  } : undefined}
                 >
                   {f.icon}
                   {active && (
-                    <span style={{
-                      position: "absolute", top: 2, right: 2,
-                      minWidth: 14, height: 14, borderRadius: 7,
-                      background: f.activeColor, color: "#fff",
-                      fontSize: "0.55rem", fontWeight: 700,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      lineHeight: 1, padding: "0 2px",
-                    }}>
+                    <span className="t-pill-count">
                       {count > 99 ? "99+" : count}
                     </span>
                   )}
@@ -638,10 +601,9 @@ export default function Tests() {
               );
             })}
 
-            {/* Divider */}
-            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+            <div className="t-pill-divider" />
 
-            {/* Category filter buttons (UI / API) */}
+            {/* Category filter buttons (UI / API) — text-label `.t-pill-text` variant */}
             {CATEGORY_FILTERS.map(f => {
               const active = categoryFilter === f.key;
               const count  = categoryCounts[f.key] ?? 0;
@@ -650,27 +612,16 @@ export default function Tests() {
                   key={f.key}
                   title={`${f.tooltip} · ${count} test${count !== 1 ? "s" : ""} · click again to clear`}
                   onClick={() => setCategoryFilter(active ? "All" : f.key)}
-                  style={{
-                    position: "relative",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    padding: "0 8px", height: 28, borderRadius: 6, border: "none",
-                    cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
-                    fontSize: "0.68rem", fontWeight: 600, whiteSpace: "nowrap",
-                    background: active ? f.activeBg      : "transparent",
-                    color:      active ? f.activeColor   : "var(--text3)",
-                    boxShadow:  active ? `0 0 0 1.5px ${f.activeColor}55` : "none",
-                  }}
+                  className={`t-pill-text${active ? " t-pill-text--active" : ""}`}
+                  style={active ? {
+                    "--t-active-bg": f.activeBg,
+                    "--t-active-color": f.activeColor,
+                    "--t-active-shadow": `${f.activeColor}55`,
+                  } : undefined}
                 >
                   {f.label}
                   {active && (
-                    <span style={{
-                      marginLeft: 4,
-                      minWidth: 14, height: 14, borderRadius: 7,
-                      background: f.activeColor, color: "#fff",
-                      fontSize: "0.55rem", fontWeight: 700,
-                      display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      lineHeight: 1, padding: "0 2px",
-                    }}>
+                    <span className="t-pill-count t-pill-count--inline">
                       {count > 99 ? "99+" : count}
                     </span>
                   )}
@@ -678,34 +629,17 @@ export default function Tests() {
               );
             })}
 
-            {/* Divider */}
-            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+            <div className="t-pill-divider" />
 
-            {/* Stale filter (AUTO-013) */}
+            {/* Stale filter (AUTO-013) — fixed slate-500 palette, not per-filter colour */}
             <button
               title={`Stale tests · ${tests.filter(t => t.isStale).length} test${tests.filter(t => t.isStale).length !== 1 ? "s" : ""} · click again to clear`}
               onClick={() => setStaleFilter(!staleFilter)}
-              style={{
-                position: "relative",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                padding: "0 8px", height: 28, borderRadius: 6, border: "none",
-                cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
-                fontSize: "0.68rem", fontWeight: 600, whiteSpace: "nowrap", gap: 4,
-                background: staleFilter ? "rgba(100,116,139,0.12)" : "transparent",
-                color:      staleFilter ? "#64748b"                : "var(--text3)",
-                boxShadow:  staleFilter ? "0 0 0 1.5px #64748b55"  : "none",
-              }}
+              className={`t-pill-text${staleFilter ? " t-pill-stale--active" : ""}`}
             >
               <Clock size={12} /> Stale
               {staleFilter && (
-                <span style={{
-                  marginLeft: 2,
-                  minWidth: 14, height: 14, borderRadius: 7,
-                  background: "#64748b", color: "#fff",
-                  fontSize: "0.55rem", fontWeight: 700,
-                  display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  lineHeight: 1, padding: "0 2px",
-                }}>
+                <span className="t-pill-count t-pill-count--inline">
                   {tests.filter(t => t.isStale).length > 99 ? "99+" : tests.filter(t => t.isStale).length}
                 </span>
               )}
@@ -714,16 +648,11 @@ export default function Tests() {
             {/* Clear-all button — only visible when any filter is active */}
             {(filter !== "All" || reviewFilter !== "All Tests" || categoryFilter !== "All" || staleFilter) && (
               <>
-                <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+                <div className="t-pill-divider" />
                 <button
                   title="Clear all filters"
                   onClick={() => { setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); setStaleFilter(false); }}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    width: 28, height: 28, borderRadius: 6, border: "none",
-                    cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "var(--red)",
-                    transition: "background 0.12s",
-                  }}
+                  className="t-clear-btn"
                 >
                   <X size={12} />
                 </button>
@@ -733,9 +662,9 @@ export default function Tests() {
         </div>
 
         {loading ? (
-          <div style={{ padding: 24 }}>
+          <div className="t-loading-block">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="skeleton" style={{ height: 44, marginBottom: 8, borderRadius: 8 }} />
+              <div key={i} className="skeleton t-loading-row" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
@@ -752,13 +681,12 @@ export default function Tests() {
           <>
             {/* Bulk action bar — delete only (review actions live in Review Queue) */}
             {selected.size > 0 && (
-              <div className="tests-bulk-bar" style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: "var(--accent-bg)", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-                <span style={{ fontSize: "0.82rem", color: "var(--accent)", fontWeight: 500 }}>
+              <div className="tests-bulk-bar t-bulk-bar">
+                <span className="t-bulk-label">
                   {selected.size} selected
                 </span>
                 <button
-                  className="btn btn-sm"
-                  style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
+                  className="btn btn-sm t-bulk-delete"
                   onClick={() => {
                     const ids = Array.from(selected);
                     if (ids.length > 1) setBulkConfirm({ action: "delete", ids });
@@ -773,10 +701,10 @@ export default function Tests() {
             )}
             {/* Partial failure feedback from bulk actions */}
             {bulkError && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: "var(--amber-bg)", borderBottom: "1px solid var(--border)", fontSize: "0.82rem", color: "var(--amber)" }}>
+              <div className="t-bulk-error">
                 <AlertCircle size={13} />
                 {bulkError}
-                <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto" }} onClick={() => setBulkError(null)}>
+                <button className="btn btn-ghost btn-xs t-bulk-error__dismiss" onClick={() => setBulkError(null)}>
                   <X size={11} />
                 </button>
               </div>
@@ -784,11 +712,11 @@ export default function Tests() {
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 36, paddingRight: 0 }}>
+                  <th className="t-th-checkbox">
                     <input type="checkbox"
                       checked={paged.length > 0 && paged.every(t => selected.has(t.id))}
                       onChange={e => toggleAll(e.target.checked, paged.map(t => t.id))}
-                      style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                      className="t-checkbox" />
                   </th>
                   <th>Test ID</th>
                   <th>Test Name</th>
@@ -807,14 +735,14 @@ export default function Tests() {
                   return (
                     <tr
                       key={t.id}
-                      style={{ cursor: "pointer", background: isSelected ? "var(--accent-bg)" : undefined }}
+                      className={`t-row${isSelected ? " t-row--selected" : ""}`}
                       onClick={() => navigate(`/tests/${t.id}`)}
                       onMouseEnter={() => setHoveredRow(t.id)}
                       onMouseLeave={() => setHoveredRow(null)}
                     >
-                      <td style={{ paddingRight: 0 }} onClick={e => e.stopPropagation()}>
+                      <td className="t-td-checkbox" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(t.id)}
-                          style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                          className="t-checkbox" />
                       </td>
                       <td>
                         <span className="mono-id">
@@ -822,16 +750,16 @@ export default function Tests() {
                         </span>
                       </td>
                       <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div className="t-name-cell">
                           <AgentTag type="TA" />
                           <div>
-                            <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</div>
+                            <div className="t-name-title">{cleanTestName(t.name)}</div>
                             {t.description && (
-                              <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 1, maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <div className="t-name-desc">
                                 {t.description}
                               </div>
                             )}
-                            <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                            <div className="t-name-tags">
                               <ScenarioBadges test={t} isBddTest={isBddTest} />
                             </div>
                           </div>
@@ -840,8 +768,7 @@ export default function Tests() {
                       <td>
                         {projMap[t.projectId] && (
                           <span
-                            className="badge badge-gray"
-                            style={{ cursor: "pointer" }}
+                            className="badge badge-gray t-project-badge"
                             onClick={e => { e.stopPropagation(); navigate(`/projects/${t.projectId}`); }}
                           >
                             {projMap[t.projectId].name}
@@ -854,11 +781,11 @@ export default function Tests() {
                           : t.priority === "low"
                             ? <span className="badge badge-gray">Low</span>
                             : t.priority
-                              ? <span className="badge badge-gray" style={{ textTransform: "capitalize" }}>{t.priority}</span>
+                              ? <span className="badge badge-gray t-priority-cap">{t.priority}</span>
                               : null}
                       </td>
                       <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <div className="t-type-cell">
                           {t.type && (
                             <span className={`badge ${testTypeBadgeClass(t.type)}`}>
                               {testTypeLabel(t.type, true)}
@@ -904,12 +831,12 @@ export default function Tests() {
                       </td>
                       <td><StatusBadge result={t.lastResult} /></td>
                       <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ fontSize: "0.8rem", color: "var(--text2)" }} title={t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : undefined}>
+                        <div className="t-lastrun-cell">
+                          <span className="t-lastrun-text" title={t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : undefined}>
                             {fmtRelativeTimeFull(t.lastRunAt)}
                           </span>
                           {isHovered && (
-                            <div style={{ display: "flex", gap: 4, marginLeft: "auto" }} onClick={e => e.stopPropagation()}>
+                            <div className="t-hover-actions" onClick={e => e.stopPropagation()}>
                               <button className="btn btn-ghost btn-xs" title="Run test" onClick={e => runSingleTest(e, t.id)} disabled={actionLoading === t.id}>
                                 {actionLoading === t.id ? <Loader2 size={11} className="spin" /> : <Play size={11} />}
                               </button>
@@ -950,12 +877,12 @@ export default function Tests() {
 
       {/* Bulk delete confirmation modal */}
       {bulkConfirm && bulkConfirm.action === "delete" && (
-        <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" ariaLabelledBy="tests-bulk-delete-title" style={{ padding: "28px 32px" }}>
+        <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" ariaLabelledBy="tests-bulk-delete-title" className="t-modal-padding">
           <div id="tests-bulk-delete-title" className="modal-title">Delete {bulkConfirm.ids.length} tests?</div>
-          <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
+          <div className="t-modal-body">
             These tests will be moved to the recycle bin. This cannot be undone easily.
           </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <div className="t-modal-actions">
             <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
             <button className="btn btn-danger btn-sm" onClick={() => executeBulkDelete(bulkConfirm.ids)}>
               Delete {bulkConfirm.ids.length} tests
