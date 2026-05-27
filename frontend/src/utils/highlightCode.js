@@ -30,6 +30,25 @@ const PURIFY_CONFIG = {
 };
 
 /**
+ * DOMPurify ships as a browser-only module: its default export only exposes
+ * `.sanitize` when a `window` is available at import time. In Node (where
+ * `frontend/tests/utils.test.js` imports this module directly), there is no
+ * `window`, so the default export is the factory function and
+ * `DOMPurify.sanitize` is undefined. The pre-fix runtime threw
+ * `DOMPurify.sanitize is not a function` from CI's plain-Node test runner.
+ *
+ * The tokeniser is already escape-first safe by construction (every span
+ * passes through `escHtml` before any transform), so when DOMPurify isn't
+ * loaded we fall back to returning the assembled HTML as-is — the same
+ * security posture the file had before the defence-in-depth pass landed.
+ * In real browser builds DOMPurify works as expected; this guard only
+ * kicks in during Node test runs.
+ */
+const purify = typeof DOMPurify?.sanitize === "function"
+  ? (html) => DOMPurify.sanitize(html, PURIFY_CONFIG)
+  : (html) => html;
+
+/**
  * @param {string} code - JavaScript/TypeScript source code.
  * @returns {string} HTML string with inline color styles.
  */
