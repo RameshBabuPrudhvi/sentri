@@ -20,6 +20,7 @@ import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeL
 import { StatusBadge, ScenarioBadges } from "../components/shared/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import TablePagination from "../components/shared/TablePagination.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -159,6 +160,7 @@ export default function Tests() {
   const [actionLoading, setActionLoading] = useState(null);
   const navigate = useNavigate();
   const searchRef = useRef(null);
+  const { showToast } = useToast();
 
   // ── Filter counts ────────────────────────────────────────────────────────────
   const statusCounts = useMemo(() => ({
@@ -290,9 +292,14 @@ export default function Tests() {
         )
       );
       const failedCount = results.filter(r => r.status === "rejected").length;
+      const successCount = ids.length - failedCount;
       if (failedCount > 0) {
         setBulkError(`Some tests failed to delete. The rest were removed successfully.`);
         setTimeout(() => setBulkError(null), 6000);
+        showToast(`${failedCount} test${failedCount !== 1 ? "s" : ""} failed to delete.`, "error");
+      }
+      if (successCount > 0) {
+        showToast(`${successCount} test${successCount !== 1 ? "s" : ""} moved to recycle bin`, "success");
       }
 
       // ── Optimistic cache removal ─────────────────────────────────────
@@ -317,6 +324,7 @@ export default function Tests() {
       setSelected(new Set());
     } catch (err) {
       console.error("Bulk delete failed:", err);
+      showToast(err.message || "Bulk delete failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -328,8 +336,12 @@ export default function Tests() {
     setActionLoading(testId);
     try {
       const { runId } = await api.runSingleTest(testId);
+      showToast("Test run started", "success");
       navigate(`/runs/${runId}`);
-    } catch (err) { console.error("Run failed:", err); }
+    } catch (err) {
+      console.error("Run failed:", err);
+      showToast(err.message || "Failed to start test run.", "error");
+    }
     finally { setActionLoading(null); }
   }
 
@@ -341,7 +353,11 @@ export default function Tests() {
       updateTestsCache(prev => prev.filter(x => x.id !== t.id));
       invalidateProjectDataCache();
       setSelected(s => { const n = new Set(s); n.delete(t.id); return n; });
-    } catch (err) { console.error("Delete failed:", err); }
+      showToast("Test moved to recycle bin", "success");
+    } catch (err) {
+      console.error("Delete failed:", err);
+      showToast(err.message || "Failed to delete test.", "error");
+    }
     finally { setActionLoading(null); }
   }
 

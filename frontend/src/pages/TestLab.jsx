@@ -62,6 +62,7 @@ import { buildRetryPayload, resolveGenerateRetryFields } from "../utils/runRetry
 // Run-center terminal banners (Done / Failed). Extracted so TestLab.jsx
 // stops growing every time we tweak the action-stack copy.
 import { RunDoneBanner, RunFailedBanner } from "../components/test-lab/RunBanners.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 // Test Lab middle-column config body. Default export is the full
 // `tl-config` surface (error banner + Requirement composer + Test
 // Dials); the named `RequirementComposer` export is consumed
@@ -447,6 +448,7 @@ export default function TestLab() {
   // testsGenerated sum across historical runs.
   const { projects, allRuns, allTests, loading: loadingProjectData } = useProjectData();
   const loadingProjects = loadingProjectData;
+  const { showToast } = useToast();
   const [selectedId, setSelectedId]       = useState(routeProjectId ?? null);
 
   // ── Config state ──
@@ -1098,7 +1100,10 @@ export default function TestLab() {
       // with the server's authoritative status.
       setRunData(prev => ({ ...prev, status: "aborted" }));
       invalidateProjectDataCache();
-    } catch { /* non-fatal */ } finally {
+      showToast("Run stopped", "success");
+    } catch (err) {
+      showToast(err?.message || "Failed to stop run.", "error");
+    } finally {
       setStopLoading(false);
     }
   }
@@ -1109,7 +1114,10 @@ export default function TestLab() {
       // Bust the shared project/run cache so the Queue reflects the abort on
       // the next refetch — no ad-hoc local state to keep in sync.
       invalidateProjectDataCache();
-    } catch { /* non-fatal */ }
+      showToast("Run stopped", "success");
+    } catch (err) {
+      showToast(err?.message || "Failed to stop run.", "error");
+    }
   }
 
   function handleReset() {

@@ -3,6 +3,7 @@ import { RefreshCw, Trash2, AlertTriangle } from "lucide-react";
 import { api } from "../../api.js";
 import { invalidateProjectDataCache } from "../../hooks/useProjectData.js";
 import ModalShell from "./ModalShell.jsx";
+import { useToast } from "../../context/ToastContext.jsx";
 
 /**
  * Confirmation modal for deleting a project.
@@ -18,6 +19,7 @@ import ModalShell from "./ModalShell.jsx";
 export default function DeleteProjectModal({ project, onClose, onDeleted }) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
+  const { showToast } = useToast();
 
   // Check for automation config that will be permanently destroyed on delete.
   // Tokens and schedules are hard-deleted (not soft-deleted) because they are
@@ -46,8 +48,10 @@ export default function DeleteProjectModal({ project, onClose, onDeleted }) {
       invalidateProjectDataCache();
       onDeleted(project.id);
       onClose();
+      showToast(`Project "${project.name}" moved to recycle bin`, "success");
     } catch (err) {
       setError(err.message || "Failed to delete project.");
+      showToast(err.message || "Failed to delete project.", "error");
       setDeleting(false);
     }
   }

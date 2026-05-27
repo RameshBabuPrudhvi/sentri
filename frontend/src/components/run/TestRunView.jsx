@@ -12,6 +12,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { api } from "../../api.js";
+import { useToast } from "../../context/ToastContext.jsx";
 // StepResultsView is 55KB — lazy-loaded since it only renders when a user
 // drills into a specific test result, never on initial run view render.
 const StepResultsView = lazy(() => import("./StepResultsView"));
@@ -343,6 +344,7 @@ export default function TestRunView({ run, frames = [] }) {
   const [selectedCase, setSelectedCase] = useState(0);
   const [drilledCase, setDrilledCase]   = useState(null); // null = suite overview
   const [rerunning, setRerunning]       = useState(false);
+  const { showToast } = useToast();
 
   const listRef = useRef(null);
   const isRunning = run?.status === "running";
@@ -545,9 +547,11 @@ export default function TestRunView({ run, frames = [] }) {
                 setRerunning(true);
                 try {
                   const { runId } = await api.runTests(run.projectId);
+                  showToast("Re-run started", "success");
                   navigate(`/runs/${runId}`);
                 } catch (err) {
                   console.error("Re-run failed:", err);
+                  showToast(err.message || "Re-run failed.", "error");
                   setRerunning(false);
                 }
               }}

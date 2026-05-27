@@ -40,6 +40,7 @@ import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
 import { ReviewBadge, StatusBadge } from "../components/shared/TestBadges.jsx";
 import ModalShell from "../components/shared/ModalShell.jsx";
 import { QualityScoreChip, qualityTierKey } from "../components/shared/QualityScoreChip.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import highlightCode from "../utils/highlightCode.js";
 import "../styles/pages/review-queue.css";
 
@@ -331,6 +332,7 @@ export default function ReviewQueue() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user: authUser } = useAuth();
   const canEdit = userHasRole(authUser, "qa_lead");
+  const { showToast } = useToast();
 
   // Projects list only — tests now flow through the server-paginated
   // `useReviewQueueQuery` hook, so we no longer fetch every test in the
@@ -528,10 +530,12 @@ export default function ReviewQueue() {
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
       invalidateProjectDataCache();
+      showToast("Test approved → regression suite", "success");
     } catch (err) {
       console.error("Approve failed:", err);
       setBulkError(`Approve failed: ${err.message}`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(err.message || "Approve failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -556,10 +560,12 @@ export default function ReviewQueue() {
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
       invalidateProjectDataCache();
+      showToast("Test rejected", "success");
     } catch (err) {
       console.error("Reject failed:", err);
       setBulkError(`Reject failed: ${err.message}`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(err.message || "Reject failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -577,10 +583,12 @@ export default function ReviewQueue() {
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
       invalidateProjectDataCache();
+      showToast("Test restored to draft", "success");
     } catch (err) {
       console.error("Restore failed:", err);
       setBulkError(`Restore failed: ${err.message}`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(err.message || "Restore failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -602,10 +610,12 @@ export default function ReviewQueue() {
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
       invalidateProjectDataCache();
+      showToast("Test moved to recycle bin", "success");
     } catch (err) {
       console.error("Delete failed:", err);
       setBulkError(`Delete failed: ${err.message}`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(err.message || "Delete failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -645,9 +655,15 @@ export default function ReviewQueue() {
     );
 
     const failedCount = results.filter(r => r.status === "rejected").length;
+    const successCount = ids.length - failedCount;
     if (failedCount > 0) {
       setBulkError(`${failedCount} project group${failedCount !== 1 ? "s" : ""} failed to ${action}. Others updated.`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(`${failedCount} project group${failedCount !== 1 ? "s" : ""} failed to ${action}.`, "error");
+    }
+    if (successCount > 0) {
+      const verb = action === "approve" ? "approved → regression" : "rejected";
+      showToast(`${successCount} test${successCount !== 1 ? "s" : ""} ${verb}`, "success");
     }
 
     invalidateReviewQueueCache();

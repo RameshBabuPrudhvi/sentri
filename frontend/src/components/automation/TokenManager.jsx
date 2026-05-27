@@ -14,6 +14,7 @@ import { api } from "../../api.js";
 import CopyButton from "../shared/CopyButton.jsx";
 import { fmtDateTimeMedium } from "../../utils/formatters.js";
 import { invalidateAutomationStatus } from "../../utils/automationStatus.js";
+import { useToast } from "../../context/ToastContext.jsx";
 
 // ─── Token reveal banner (shown once) ────────────────────────────────────────
 
@@ -45,6 +46,7 @@ export default function TokenManager({ projectId }) {
   const [newToken, setNewToken]     = useState(null); // plaintext reveal
   const [revoking, setRevoking]     = useState(null); // tokenId being deleted
   const [error, setError]           = useState(null);
+  const { showToast } = useToast();
 
   const loadTokens = useCallback(async () => {
     try {
@@ -69,8 +71,10 @@ export default function TokenManager({ projectId }) {
       setLabel("");
       await loadTokens();
       invalidateAutomationStatus(projectId, "tokens");
+      showToast("Trigger token created", "success");
     } catch (err) {
       setError(err.message || "Failed to create token.");
+      showToast(err.message || "Failed to create token.", "error");
     } finally {
       setCreating(false);
     }
@@ -84,8 +88,10 @@ export default function TokenManager({ projectId }) {
       setTokens((prev) => prev.filter((t) => t.id !== tokenId));
       if (newToken) setNewToken(null);
       invalidateAutomationStatus(projectId, "tokens");
-    } catch {
+      showToast("Trigger token revoked", "success");
+    } catch (err) {
       setError("Failed to revoke token.");
+      showToast(err?.message || "Failed to revoke token.", "error");
     } finally {
       setRevoking(null);
     }
