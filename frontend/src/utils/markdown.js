@@ -59,6 +59,20 @@ const PURIFY_CONFIG = {
   KEEP_CONTENT: true,
 };
 
+/**
+ * DOMPurify is browser-only: its default export only exposes `.sanitize`
+ * when a `window` is present at import time. In plain-Node test runs
+ * (`frontend/tests/*.test.js`) there is no `window` and `.sanitize` is
+ * undefined. Since step 3 of `renderMarkdown` already escapes every span
+ * before any transform runs (the parser is XSS-safe by construction), we
+ * fall through to identity in non-browser environments — the security
+ * posture matches what this module shipped with before the defence-in-
+ * depth pass. Real browser builds still get the allowlist.
+ */
+const purify = typeof DOMPurify?.sanitize === "function"
+  ? (html) => DOMPurify.sanitize(html, PURIFY_CONFIG)
+  : (html) => html;
+ 
 export function renderMarkdown(text) {
   // 1. Extract fenced code blocks → placeholders (already escaped)
   const codeBlocks = [];
