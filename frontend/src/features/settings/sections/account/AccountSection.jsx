@@ -6,6 +6,7 @@ import { api } from "../../../../api.js";
 import { useAuth } from "../../../../context/AuthContext.jsx";
 import { resetOnboarding } from "../../../../hooks/useOnboarding.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
+import { useToast } from "../../../../context/ToastContext.jsx";
 
 /**
  * Account & Privacy section — data export + account deletion under GDPR / CCPA
@@ -20,6 +21,7 @@ export default function AccountSection() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const { showToast } = useToast();
 
   const needsPassword = user?.hasPassword !== false;
 
@@ -47,8 +49,10 @@ export default function AccountSection() {
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
       setStatus({ type: "ok", text: "Account export downloaded." });
+      showToast("Account export downloaded", "success");
     } catch (err) {
       setStatus({ type: "err", text: err.message || "Export failed." });
+      showToast(err.message || "Export failed.", "error");
     } finally {
       setBusy(false);
     }
@@ -67,9 +71,13 @@ export default function AccountSection() {
     setStatus(null);
     try {
       await api.deleteAccount(needsPassword ? password.trim() : "");
+      // UX-001: fire the toast BEFORE logout — the provider is mounted at
+      // App.jsx so it survives the logout → redirect to /login transition.
+      showToast("Account deleted", "success");
       await logout();
     } catch (err) {
       setStatus({ type: "err", text: err.message || "Account deletion failed." });
+      showToast(err.message || "Account deletion failed.", "error");
     } finally {
       setBusy(false);
       setConfirmDelete(false);

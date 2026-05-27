@@ -5,6 +5,7 @@ import {
 import { api } from "../../../../api.js";
 import { useAuth } from "../../../../context/AuthContext.jsx";
 import SectionTitle from "../../shared/SectionTitle.jsx";
+import { useToast } from "../../../../context/ToastContext.jsx";
 
 /**
  * Integrations section — GitHub PR checks (INT-002 / INT-002b).
@@ -28,6 +29,7 @@ export default function IntegrationsSection() {
   const [saving, setSaving] = useState(null);
   const [installing, setInstalling] = useState(null);
   const [status, setStatus] = useState(null);
+  const { showToast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +53,7 @@ export default function IntegrationsSection() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("github") === "installed") {
       setStatus({ type: "ok", text: "GitHub App installed. Settings were refreshed with the selected repository." });
+      showToast("GitHub App installed", "success");
       load();
       window.history.replaceState(null, "", window.location.pathname);
     }
@@ -69,6 +72,7 @@ export default function IntegrationsSection() {
       window.location.assign(data.url);
     } catch (err) {
       setError(err.message || "Failed to start GitHub App install.");
+      showToast(err.message || "Failed to start GitHub App install.", "error");
       setInstalling(null);
     }
   }
@@ -83,8 +87,10 @@ export default function IntegrationsSection() {
         installationId: row.installationId || "",
       });
       await load();
+      showToast("GitHub check settings saved", "success");
     } catch (err) {
       setError(err.message || "Failed to save GitHub settings.");
+      showToast(err.message || "Failed to save GitHub settings.", "error");
     } finally {
       setSaving(null);
     }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **UX-001** — Restore success/failure toast feedback across save/update/delete actions. The `/automation` page was wiring panel toast callbacks to `addNotification()` (the notification bell at `frontend/src/pages/Automation.jsx`), so users saving Auto-Approval threshold, Quality Gates, Web Vitals, or Coverage settings saw no visible confirmation. The new-project create/edit form (`frontend/src/pages/NewProject.jsx`) silently navigated away on success. The decomposed `frontend/src/features/settings/sections/*` surface (Agent Roles, AI Providers, Integrations, Members, Account) silently completed every save/update/delete. Introduced a global `ToastContext` at `frontend/src/context/ToastContext.jsx` (mounted in `App.jsx` above `<Routes>`) and migrated every `api.update*` / `api.create*` / `api.delete*` callsite in the affected files to emit a visible toast on both success and error. Inline `setStatus({type,text})` banners on durable panels are kept in addition to the toast.
+
 ## [1.9.0] — 2026-05-26
 
 ### Added

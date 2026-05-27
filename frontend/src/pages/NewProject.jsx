@@ -13,6 +13,7 @@ import usePageTitle from "../hooks/usePageTitle.js";
 // pattern used by Tests.jsx, ReviewQueue.jsx, and ConfigurablePanel.jsx
 // after their respective mutations (see REFERENCE.md:105).
 import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
+import { useToast } from "../context/ToastContext.jsx";
 
 function validateForm(form, { isEdit = false, hasExistingCreds = false } = {}) {
   const errors = {};
@@ -59,6 +60,7 @@ export default function NewProject() {
 
   usePageTitle(isEdit ? "Edit Project" : "New Project");
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [savedAuthFields, setSavedAuthFields] = useState(null);
@@ -166,6 +168,9 @@ export default function NewProject() {
         // Bust the cache so name/URL changes show up immediately on the
         // Projects list, Dashboard, and Test Lab without a hard refresh.
         invalidateProjectDataCache();
+        // UX-001: surface success before we navigate away — the toast
+        // provider is mounted at App.jsx so it survives the route change.
+        showToast("Project updated", "success");
         navigate(`/projects/${editId}`);
       } else {
         const project = await api.createProject(payload);
@@ -176,10 +181,12 @@ export default function NewProject() {
         // hard-refreshes.
         invalidateProjectDataCache();
         emitTourEvent("project-created");
+        showToast("Project created", "success");
         navigate(`/projects/${project.id}`);
       }
     } catch (err) {
       setError(err.message);
+      showToast(err.message || "Failed to save project.", "error");
     } finally {
       setLoading(false);
     }
