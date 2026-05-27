@@ -7,6 +7,50 @@
 
 ---
 
+## 0. Progress Update — PR #40 (Hot-Fix branch)
+
+> Last updated against commit `2041fb0` (Hot-Fix PR · UX-001).
+>
+> Status legend: ✅ Done · 🟡 Partial · 🔴 Not started
+
+PR #40 was scoped to UX feedback (UX-001) but also picked up several audit items along the way. Status of every audit finding below:
+
+| Audit ID | Finding | Status | Where landed |
+|---|---|---|---|
+| **§3.2 / CR-006 / TD-008** | Stored XSS via LLM markdown in `AIChat.jsx` / `ChatHistory.jsx` (no DOMPurify) | ✅ **Done** | `frontend/src/utils/markdown.js` — DOMPurify allowlist (defence-in-depth on top of the parser's existing escape-first guarantee). `dompurify ^3.2.0` added to `frontend/package.json`. |
+| **§3.4 / TD-015** | Google Fonts CDN dependency in `tokens.css` (GDPR / CSP / perf / air-gap) | ✅ **Done** | `@fontsource/inter` + `@fontsource/jetbrains-mono` self-hosted via `frontend/src/main.jsx`; rationale documented inline in `frontend/src/styles/tokens.css`. |
+| **§6.1** | "TypeScript" mislabel on Review Queue code preview | ✅ **Done** | `frontend/src/pages/ReviewQueue.jsx` — corrected to "JavaScript". |
+| **§6.1** | Bulk approve has no Undo | ✅ **Done** | `frontend/src/pages/ReviewQueue.jsx` `executeBulkAction` — inline **Undo** CTA on the success toast wires through `bulkUpdateTests(pid, ids, "restore")` per project. Toast linger extended to 5s when an action button is present. Industry pattern matches Gmail / Linear / GitHub. |
+| **§6.1** | "No keyboard shortcuts" claim | ✅ Was wrong — already shipped | `frontend/src/pages/ReviewQueue.jsx:703-729` implements `a` / `r` / `j` / `k` / `↑` / `↓`. Audit overstated. |
+| **§6.1** | "Quality score has no tooltip" claim | ✅ Was wrong — already shipped | `QualityScoreChip` opens a factor-breakdown popover on click. Audit overstated. |
+| **§7.5** | CSP `style-src 'unsafe-inline'` (inline styles throughout SPA) | 🟡 **In progress** | `frontend/src/components/project/RunToast.jsx` migrated to `.rt-toast*` class names + dedicated `frontend/src/styles/components/run-toast.css` partial. Wider SPA sweep still pending — CSP cannot tighten until all `style={{}}` usages are removed. |
+| **§3.1 / TD-006 / TD-007** | Monolithic frontend pages (`TestLab.jsx` 1,899 / `ReviewQueue.jsx` 1,460 / `TestDetail.jsx` 1,012) | 🔴 Not addressed | Out of scope for the hot-fix branch. Defer to a dedicated decomposition PR. |
+| **§3.3** | TestLab dual SSE hooks / dual source of truth | 🔴 Not addressed | Migration was already in flight per the in-code comment; defer. |
+| **§6.3** | Sidebar IA overload (11 items) | 🔴 Not addressed | Requires a dedicated IA pass. |
+| **§6.4** | Empty states lack CTAs | 🟡 Partial | `frontend/src/pages/Tests.jsx` already shows `<EmptyState>` with primary CTA; ReviewQueue's "Inbox zero" branch (`frontend/src/pages/ReviewQueue.jsx:973-1007`) was already coached with `Generate more tests →` + `Audit recent approvals`. Audit was partially out-of-date. |
+| **§4 — backend (CR-001, 002, 003, 004, 007; TD-001..004, 011, 012, 014, 016..018)** | All backend findings | 🔴 Not addressed | Out of scope for a frontend hot-fix. |
+| **§5 — agent architecture (CR-005, 008; TD-005, 009, 010, 013)** | All AI/agent findings | 🔴 Not addressed | Out of scope. |
+| **§7.1–§7.4 — backend security** | VM sandbox, Helm secrets, SSRF, audit atomicity | 🔴 Not addressed | Out of scope. |
+| **§8–§12** | Performance, enterprise readiness, observability, product strategy | 🔴 Not addressed | Out of scope. |
+
+### Additional UX-001 work shipped in this PR (not in original audit)
+
+The hot-fix branch also addressed a frontend regression that wasn't called out in this audit: every user-initiated mutation (save / update / delete / approve / reject / run / abort) across ~25 pages and components had drifted to silent success — either no feedback at all (`Settings/sections/*`, `NewProject.jsx`), or feedback routed into the notification bell instead of a visible toast (`Automation.jsx`, `ProjectSettingsLayout.jsx`). Fixed by introducing a global `ToastContext` (`frontend/src/context/ToastContext.jsx`) mounted in `App.jsx`, migrating every silent callsite to emit a visible toast, and pinning the behaviour with WAI-ARIA `role="status"` / `role="alert"` + `aria-live` + WCAG 2.2 SC 2.2.1 user-dismissable affordance. See `docs/changelog.md` under `## [Unreleased]` for the full surface list.
+
+### Net effect on overall readiness score
+
+The audit's overall **5.9 / 10** reflected the state before this PR. The frontend-scoped subscores move as follows (other subscores unchanged):
+
+| Dimension | Audit score | After PR #40 | Notes |
+|---|---|---|---|
+| Frontend Architecture | 6.0/10 | **6.5/10** | XSS gap closed, font-CDN gap closed, toast-feedback gap closed; monolithic pages still pending. |
+| Security Posture | 6.5/10 | **7.0/10** | XSS defence-in-depth + GDPR/CSP-clean font hosting; VM-sandbox, Helm secrets, SSRF still open. |
+| Core QA Pipeline Quality | 7.5/10 | 7.5/10 | No backend changes in this PR. |
+
+Refreshed **overall readiness: ~6.1 / 10** (frontend sub-points only).
+
+---
+
 ## 1. Executive Summary
 
 Sentri is an earnestly ambitious platform with genuinely sophisticated engineering in some areas — particularly the multi-agent orchestration, AI provider abstraction, and self-healing waterfall. However, a set of structural defects, unfinished security mitigations, and architectural compromises are now load-bearing at production scale. The most serious are not documentation problems — they are coded into the production paths.
