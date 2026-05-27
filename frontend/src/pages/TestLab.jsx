@@ -15,9 +15,9 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  StopCircle, Clock,
-  ArrowRight, RotateCcw, Atom, Video,
-  Copy, Check, RefreshCw,
+  StopCircle,
+  Atom, Video,
+  RefreshCw,
 } from "lucide-react";
 import { api } from "../api.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
@@ -34,17 +34,18 @@ import SiteGraph from "../components/crawl/SiteGraph.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
 // `TestConfig` is consumed internally by `<TestLabConfigPanel>` —
 // no longer imported here directly.
-import EmptyState from "../components/shared/EmptyState.jsx";
+// `EmptyState` previously imported here and forwarded to `<QueueTab>` via
+// DI; the extracted `QueueTab.jsx` now imports it directly so this page
+// no longer references it.
 // Task 3 — multi-agent chat transcript replaces the prior single-narrator
 // `NarrativeFeed` (which lived inline in this file). `AgentConversation`
 // owns its own `getStageAgentRoles` import from `frontend/src/config.js`,
 // so step → role attribution stays anchored to the canonical map without
 // prop-drilling through TestLab.
 import AgentConversation from "../components/ai/AgentConversation.jsx";
-// `stageStatus` extracted to a shared util so AgentConversation and any
-// future stage-aware view derive state from the same single source. See
-// `frontend/src/utils/pipelineState.js` for status semantics.
-import { stageStatus } from "../utils/pipelineState.js";
+// `stageStatus` (status derivation) is consumed inside the extracted
+// `<PipelinePanel>` and `<AgentConversation>` — this page no longer
+// references it directly. See `frontend/src/utils/pipelineState.js`.
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
 // AGENT.md §40 — `TestLabTabs` extracted from the inline IIFE that
 // previously lived in this file. `RetryButton` is also extracted but
@@ -72,20 +73,35 @@ import TestLabConfigPanel from "../components/test-lab/TestLabConfigPanel.jsx";
 // surface. Pure pass-through: every value + handler is owned by this
 // page. See the component's JSDoc for the prop contract.
 import TestLabLaunchPanel from "../components/test-lab/TestLabLaunchPanel.jsx";
+// Audit §3.1 decomposition — presentational sub-components + module
+// constants previously inlined in this file now live next to their
+// siblings under `frontend/src/components/test-lab/`. The page keeps
+// only the run-lifecycle state machine (G9 parallel-runs, SSE handler,
+// launch flow) — see the inline comment block at the top of `<TestLab>`
+// for what's still in-file and why.
+import ProjIcon from "../components/test-lab/ProjIcon.jsx";
+import PipelinePanel, { PIPELINE_STAGES } from "../components/test-lab/PipelinePanel.jsx";
+import LiveLog from "../components/test-lab/LiveLog.jsx";
+import QueueRow from "../components/test-lab/QueueRow.jsx";
+// Pure helpers — sessionStorage mirror + attachment MIME guard.
+// Extracted so the page file stops growing every time we tweak the
+// log cap or the MIME allowlist, and so each helper is unit-testable
+// without a React renderer.
+import {
+  LOG_CAP,
+  loadPersistedRun,
+  persistRun,
+  clearPersistedRun,
+} from "../utils/testLabPersistence.js";
+import {
+  ACCEPTED_EXTENSIONS,
+  MAX_ATTACHMENT_SIZE,
+  MAX_TOTAL_ATTACHMENT,
+  isTextMime,
+} from "../utils/testLabAttachments.js";
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const PIPELINE_STAGES = [
-  { label: "Crawl & snapshot",     step: 1, key: "pagesFound",          unit: "pages" },
-  { label: "Filter elements",      step: 2, key: "elementsKept",         unit: "kept"  },
-  { label: "Classify intents",     step: 3, key: "journeysDetected",     unit: "flows" },
-  { label: "Generate tests",       step: 4, key: "rawTestsGenerated",    unit: "raw"   },
-  { label: "Deduplicate",          step: 5, key: "duplicatesRemoved",    unit: "removed" },
-  { label: "Enhance assertions",   step: 6, key: "assertionsEnhanced",   unit: "enhanced" },
-  { label: "Validate",             step: 7, key: "validationRejected",   unit: "rejected" },
-  { label: "Done",                 step: 8, key: null,                   unit: null },
-];
 
 // GAP-005 (audit, fix) — `STEP_TO_AGENT_ROLE` removed in favour of the
 // shared `getStageAgentRoles` helper imported above. The old map was both
@@ -106,43 +122,6 @@ const REQ_EXAMPLES = [
   "Password reset flow end-to-end",
 ];
 
-// ── Attachment limits ────────────────────────────────────────────────────────
-// Mirror the legacy GenerateTestModal contract (40 KB per file, 45 KB total —
-// backend caps `description` at 50 KB so we leave headroom for the prompt
-// scaffold). Same MIME-allowlist + binary-detection guards prevent users from
-// pasting screenshots / PDFs that would blow up token counts.
-const ACCEPTED_EXTENSIONS = ".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,.gherkin";
-const MAX_ATTACHMENT_SIZE  = 40_000;
-const MAX_TOTAL_ATTACHMENT = 45_000;
-const TEXT_MIME_PREFIXES   = ["text/", "application/json", "application/xml", "application/x-yaml", "application/yaml"];
-const TEXT_MIME_EXACT      = new Set([
-  "text/plain", "text/csv", "text/html", "text/markdown", "text/xml", "text/yaml",
-  "application/json", "application/xml", "application/x-yaml", "application/yaml",
-]);
-
-function isTextMime(file) {
-  const mime = (file.type || "").toLowerCase();
-  // No MIME (e.g. .feature, .gherkin) — allow because the OS picker already
-  // filtered by the ACCEPTED_EXTENSIONS list.
-  if (!mime) return true;
-  if (TEXT_MIME_EXACT.has(mime)) return true;
-  return TEXT_MIME_PREFIXES.some(p => mime.startsWith(p));
-}
-
-// ── Persistence ──────────────────────────────────────────────────────────────
-//
-// The pipeline + log views are driven by component-local state (`activeRun`,
-// `runData`, `logLines`). Without persistence, navigating away from Test Lab
-// unmounts the component and wipes the state, so returning mid-run shows an
-// empty idle panel instead of the in-flight pipeline. We mirror the live run
-// to sessionStorage so soft navigation within the app is seamless; on mount
-// we rehydrate and the SSE hook auto-reconnects (its `snapshot` event refills
-// pipeline counters, and new log lines resume streaming from the reconnect
-// point). sessionStorage is scoped per-tab, which matches the UX we want.
-
-const STORAGE_KEY = "sentri.testLab.activeRun";
-const LOG_CAP     = 200; // bound storage size — the LiveLog UI slices at -40
-
 // Test Lab's Queue + Active Runs panels only describe AI generation runs —
 // the pipeline visualisation, "Step N/8" subtitle, and the attach-to-live
 // view all assume the 8-stage crawl/generate pipeline. Regression `test_run`
@@ -153,268 +132,20 @@ const LOG_CAP     = 200; // bound storage size — the LiveLog UI slices at -40
 // reference every render.
 const isGenerationRun = (r) => r.type === "crawl" || r.type === "generate";
 
-function loadPersistedRun() {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.activeRun?.runId) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function persistRun(activeRun, runData, logLines) {
-  try {
-    if (!activeRun?.runId) {
-      sessionStorage.removeItem(STORAGE_KEY);
-      return;
-    }
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-      activeRun,
-      runData,
-      logLines: logLines.slice(-LOG_CAP),
-    }));
-  } catch { /* quota / private mode — non-fatal */ }
-}
-
-function clearPersistedRun() {
-  try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* non-fatal */ }
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
-// `stageStatus` previously lived inline here; it's now imported from
-// `frontend/src/utils/pipelineState.js` so AgentConversation (and any
-// future stage-aware surface) shares the single source of truth.
-
-/** Build a project avatar colour from its initial letter (deterministic). */
-function avatarStyle(initial) {
-  const hues = {
-    A: 210, B: 280, C: 340, D: 170, E: 50, F: 120, G: 15,
-    H: 255, I: 190, J: 320, K: 90, L: 200, M: 30, N: 160,
-    O: 60, P: 295, Q: 135, R: 0, S: 240, T: 75, U: 215,
-    V: 145, W: 350, X: 180, Y: 45, Z: 270,
-  };
-  const h = hues[(initial || "?").toUpperCase()] ?? 200;
-  return {
-    background: `hsl(${h},60%,90%)`,
-    color: `hsl(${h},60%,30%)`,
-  };
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-// `ChipGroup` was inlined here for the Crawl/Requirement chip rows; chip
-// rendering now lives in `frontend/src/components/test/TestConfig.jsx` and is
-// shared with the rest of the app.
-
-/**
- * Compact project avatar with deterministic colour from the project name initial.
- *
- * @param {{ project: Object }} props
- */
-function ProjIcon({ project }) {
-  const initial = (project?.name || "?")[0].toUpperCase();
-  return (
-    <div className="tl-proj-icon" style={avatarStyle(initial)}>
-      {initial}
-    </div>
-  );
-}
-
-/**
- * Pipeline stage list shown while a crawl run is active.
- *
- * @param {{ run: Object }} props
- */
-function PipelinePanel({ run }) {
-  const cs = run?.currentStep ?? null;
-  const ps = run?.pipelineStats || {};
-  const status = run?.status ?? "running";
-
-  return (
-    <div className="tl-pipeline">
-      {PIPELINE_STAGES.map(stage => {
-        const state = stageStatus(stage.step, cs, status);
-        const statVal = stage.key ? ps[stage.key] : null;
-        return (
-          <div key={stage.step} className={`tl-stage tl-stage--${state}`}>
-            <div className={`tl-stage-dot tl-stage-dot--${state}`} />
-            <span className="tl-stage-name">{stage.label}</span>
-            {statVal != null && (
-              <span className="tl-stage-stat">
-                {statVal} {stage.unit}
-              </span>
-            )}
-            {state === "active" && statVal == null && (
-              <span className="tl-stage-stat tl-stage-stat--running">running…</span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * Live log terminal — scrolls to bottom on each new entry.
- *
- * @param {{ lines: string[] }} props
- */
-function LiveLog({ lines }) {
-  const endRef = useRef(null);
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [lines.length]);
-
-  // Copy the *full* buffer (not just the visible -40 slice) so the user can
-  // share the complete log when triaging an issue. `navigator.clipboard`
-  // requires HTTPS or localhost; the catch keeps the button silent on
-  // unsupported origins instead of throwing into the console.
-  function handleCopy() {
-    const text = lines.join("\n");
-    if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    }).catch(() => { /* clipboard unavailable — non-fatal */ });
-  }
-
-  return (
-    <div className="tl-live-log">
-      {/* Icon-only copy button pinned to the top-right of the log surface.
-          `tl-log-copy` is absolutely positioned against the non-scrolling
-          `.tl-live-log` wrapper so it stays in view as the user scrolls
-          through `.tl-live-log-scroll` below. Disabled when the buffer is
-          empty so users can't no-op-copy a blank log. */}
-      <button
-        type="button"
-        className={`tl-log-copy${copied ? " tl-log-copy--copied" : ""}`}
-        onClick={handleCopy}
-        disabled={lines.length === 0}
-        title={copied ? "Copied to clipboard" : "Copy log to clipboard"}
-        aria-label="Copy log to clipboard"
-      >
-        {copied ? <Check size={13} /> : <Copy size={13} />}
-      </button>
-      {/* Inner scroll surface — the absolutely-positioned copy button above
-          stayed visually pinned only when the scroll happened on a separate
-          element. Co-locating `overflow-y: auto` on the parent caused the
-          button to scroll *with* the log content (absolute children of a
-          scroll container participate in its scroll). */}
-      <div className="tl-live-log-scroll">
-        {lines.slice(-40).map((line, i) => {
-          // Backend emits lines as `[ISO timestamp] <emoji> <message>` (see
-          // `backend/src/utils/runLogger.js` and `backend/src/crawler.js`), so
-          // we can't anchor the classifier at index 0 — the leading bracketed
-          // timestamp pushes the emoji past the start. Scan for the first
-          // recognisable marker anywhere in the line; first match wins.
-          let cls = "tl-log-dim";
-          if (/[✅✓]/.test(line) || /\bPASSED\b/.test(line))           cls = "tl-log-ok";
-          else if (/[❌✗]/.test(line) || /\b(FAILED|ERROR)\b/i.test(line)) cls = "tl-log-error";
-          else if (/[⚠️]/.test(line) || /\bWARN(ING)?\b/i.test(line))     cls = "tl-log-warn";
-          else if (/[🏁🚀🕷️🔍🤖→▶]/.test(line))                          cls = "tl-log-info";
-          return <div key={i} className={cls}>{line}</div>;
-        })}
-        <div ref={endRef} />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Single queue row for the Queue tab.
- *
- * @param {{ run: Object, project: Object, onStop: Function, onAttach: Function }} props
- *   `onAttach` is called for active runs to reattach the live view; it falls
- *   back to navigating to `/runs/:id` for completed runs.
- */
-function QueueRow({ run, project, onStop, onAttach }) {
-  const navigate = useNavigate();
-  const isActive    = run.status === "running";
-  const isCompleted = run.status === "completed" || run.status === "completed_empty";
-  const isFailed    = run.status === "failed";
-  const isAborted   = run.status === "aborted";
-  // Any terminal status dims the row + suppresses the progress bar.
-  const isTerminal  = isCompleted || isFailed || isAborted;
-
-  const pct = run.currentStep != null
-    ? Math.round(((run.currentStep - 1) / 7) * 100)
-    : 0;
-
-  // Subtitle reflects the actual outcome — a failed run must not read as
-  // "Completed · N tests generated", and an aborted run must not fall through
-  // to the "Queued" branch.
-  let subtitle;
-  if (isActive && run.currentStep != null) {
-    subtitle = `Step ${run.currentStep}/8 · ${PIPELINE_STAGES[run.currentStep - 1]?.label ?? ""} · started ${fmtRelativeDate(run.startedAt)}`;
-  } else if (isCompleted) {
-    subtitle = `Completed · ${run.testsGenerated ?? 0} tests generated · ${fmtRelativeDate(run.startedAt)}`;
-  } else if (isFailed) {
-    subtitle = `Failed${run.error ? ` — ${run.error}` : ""} · ${fmtRelativeDate(run.startedAt)}`;
-  } else if (isAborted) {
-    subtitle = `Aborted · ${fmtRelativeDate(run.startedAt)}`;
-  } else {
-    subtitle = `Queued · ${fmtRelativeDate(run.startedAt)}`;
-  }
-
-  return (
-    <div className={`tl-queue-row${isTerminal ? " tl-queue-row--done" : ""}`}>
-      <ProjIcon project={project} />
-      <div className="tl-queue-info">
-        <div className="tl-queue-name">
-          {project?.name ?? "Unknown"} · {run.type === "crawl" ? "Crawl & Generate" : "Requirement"}
-        </div>
-        <div className="tl-queue-sub">{subtitle}</div>
-      </div>
-
-      {isActive && (
-        <div className="tl-queue-progress">
-          <div className="progress-bar">
-            <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
-          </div>
-        </div>
-      )}
-
-      {isCompleted && (
-        <span className="badge badge-green tl-queue-row__pin">done</span>
-      )}
-      {isFailed && (
-        <span className="badge badge-red tl-queue-row__pin">failed</span>
-      )}
-      {isAborted && (
-        <span className="badge badge-amber tl-queue-row__pin">aborted</span>
-      )}
-
-      {isActive ? (
-        <>
-          <button
-            className="btn btn-ghost btn-sm tl-queue-row__pin"
-            onClick={() => onAttach?.(run)}
-            title="Attach the live pipeline view to this run"
-          >
-            View <ArrowRight size={13} />
-          </button>
-          <button
-            className="btn btn-ghost btn-sm tl-queue-row__pin"
-            onClick={() => onStop(run.id)}
-          >
-            <StopCircle size={14} />
-            Stop
-          </button>
-        </>
-      ) : (
-        <button
-          className="btn btn-ghost btn-sm tl-queue-row__pin"
-          onClick={() => navigate(`/runs/${run.id}`)}
-        >
-          View <ArrowRight size={13} />
-        </button>
-      )}
-    </div>
-  );
-}
+// All previously-inline helpers moved out per audit §3.1:
+//   - `loadPersistedRun` / `persistRun` / `clearPersistedRun` / `STORAGE_KEY`
+//     / `LOG_CAP` → `frontend/src/utils/testLabPersistence.js`
+//   - `ProjIcon` + `avatarStyle` → `frontend/src/components/test-lab/ProjIcon.jsx`
+//   - `PipelinePanel` + `PIPELINE_STAGES` →
+//     `frontend/src/components/test-lab/PipelinePanel.jsx`
+//   - `LiveLog` → `frontend/src/components/test-lab/LiveLog.jsx`
+//   - `QueueRow` → `frontend/src/components/test-lab/QueueRow.jsx`
+//   - `isTextMime` + attachment caps → `frontend/src/utils/testLabAttachments.js`
+//
+// `stageStatus` (status derivation for the pipeline) continues to live in
+// `frontend/src/utils/pipelineState.js` as the single source of truth shared
+// with `AgentConversation`.
 
 // ── (NarrativeFeed removed — see `frontend/src/components/ai/AgentConversation.jsx`)
 //
@@ -1481,9 +1212,6 @@ export default function TestLab() {
           onStop={handleQueueStop}
           onAttach={handleAttachRun}
           onSwitchToCrawl={() => setTab("crawl")}
-          QueueRow={QueueRow}
-          EmptyState={EmptyState}
-          ClockIcon={Clock}
         />
       )}
 
