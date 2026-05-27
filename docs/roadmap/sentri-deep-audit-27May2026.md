@@ -9,7 +9,7 @@
 
 ## 0. Progress Update — PR #40 (Hot-Fix branch)
 
-> Last updated against commit `2041fb0` (Hot-Fix PR · UX-001).
+> Last updated against commit `63296d2` (Hot-Fix PR · final).
 >
 > Status legend: ✅ Done · 🟡 Partial · 🔴 Not started
 
@@ -23,7 +23,7 @@ PR #40 was scoped to UX feedback (UX-001) but also picked up several audit items
 | **§6.1** | Bulk approve has no Undo | ✅ **Done** | `frontend/src/pages/ReviewQueue.jsx` `executeBulkAction` — inline **Undo** CTA on the success toast wires through `bulkUpdateTests(pid, ids, "restore")` per project. Toast linger extended to 5s when an action button is present. Industry pattern matches Gmail / Linear / GitHub. |
 | **§6.1** | "No keyboard shortcuts" claim | ✅ Was wrong — already shipped | `frontend/src/pages/ReviewQueue.jsx:703-729` implements `a` / `r` / `j` / `k` / `↑` / `↓`. Audit overstated. |
 | **§6.1** | "Quality score has no tooltip" claim | ✅ Was wrong — already shipped | `QualityScoreChip` opens a factor-breakdown popover on click. Audit overstated. |
-| **§7.5** | CSP `style-src 'unsafe-inline'` (inline styles throughout SPA) | 🟡 **In progress** | `frontend/src/components/project/RunToast.jsx` migrated to `.rt-toast*` class names + dedicated `frontend/src/styles/components/run-toast.css` partial. Wider SPA sweep still pending — CSP cannot tighten until all `style={{}}` usages are removed. |
+| **§7.5** | CSP `style-src 'unsafe-inline'` (inline styles throughout SPA) | 🟡 **Substantial progress** | `RunToast.jsx` → `.rt-toast*` CSS partial. `RunDetail.jsx` (108→3 inline styles), `Tests.jsx` (114→6), `TestRunView.jsx` (131→3) fully swept — all remaining are data-driven (progress-bar widths, per-category palettes) that need hash-based CSP. `TestLab.jsx` deferred to other agent. ~340 inline styles eliminated; ~12 data-driven carve-outs remain across the three files. |
 | **§3.1 / TD-006 / TD-007** | Monolithic frontend pages (`TestLab.jsx` 1,899 / `ReviewQueue.jsx` 1,460 / `TestDetail.jsx` 1,012) | 🔴 Not addressed | Out of scope for the hot-fix branch. Defer to a dedicated decomposition PR. |
 | **§3.3** | TestLab dual SSE hooks / dual source of truth | 🔴 Not addressed | Migration was already in flight per the in-code comment; defer. |
 | **§6.3** | Sidebar IA overload (11 items) | 🔴 Not addressed | Requires a dedicated IA pass. |
@@ -33,9 +33,15 @@ PR #40 was scoped to UX feedback (UX-001) but also picked up several audit items
 | **§7.1–§7.4 — backend security** | VM sandbox, Helm secrets, SSRF, audit atomicity | 🔴 Not addressed | Out of scope. |
 | **§8–§12** | Performance, enterprise readiness, observability, product strategy | 🔴 Not addressed | Out of scope. |
 
-### Additional UX-001 work shipped in this PR (not in original audit)
+### Additional work shipped in this PR (not in original audit)
 
-The hot-fix branch also addressed a frontend regression that wasn't called out in this audit: every user-initiated mutation (save / update / delete / approve / reject / run / abort) across ~25 pages and components had drifted to silent success — either no feedback at all (`Settings/sections/*`, `NewProject.jsx`), or feedback routed into the notification bell instead of a visible toast (`Automation.jsx`, `ProjectSettingsLayout.jsx`). Fixed by introducing a global `ToastContext` (`frontend/src/context/ToastContext.jsx`) mounted in `App.jsx`, migrating every silent callsite to emit a visible toast, and pinning the behaviour with WAI-ARIA `role="status"` / `role="alert"` + `aria-live` + WCAG 2.2 SC 2.2.1 user-dismissable affordance. See `docs/changelog.md` under `## [Unreleased]` for the full surface list.
+- **UX-001 toast feedback** — every user-initiated mutation (save / update / delete / approve / reject / run / abort) across ~25 pages and components now emits a visible toast on success and error. Previously silent or routed to the notification bell. Global `ToastContext` with WAI-ARIA `role="status"` / `role="alert"` + `aria-live` + WCAG 2.2 SC 2.2.1 dismiss button.
+
+- **Undo CTA on bulk approve/reject** — industry-standard pattern (Gmail / Linear / GitHub). Toast surfaces an inline "Undo" button that calls `bulkUpdateTests(pid, ids, "restore")` per-project. Action toasts linger 5s. Partial-success undo skips failed project groups.
+
+- **DS-001 inline-style sweep** — `RunDetail.jsx` (108→3), `Tests.jsx` (114→6), `TestRunView.jsx` (131→3). Filter pills use CSS custom properties (`--t-active-bg` / `--t-active-color`) for data-driven colour; layout/sizing/transition rules in dedicated CSS partials (`run-detail.css`, `tests.css`, `test-run-view.css`). ~340 inline styles eliminated.
+
+- **Bug fixes** — `successCount` unit mismatch in ReviewQueue + Tests bulk actions (was mixing test-ID count with project-group count); unmemoized ToastContext provider value; missing null guards in Automation `onPanelToast`; missing `showToast` in IntegrationsSection useEffect deps; duplicate `### Fixed` heading in changelog.
 
 ### Net effect on overall readiness score
 
@@ -43,11 +49,11 @@ The audit's overall **5.9 / 10** reflected the state before this PR. The fronten
 
 | Dimension | Audit score | After PR #40 | Notes |
 |---|---|---|---|
-| Frontend Architecture | 6.0/10 | **6.5/10** | XSS gap closed, font-CDN gap closed, toast-feedback gap closed; monolithic pages still pending. |
-| Security Posture | 6.5/10 | **7.0/10** | XSS defence-in-depth + GDPR/CSP-clean font hosting; VM-sandbox, Helm secrets, SSRF still open. |
+| Frontend Architecture | 6.0/10 | **7.0/10** | XSS gap closed; font-CDN closed; toast feedback across ~25 surfaces; coached empty states; ~340 inline styles eliminated (RunDetail + Tests + TestRunView); TestLab decomposition (1,907→~995 lines by other agent). Monolithic ReviewQueue + TestDetail still pending. |
+| Security Posture | 6.5/10 | **7.0/10** | DOMPurify defence-in-depth on markdown; GDPR/CSP-clean font hosting; `data-lang` attr escaped. VM-sandbox, Helm secrets, SSRF still open (backend scope). |
 | Core QA Pipeline Quality | 7.5/10 | 7.5/10 | No backend changes in this PR. |
 
-Refreshed **overall readiness: ~6.1 / 10** (frontend sub-points only).
+Refreshed **overall readiness: ~6.2 / 10** (frontend sub-points only; backend unchanged).
 
 ---
 
