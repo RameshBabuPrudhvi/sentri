@@ -39,7 +39,7 @@ import { Download, ChevronDown } from "lucide-react";
 import { api } from "../api.js";
 import { API_PATH } from "../utils/apiBase.js";
 import { useAuth } from "../context/AuthContext.jsx";
-import { useNotifications } from "../context/NotificationContext.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 import { fmtDateTime, fmtDate, fmtAuditTimestamp } from "../utils/formatters.js";
 // audit-log.css is imported from `frontend/src/index.css` after
@@ -522,7 +522,7 @@ export default function AuditLog() {
   // backend (`requireRole("admin")`). The workspaceId comes from the JWT
   // claim baked into `user` at login — never from URL state.
   const workspaceId = user?.workspaceId;
-  const { addNotification } = useNotifications();
+  const { showToast } = useToast();
 
   // ── URL-driven filters (mirrors ReviewQueue + ApprovalsTimeline pattern) ──
   const [searchParams, setSearchParams] = useSearchParams();
@@ -803,7 +803,7 @@ export default function AuditLog() {
       }
       setNextCursor(res?.nextCursor || null);
     } catch (err) {
-      addNotification({ type: "error", title: "Audit log", body: err.message || "Failed to load more" });
+      showToast(err.message || "Failed to load more audit events.", "error");
     } finally {
       setLoadingMore(false);
     }
@@ -838,11 +838,7 @@ export default function AuditLog() {
       // The server has no `q` param yet; document the limitation in the
       // notification so an evidence-pulling admin knows the file matches
       // the filter chips, not the search box.
-      addNotification({
-        type: "info",
-        title: "Export",
-        body: "Export ignores the search box (server-side filter applies the type/project/date chips only).",
-      });
+      showToast("Export ignores the search box — server-side filter applies the type/project/date chips only.", "info");
     }
     const url = `${API_PATH}/workspaces/${workspaceId}/audit-log?${params.toString()}`;
     try {
@@ -866,20 +862,12 @@ export default function AuditLog() {
       }
       if (res.status === 429) {
         const errBody = await res.json().catch(() => ({}));
-        addNotification({
-          type: "error",
-          title: "Export rate-limited",
-          body: errBody.error || "Too many audit-log exports. Try again later.",
-        });
+        showToast(errBody.error || "Too many audit-log exports. Try again later.", "error");
         return;
       }
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        addNotification({
-          type: "error",
-          title: "Export failed",
-          body: errBody.error || `Export failed (${res.status}).`,
-        });
+        showToast(errBody.error || `Export failed (${res.status}).`, "error");
         return;
       }
       const blob = await res.blob();
@@ -890,8 +878,9 @@ export default function AuditLog() {
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+      showToast(`Audit log exported as ${format.toUpperCase()}`, "success");
     } catch (err) {
-      addNotification({ type: "error", title: "Export failed", body: err.message || "Export failed." });
+      showToast(err.message || "Export failed.", "error");
     }
   }
 
@@ -907,7 +896,7 @@ export default function AuditLog() {
       const res = await api.verifyAuditChain();
       setVerifyResult(res);
     } catch (err) {
-      addNotification({ type: "error", title: "Verify chain", body: err.message || "Verification failed." });
+      showToast(err.message || "Chain verification failed.", "error");
     } finally {
       setVerifying(false);
     }
@@ -923,7 +912,7 @@ export default function AuditLog() {
       const res = await api.listAuditDlq(workspaceId, { limit: 200 });
       setDlqRows(Array.isArray(res?.rows) ? res.rows : []);
     } catch (err) {
-      addNotification({ type: "error", title: "DLQ", body: err.message || "Failed to load DLQ." });
+      showToast(err.message || "Failed to load DLQ.", "error");
       setDlqRows([]);
     } finally {
       setDlqLoading(false);
@@ -935,22 +924,17 @@ export default function AuditLog() {
     setReplayingId(dlqId);
     try {
       await api.replayAuditDlq(workspaceId, dlqId);
-      addNotification({ type: "success", title: "DLQ replay", body: "DLQ entry replayed." });
+      showToast("DLQ entry replayed", "success");
       setDlqRows((prev) => (prev || []).filter((r) => r.id !== dlqId));
     } catch (err) {
       // SIEM_NOT_CONFIGURED is distinct from real dispatch failures —
-      // surface it as an info notification with a hint to configure
-      // the forwarder. The "Configure SIEM" button lives in the same
-      // header.
+      // surface it as an info toast with a hint to configure the
+      // forwarder. The "Configure SIEM" button lives in the same header.
       const code = err.body?.code;
       if (code === "SIEM_NOT_CONFIGURED") {
-        addNotification({
-          type: "info",
-          title: "SIEM not configured",
-          body: "No SIEM target configured. Open SIEM config to set one.",
-        });
+        showToast("No SIEM target configured — open SIEM config to set one.", "info");
       } else {
-        addNotification({ type: "error", title: "DLQ replay", body: err.message || "Replay failed." });
+        showToast(err.message || "DLQ replay failed.", "error");
       }
     } finally {
       setReplayingId(null);
@@ -966,7 +950,7 @@ export default function AuditLog() {
       const res = await api.getSystemSecurityEvents({ limit: 200 });
       setSysEventsRows(Array.isArray(res?.rows) ? res.rows : []);
     } catch (err) {
-      addNotification({ type: "error", title: "System events", body: err.message || "Failed to load system events." });
+      showToast(err.message || "Failed to load system events.", "error");
       setSysEventsRows([]);
     } finally {
       setSysEventsLoading(false);
@@ -1053,9 +1037,10 @@ export default function AuditLog() {
       // Clear the hmacSecret field after a successful save so it's not
       // hanging around in the DOM.
       setSiemForm((prev) => ({ ...prev, hmacSecret: "" }));
-      addNotification({ type: "success", title: "SIEM config", body: "SIEM forwarder saved." });
+      showToast("SIEM forwarder saved", "success");
     } catch (err) {
       setSiemError(err.message || "Failed to save SIEM config.");
+      showToast(err.message || "Failed to save SIEM config.", "error");
     } finally {
       setSiemSaving(false);
     }
@@ -1069,9 +1054,10 @@ export default function AuditLog() {
       await api.deleteWorkspaceSiemConfig(workspaceId);
       setSiemConfig(null);
       setSiemForm({ targetUrl: "", hmacSecret: "", headersJson: "", enabled: true });
-      addNotification({ type: "success", title: "SIEM config", body: "SIEM forwarder removed." });
+      showToast("SIEM forwarder removed", "success");
     } catch (err) {
       setSiemError(err.message || "Failed to delete SIEM config.");
+      showToast(err.message || "Failed to delete SIEM config.", "error");
     } finally {
       setSiemSaving(false);
     }

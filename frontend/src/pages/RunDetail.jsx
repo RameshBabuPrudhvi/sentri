@@ -22,6 +22,7 @@ import { queryClient, runQueryKeys, invalidateRunCache } from "../queryClient.js
 import { useRunDetailQuery } from "../hooks/queries/useRunDetailQuery.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
 import { useNotifications } from "../context/NotificationContext.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 
 import CrawlView from "../components/crawl/CrawlView";
 import GenerateView from "../components/generate/GenerateView";
@@ -138,6 +139,7 @@ export default function RunDetail() {
   const [priorRuns, setPriorRuns] = useState([]);
   const [rootCauseExpanded, setRootCauseExpanded] = useState(false);
   const { addNotification } = useNotifications();
+  const { showToast } = useToast();
 
   // Cap the streamed token buffer so long-running generation jobs don't
   // accumulate hundreds of thousands of characters and cause layout/memory issues.
@@ -243,11 +245,7 @@ export default function RunDetail() {
         // Guard against missing/corrupted generateInput — the backend requires
         // `name` for generate runs, so sending undefined would 400.
         if (!input.name) {
-          addNotification({
-            type: "error",
-            title: "Re-run failed",
-            body: "Original generation input not found — please create a new generation instead.",
-          });
+          showToast("Original generation input not found — please create a new generation instead.", "error");
           return;
         }
         result = await api.generateTest(run.projectId, {
@@ -257,15 +255,17 @@ export default function RunDetail() {
         });
       }
       if (result?.runId) {
-        addNotification({ type: "success", title: "Re-run started", body: `New run ${result.runId} created` });
+        // UX-001: user-initiated "Re-run" click — surface as a visible toast
+        // before navigation (the bell stays for SSE "Run complete" events).
+        showToast(`Re-run started — new run ${result.runId} created`, "success");
         navigate(`/runs/${result.runId}`);
       }
     } catch (err) {
-      addNotification({ type: "error", title: "Re-run failed", body: err.message || "Unknown error" });
+      showToast(err.message || "Re-run failed.", "error");
     } finally {
       setRerunning(false);
     }
-  }, [run, rerunning, navigate, addNotification]);
+  }, [run, rerunning, navigate, showToast]);
 
   // AUTO-010 — Track whether the initial auto-expand decision has been made
   // for the current run. Reset on `runId` change so navigating to a different
