@@ -1,23 +1,112 @@
 /**
- * RunDetail — page-specific responsive styles
- *
- * The RunDetail page has a task header with badges + action buttons, a meta row,
- * a pass-rate bar, error banners, and a main content area that renders one of
- * CrawlView / GenerateView / TestRunView (each has its own internal layout).
- * The quality analytics section uses a 3-column grid.
- *
- * Class hooks added to RunDetail.jsx:
- *   .rd-header        — the task header row (title + badges + buttons)
- *   .rd-meta           — the meta info row below the header
- *   .rd-analytics-grid — the 3-column quality analytics grid
- *
- * Layer: Pages (ITCSS) — import after runs.css in index.css
- *
- * Breakpoints:
- *   900px — header wraps; analytics grid → 2 columns
- *   600px — meta row wraps more aggressively
- *   480px — analytics grid → single column; tighten padding
+ * RunDetail — page styles. Audit §7.5/DS-001 inline-style sweep.
+ * Class hooks documented inline next to each rule.
+ * Data-driven values (passrate width, per-category error palette) stay
+ * inline per AGENT.md §127.
  */
+
+/* Shell + skeleton */
+.rd-page { max-width: 1200px; margin: 0 auto; padding: 0 16px 40px; overflow-x: hidden; }
+.rd-skeleton-shell { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+.rd-skeleton-row1 { height: 90px; border-radius: 12px; margin-bottom: 16px; }
+.rd-skeleton-row2 { height: 60px; border-radius: 8px; margin-bottom: 16px; }
+.rd-skeleton-grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; height: 560px; }
+.rd-skeleton-grid .skeleton { border-radius: 12px; }
+.rd-not-found { text-align: center; padding: 40px; color: var(--text3); }
+
+/* Header */
+.rd-header-wrap { margin-bottom: 16px; }
+.rd-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.rd-header-actions { margin-left: auto; display: flex; gap: 8px; }
+.rd-title { font-weight: 700; font-size: 1.3rem; }
+.rd-stop-btn { background: var(--red-bg); color: var(--red); border: 1px solid #fca5a5; font-weight: 600; }
+.rd-badge-amber-inline { background: var(--amber-bg); color: #92400e; border: 1px solid #fcd34d; }
+.rd-trace-select { font-size: 0.78rem; padding: 4px 8px; }
+
+/* Meta row */
+.rd-meta { display: flex; align-items: center; gap: 16px; color: var(--text3); font-size: 0.78rem; flex-wrap: wrap; }
+.rd-meta-mono { font-family: var(--font-mono); }
+.rd-meta-item { display: flex; align-items: center; gap: 4px; }
+.rd-meta-badge-xs { font-size: 0.7rem; }
+.rd-meta-budget { font-size: 0.72rem; color: var(--text3); }
+
+/* Compare bar */
+.rd-compare-bar { padding: 10px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.rd-compare-label { font-size: 0.82rem; color: var(--text2); }
+.rd-compare-select { font-size: 0.82rem; padding: 4px 8px; }
+
+/* Impact card */
+.rd-impact-card { padding: 14px; margin-bottom: 16px; }
+.rd-impact-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.rd-impact-title { font-weight: 700; font-size: 0.9rem; }
+.rd-impact-badge-xs { font-size: 0.7rem; }
+.rd-impact-fallback { color: var(--text3); font-size: 0.76rem; margin-bottom: 8px; }
+.rd-impact-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.rd-impact-file-code { font-size: 0.72rem; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+.rd-impact-overflow, .rd-impact-empty { color: var(--text3); font-size: 0.76rem; }
+
+/* Pass-rate bar */
+.rd-passrate-wrap { margin-bottom: 20px; }
+.rd-passrate-header { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text2); margin-bottom: 6px; }
+.rd-passrate-value { font-weight: 600; }
+.rd-passrate-value--good { color: var(--green); }
+.rd-passrate-value--warn { color: var(--amber); }
+.rd-passrate-value--bad { color: var(--red); }
+.rd-passrate-fill { transition: width 0.8s ease; }
+
+/* SSE banners */
+.rd-sse-banner { display: flex; align-items: center; gap: 8px; padding: 8px 14px; margin-bottom: 12px; border-radius: 8px; font-size: 0.76rem; }
+.rd-sse-banner--info { background: var(--blue-bg); border: 1px solid #bfdbfe; color: var(--blue); }
+.rd-sse-banner--warn { background: var(--amber-bg); border: 1px solid #fcd34d; color: var(--amber); }
+.rd-sse-icon { flex-shrink: 0; }
+.rd-sse-icon--spinning { animation: spin 2s linear infinite; }
+.rd-sse-refresh-link { background: none; border: none; cursor: pointer; color: var(--amber); font-weight: 600; text-decoration: underline; padding: 0; font-size: 0.76rem; }
+
+/* Alert banners */
+.rd-alert { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; margin-bottom: 16px; border-radius: 10px; font-size: 0.82rem; line-height: 1.5; }
+.rd-alert--amber { background: var(--amber-bg); border: 1px solid #fcd34d; color: #92400e; }
+.rd-alert--red { background: var(--red-bg); border: 1px solid #fca5a5; color: var(--red); }
+.rd-alert__icon-wrap { flex-shrink: 0; margin-top: 1px; }
+.rd-alert__icon-emoji { font-size: 1.1rem; flex-shrink: 0; }
+.rd-alert__title { font-weight: 700; margin-bottom: 3px; }
+.rd-alert__list { margin-top: 8px; font-size: 0.78rem; color: #78350f; }
+.rd-alert__list-head { font-weight: 600; margin-bottom: 4px; }
+.rd-alert__sub { margin-top: 4px; font-size: 0.78rem; color: #78350f; }
+.rd-alert__body { flex: 1; }
+.rd-alert__body--break { word-break: break-word; }
+.rd-alert__cta { margin-top: 8px; padding: 5px 12px; border-radius: 6px; background: rgba(255,255,255,0.5); font-weight: 600; font-size: 0.78rem; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+
+/* Gate violations + root cause */
+.rd-gate-violation { font-size: 0.78rem; }
+.rd-gate-violation__rule { font-family: var(--font-mono); }
+.rd-gate-violation__prior { color: var(--text3); }
+.rd-gate-list { display: flex; flex-direction: column; gap: 4px; }
+.rd-gate-footer { margin-top: 6px; font-size: 0.73rem; color: #7f1d1d; }
+.rd-rootcause-card { margin-bottom: 16px; padding: 12px; }
+.rd-rootcause-grid { display: grid; gap: 8px; margin-top: 10px; }
+.rd-rootcause-item { padding: 10px; }
+.rd-rootcause-pattern { font-weight: 600; }
+.rd-rootcause-affected { font-size: 0.82rem; color: var(--text3); }
+
+/* Analytics */
+.rd-analytics-card { padding: 24px; margin-top: 20px; }
+.rd-analytics-title { font-weight: 700; font-size: 1rem; margin-top: 0; margin-bottom: 16px; }
+.rd-analytics-insights { margin-bottom: 18px; display: flex; flex-direction: column; gap: 8px; }
+.rd-analytics-insight { padding: 10px 14px; background: var(--amber-bg); border: 1px solid #fcd34d; border-radius: 8px; font-size: 0.82rem; color: #92400e; line-height: 1.5; }
+.rd-analytics-section-label { font-size: 0.73rem; color: var(--text3); font-weight: 600; text-transform: uppercase; margin-bottom: 8px; }
+.rd-analytics-row { display: flex; justify-content: space-between; font-size: 0.82rem; padding: 3px 0; }
+.rd-analytics-row__label { color: var(--text2); }
+.rd-analytics-row__label--cap { color: var(--text2); text-transform: capitalize; }
+.rd-analytics-row__mono { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text2); }
+.rd-analytics-row__val-red { font-weight: 600; color: var(--red); }
+.rd-analytics-row__val-text { font-weight: 600; color: var(--text); }
+.rd-flaky-wrap { margin-top: 18px; }
+.rd-flaky-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+.rd-flaky-row__name { color: var(--text); }
+.rd-flaky-row__stats { color: var(--amber); font-weight: 600; font-size: 0.78rem; }
+
+/* Footer */
+.rd-footer { margin-top: 20px; display: flex; justify-content: space-between; }
 
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {

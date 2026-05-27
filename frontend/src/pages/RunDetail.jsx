@@ -379,36 +379,19 @@ export default function RunDetail() {
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 16px" }}>
-        <div
-          className="skeleton"
-          style={{ height: 90, borderRadius: 12, marginBottom: 16 }}
-        />
-        <div
-          className="skeleton"
-          style={{ height: 60, borderRadius: 8, marginBottom: 16 }}
-        />
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "320px 1fr",
-            gap: 16,
-            height: 560,
-          }}
-        >
-          <div className="skeleton" style={{ borderRadius: 12 }} />
-          <div className="skeleton" style={{ borderRadius: 12 }} />
+      <div className="rd-skeleton-shell">
+        <div className="skeleton rd-skeleton-row1" />
+        <div className="skeleton rd-skeleton-row2" />
+        <div className="rd-skeleton-grid">
+          <div className="skeleton" />
+          <div className="skeleton" />
         </div>
       </div>
     );
   }
 
   if (!run) {
-    return (
-      <div style={{ textAlign: "center", padding: 40, color: "var(--text3)" }}>
-        Run not found
-      </div>
-    );
+    return <div className="rd-not-found">Run not found</div>;
   }
 
   // ── Derived values ───────────────────────────────────────────────────────
@@ -492,10 +475,7 @@ export default function RunDetail() {
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div
-      className="fade-in"
-      style={{ maxWidth: 1200, margin: "0 auto", padding: "0 16px 40px", overflowX: "hidden" }}
-    >
+    <div className="fade-in rd-page">
       {/* ── Breadcrumb (NAV-002, audit) ─────────────────────────────────
           Semantic trail using `<Breadcrumb>`: each segment is a real
           `<Link>` so middle-click opens in a new tab and screen readers
@@ -523,17 +503,9 @@ export default function RunDetail() {
           chrome); the breadcrumb above gives the *logical* path. */}
 
       {/* ── Task header ────────────────────────────────────────────────── */}
-      <div style={{ marginBottom: 16 }}>
-        <div
-          className="rd-header"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 6,
-          }}
-        >
-          <h1 style={{ fontWeight: 700, fontSize: "1.3rem" }}>
+      <div className="rd-header-wrap">
+        <div className="rd-header">
+          <h1 className="rd-title">
             Task #{runId.length > 6 ? runId.slice(0, 6).toUpperCase() + "…" : runId.toUpperCase()}:{" "}
             {isCrawl ? "Crawl & Generate" : isGenerate ? "AI Generate" : "Test Run"}
           </h1>
@@ -544,12 +516,12 @@ export default function RunDetail() {
             </span>
           )}
           {run.status === "completed" && run.rateLimitError && (
-            <span className="badge badge-amber" style={{ background: "var(--amber-bg)", color: "#92400e", border: "1px solid #fcd34d" }}>
+            <span className="badge badge-amber rd-badge-amber-inline">
               ⚠ Rate Limited
             </span>
           )}
           {run.status === "completed_empty" && (
-            <span className="badge badge-amber" style={{ background: "var(--amber-bg)", color: "#92400e", border: "1px solid #fcd34d" }}>
+            <span className="badge badge-amber rd-badge-amber-inline">
               <AlertTriangle size={10} /> No Tests Generated
             </span>
           )}
@@ -585,14 +557,10 @@ export default function RunDetail() {
             <GateBadge gateResult={run.gateResult} />
           )}
 
-          <div className="rd-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <div className="rd-header-actions">
             {isRunning && (
               <button
-                className="btn btn-sm"
-                style={{
-                  background: "var(--red-bg)", color: "var(--red)",
-                  border: "1px solid #fca5a5", fontWeight: 600,
-                }}
+                className="btn btn-sm rd-stop-btn"
                 onClick={handleAbort}
                 disabled={aborting}
               >
@@ -620,7 +588,7 @@ export default function RunDetail() {
                 single-link UI for `shardCount === 1` and legacy runs. */}
             {hasShardTraces ? (
               <select
-                className="input btn-sm"
+                className="input btn-sm rd-trace-select"
                 aria-label="Open trace for shard"
                 defaultValue=""
                 onChange={(e) => {
@@ -629,7 +597,6 @@ export default function RunDetail() {
                   window.open(`/trace-viewer/?trace=${encodeURIComponent(path)}`, "_blank", "noreferrer");
                   e.target.value = ""; // reset so re-selecting the same shard re-opens
                 }}
-                style={{ fontSize: "0.78rem", padding: "4px 8px" }}
               >
                 <option value="" disabled>🔍 Open Trace…</option>
                 {shardTracePaths.map(({ path, shardIndex }) => (
@@ -674,24 +641,14 @@ export default function RunDetail() {
           </div>
         </div>
 
-        <div
-          className="rd-meta"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 16,
-            color: "var(--text3)",
-            fontSize: "0.78rem",
-            flexWrap: "wrap",
-          }}
-        >
-          <span style={{ fontFamily: "var(--font-mono)" }}>
+        <div className="rd-meta">
+          <span className="rd-meta-mono">
             #{runId.length > 8 ? runId.slice(0, 8) + "…" : runId}
           </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span className="rd-meta-item">
             <AgentTag type="TA" /> Sentri Agent
           </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span className="rd-meta-item">
             <Clock size={12} />
             {run.startedAt
               ? new Date(run.startedAt).toLocaleString()
@@ -705,8 +662,7 @@ export default function RunDetail() {
           )}
           {!isCrawl && skippedOverBudget > 0 && (
             <span
-              className="badge badge-amber"
-              style={{ fontSize: "0.7rem" }}
+              className="badge badge-amber rd-meta-badge-xs"
               title="Tests skipped to fit the requested budget — risk-based ordering kept the most likely-to-fail tests in scope."
             >
               ⏱ {skippedOverBudget} skipped (over budget)
@@ -714,15 +670,14 @@ export default function RunDetail() {
           )}
           {!isCrawl && skippedNoImpact > 0 && (
             <span
-              className="badge badge-gray"
-              style={{ fontSize: "0.7rem" }}
+              className="badge badge-gray rd-meta-badge-xs"
               title="Tests skipped because the git diff did not map to their captured routes."
             >
               {skippedNoImpact} skipped (no impact)
             </span>
           )}
           {!isCrawl && run.budgetMinutes != null && (
-            <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
+            <span className="rd-meta-budget">
               budget: {run.budgetMinutes}m
             </span>
           )}
@@ -732,14 +687,13 @@ export default function RunDetail() {
       {!isCrawl && !isGenerate && (compareData || compareLoading || compareError) && (
         <>
           {priorRuns.length > 1 && (
-            <div className="card" style={{ padding: 10, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-              <label htmlFor="compare-prior-run" style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
+            <div className="card rd-compare-bar">
+              <label htmlFor="compare-prior-run" className="rd-compare-label">
                 Compare against:
               </label>
               <select
                 id="compare-prior-run"
-                className="input"
-                style={{ fontSize: "0.82rem", padding: "4px 8px" }}
+                className="input rd-compare-select"
                 value={compareData?.otherRun?.id || priorRuns[0]?.id || ""}
                 onChange={(e) => runCompareAgainst(e.target.value)}
               >
@@ -757,75 +711,62 @@ export default function RunDetail() {
 
 
       {!isCrawl && !isGenerate && (changedFiles.length > 0 || impactAnalysis) && (
-        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-            <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>Impact scope</div>
+        <div className="card rd-impact-card">
+          <div className="rd-impact-head">
+            <div className="rd-impact-title">Impact scope</div>
             {impactedCount !== null && (
-              <span className="badge badge-blue" style={{ fontSize: "0.7rem" }}>
+              <span className="badge badge-blue rd-impact-badge-xs">
                 {impactedCount} impacted / {total} approved
               </span>
             )}
           </div>
           {impactAnalysis?.fallbackReason && (
-            <div style={{ color: "var(--text3)", fontSize: "0.76rem", marginBottom: 8 }}>
+            <div className="rd-impact-fallback">
               Fallback: {impactAnalysis.fallbackReason.replace(/_/g, " ")}
             </div>
           )}
           {changedFiles.length > 0 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <div className="rd-impact-files">
               {changedFiles.slice(0, 12).map((file) => (
-                <code key={file} style={{ fontSize: "0.72rem", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 6px" }}>
+                <code key={file} className="rd-impact-file-code">
                   {file}
                 </code>
               ))}
               {changedFiles.length > 12 && (
-                <span style={{ color: "var(--text3)", fontSize: "0.76rem" }}>+{changedFiles.length - 12} more</span>
+                <span className="rd-impact-overflow">+{changedFiles.length - 12} more</span>
               )}
             </div>
           ) : (
-            <div style={{ color: "var(--text3)", fontSize: "0.76rem" }}>No changed files were supplied; Sentri used the full approved suite.</div>
+            <div className="rd-impact-empty">No changed files were supplied; Sentri used the full approved suite.</div>
           )}
         </div>
       )}
 
       {/* ── Pass rate bar (test runs only) ─────────────────────────────── */}
       {!isCrawl && total > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: "0.78rem",
-              color: "var(--text2)",
-              marginBottom: 6,
-            }}
-          >
+        <div className="rd-passrate-wrap">
+          <div className="rd-passrate-header">
             <span>
               {passed + failed} / {total} test cases executed
             </span>
             {passRate !== null && (
               <span
-                style={{
-                  fontWeight: 600,
-                  color:
-                    passRate >= 80
-                      ? "var(--green)"
-                      : passRate >= 50
-                      ? "var(--amber)"
-                      : "var(--red)",
-                }}
+                className={`rd-passrate-value ${
+                  passRate >= 80 ? "rd-passrate-value--good"
+                  : passRate >= 50 ? "rd-passrate-value--warn"
+                  : "rd-passrate-value--bad"
+                }`}
               >
                 {passRate}% pass rate
               </span>
             )}
           </div>
           <div className="progress-bar progress-bar-green">
+            {/* Width is data-driven from `passRate` (0–100). AGENT.md §127
+                carves out runtime-numeric style values — keep this inline. */}
             <div
-              className="progress-bar-fill"
-              style={{
-                width: `${passRate || 0}%`,
-                transition: "width 0.8s ease",
-              }}
+              className="progress-bar-fill rd-passrate-fill"
+              style={{ width: `${passRate || 0}%` }}
             />
           </div>
         </div>
@@ -833,43 +774,29 @@ export default function RunDetail() {
 
       {/* ── SSE reconnection / fallback banner ── */}
       {isRunning && retryIn != null && !sseDown && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", marginBottom: 12,
-          background: "var(--blue-bg)", border: "1px solid #bfdbfe",
-          borderRadius: 8, fontSize: "0.76rem", color: "var(--blue)",
-        }}>
-          <RefreshCw size={12} style={{ flexShrink: 0 }} />
+        <div className="rd-sse-banner rd-sse-banner--info">
+          <RefreshCw size={12} className="rd-sse-icon" />
           Connection lost — reconnecting in {retryIn}s…
         </div>
       )}
       {sseDown && isRunning && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", marginBottom: 12,
-          background: "var(--amber-bg)", border: "1px solid #fcd34d",
-          borderRadius: 8, fontSize: "0.76rem", color: "var(--amber)",
-        }}>
-          <RefreshCw size={12} style={{ animation: "spin 2s linear infinite", flexShrink: 0 }} />
-          Live updates unavailable — refreshing every 5s. <button onClick={fetchRun} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--amber)", fontWeight: 600, textDecoration: "underline", padding: 0, fontSize: "0.76rem" }}>Refresh now</button>
+        <div className="rd-sse-banner rd-sse-banner--warn">
+          <RefreshCw size={12} className="rd-sse-icon rd-sse-icon--spinning" />
+          Live updates unavailable — refreshing every 5s.{" "}
+          <button onClick={fetchRun} className="rd-sse-refresh-link">Refresh now</button>
         </div>
       )}
 
       {/* ── Run-level error / warning banners ─────────────────────────── */}
       {/* ── ENH-034: Empty crawl guidance banner ─────────────────────── */}
       {!isRunning && run.status === "completed_empty" && (
-        <div style={{
-          display: "flex", alignItems: "flex-start", gap: 10,
-          padding: "12px 16px", marginBottom: 16,
-          background: "var(--amber-bg)", border: "1px solid #fcd34d",
-          borderRadius: 10, fontSize: "0.82rem", color: "#92400e", lineHeight: 1.5,
-        }}>
-          <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>⚠️</span>
+        <div className="rd-alert rd-alert--amber">
+          <span className="rd-alert__icon-emoji">⚠️</span>
           <div>
-            <div style={{ fontWeight: 700, marginBottom: 3 }}>No Tests Generated</div>
+            <div className="rd-alert__title">No Tests Generated</div>
             <div>The crawl completed successfully but did not produce any tests. This usually means the AI could not find testable interactions on the discovered pages.</div>
-            <div style={{ marginTop: 8, fontSize: "0.78rem", color: "#78350f" }}>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Try these fixes:</div>
+            <div className="rd-alert__list">
+              <div className="rd-alert__list-head">Try these fixes:</div>
               <div>1. <strong>Check credentials</strong> — if the site requires login, add credentials in Project Settings</div>
               <div>2. <strong>Try a different start URL</strong> — point to a page with forms, buttons, or interactive elements</div>
               <div>3. <strong>Use State Exploration mode</strong> — it clicks and fills to discover dynamic content that link crawl misses</div>
@@ -879,17 +806,12 @@ export default function RunDetail() {
         </div>
       )}
       {!isRunning && run.rateLimitError && (
-        <div style={{
-          display: "flex", alignItems: "flex-start", gap: 10,
-          padding: "12px 16px", marginBottom: 16,
-          background: "var(--amber-bg)", border: "1px solid #fcd34d",
-          borderRadius: 10, fontSize: "0.82rem", color: "#92400e", lineHeight: 1.5,
-        }}>
-          <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>⚠️</span>
+        <div className="rd-alert rd-alert--amber">
+          <span className="rd-alert__icon-emoji">⚠️</span>
           <div>
-            <div style={{ fontWeight: 700, marginBottom: 3 }}>AI Rate Limit Reached</div>
+            <div className="rd-alert__title">AI Rate Limit Reached</div>
             <div>{run.rateLimitError}</div>
-            <div style={{ marginTop: 4, fontSize: "0.78rem", color: "#78350f" }}>
+            <div className="rd-alert__sub">
               Switch to a different AI provider in Settings, or wait for the rate limit to reset and retry.
             </div>
           </div>
@@ -897,26 +819,23 @@ export default function RunDetail() {
       )}
       {!isRunning && run.status === "failed" && run.error && !run.rateLimitError && (() => {
         const bp = getErrorBannerProps(run.errorCategory, navigate);
+        // Per-category palette (bg / border / text colour) is data-driven from
+        // `getErrorBannerProps()` — kept inline per AGENT.md §127. Layout,
+        // typography, and gap rules live on `.rd-alert` + `.rd-alert__cta`.
         return (
-          <div style={{
-            display: "flex", alignItems: "flex-start", gap: 10,
-            padding: "12px 16px", marginBottom: 16,
-            background: bp.bg, border: `1px solid ${bp.border}`,
-            borderRadius: 10, fontSize: "0.82rem", color: bp.color, lineHeight: 1.5,
-          }}>
-            <span style={{ flexShrink: 0, marginTop: 1 }}>{bp.icon}</span>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, marginBottom: 3 }}>{bp.title}</div>
-              <div style={{ wordBreak: "break-word" }}>{run.error}</div>
+          <div
+            className="rd-alert"
+            style={{ background: bp.bg, border: `1px solid ${bp.border}`, color: bp.color }}
+          >
+            <span className="rd-alert__icon-wrap">{bp.icon}</span>
+            <div className="rd-alert__body">
+              <div className="rd-alert__title">{bp.title}</div>
+              <div className="rd-alert__body--break">{run.error}</div>
               {bp.action && (
                 <button
                   onClick={bp.action.onClick}
-                  style={{
-                    marginTop: 8, padding: "5px 12px", borderRadius: 6,
-                    border: `1px solid ${bp.border}`, background: "rgba(255,255,255,0.5)",
-                    color: bp.color, fontWeight: 600, fontSize: "0.78rem",
-                    cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5,
-                  }}
+                  className="rd-alert__cta"
+                  style={{ border: `1px solid ${bp.border}`, color: bp.color }}
                 >
                   <Settings size={11} /> {bp.action.label}
                 </button>
@@ -928,31 +847,26 @@ export default function RunDetail() {
 
       {/* ── Quality gate violations (AUTO-012) ─────────────────────────── */}
       {!isCrawl && !isGenerate && run.gateResult && run.gateResult.passed === false && Array.isArray(run.gateResult.violations) && run.gateResult.violations.length > 0 && (
-        <div style={{
-          display: "flex", alignItems: "flex-start", gap: 10,
-          padding: "12px 16px", marginBottom: 16,
-          background: "var(--red-bg)", border: "1px solid #fca5a5",
-          borderRadius: 10, fontSize: "0.82rem", color: "var(--red)", lineHeight: 1.5,
-        }}>
-          <XCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+        <div className="rd-alert rd-alert--red">
+          <XCircle size={16} className="rd-alert__icon-wrap" />
+          <div className="rd-alert__body">
+            <div className="rd-alert__title">
               Quality Gate Failed ({run.gateResult.violations.length} violation{run.gateResult.violations.length !== 1 ? "s" : ""})
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div className="rd-gate-list">
               {run.gateResult.violations.map((v, i) => (
-                <div key={i} style={{ fontSize: "0.78rem" }}>
-                  <strong style={{ fontFamily: "var(--font-mono)" }}>{v.rule}</strong>
+                <div key={i} className="rd-gate-violation">
+                  <strong className="rd-gate-violation__rule">{v.rule}</strong>
                   : actual <strong>{v.actual}{v.rule.includes("Pct") ? "%" : ""}</strong> vs threshold <strong>{v.threshold}{v.rule.includes("Pct") ? "%" : ""}</strong>
                   {/* AUTO-009d — regression gate carries the baseline so operators
                       see "dropped from 80% to 68%" not just "12% > 5%". */}
                   {v.priorCoveragePct != null && (
-                    <span style={{ color: "var(--text3)" }}> (prior run: {v.priorCoveragePct}%)</span>
+                    <span className="rd-gate-violation__prior"> (prior run: {v.priorCoveragePct}%)</span>
                   )}
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 6, fontSize: "0.73rem", color: "#7f1d1d" }}>
+            <div className="rd-gate-footer">
               CI pipelines polling the trigger endpoint receive <code>gateResult.passed: false</code> and should exit non-zero.
             </div>
           </div>
@@ -961,10 +875,10 @@ export default function RunDetail() {
 
       {/* ── Root cause summary (AUTO-010) ───────────────────────────────── */}
       {run.type === "test_run" && rootCauses.length >= 1 && (
-        <div className="card" style={{ marginBottom: 16, padding: 12 }}>
+        <div className="card rd-rootcause-card">
           <button className="btn btn-ghost btn-sm" onClick={() => setRootCauseExpanded((v) => !v)}>{rootCauseExpanded ? "▼" : "▶"} Root Cause Summary ({rootCauses.length})</button>
           {rootCauseExpanded && (
-            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+            <div className="rd-rootcause-grid">
               {rootCauses.map((cluster) => {
                 // AUTO-010 — surface the deduplicated test-id count so data-
                 // driven tests with N failing iterations don't inflate the
@@ -974,9 +888,9 @@ export default function RunDetail() {
                   ? cluster.affectedTestIds.length
                   : cluster.size;
                 return (
-                  <div key={cluster.fingerprint} className="card" style={{ padding: 10 }}>
-                    <div style={{ fontWeight: 600 }}>{cluster.errorPattern || "Likely root cause"}</div>
-                    <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>{affectedCount} affected test(s)</div>
+                  <div key={cluster.fingerprint} className="card rd-rootcause-item">
+                    <div className="rd-rootcause-pattern">{cluster.errorPattern || "Likely root cause"}</div>
+                    <div className="rd-rootcause-affected">{affectedCount} affected test(s)</div>
                   </div>
                 );
               })}
@@ -1005,38 +919,31 @@ export default function RunDetail() {
 
       {/* ── Quality Analytics (shown when run has analytics data) ──────── */}
       {run.qualityAnalytics && run.qualityAnalytics.totalFailures > 0 && (
-        <div className="card" style={{ padding: 24, marginTop: 20 }}>
-          <h2 style={{ fontWeight: 700, fontSize: "1rem", marginTop: 0, marginBottom: 16 }}>
-            Quality Insights
-          </h2>
+        <div className="card rd-analytics-card">
+          <h2 className="rd-analytics-title">Quality Insights</h2>
 
           {/* Insights */}
           {run.qualityAnalytics.insights?.length > 0 && (
-            <div style={{ marginBottom: 18, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className="rd-analytics-insights">
               {run.qualityAnalytics.insights.map((insight, i) => (
-                <div key={i} style={{
-                  padding: "10px 14px", background: "var(--amber-bg)",
-                  border: "1px solid #fcd34d", borderRadius: 8,
-                  fontSize: "0.82rem", color: "#92400e", lineHeight: 1.5,
-                }}>
+                <div key={i} className="rd-analytics-insight">
                   💡 {insight}
                 </div>
               ))}
             </div>
           )}
 
-          {/* Breakdown grids */}
+          {/* Breakdown grids — `.rd-analytics-grid` keeps the responsive
+              3→2→1 column rules in run-detail.css. */}
           <div className="rd-analytics-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
             {/* By category */}
             {Object.keys(run.qualityAnalytics.byCategory || {}).length > 0 && (
               <div>
-                <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
-                  By failure category
-                </div>
+                <div className="rd-analytics-section-label">By failure category</div>
                 {Object.entries(run.qualityAnalytics.byCategory).map(([cat, count]) => (
-                  <div key={cat} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "3px 0" }}>
-                    <span style={{ color: "var(--text2)" }}>{cat.replace(/_/g, " ")}</span>
-                    <span style={{ fontWeight: 600, color: "var(--red)" }}>{count}</span>
+                  <div key={cat} className="rd-analytics-row">
+                    <span className="rd-analytics-row__label">{cat.replace(/_/g, " ")}</span>
+                    <span className="rd-analytics-row__val-red">{count}</span>
                   </div>
                 ))}
               </div>
@@ -1045,13 +952,11 @@ export default function RunDetail() {
             {/* By test type */}
             {Object.keys(run.qualityAnalytics.byType || {}).length > 0 && (
               <div>
-                <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
-                  By test type
-                </div>
+                <div className="rd-analytics-section-label">By test type</div>
                 {Object.entries(run.qualityAnalytics.byType).map(([type, count]) => (
-                  <div key={type} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "3px 0" }}>
-                    <span style={{ color: "var(--text2)", textTransform: "capitalize" }}>{type}</span>
-                    <span style={{ fontWeight: 600, color: "var(--text)" }}>{count}</span>
+                  <div key={type} className="rd-analytics-row">
+                    <span className="rd-analytics-row__label--cap">{type}</span>
+                    <span className="rd-analytics-row__val-text">{count}</span>
                   </div>
                 ))}
               </div>
@@ -1060,13 +965,11 @@ export default function RunDetail() {
             {/* By assertion method */}
             {Object.keys(run.qualityAnalytics.failedAssertionMethods || {}).length > 0 && (
               <div>
-                <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
-                  Failed assertion types
-                </div>
+                <div className="rd-analytics-section-label">Failed assertion types</div>
                 {Object.entries(run.qualityAnalytics.failedAssertionMethods).map(([method, count]) => (
-                  <div key={method} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "3px 0" }}>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text2)" }}>{method}</span>
-                    <span style={{ fontWeight: 600, color: "var(--red)" }}>{count}</span>
+                  <div key={method} className="rd-analytics-row">
+                    <span className="rd-analytics-row__mono">{method}</span>
+                    <span className="rd-analytics-row__val-red">{count}</span>
                   </div>
                 ))}
               </div>
@@ -1075,17 +978,14 @@ export default function RunDetail() {
 
           {/* Flaky tests */}
           {run.qualityAnalytics.flakyTests?.length > 0 && (
-            <div style={{ marginTop: 18 }}>
-              <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
+            <div className="rd-flaky-wrap">
+              <div className="rd-analytics-section-label">
                 Flaky tests ({run.qualityAnalytics.flakyTests.length})
               </div>
               {run.qualityAnalytics.flakyTests.map(ft => (
-                <div key={ft.testId} style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                  padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: "0.82rem",
-                }}>
-                  <span style={{ color: "var(--text)" }}>{ft.name}</span>
-                  <span style={{ color: "var(--amber)", fontWeight: 600, fontSize: "0.78rem" }}>
+                <div key={ft.testId} className="rd-flaky-row">
+                  <span className="rd-flaky-row__name">{ft.name}</span>
+                  <span className="rd-flaky-row__stats">
                     {ft.passCount}✓ / {ft.failCount}✗ ({ft.flakyRate}% flaky)
                   </span>
                 </div>
@@ -1102,13 +1002,7 @@ export default function RunDetail() {
           navigation case. Removing this would force a scroll-to-top
           before the user can navigate, which is worse UX than the
           imprecise back-history step. */}
-      <div
-        style={{
-          marginTop: 20,
-          display: "flex",
-          justifyContent: "space-between",
-        }}
-      >
+      <div className="rd-footer">
         <button
           className="btn btn-ghost btn-sm"
           onClick={() => navigate(-1)}
