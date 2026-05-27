@@ -93,6 +93,7 @@ export default function highlightCode(code) {
   // escape-first safe by construction (every user-supplied span passes
   // through `escHtml` before any transform), so this strips nothing in
   // practice today. It exists to catch a future regression where a new
-  // highlighting rule forgets the escape step.
-  return DOMPurify.sanitize(html, PURIFY_CONFIG);
+  // highlighting rule forgets the escape step. Uses the `purify` shim
+  // above so plain-Node test runs (no `window`) fall through to identity.
+  return purify(html);
 }
