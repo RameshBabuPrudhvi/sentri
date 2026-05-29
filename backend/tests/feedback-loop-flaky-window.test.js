@@ -30,31 +30,27 @@ function seedRun({ id, daysAgo, results }) {
   const db = getDatabase();
   const startedAt = new Date(Date.now() - daysAgo * 86400000).toISOString();
   db.prepare(
-    `INSERT INTO runs (id, projectId, type, status, startedAt, results, workspaceId, retryCount, failedAfterRetry, secretScanBlocked)
-     VALUES (?, ?, 'test_run', 'completed', ?, ?, '__default__', 0, 0, 0)`,
+    `INSERT INTO runs (id, projectId, type, status, startedAt, results, retryCount, failedAfterRetry, secretScanBlocked)
+     VALUES (?, ?, 'test_run', 'completed', ?, ?, 0, 0, 0)`,
   ).run(id, PROJECT_ID, startedAt, JSON.stringify(results));
 }
 
 // Clean slate so prior tests' seeded rows don't pollute results.
 getDatabase().prepare("DELETE FROM runs WHERE projectId = ?").run(PROJECT_ID);
-// Seed a project row so the FK on runs.projectId is satisfied.
-// Use the full column set that the schema requires (NOT NULL constraints).
+// Seed project rows so the FK on runs.projectId is satisfied.
+// workspaceId left NULL — the column is nullable (migration 005) and
+// ensureDefaultWorkspaces() does NOT create a '__default__' workspace.
 try {
   const now = new Date().toISOString();
   getDatabase().prepare(
-    `INSERT OR IGNORE INTO projects (id, name, url, workspaceId, createdAt, updatedAt)
-     VALUES (?, ?, ?, '__default__', ?, ?)`,
+    `INSERT OR IGNORE INTO projects (id, name, url, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?)`,
   ).run(PROJECT_ID, "Flaky Window Test Project", "http://app.example.test", now, now);
-} catch { /* may already exist from a prior test run */ }
-
-// Also seed the small-project used by the boundary test below.
-try {
-  const now = new Date().toISOString();
   getDatabase().prepare(
-    `INSERT OR IGNORE INTO projects (id, name, url, workspaceId, createdAt, updatedAt)
-     VALUES (?, ?, ?, '__default__', ?, ?)`,
+    `INSERT OR IGNORE INTO projects (id, name, url, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?)`,
   ).run("PRJ-FLAKY-WINDOW-SMALL", "Small Project", "http://app.example.test", now, now);
-} catch { /* may already exist */ }
+} catch { /* may already exist from a prior test run */ }
 
 // 51 OLD runs (days 51..101): `t-old` flip-flops (alternates pass/fail).
 for (let i = 0; i < 51; i += 1) {
@@ -125,12 +121,12 @@ test("detectFlakyTests bounds the scan even on fewer-than-cap projects", () => {
   db.prepare("DELETE FROM runs WHERE projectId = ?").run(SMALL);
   const startedAt = new Date(Date.now() - 3 * 86400000).toISOString();
   db.prepare(
-    `INSERT INTO runs (id, projectId, type, status, startedAt, results, workspaceId, retryCount, failedAfterRetry, secretScanBlocked)
-     VALUES (?, ?, 'test_run', 'completed', ?, ?, '__default__', 0, 0, 0)`,
+    `INSERT INTO runs (id, projectId, type, status, startedAt, results, retryCount, failedAfterRetry, secretScanBlocked)
+     VALUES (?, ?, 'test_run', 'completed', ?, ?, 0, 0, 0)`,
   ).run("RUN-SMALL-1", SMALL, startedAt, JSON.stringify([{ testId: "t1", status: "passed" }]));
   db.prepare(
-    `INSERT INTO runs (id, projectId, type, status, startedAt, results, workspaceId, retryCount, failedAfterRetry, secretScanBlocked)
-     VALUES (?, ?, 'test_run', 'completed', ?, ?, '__default__', 0, 0, 0)`,
+    `INSERT INTO runs (id, projectId, type, status, startedAt, results, retryCount, failedAfterRetry, secretScanBlocked)
+     VALUES (?, ?, 'test_run', 'completed', ?, ?, 0, 0, 0)`,
   ).run("RUN-SMALL-2", SMALL, new Date(Date.now() - 86400000).toISOString(), JSON.stringify([{ testId: "t1", status: "failed" }]));
 
   const flaky = detectFlakyTests(SMALL); // default 50, but only 2 runs exist
