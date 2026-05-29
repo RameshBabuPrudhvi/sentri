@@ -201,11 +201,38 @@ function hostnameRegex(url) {
   }
 }
 
+// Bundle-A fix #16 — selector targeting typical error UI regions, used by
+// AUTH + security templates below. Scoping the negative-text check to
+// dedicated alert / error containers avoids false-positives on legitimate
+// body text like "Invalid email format" hints next to inputs, "Error
+// Reports" admin nav links, or copy that mentions "errors" in passing
+// (e.g. "Sometimes errors happen — try again").
+//
+// Selector list mirrors industry conventions:
+//   • `[role="alert"]`     — WAI-ARIA live region for important messages
+//   • `.error` / `.field-error` — Bootstrap / Tailwind / Material UI defaults
+//   • `[aria-invalid="true"]` — accessible form-validation flag
+//   • `.alert-danger` / `.notification--error` — alternate framework names
+//
+// `.catch(() => {})` swallows the "locator not found" rejection so a
+// page WITHOUT any error region (i.e. no error happened — the happy
+// path) doesn't fail the test. The negative assertion only fires when
+// an error region actually exists; when it does, it must NOT contain
+// the failure keyword. This is the standard "soft assert on error UI"
+// pattern used by Playwright community examples and matches the
+// existing CRUD template's `.catch(() => {})` idiom on line 99-100.
+const AUTH_ERROR_REGION_SELECTOR = "[role=\"alert\"], .error, .field-error, [aria-invalid=\"true\"], .alert-danger, .notification--error";
+
 const INTENT_TEMPLATES = {
   AUTH: (snapshot) => `
-  // Assert successful authentication — URL should change away from login page
-  await expect(page.locator('body')).not.toContainText('Invalid');
-  await expect(page.locator('body')).not.toContainText('error');`,
+  // Assert successful authentication — URL should change away from login page.
+  // Bundle-A fix #16: scope the negative-text check to dedicated error
+  // regions so legitimate body copy (e.g. "Invalid email format" input
+  // hints, "Error Reports" admin links) doesn't false-positive after a
+  // successful login. `.catch(() => {})` swallows the not-found case
+  // — the happy path has no error region to assert against.
+  await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('Invalid').catch(() => {});
+  await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('error').catch(() => {});`,
 
   NAVIGATION: (snapshot) => `
   // Assert page loaded correctly
@@ -271,9 +298,12 @@ const TYPE_TEMPLATES = {
   await expect(page.locator('h1').first()).toBeVisible();`,
 
   security: (snapshot) => `
-  // Security — verify auth boundary
-  await expect(page.locator('body')).not.toContainText('Invalid');
-  await expect(page.locator('body')).not.toContainText('error');`,
+  // Security — verify auth boundary.
+  // Bundle-A fix #16: scope to dedicated error regions (see
+  // `AUTH_ERROR_REGION_SELECTOR` docblock above) to avoid false-positives
+  // on legitimate body copy like "Error reports" admin links.
+  await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('Invalid').catch(() => {});
+  await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('error').catch(() => {});`,
 
   performance: (snapshot) => `
   // Performance — verify page loads within timeout

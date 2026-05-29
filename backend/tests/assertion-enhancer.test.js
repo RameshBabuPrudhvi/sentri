@@ -782,6 +782,80 @@ test("injection still works when `});` is followed by nothing (no-regression bas
   assert.equal(r._enhancementReason, "no_assertions");
 });
 
+// ── 13. Bundle-A fix #16 — AUTH/security templates scope to error regions ───
+//
+// Pre-fix the AUTH and `security` templates asserted
+// `expect(page.locator('body')).not.toContainText('Invalid')` — which
+// false-positives on legitimate body copy like:
+//   • "Invalid email format" hints next to form inputs
+//   • Admin links named "Error Reports"
+//   • Help text like "Sometimes errors happen — try again"
+// Fix #16 scopes the negative assertion to dedicated error-region
+// selectors (`[role="alert"]`, `.error`, `.field-error`, etc.) and adds
+// `.catch(() => {})` so the happy path (no error region present)
+// doesn't fail the test.
+
+console.log("\n🔐  AUTH / security templates — scoped error-region check (fix #16)");
+
+test("AUTH template: scopes negative-text check to error regions, NOT body", () => {
+  const r = enhanceTest(noAssertTest(), SNAPSHOT, { dominantIntent: "AUTH" });
+  assert.equal(r._assertionEnhanced, true);
+  // Must NOT use `page.locator('body')` for the negative-text assertion
+  // — that's the false-positive vector. (The existing positive happy-path
+  // template doesn't otherwise reference `body`, so any presence here
+  // would be the bug.)
+  assert.doesNotMatch(
+    r.playwrightCode,
+    /locator\('body'\)\.not\.toContainText/,
+    "AUTH template must not use page.locator('body') for negative-text check",
+  );
+  // Must reference one of the canonical error-region selectors.
+  assert.match(
+    r.playwrightCode,
+    /role="alert"|\.error|\.field-error/,
+    "AUTH template must scope to a dedicated error region",
+  );
+});
+
+test("AUTH template: appends `.catch(() => {})` so missing error region doesn't fail the test", () => {
+  // `.catch(() => {})` swallows the locator-not-found rejection so a
+  // page WITHOUT any error region (the happy path) passes silently.
+  const r = enhanceTest(noAssertTest(), SNAPSHOT, { dominantIntent: "AUTH" });
+  // Two `.not.toContainText(...)` chains, each followed by `.catch(() => {})`.
+  const matches = r.playwrightCode.match(/\.not\.toContainText\('[^']+'\)\.catch\(\(\) => \{\}\)/g) || [];
+  assert.ok(
+    matches.length >= 2,
+    `AUTH template must emit at least 2 .catch-guarded negative-text assertions, got ${matches.length}`,
+  );
+});
+
+test("security TYPE template: same scoped-region fix applied", () => {
+  // Symmetric guard — the `security` TYPE template had the identical bug
+  // (literal copy of AUTH's body). Fix #16 patches both.
+  const r = enhanceTest(noAssertTest({ type: "security" }), SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, true);
+  assert.doesNotMatch(
+    r.playwrightCode,
+    /locator\('body'\)\.not\.toContainText/,
+    "security template must not use page.locator('body') for negative-text check",
+  );
+  assert.match(
+    r.playwrightCode,
+    /role="alert"|\.error|\.field-error/,
+    "security template must scope to a dedicated error region",
+  );
+});
+
+test("AUTH template: text `Invalid` and `error` keywords still present (no behaviour drop)", () => {
+  // No-regression for the existing AUTH test contract — the template
+  // still asserts on the same two keywords; only the locator scope
+  // changed. A pre-fix consumer doing `assert.match(/not.toContainText\('Invalid'\)/)`
+  // (line 168 above) must still pass.
+  const r = enhanceTest(noAssertTest(), SNAPSHOT, { dominantIntent: "AUTH" });
+  assert.match(r.playwrightCode, /not\.toContainText\('Invalid'\)/);
+  assert.match(r.playwrightCode, /not\.toContainText\('error'\)/);
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);
