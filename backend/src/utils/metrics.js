@@ -383,3 +383,20 @@ export const agentToolCallsTotal = new client.Counter({
   labelNames: ["tool", "outcome"],
   registers: [register],
 });
+
+// Bundle-A fix #3 — Reviewer verdict downgrade counter. Increments every
+// time `runReviewerAuthorLoop` downgrades a `request_revision` verdict to
+// `accept` because every issue referenced an unknown testId (none of
+// the issue.testId values matched a test in the author's artifact). A
+// non-zero rate is a leading indicator of reviewer-prompt drift or
+// hallucinated testIds — operators want a metric, not just an event row.
+//
+// `reason` is a closed-set label so cardinality stays bounded. Today the
+// only documented reason is `unknown_test_ids`; future downgrade triggers
+// (e.g. malformed verdict shape) get their own bucket.
+export const reviewerVerdictDowngradedTotal = new client.Counter({
+  name: "app_reviewer_verdict_downgraded_total",
+  help: "Bundle-A fix #3 — reviewer verdict downgrades from `request_revision` → `accept`. `reason` ∈ {unknown_test_ids}. Non-zero rate signals reviewer-prompt drift or hallucinated testIds.",
+  labelNames: ["reason"],
+  registers: [register],
+});

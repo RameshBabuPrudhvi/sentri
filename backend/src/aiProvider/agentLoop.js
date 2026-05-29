@@ -1,6 +1,6 @@
 import { emitAgentMessage, emitAgentEvent } from "./agentEventEmitter.js";
 import { getCurrentTraceId } from "../utils/observability.js";
-import { agentReviewRounds } from "../utils/metrics.js";
+import { agentReviewRounds, reviewerVerdictDowngradedTotal } from "../utils/metrics.js";
 import { readSpendCaps, evaluateSpendCap } from "./quotaGuard.js";
 import { getMaxReviewRounds } from "../database/repositories/agentConfigRepo.js";
 import { resolveRoute } from "./registry.js";
@@ -405,6 +405,15 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       // The event lands on the same channel the run-detail page renders
       // (Task 2 NarrativeFeed contract); no new UI surface needed.
       if (safeIssues.length === 0) {
+        // Bundle-A fix #3 — bump the verdict-downgrade counter on every
+        // downgrade so operator dashboards have a metric (not just an
+        // event row) for the reviewer-prompt-drift signal. Fires
+        // regardless of `runId` so smoke-test paths still produce the
+        // observability signal; best-effort to match the surrounding
+        // observability contract.
+        try {
+          reviewerVerdictDowngradedTotal.inc({ reason: "unknown_test_ids" });
+        } catch { /* best-effort */ }
         if (droppedCount > 0 && runId) {
           try {
             emitAgentEvent(runId, {
