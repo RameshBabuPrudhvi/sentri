@@ -4,6 +4,12 @@
  * Detects weak/missing assertions and rewrites them using page context.
  */
 import { isAdvancedPlaywrightScenario } from "./prompts/playwrightCapabilityGuide.js";
+// Bundle-A follow-up #F3 — `stripStringsAndComments` extracted to a shared
+// util so this module's assertion-presence checks and `deduplicator.js`'s
+// quality rubric (which had the same string/comment false-positive bug)
+// route through one implementation. The local copy below is preserved for
+// the rest of this file's call sites but now delegates to the shared one.
+import { stripStringsAndComments as sharedStripStringsAndComments } from "../utils/codeStripping.js";
 
 // ── Assertion quality detection ───────────────────────────────────────────────
 
@@ -14,29 +20,66 @@ const WEAK_ASSERTION_PATTERNS = [
   /expect\(.*\)\.not\.toBeNull/,
 ];
 
+// Bundle-A follow-up #F2 — anchor each matcher pattern to method-call
+// syntax (`.toHaveURL(`) rather than bare substring. Defence-in-depth
+// alongside fix #14's `stripStringsAndComments` pass: if a future caller
+// runs these patterns without the strip, a code identifier or property
+// name like `obj.toHaveURL = …` won't false-match. Pre-fix these were
+// bare substrings (`/toHaveURL/`) which would match anywhere the token
+// appeared, including (without the strip) in comments and strings.
 const STRONG_ASSERTION_PATTERNS = [
-  /toHaveURL/,
-  /toHaveTitle/,
-  /toBeVisible/,
-  /toHaveText/,
-  /toContainText/,
-  /toBeEnabled/,
-  /toHaveValue/,
-  /toBeChecked/,
-  /toHaveCount/,
-  /toBeDisabled/,
+  /\.toHaveURL\s*\(/,
+  /\.toHaveTitle\s*\(/,
+  /\.toBeVisible\s*\(/,
+  /\.toHaveText\s*\(/,
+  /\.toContainText\s*\(/,
+  /\.toBeEnabled\s*\(/,
+  /\.toHaveValue\s*\(/,
+  /\.toBeChecked\s*\(/,
+  /\.toHaveCount\s*\(/,
+  /\.toBeDisabled\s*\(/,
 ];
 
+/**
+ * Strip string literals and comments from code before assertion-presence
+ * checks. Delegates to the shared `utils/codeStripping.js` implementation
+ * (Bundle-A fix #14 + follow-up #F3). See that module's docblock for the
+ * full stripping contract.
+ */
+function stripStringsAndComments(code) {
+  return sharedStripStringsAndComments(code);
+}
+
 export function hasStrongAssertions(playwrightCode) {
-  return STRONG_ASSERTION_PATTERNS.some(p => p.test(playwrightCode));
+  // Bundle-A fix #14 — strip strings + comments so a `// toHaveURL`
+  // mention or a `'toBeVisible'` string literal can't masquerade as
+  // a real assertion.
+  const clean = stripStringsAndComments(playwrightCode || "");
+  return STRONG_ASSERTION_PATTERNS.some(p => p.test(clean));
 }
 
 export function hasWeakAssertions(playwrightCode) {
-  return WEAK_ASSERTION_PATTERNS.some(p => p.test(playwrightCode));
+  const clean = stripStringsAndComments(playwrightCode || "");
+  return WEAK_ASSERTION_PATTERNS.some(p => p.test(clean));
 }
 
+/**
+ * Bundle-A fix #14 — true assertion presence check.
+ *
+ * Pre-fix used `!playwrightCode.includes("expect(")` which returned
+ * `false` (i.e. "has assertions") for any test where the literal
+ * substring `expect(` appeared anywhere — including inside string
+ * literals (`console.log("expect(loaded)")`) and comments
+ * (`// TODO: add expect(...) call`). The enhancer would then skip
+ * injection on a test that genuinely has zero assertions.
+ *
+ * The fix strips strings + comments before running the presence
+ * check so only REAL `expect(` calls count, then uses the same
+ * `\bexpect\s*\(` anchor as `HAS_PAGE_LOAD_ASSERTION_RE`.
+ */
 export function hasNoAssertions(playwrightCode) {
-  return !playwrightCode.includes("expect(");
+  const clean = stripStringsAndComments(playwrightCode || "");
+  return !/\bexpect\s*\(/.test(clean);
 }
 
 /**
@@ -46,10 +89,59 @@ export function hasNoAssertions(playwrightCode) {
  * literals (`'toHaveURL'`) are NOT matched.
  *
  * Pattern: `expect(` … `)` … `.toHaveURL(` or `.toHaveTitle(`
- * The `.+` is greedy so it backtracks from the last `)` on the line,
- * correctly handling nested parens like `expect(page.locator('x').first())`.
+ *
+ * Bundle-A follow-up #F1 — both captures are bounded (`[^;\n]{1,2000}`
+ * + `[^;\n]{0,200}`) instead of the pre-fix greedy `.+` / `.*` with the
+ * `/s` flag. The old pattern walked exponential backtracking trees on
+ * minified single-line test bodies — same class of vulnerability as
+ * `ASSERTION_RE` (fixed by Bundle-A fix #18). The `/s` flag (dotall —
+ * makes `.` match newlines) made it worse here: a multi-line input
+ * could trigger backtracking across every newline.
+ *
+ * Capture bounds:
+ *   • `[^;\n]{1,2000}` — expect target ≤ 2 KB, stops at statement
+ *     boundary. Same bound used by `testValidator.js#ASSERTION_RE`.
+ *   • `[^;\n]{0,200}`  — between `)` and `.toHaveURL(` is realistically
+ *     0-5 chars (`.not`, whitespace); 200 is a generous cap.
+ *
+ * Dropped `/s` flag (no longer needed) so `.` reverts to default
+ * "doesn't match newlines" — the `[^;\n]` character classes already
+ * stop at newlines, but removing `/s` is defence-in-depth.
  */
-const HAS_PAGE_LOAD_ASSERTION_RE = /expect\s*\(.+\).*\.(?:toHaveURL|toHaveTitle)\s*\(/s;
+const HAS_PAGE_LOAD_ASSERTION_RE = /expect\s*\([^;\n]{1,2000}\)[^;\n]{0,200}\.(?:toHaveURL|toHaveTitle)\s*\(/;
+
+/**
+ * Bundle-A fix #15 — assertion-injection anchor that matches the test
+ * wrapper's closing `});` even when followed by trailing newlines,
+ * line comments, or block comments.
+ *
+ * Pre-fix the three injection regexes used `(\}\s*\);\s*$)` — `$`
+ * defaults to end-of-string (no `/m` flag), so any test ending with
+ * `});\n// generated by gpt-4o\n` silently failed the regex and the
+ * assertion injection was a no-op.
+ *
+ * Naively adding `/m` would make `$` match end-of-LINE anywhere in
+ * the file, so an inner `});` (e.g. a `.then(() => { ... });` chain)
+ * could be picked instead of the test wrapper's closing. The pattern
+ * below is more precise: it requires the `});` to be followed ONLY by
+ * whitespace, line comments, or block comments through end-of-string
+ * — i.e. it's the LAST `});` in the file, with optional non-code
+ * trailers. The matching group still captures `});` exactly so the
+ * replacement strings (`${assertions}\n$1`) inject the assertions
+ * BEFORE the closing brace, identical to the pre-fix happy path.
+ *
+ * Pattern breakdown:
+ *   (\}\s*\);)             — capture the closing `});` (group $1)
+ *   (?=                    — lookahead: must be followed by ONLY
+ *     (?:                  —   any number of …
+ *       \s+ |              —   whitespace runs (incl. newlines), OR
+ *       \/\/[^\n]* |       —   line comments (to EOL, no leading \s+ → handled by outer alternation), OR
+ *       \/\*[\s\S]*?\*\/   —   block comments (non-greedy across newlines)
+ *     )*
+ *     $                    — end of STRING (no `/m`, no surprises)
+ *   )
+ */
+const TEST_WRAPPER_CLOSE_RE = /(\}\s*\);)(?=(?:\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*$)/;
 
 // ── Assertion templates ──────────────────────────────────────────────────────
 // Two tiers of templates:
@@ -71,11 +163,38 @@ function hostnameRegex(url) {
   }
 }
 
+// Bundle-A fix #16 — selector targeting typical error UI regions, used by
+// AUTH + security templates below. Scoping the negative-text check to
+// dedicated alert / error containers avoids false-positives on legitimate
+// body text like "Invalid email format" hints next to inputs, "Error
+// Reports" admin nav links, or copy that mentions "errors" in passing
+// (e.g. "Sometimes errors happen — try again").
+//
+// Selector list mirrors industry conventions:
+//   • `[role="alert"]`     — WAI-ARIA live region for important messages
+//   • `.error` / `.field-error` — Bootstrap / Tailwind / Material UI defaults
+//   • `[aria-invalid="true"]` — accessible form-validation flag
+//   • `.alert-danger` / `.notification--error` — alternate framework names
+//
+// `.catch(() => {})` swallows the "locator not found" rejection so a
+// page WITHOUT any error region (i.e. no error happened — the happy
+// path) doesn't fail the test. The negative assertion only fires when
+// an error region actually exists; when it does, it must NOT contain
+// the failure keyword. This is the standard "soft assert on error UI"
+// pattern used by Playwright community examples and matches the
+// existing CRUD template's `.catch(() => {})` idiom on line 99-100.
+const AUTH_ERROR_REGION_SELECTOR = "[role=\"alert\"], .error, .field-error, [aria-invalid=\"true\"], .alert-danger, .notification--error";
+
 const INTENT_TEMPLATES = {
   AUTH: (snapshot) => `
-  // Assert successful authentication — URL should change away from login page
-  await expect(page.locator('body')).not.toContainText('Invalid');
-  await expect(page.locator('body')).not.toContainText('error');`,
+  // Assert successful authentication — URL should change away from login page.
+  // Bundle-A fix #16: scope the negative-text check to dedicated error
+  // regions so legitimate body copy (e.g. "Invalid email format" input
+  // hints, "Error Reports" admin links) doesn't false-positive after a
+  // successful login. .catch(() => {}) swallows the not-found case
+  // — the happy path has no error region to assert against.
+  await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('Invalid').catch(() => {});
+  await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('error').catch(() => {});`,
 
   NAVIGATION: (snapshot) => `
   // Assert page loaded correctly
@@ -141,9 +260,12 @@ const TYPE_TEMPLATES = {
   await expect(page.locator('h1').first()).toBeVisible();`,
 
   security: (snapshot) => `
-  // Security — verify auth boundary
-  await expect(page.locator('body')).not.toContainText('Invalid');
-  await expect(page.locator('body')).not.toContainText('error');`,
+  // Security — verify auth boundary.
+  // Bundle-A fix #16: scope to dedicated error regions (see
+  // AUTH_ERROR_REGION_SELECTOR docblock above) to avoid false-positives
+  // on legitimate body copy like "Error reports" admin links.
+  await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('Invalid').catch(() => {});
+  await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('error').catch(() => {});`,
 
   performance: (snapshot) => `
   // Performance — verify page loads within timeout
@@ -191,23 +313,19 @@ function buildPageLoadAssertion(url, title) {
 export function enhanceTest(test, snapshot, classifiedPage) {
   let code = test.playwrightCode || "";
   const advancedScenario = isAdvancedPlaywrightScenario(code);
+  // Strip strings + comments ONCE so all assertion-presence checks below
+  // see only real code. The raw `code` is kept for actual string
+  // manipulation (injection, replacement) that follows.
+  const cleanCode = stripStringsAndComments(code);
 
   // ── Fast-path: already fully enhanced ────────────────────────────────────
   // A test qualifies only when it has at least one strong assertion AND a
   // page-load anchor (toHaveURL or toHaveTitle inside an actual expect()
   // chain) AND at least one expect() call.
-  //
-  // We use a regex that requires the matcher to appear after `expect(`
-  // so that mentions in comments or string literals don't trigger the
-  // fast-path.  Example false positive without this:
-  //   await expect(el).toBeVisible();
-  //   // TODO: add toHaveURL assertion
-  // → code.includes("toHaveURL") is true but there is no real page-load
-  //   assertion, so the test should NOT be fast-pathed.
   if (
     hasStrongAssertions(code) &&
     !hasNoAssertions(code) &&
-    HAS_PAGE_LOAD_ASSERTION_RE.test(code)
+    HAS_PAGE_LOAD_ASSERTION_RE.test(cleanCode)
   ) {
     return { ...test, _assertionEnhanced: false };
   }
@@ -237,8 +355,13 @@ export function enhanceTest(test, snapshot, classifiedPage) {
     // waitForStable() call prepended in executeTest.js.
     const stabilityStep = `  // S3-02: DOM stability wait — let the page settle before asserting\n  await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});`;
 
-    // Inject stability step + assertions before closing brace of the test
-    code = code.replace(/(\}\s*\);\s*$)/, `${stabilityStep}\n${pageLoad}\n${template(snapshot)}\n$1`);
+    // Inject stability step + assertions before closing brace of the test.
+    // Bundle-A fix #15 — `TEST_WRAPPER_CLOSE_RE` tolerates trailing
+    // newlines / line / block comments after `});` so a test ending with
+    // `});\n// generated by gpt-4o\n` still gets injected (pre-fix the
+    // `$` end-of-string anchor failed the match and the assertions were
+    // silently skipped).
+    code = code.replace(TEST_WRAPPER_CLOSE_RE, `${stabilityStep}\n${pageLoad}\n${template(snapshot)}\n$1`);
 
     return {
       ...test,
@@ -256,7 +379,8 @@ export function enhanceTest(test, snapshot, classifiedPage) {
     const pageLoad = buildPageLoadAssertion(snapshot.url, snapshot.title);
     // Replace weak assertion lines
     code = code.replace(/.*expect\(.*\)\.(toBeTruthy|toBeDefined|not\.toBeNull).*\n?/g, "");
-    code = code.replace(/(\}\s*\);\s*$)/, `${pageLoad}\n$1`);
+    // Bundle-A fix #15 — see TEST_WRAPPER_CLOSE_RE docblock.
+    code = code.replace(TEST_WRAPPER_CLOSE_RE, `${pageLoad}\n$1`);
 
     return {
       ...test,
@@ -267,12 +391,13 @@ export function enhanceTest(test, snapshot, classifiedPage) {
   }
 
   // Already has strong assertions — ensure page load assertion exists
-  if (!HAS_PAGE_LOAD_ASSERTION_RE.test(code)) {
+  if (!HAS_PAGE_LOAD_ASSERTION_RE.test(cleanCode)) {
     if (advancedScenario) {
       return { ...test, _assertionEnhanced: false, _enhancementSkipped: "advanced_capability_flow" };
     }
     const pageLoad = buildPageLoadAssertion(snapshot.url, snapshot.title);
-    code = code.replace(/(\}\s*\);\s*$)/, `${pageLoad}\n$1`);
+    // Bundle-A fix #15 — see TEST_WRAPPER_CLOSE_RE docblock.
+    code = code.replace(TEST_WRAPPER_CLOSE_RE, `${pageLoad}\n$1`);
     return { ...test, playwrightCode: code, _assertionEnhanced: true, _enhancementReason: "added_page_load_assertion" };
   }
 

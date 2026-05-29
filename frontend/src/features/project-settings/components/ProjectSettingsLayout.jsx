@@ -47,18 +47,16 @@ export default function ProjectSettingsLayout() {
 
   usePageTitle(project ? `${project.name} · Settings` : "Project Settings");
 
-  // Toast helper — sections forward this to their panel components. The
-  // callable supports two argument shapes because the panel components
-  // currently call it two different ways:
+  // Toast helper — sections forward this to their panel components.
   //
-  //   1. Object form: `onToast({ type, message })` — used by
-  //      AutoApprovalPanel, CoveragePanel, IterationCapPanel, PiiFirewallPanel,
-  //      VisionHealingPanel (the panels extracted directly into
-  //      `features/project-settings/sections/*`).
-  //
-  //   2. Positional form: `onToast(message, type)` — used by
-  //      `ConfigurablePanel` (`components/project/ConfigurablePanel.jsx:105`),
-  //      which backs both `QualityGatesPanel` and `WebVitalsBudgetsPanel`.
+  // Signature is `(message, type)`. Every panel under
+  // `features/project-settings/sections/*` calls it with positional args
+  // (AutoApprovalPanel, CoveragePanel, IterationCapPanel, PiiFirewallPanel,
+  // VisionHealingPanel), matching the signature used by
+  // `ConfigurablePanel` (which backs QualityGatesPanel and
+  // WebVitalsBudgetsPanel) and `EnvironmentsTab`. The pre-UX-001 object
+  // form `onToast({ type, message })` was migrated to positional in the
+  // same PR — see commit history for the shim removal.
   //
   // UX-001: previously this routed every panel toast into `addNotification()`
   // — i.e. the notification BELL, not a visible toast — so users saving
@@ -66,26 +64,8 @@ export default function ProjectSettingsLayout() {
   // PII Firewall / Vision Healing in Project Settings saw no confirmation.
   // Now we forward to the global `useToast()` provider mounted in App.jsx.
   // The bell stays for durable async events (run-complete, scheduled-trigger
-  // fired). Unifying the panel-side contract to a single signature would be
-  // cleaner but touches 7+ files; accepting both here is the smaller-
-  // blast-radius fix.
-  const onToast = useCallback((msg, typeArg) => {
-    if (!msg) return;
-    let type;
-    let message;
-    if (typeof msg === "string") {
-      // Positional form: onToast("Saved", "success") — `typeArg` carries
-      // the level; default to "info" when absent (matches the legacy
-      // `showToast` helper signature in ConfigurablePanel).
-      message = msg;
-      type = typeArg || "info";
-    } else {
-      // Object form: onToast({ type, message }) — destructure with the
-      // same default. `typeArg` is ignored on the object path since the
-      // object already carries the level.
-      type = msg.type || "info";
-      message = msg.message;
-    }
+  // fired).
+  const onToast = useCallback((message, type = "info") => {
     if (!message) return;
     showToast(message, type === "error" ? "error" : type === "success" ? "success" : "info");
   }, [showToast]);

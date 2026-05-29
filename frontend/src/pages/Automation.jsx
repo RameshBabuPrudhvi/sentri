@@ -71,18 +71,12 @@ export default function Automation() {
   // Users saving Auto-Approval threshold / Quality Gates / etc. saw no
   // confirmation. Now we surface the toast directly. The bell stays for
   // durable async events (run-complete, scheduled-trigger fired).
+  //
+  // Signature is `(message, type)` — unified across every callsite (panels
+  // under `features/project-settings/sections/*`, `ConfigurablePanel`,
+  // `EnvironmentsTab`). The pre-UX-001 `{ type, message }` object form was
+  // migrated to positional in the same PR.
   const onPanelToast = useCallback((msg, type = "info") => {
-    // Compat shim: ProjectQualityCard currently calls
-    // `onToast?.({ type, message })` while EnvironmentsTab + ConfigurablePanel
-    // call `onToast?.(msg, type)`. Normalize here so we can migrate the
-    // ProjectQualityCard callsites to `(msg, type)` in a follow-up commit
-    // without breaking the page during the transition.
-    if (msg && typeof msg === "object") {
-      const message = msg.message ?? "";
-      if (!message) return;
-      showToast(message, msg.type ?? "info");
-      return;
-    }
     if (!msg) return;
     showToast(msg, type);
   }, [showToast]);

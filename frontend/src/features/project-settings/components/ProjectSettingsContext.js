@@ -12,7 +12,7 @@ import { createContext, useContext } from "react";
  *   {
  *     project: Project,                                  // hydrated from useQuery(getProject)
  *     canEdit: boolean,                                  // qa_lead+ on the workspace
- *     onToast: (msg: { type, message }) => void,         // wraps NotificationContext
+ *     onToast: (message: string, type?: "success"|"error"|"info") => void,  // wraps useToast()
  *     refresh: () => Promise<void>,                      // re-fetch the project after a save
  *   }
  *

@@ -383,3 +383,42 @@ export const agentToolCallsTotal = new client.Counter({
   labelNames: ["tool", "outcome"],
   registers: [register],
 });
+
+// Bundle-A fix #3 — Reviewer verdict downgrade counter. Increments every
+// time `runReviewerAuthorLoop` downgrades a `request_revision` verdict to
+// `accept` because every issue referenced an unknown testId (none of
+// the issue.testId values matched a test in the author's artifact). A
+// non-zero rate is a leading indicator of reviewer-prompt drift or
+// hallucinated testIds — operators want a metric, not just an event row.
+//
+// `reason` is a closed-set label so cardinality stays bounded. Today the
+// only documented reason is `unknown_test_ids`; future downgrade triggers
+// (e.g. malformed verdict shape) get their own bucket.
+export const reviewerVerdictDowngradedTotal = new client.Counter({
+  name: "app_reviewer_verdict_downgraded_total",
+  help: "Bundle-A fix #3 — reviewer verdict downgrades from `request_revision` → `accept`. `reason` ∈ {unknown_test_ids}. Non-zero rate signals reviewer-prompt drift or hallucinated testIds.",
+  labelNames: ["reason"],
+  registers: [register],
+});
+
+// Bundle-A fix #9 — feedback-loop regeneration failure counter. Bumps
+// every time `regenerateFailingTest` catches a non-abort error and
+// returns null (i.e. the auto-regen path failed for reasons OTHER than
+// user cancellation). Pre-fix these failures were swallowed silently
+// — operators had no signal that regeneration was failing en masse
+// (LLM provider outage, JSON parse failure, validator exception). The
+// metric closes the observability gap so dashboards / alerts can fire
+// when the auto-regen success rate drops.
+//
+// `reason` is a closed-set label so cardinality stays bounded:
+//   • parse_error      — `parseJSON` threw on the LLM response
+//   • provider_error   — `generateText` threw (rate limit, auth, 5xx)
+//   • internal_error   — any other unexpected throw (validator,
+//                        repo, etc.) — operators investigate via the
+//                        accompanying structured warn log line.
+export const feedbackLoopRegenerationFailuresTotal = new client.Counter({
+  name: "app_feedback_loop_regeneration_failures_total",
+  help: "Bundle-A fix #9 — non-abort failures inside `regenerateFailingTest`. `reason` ∈ {parse_error, provider_error, internal_error}. Pair with the structured warn log to triage feedback-loop regression.",
+  labelNames: ["reason"],
+  registers: [register],
+});

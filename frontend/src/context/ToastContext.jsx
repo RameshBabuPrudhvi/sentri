@@ -25,11 +25,11 @@
  *   showToast("Saved", "success");
  *   showToast("Failed: invalid threshold", "error");
  *
- * Signature is `(msg, type)` to match the existing call sites in
- * `ProjectDetail.jsx:130-133`, `EnvironmentsTab.jsx:75`, and
- * `ConfigurablePanel.jsx:105`. Callers using the `{ type, message }` object
- * form (currently only `ProjectQualityCard.jsx`) should be migrated to
- * `(msg, type)` in the same PR — see the audit task list.
+ * Signature is `(msg, type)` — unified across every callsite
+ * (`ProjectDetail.jsx`, `EnvironmentsTab.jsx`, `ConfigurablePanel.jsx`, and
+ * every panel under `features/project-settings/sections/*`). The
+ * pre-UX-001 `{ type, message }` object form was migrated to positional in
+ * the same PR.
  */
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import RunToast from "../components/project/RunToast.jsx";

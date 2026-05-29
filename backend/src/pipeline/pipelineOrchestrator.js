@@ -88,11 +88,29 @@ export function sanitizeRunInputs(project, run, { snapshotsByUrl = {}, classifie
  * @returns {{ validatedTests: object[], enhancedTests: object[], rejected: number, removed: number, enhancedCount: number, dedupStats: object }}
  */
 export async function runPostGenerationPipeline(rawTests, project, run, { snapshotsByUrl = {}, classifiedPagesByUrl = {}, signal } = {}) {
+  // Bundle-A fix #6 — reset the run-level `secretScanBlocked` flag at
+  // orchestrator entry so a re-entry on the same run (e.g. crawler
+  // hands the same `run` object to a second pipeline pass after a
+  // partial batch) doesn't carry a stale `true` from a previous batch.
+  // Step 7 below promotes the flag on any test where the secret
+  // scanner blocked, so the post-stage value is always fresh-from-this-
+  // run. Explicit `false` (not `delete`) so downstream CI/UI consumers
+  // that read `!!run.secretScanBlocked` see the expected primitive.
+  run.secretScanBlocked = false;
+
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 5);
+  // Bundle-A fix #20 — steps 5/6/7 are deterministic post-processing, NOT
+  // LLM author calls. Labelling them `agent: "system"` instead of "author"
+  // keeps the conversation UI honest: the author lane shows only the
+  // generative LLM work, while mechanical dedup / enhancement / validation
+  // surface under a separate system lane. Pre-fix every post-processing
+  // emit landed under the same author lane as the actual generation calls,
+  // so operators couldn't tell from the timeline whether a step was an
+  // LLM dispatch or local algorithmic work.
   emitAgentEvent(run.id, {
-    step: 5, agent: "author", phase: "start",
+    step: 5, agent: "system", phase: "start",
     message: "Comparing all tests for overlapping scenarios.",
     workspaceId: project.workspaceId,
   });
@@ -103,22 +121,24 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
   structuredLog("pipeline.dedup", { runId: run.id, input: rawTests.length, unique: unique.length, removed, final: finalTests.length });
   emitAgentEvent(run.id, {
-    step: 5, agent: "author", phase: "finding",
+    step: 5, agent: "system", phase: "finding",
     message: removed > 0
       ? `Removed ${removed} duplicate${removed !== 1 ? "s" : ""}.`
       : "No duplicates found — the suite is already lean.",
     workspaceId: project.workspaceId,
   });
   emitAgentEvent(run.id, {
-    step: 5, agent: "author", phase: "done",
+    step: 5, agent: "system", phase: "done",
     workspaceId: project.workspaceId,
   });
 
   // ── Step 6: Enhance assertions ──────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 6);
+  // Bundle-A fix #20 — see step 5 docblock. Enhancer is template-driven
+  // text substitution, not an LLM call.
   emitAgentEvent(run.id, {
-    step: 6, agent: "author", phase: "start",
+    step: 6, agent: "system", phase: "start",
     message: "Reviewing assertions — upgrading weak page-load checks to meaningful behavioural ones.",
     workspaceId: project.workspaceId,
   });
@@ -127,27 +147,56 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
   structuredLog("pipeline.enhance", { runId: run.id, enhanced: enhancedCount, total: enhancedTests.length });
   emitAgentEvent(run.id, {
-    step: 6, agent: "author", phase: "finding",
+    step: 6, agent: "system", phase: "finding",
     message: enhancedCount > 0
       ? `Enhanced ${enhancedCount} test${enhancedCount !== 1 ? "s" : ""} with stronger assertions.`
       : "No assertions needed upgrading.",
     workspaceId: project.workspaceId,
   });
   emitAgentEvent(run.id, {
-    step: 6, agent: "author", phase: "done",
+    step: 6, agent: "system", phase: "done",
     workspaceId: project.workspaceId,
   });
 
-  // ── Step 6a: Re-score quality factors against the enhanced code ─────────
+  // ── Step 6a: Apply self-healing transforms ────────────────────────────
+  // Rewrite raw Playwright calls (page.click, page.fill, page.getByRole().click())
+  // into self-healing helpers (safeClick, safeFill, safeExpect) BEFORE validation.
+  // Without this, the validator rejects code that uses raw Playwright methods —
+  // but at runtime executeTest.js applies the same transforms, so the code would
+  // actually work. This was the #1 cause of false-positive rejections, especially
+  // with Ollama which frequently ignores the "use safeClick" prompt instruction.
+  //
+  // Bundle-A fix #7 — order matters: healing transforms run BEFORE the quality
+  // re-score below. Transforms rewrite `page.click("Submit")` → `safeClick(...)`
+  // and drop the literal `getByRole`/`getByLabel`/`getByText` calls that the
+  // `selector.semantic` rubric factor rewards. Re-scoring after transforms
+  // gives the post-transform shape the right quality attribution, so the
+  // Review Queue's "why was this drafted?" popover matches what the operator
+  // actually sees in the persisted code.
+  let healingTransformed = 0;
+  for (const t of enhancedTests) {
+    if (t.playwrightCode) {
+      const before = t.playwrightCode;
+      t.playwrightCode = applyHealingTransforms(t.playwrightCode);
+      if (t.playwrightCode !== before) healingTransformed++;
+    }
+  }
+  if (healingTransformed > 0) {
+    log(run, `🩹 ${healingTransformed} test(s) had raw Playwright calls rewritten to self-healing helpers`);
+  }
+
+  // ── Step 6b: Re-score quality factors against the enhanced + transformed code ──
   // The dedup stage (Step 5) attached `_quality` and `_qualityFactors` based
   // on the *pre-enhancement* `playwrightCode`. Step 6 then injects assertions
-  // (toBeVisible, toHaveURL, …) which directly affect the rubric outcome —
-  // a test that hit `assert.none -30` before enhancement should no longer
-  // carry that penalty after the enhancer adds an `expect(...)`. Without
-  // this re-score, the Review Queue's "why was this drafted?" popover
-  // shows penalties that no longer apply to the persisted code, and
-  // `qualityScore` is systematically biased downward for any test that
-  // benefited from enhancement.
+  // (toBeVisible, toHaveURL, …) and Step 6a rewrites raw Playwright into
+  // self-healing helpers — both of which directly affect the rubric outcome.
+  // Bundle-A fix #7 moved this block to AFTER the healing transforms so the
+  // score reflects the canonical persisted code shape (no `selector.semantic`
+  // misattribution for tests rewritten to `safeClick` / `safeFill` /
+  // `safeExpect`). Pre-fix the re-score ran against pre-transform code, so
+  // every test that benefited from a `page.click("Submit")` → `safeClick`
+  // rewrite carried a stale `selector.semantic` bonus the validator would
+  // never have awarded against the actual persisted code.
   for (const t of enhancedTests) {
     const { score, factors } = scoreTestWithFactors(t);
     t._quality = score;
@@ -161,30 +210,13 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
     t.confidenceScore = normalizeQualityToConfidence(score);
   }
 
-  // ── Step 6b: Apply self-healing transforms ────────────────────────────
-  // Rewrite raw Playwright calls (page.click, page.fill, page.getByRole().click())
-  // into self-healing helpers (safeClick, safeFill, safeExpect) BEFORE validation.
-  // Without this, the validator rejects code that uses raw Playwright methods —
-  // but at runtime executeTest.js applies the same transforms, so the code would
-  // actually work. This was the #1 cause of false-positive rejections, especially
-  // with Ollama which frequently ignores the "use safeClick" prompt instruction.
-  let healingTransformed = 0;
-  for (const t of enhancedTests) {
-    if (t.playwrightCode) {
-      const before = t.playwrightCode;
-      t.playwrightCode = applyHealingTransforms(t.playwrightCode);
-      if (t.playwrightCode !== before) healingTransformed++;
-    }
-  }
-  if (healingTransformed > 0) {
-    log(run, `🩹 ${healingTransformed} test(s) had raw Playwright calls rewritten to self-healing helpers`);
-  }
-
   // ── Step 7: Validate ────────────────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 7);
+  // Bundle-A fix #20 — see step 5 docblock. Validator is acorn parse +
+  // regex checks, not an LLM call.
   emitAgentEvent(run.id, {
-    step: 7, agent: "author", phase: "start",
+    step: 7, agent: "system", phase: "start",
     message: "Final quality check — selector stability and assertion coverage.",
     workspaceId: project.workspaceId,
   });
@@ -210,14 +242,14 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
   structuredLog("pipeline.validate", { runId: run.id, valid: validatedTests.length, rejected });
   emitAgentEvent(run.id, {
-    step: 7, agent: "author", phase: "finding",
+    step: 7, agent: "system", phase: "finding",
     message: rejected > 0
       ? `Rejected ${rejected} test${rejected !== 1 ? "s" : ""} with brittle selectors or weak coverage.`
       : "All tests passed quality review.",
     workspaceId: project.workspaceId,
   });
   emitAgentEvent(run.id, {
-    step: 7, agent: "author", phase: "done",
+    step: 7, agent: "system", phase: "done",
     workspaceId: project.workspaceId,
   });
 

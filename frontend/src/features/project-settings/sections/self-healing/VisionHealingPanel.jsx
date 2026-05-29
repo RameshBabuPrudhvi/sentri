@@ -46,11 +46,11 @@ export default function VisionHealingPanel({ project, canEdit, onToast }) {
     const callsN = Number(callsCap);
     const costN = Number(costCap);
     if (!Number.isInteger(callsN) || callsN < 1 || callsN > 10000) {
-      onToast?.({ type: "error", message: "Daily call cap must be an integer between 1 and 10000." });
+      onToast?.("Daily call cap must be an integer between 1 and 10000.", "error");
       return;
     }
     if (!Number.isFinite(costN) || costN < 0 || costN > 100000) {
-      onToast?.({ type: "error", message: "Monthly cost cap must be a number between 0 and 100000." });
+      onToast?.("Monthly cost cap must be a number between 0 and 100000.", "error");
       return;
     }
     setSaving(true);
@@ -65,7 +65,7 @@ export default function VisionHealingPanel({ project, canEdit, onToast }) {
         : mode === "pixelmatch_only"
           ? `Pixelmatch fallback enabled · caps ${callsN}/day, $${costN}/month.`
           : `Pixelmatch + LLM fallback enabled · caps ${callsN}/day, $${costN}/month.`;
-      onToast?.({ type: "success", message: summary });
+      onToast?.(summary, "success");
     } catch (err) {
       // Distinguish the LLM-not-configured failure from a generic save error
       // so the user gets a concrete remediation step instead of "save failed".
@@ -73,9 +73,9 @@ export default function VisionHealingPanel({ project, canEdit, onToast }) {
       if (msg.includes("VISION_PROVIDER_NOT_CONFIGURED")) {
         setLlmAvailable(false);
         setMode("pixelmatch_only");
-        onToast?.({ type: "error", message: "LLM vision is unavailable — no vision-capable model is configured server-side. Falling back to pixelmatch-only." });
+        onToast?.("LLM vision is unavailable — no vision-capable model is configured server-side. Falling back to pixelmatch-only.", "error");
       } else {
-        onToast?.({ type: "error", message: msg });
+        onToast?.(msg, "error");
       }
     } finally {
       setSaving(false);

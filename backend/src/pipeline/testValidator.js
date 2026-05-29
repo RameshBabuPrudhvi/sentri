@@ -77,6 +77,54 @@ const VALID_PAGE_ACTIONS = new Set([
   "evaluate", "evaluateHandle",
   "keyboard", "mouse", "touchscreen",
   "on", "once", "off",
+  // Bundle-A fix #17 — additions for previously-rejected real Playwright
+  // methods. Audited against `@playwright/test` 1.4x public API. These
+  // were the main false-positives the validator surfaced as "invalid
+  // Playwright method" against AI-generated tests that legitimately
+  // used advanced page features (downloads, PDFs, script injection,
+  // coverage capture, etc.).
+  //
+  // Page document/DOM manipulation:
+  "setContent",       // set page HTML directly (download / email-render tests)
+  "addScriptTag",     // inject <script> (analytics/polyfill stubbing)
+  "addStyleTag",      // inject <style> (theme/CSS regression tests)
+  // Page lifecycle / window control:
+  "bringToFront",     // multi-tab tests need to focus a background tab
+  "pdf",              // PDF export tests (Chromium only — runtime asserts that)
+  "setOfflineMode",   // offline-mode E2E tests
+  // Page introspection / measurement:
+  "boundingBox",      // visual-position assertions, accessibility checks
+  "coverage",         // browser-coverage capture (AUTO-009 surface)
+  // Page<->Node communication:
+  "exposeFunction",   // call into Node from page scripts
+  "exposeBinding",    // exposeFunction + frame/source binding
+  // Page video / downloads / file chooser:
+  "video",            // page.video() — handle returned from `recordVideo`
+  "saveAs",           // download.saveAs() in download tests
+  "path",             // download.path() (also handle on test attachments)
+  "suggestedFilename", // download.suggestedFilename()
+  "delete",           // download.delete() — name overlaps with HTTP DELETE
+                      //   which is already in the set, but Set dedupes.
+  // Locator / element-handle helpers used in advanced tests:
+  "elementHandle", "elementHandles",
+  "and", "or",        // 1.34+ locator combinators
+  "describeOptions",  // 1.42+ test info
+  "clear",            // 1.28+ locator.clear() (alternative to fill(''))
+  // Network response / request helpers (route handler chains):
+  "headers", "headersArray", "ok", "status", "statusText", "json", "body", "text",
+  "allHeaders", "headerValue", "headerValues", "request", "response",
+  // Frame helpers (page.mainFrame(), page.frames(), iframe traversal):
+  "mainFrame", "frames", "childFrames", "parentFrame", "isDetached", "name",
+  // Worker / service-worker helpers:
+  "workers", "serviceWorker", "serviceWorkers", "backgroundPages",
+  // Bundle-A follow-up #F4 — methods on returned-object receivers that
+  // are now validated (receiver list expanded to include `mouse`,
+  // `keyboard`, `coverage`, etc.). Names added so `page.mouse.click(x,y)`
+  // and `page.keyboard.press('Enter')` validate cleanly.
+  "move", "down", "up", "wheel",                       // mouse
+  "insertText",                                         // keyboard
+  "startJSCoverage", "stopJSCoverage",                  // coverage
+  "startCSSCoverage", "stopCSSCoverage",                // coverage
 ]);
 
 /**
@@ -84,8 +132,17 @@ const VALID_PAGE_ACTIONS = new Set([
  * Captures: the receiver expression + the method name.
  *   e.g.  page.clicks(...)  →  method = "clicks"
  *         locator.fillup()  →  method = "fillup"
+ *
+ * Bundle-A follow-up #F4 — receiver list expanded to include common
+ * returned-object identifiers (`download`, `response`, `mouse`,
+ * `keyboard`, `touchscreen`, `worker`, `coverage`). Pre-fix chained
+ * method calls on these (e.g. `download.saveAs(...)`,
+ * `response.json()`, `page.mouse.click(x,y)`) were silently unvalidated
+ * — typos like `download.savAs(...)` would slip through. The
+ * VALID_PAGE_ACTIONS allowlist already documents the legal methods
+ * via the fix #17 additions; this expansion closes the validation gap.
  */
-const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request|browser|api|test|expect|testInfo|route)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request|browser|api|test|expect|testInfo|route|download|response|mouse|keyboard|touchscreen|worker|coverage)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
  * validateActions(code) → string[]
@@ -149,16 +206,30 @@ const VALID_MATCHERS = new Set([
  *   expect(value).toBe(...)
  *   expect(page.locator('...').first()).toBeVisible()
  *
- * Uses greedy `.+` so the regex backtracks from the last `)` on the
- * line, correctly handling nested parentheses inside the expect()
- * expression (e.g. `.locator(...).first()`).
+ * Bundle-A fix #18 — the inner capture is bounded to `[^;\n]{1,2000}`
+ * (no statement terminators, no newlines, ≤ 2KB) instead of the pre-fix
+ * greedy `.+`. The old pattern walked backtracking trees on minified
+ * single-line test bodies — a 5KB single-line test with many `(`/`)`
+ * pairs could spend hundreds of milliseconds per match attempt while
+ * the regex engine tried every possible split of `.+` against every
+ * possible `)` position. Capping the capture at:
+ *   • `[^;\n]` — stops at statement boundaries (assertions never span
+ *     across `;` or `\n` in any realistic Playwright code — even the
+ *     IIFE pattern `expect((() => { return x })()).toBe(true)` keeps
+ *     its inner `;` inside the function body, not at the
+ *     `expect(target)` boundary).
+ *   • `{1,2000}` — hard length cap; no realistic expect target
+ *     exceeds 2 KB. The greedy quantifier still backtracks for the
+ *     nested-parens case the original docblock called out, but the
+ *     search space is now bounded so worst-case time is linear in
+ *     the cap rather than exponential in the line length.
  *
  * Groups:
  *   [1] target expression inside expect(...)
  *   [2] optional ".not" negation
  *   [3] matcher name
  */
-const ASSERTION_RE = /expect\s*\((.+)\)\s*(\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+const ASSERTION_RE = /expect\s*\(([^;\n]{1,2000})\)\s*(\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
  * Matchers that must NOT be used with .not because the negated form is

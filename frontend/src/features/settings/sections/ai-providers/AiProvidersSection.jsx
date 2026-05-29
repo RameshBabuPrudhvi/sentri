@@ -975,9 +975,16 @@ export default function AiProvidersSection() {
     try {
       const payload = await api.exportRoutes();
       const count = payload?.routes?.length ?? 0;
-      setImportMsg({ type: "ok", text: `Exported ${count} provider(s).` });
+      const text = `Exported ${count} provider(s).`;
+      setImportMsg({ type: "ok", text });
+      // UX-001 follow-up: import/export also fire toasts so the action is
+      // confirmed even when the inline banner is scrolled off-screen.
+      // The banner stays for durable reference (matches Step 5 Option A).
+      showToast(text, "success");
     } catch (err) {
-      setImportMsg({ type: "err", text: err.message || "Export failed." });
+      const text = err.message || "Export failed.";
+      setImportMsg({ type: "err", text });
+      showToast(text, "error");
     } finally {
       setIoBusy(false);
     }
@@ -999,12 +1006,17 @@ export default function AiProvidersSection() {
         // eslint-disable-next-line no-console
         console.warn("[AI Providers import] errors:", res.errors);
       }
-      setImportMsg({
-        type: res.errors?.length ? "err" : "ok",
-        text: parts.length ? parts.join(" · ") : "No changes applied.",
-      });
+      const hasErrors = !!res.errors?.length;
+      const text = parts.length ? parts.join(" · ") : "No changes applied.";
+      setImportMsg({ type: hasErrors ? "err" : "ok", text });
+      // UX-001 follow-up: surface the same summary via toast. Errors fire
+      // a red toast even when some rows succeeded so partial-failure
+      // imports don't read as fully successful.
+      showToast(text, hasErrors ? "error" : "success");
     } catch (err) {
-      setImportMsg({ type: "err", text: err.message || "Import failed." });
+      const text = err.message || "Import failed.";
+      setImportMsg({ type: "err", text });
+      showToast(text, "error");
     } finally {
       setIoBusy(false);
     }

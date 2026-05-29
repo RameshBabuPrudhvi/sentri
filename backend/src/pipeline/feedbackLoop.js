@@ -55,6 +55,12 @@ import { buildCapabilityCoverageBlock } from "./prompts/playwrightCapabilityGuid
 import { scoreTestWithFactors, normalizeQualityToConfidence } from "./deduplicator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
+import { formatLogLine } from "../utils/logFormatter.js";
+import { feedbackLoopRegenerationFailuresTotal } from "../utils/metrics.js";
+// Bundle-A fix #19 — bot-detection regexes sourced from the shared module
+// so this classifier and `pipeline/stateExplorer.js`'s crawl-time gate
+// share one pattern list. See `utils/botDetection.js` for rationale.
+import { BOT_DETECTION_PATTERNS } from "../utils/botDetection.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 //
@@ -96,31 +102,12 @@ const FAILURE_PATTERNS = [
   // tests. Bot-detection pages reliably surface one of the URL/text patterns
   // below; falling back to UNKNOWN for naked "access denied" preserves the
   // feedback loop's chance to repair an auth-flow test.
-  ["BOT_BLOCK", [
-    /\/sorry\//i,
-    /\/captcha/i,
-    /\/challenge/i,
-    // `/blocked` mirrors the `stateExplorer.js` anti-bot URL list referenced
-    // in the comment block above. Without it a SUT that redirects to
-    // `/blocked` (Cloudflare's "you have been blocked" page, custom WAF
-    // landing pages) falls through to SELECTOR_ISSUE on the secondary
-    // locator timeout — defeating the entire reason this category exists.
-    //
-    // Anchored to a path-segment boundary (`/blocked` followed by `/`,
-    // `?`, `#`, or end-of-string) so legitimate application paths like
-    // `/users/blocked-list`, `/content/blocked-items`, or
-    // `/admin/blocked-accounts` are NOT misclassified as bot-blocks. The
-    // canonical anti-bot landing page is exactly `/blocked` (Cloudflare,
-    // most WAF vendors); apps that nest functionality under `/blocked-*`
-    // are a real-world false-positive risk per Lifeguard BUG-0003.
-    /\/blocked(?:[/?#]|$)/i,
-    /recaptcha/i,
-    /unusual traffic/i,
-    /are you a robot/i,
-    /detected unusual traffic/i,
-    /verify you are human/i,
-    /cloudflare.*challenge/i,
-  ]],
+  // Bundle-A fix #19 — pattern list lifted to `utils/botDetection.js` so
+  // the post-run classifier here and `pipeline/stateExplorer.js`'s
+  // crawl-time gate share ONE source of truth. The `\/blocked(?:[/?#]|$)`
+  // boundary anchor (lifeguard BUG-0003) lives in the shared module's
+  // docblock and no longer needs to be re-explained in each consumer.
+  ["BOT_BLOCK", BOT_DETECTION_PATTERNS],
   ["SELECTOR_ISSUE", [
     /locator.*not found/i,
     /element not visible/i,
@@ -232,16 +219,34 @@ export function detectFlakiness(testHistory) {
 }
 
 /**
- * detectFlakyTests(projectId) → Map<testId, flakyInfo>
+ * detectFlakyTests(projectId, options?) → Map<testId, flakyInfo>
  *
- * Scans all run results for a project and identifies tests that have both
+ * Scans run results for a project and identifies tests that have both
  * passed and failed across different runs.
+ *
+ * Bundle-A fix #10 — bounded to the most recent `maxRuns` runs (default 50)
+ * so the O(runs × results) scan stays predictable for long-lived projects.
+ * `runRepo.getByProjectId` returns runs sorted `startedAt DESC`, so
+ * `slice(0, maxRuns)` is the most-recent-N window. Pre-fix every call
+ * iterated the entire project history, which on a long-lived project with
+ * thousands of runs could spike CPU on every `applyFeedbackLoop` call.
+ *
+ * @param {string} projectId
+ * @param {Object} [options]
+ * @param {number} [options.maxRuns=50] - Cap the window to the most recent
+ *   N runs. Set to 0 / negative / non-finite to disable the cap (full
+ *   history scan, the pre-fix behaviour — kept as an escape hatch for
+ *   admin tools that want the unabridged view).
  */
-export function detectFlakyTests(projectId) {
+export function detectFlakyTests(projectId, options = {}) {
+  const maxRuns = Number.isFinite(options.maxRuns) ? options.maxRuns : 50;
   const testResults = new Map(); // testId → { passes, fails }
   const allRuns = runRepo.getByProjectId(projectId);
+  // `getByProjectId` returns newest-first. `slice(0, N)` takes the
+  // most-recent-N window; `maxRuns <= 0` opts out of the cap.
+  const runsToScan = (maxRuns > 0) ? allRuns.slice(0, maxRuns) : allRuns;
 
-  for (const run of allRuns) {
+  for (const run of runsToScan) {
     if (!run.results) continue;
     for (const result of run.results) {
       if (!testResults.has(result.testId)) {
@@ -352,6 +357,56 @@ export function buildQualityAnalytics(improvements, testMap) {
 
 // ── Improvement prompt builder ────────────────────────────────────────────────
 
+// Bundle-A fix #8 — byte-size cap for the elements-JSON block in the
+// improvement prompt. The per-tier `maxElements` cap bounds the COUNT
+// of elements but not their cumulative serialised size — a single
+// element with a verbose `outerHTML` attribute can spend hundreds of
+// bytes, and the cumulative payload can balloon the prompt past the
+// model's context window or simply burn tokens for no marginal signal.
+// 8 KB is a safe ceiling: large enough to carry every realistic
+// element snapshot the prompt actually uses, small enough that even
+// the smallest context window (~8K tokens ≈ 32 KB) keeps room for the
+// rest of the prompt. Truncation appends a sentinel so the LLM can
+// see the cut and operators reading the prompt log understand the
+// gap. Hardcoded constant per Bugs.md "no new env vars" rule.
+export const ELEMENTS_JSON_MAX_CHARS = 8000;
+export const ELEMENTS_JSON_TRUNCATION_MARKER = "…[truncated]";
+
+// Bundle-A fix #9 — classify a non-abort `regenerateFailingTest` error
+// into the closed-set Prometheus reason label. Exported so a unit test
+// can pin every branch without booting a real AI provider. Pure
+// function (no side effects, no DB / env reads) — safe to call from
+// any code path that needs to bucket a regeneration failure.
+//
+// Returns one of:
+//   • "parse_error"    — JSON / parse failure on the LLM response
+//   • "provider_error" — provider call failed (rate-limited, 5xx, auth,
+//                        network, timeout, configuration)
+//   • "internal_error" — everything else (validator, repo, etc.)
+export function classifyRegenerationFailure(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  // Provider indicators (HTTP status, network keywords) checked FIRST so
+  // an error like `new Error("No JSON response from provider")` with
+  // `status: 502` lands in `provider_error`, not `parse_error`. Pre-fix
+  // the `parse`/`json` substring check ran first and mis-bucketed these.
+  if (
+    err?.status != null ||
+    err?.statusCode != null ||
+    /rate.?limit|rate-?limited|timeout|econnrefused|enotfound|network|provider/i.test(msg)
+  ) {
+    return "provider_error";
+  }
+  if (msg.includes("parse") || msg.includes("json")) return "parse_error";
+  return "internal_error";
+}
+
+export function capElementsJson(jsonStr) {
+  if (typeof jsonStr !== "string" || jsonStr.length <= ELEMENTS_JSON_MAX_CHARS) return jsonStr;
+  // Reserve room for the marker so the final string still fits under the cap.
+  const slice = jsonStr.slice(0, ELEMENTS_JSON_MAX_CHARS - ELEMENTS_JSON_TRUNCATION_MARKER.length);
+  return `${slice}${ELEMENTS_JSON_TRUNCATION_MARKER}`;
+}
+
 function buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier) {
   const categoryInstructions = {
     NETWORK_MOCK_FAIL: `The test failed around network interception/mocking.
@@ -432,7 +487,7 @@ ${test.playwrightCode}
 PAGE CONTEXT:
 - Title: ${snapshot?.title || "unknown"}
 - Forms: ${snapshot?.forms || 0}
-- Elements: ${JSON.stringify((snapshot?.elements || []).slice(0, TIER_CONFIG[tier || "cloud"].maxElements), null, 2)}
+- Elements: ${capElementsJson(JSON.stringify((snapshot?.elements || []).slice(0, TIER_CONFIG[tier || "cloud"].maxElements), null, 2))}
 
 INSTRUCTIONS:
 ${categoryInstructions[failureCategory] || categoryInstructions.UNKNOWN}
@@ -873,6 +928,32 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     return finalCandidate || null;
   } catch (err) {
     if (err.name === "AbortError") throw err; // propagate abort
+    // Bundle-A fix #9 — surface non-abort errors instead of silently
+    // returning null. Operators need a signal that the auto-regen path
+    // failed (LLM provider outage, JSON parse failure, validator
+    // exception) so dashboards/alerts can fire on the metric and the
+    // structured log line carries enough context to triage. Pre-fix
+    // every non-abort throw landed silently in `return null` — a
+    // sustained provider outage looked like "regeneration just isn't
+    // helping any tests" rather than "the provider is down".
+    //
+    // Reason classification is a small closed set:
+    //   • parse_error    — `parseJSON` threw on the LLM response shape
+    //   • provider_error — `generateText` threw (rate-limited, 5xx, auth)
+    //   • internal_error — any other throw (validator, repo, etc.)
+    // The full error message lands on the warn line; the metric label
+    // stays bounded so cardinality is safe.
+    const reason = classifyRegenerationFailure(err);
+    try {
+      feedbackLoopRegenerationFailuresTotal.inc({ reason });
+    } catch { /* best-effort */ }
+    // `options.runId` is the originating run id — threaded through to
+    // the log line so operators can correlate with the run-detail view.
+    console.warn(formatLogLine(
+      "warn",
+      options?.runId || null,
+      `[feedbackLoop] regenerateFailingTest failed (${reason}) for test ${test?.id || "?"} (${failureCategory}): ${err?.message || "unknown"}`,
+    ));
     return null; // Regeneration failed — keep original
   }
 }

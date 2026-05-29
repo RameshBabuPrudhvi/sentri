@@ -39,6 +39,13 @@ import { performAutoLogin } from "./autoLogin.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 import { launchBrowser } from "../runner/config.js";
 import { loadRobotsRules, isAllowed, loadSitemapUrls } from "../utils/robotsSitemap.js";
+// Bundle-A fix #19 — bot-detection patterns sourced from the shared module
+// so the crawl-time gate stays in lockstep with `feedbackLoop.js`'s post-run
+// BOT_BLOCK classifier. Pre-fix the two lists drifted: `feedbackLoop.js`
+// carried the `\/blocked(?:[/?#]|$)` boundary fix while this module had a
+// looser `\/blocked/i` pattern that over-matched legitimate `/blocked-users`
+// admin paths. See `utils/botDetection.js` for the full rationale.
+import { EXPLORER_BOT_DETECTION_PATTERNS } from "../utils/botDetection.js";
 
 // Defaults — overridden per-run by tuning values from Test Dials
 const DEFAULT_MAX_STATES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
@@ -46,12 +53,11 @@ const DEFAULT_MAX_DEPTH  = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
 const DEFAULT_MAX_ACTIONS = 8;
 const DEFAULT_ACTION_TIMEOUT = 5000;
 
-// URLs that indicate bot detection, CAPTCHA, or error pages — never valid states
-const BOT_DETECTION_PATTERNS = [
-  /\/sorry\//i, /\/captcha/i, /\/challenge/i, /\/blocked/i,
-  /recaptcha/i, /accounts\.google\.com\/v3\/signin/i,
-  /\/error\/?$/i, /\/403\/?$/i, /\/429\/?$/i,
-];
+// Bundle-A fix #19 — bot-detection pattern list now sourced from the shared
+// module so the crawl-time gate and the post-run failure classifier never
+// drift apart. The explorer-specific HTTP-error patterns (/error, /403, /429)
+// + Google SSO interstitial are included via `EXPLORER_BOT_DETECTION_PATTERNS`.
+const BOT_DETECTION_PATTERNS = EXPLORER_BOT_DETECTION_PATTERNS;
 
 /**
  * Normalise a hostname for origin comparison by stripping the `www.` prefix.
