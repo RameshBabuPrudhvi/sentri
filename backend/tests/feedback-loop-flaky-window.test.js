@@ -38,11 +38,23 @@ function seedRun({ id, daysAgo, results }) {
 // Clean slate so prior tests' seeded rows don't pollute results.
 getDatabase().prepare("DELETE FROM runs WHERE projectId = ?").run(PROJECT_ID);
 // Seed a project row so the FK on runs.projectId is satisfied.
+// Use the full column set that the schema requires (NOT NULL constraints).
 try {
+  const now = new Date().toISOString();
   getDatabase().prepare(
-    "INSERT OR IGNORE INTO projects (id, name, url, workspaceId, createdAt, updatedAt) VALUES (?, ?, ?, '__default__', datetime('now'), datetime('now'))",
-  ).run(PROJECT_ID, "Flaky Window Test Project", "http://app.example.test");
+    `INSERT OR IGNORE INTO projects (id, name, url, workspaceId, createdAt, updatedAt)
+     VALUES (?, ?, ?, '__default__', ?, ?)`,
+  ).run(PROJECT_ID, "Flaky Window Test Project", "http://app.example.test", now, now);
 } catch { /* may already exist from a prior test run */ }
+
+// Also seed the small-project used by the boundary test below.
+try {
+  const now = new Date().toISOString();
+  getDatabase().prepare(
+    `INSERT OR IGNORE INTO projects (id, name, url, workspaceId, createdAt, updatedAt)
+     VALUES (?, ?, ?, '__default__', ?, ?)`,
+  ).run("PRJ-FLAKY-WINDOW-SMALL", "Small Project", "http://app.example.test", now, now);
+} catch { /* may already exist */ }
 
 // 51 OLD runs (days 51..101): `t-old` flip-flops (alternates pass/fail).
 for (let i = 0; i < 51; i += 1) {
