@@ -369,7 +369,7 @@ export function buildQualityAnalytics(improvements, testMap) {
 // rest of the prompt. Truncation appends a sentinel so the LLM can
 // see the cut and operators reading the prompt log understand the
 // gap. Hardcoded constant per Bugs.md "no new env vars" rule.
-export const ELEMENTS_JSON_MAX_BYTES = 8000;
+export const ELEMENTS_JSON_MAX_CHARS = 8000;
 export const ELEMENTS_JSON_TRUNCATION_MARKER = "…[truncated]";
 
 // Bundle-A fix #9 — classify a non-abort `regenerateFailingTest` error
@@ -401,9 +401,9 @@ export function classifyRegenerationFailure(err) {
 }
 
 export function capElementsJson(jsonStr) {
-  if (typeof jsonStr !== "string" || jsonStr.length <= ELEMENTS_JSON_MAX_BYTES) return jsonStr;
+  if (typeof jsonStr !== "string" || jsonStr.length <= ELEMENTS_JSON_MAX_CHARS) return jsonStr;
   // Reserve room for the marker so the final string still fits under the cap.
-  const slice = jsonStr.slice(0, ELEMENTS_JSON_MAX_BYTES - ELEMENTS_JSON_TRUNCATION_MARKER.length);
+  const slice = jsonStr.slice(0, ELEMENTS_JSON_MAX_CHARS - ELEMENTS_JSON_TRUNCATION_MARKER.length);
   return `${slice}${ELEMENTS_JSON_TRUNCATION_MARKER}`;
 }
 

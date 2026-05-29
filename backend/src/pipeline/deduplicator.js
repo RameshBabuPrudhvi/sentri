@@ -382,7 +382,7 @@ const QUALITY_FACTORS = [
   // Bundle-A fix — `selector.testid` and `selector.fragile` check for CSS
   // tokens (`data-testid`, `nth-child`) that live INSIDE string arguments
   // (e.g. `page.locator('[data-testid="x"]')`). The F3 strip pass removes
-  // string contents, so these two factors use `rawCode` (4th arg) instead
+  // string contents, so these two factors use `rawCode` (3rd arg) instead
   // of the stripped `code` (2nd arg) to avoid false negatives.
   { id: "selector.testid",   label: "Test-ID selectors",      delta:  10, kind: "reward",  hit: (_, _c, raw) => raw.includes("data-testid") || raw.includes("test-id") },
   { id: "selector.fragile",  label: "Fragile nth selectors",  delta: -10, kind: "penalty", hit: (_, _c, raw) => (raw.match(/\.nth\(|nth-child|nth-of-type/g) || []).length > 2 },

@@ -16,13 +16,13 @@ import assert from "node:assert/strict";
 
 const {
   capElementsJson,
-  ELEMENTS_JSON_MAX_BYTES,
+  ELEMENTS_JSON_MAX_CHARS,
   ELEMENTS_JSON_TRUNCATION_MARKER,
 } = await import("../src/pipeline/feedbackLoop.js");
 
 test("capElementsJson passes short input through unchanged", () => {
   const small = JSON.stringify({ tag: "button", text: "Sign in" }, null, 2);
-  assert.ok(small.length < ELEMENTS_JSON_MAX_BYTES, "fixture must be under cap");
+  assert.ok(small.length < ELEMENTS_JSON_MAX_CHARS, "fixture must be under cap");
   assert.equal(capElementsJson(small), small);
 });
 
@@ -37,12 +37,12 @@ test("capElementsJson truncates oversized JSON and appends marker", () => {
     outerHTML: `<button id="btn-${i}" class="btn btn-primary">Element label number ${i}</button>`.repeat(2),
   }));
   const json = JSON.stringify(elements, null, 2);
-  assert.ok(json.length > ELEMENTS_JSON_MAX_BYTES, `precondition: 200-element JSON must exceed cap, got ${json.length}`);
+  assert.ok(json.length > ELEMENTS_JSON_MAX_CHARS, `precondition: 200-element JSON must exceed cap, got ${json.length}`);
 
   const out = capElementsJson(json);
   assert.ok(
-    out.length <= ELEMENTS_JSON_MAX_BYTES,
-    `capped output must fit under ${ELEMENTS_JSON_MAX_BYTES} bytes, got ${out.length}`,
+    out.length <= ELEMENTS_JSON_MAX_CHARS,
+    `capped output must fit under ${ELEMENTS_JSON_MAX_CHARS} chars, got ${out.length}`,
   );
   assert.ok(
     out.endsWith(ELEMENTS_JSON_TRUNCATION_MARKER),
@@ -51,16 +51,16 @@ test("capElementsJson truncates oversized JSON and appends marker", () => {
 });
 
 test("capElementsJson exactly-at-cap input is NOT truncated (boundary)", () => {
-  const exact = "a".repeat(ELEMENTS_JSON_MAX_BYTES);
+  const exact = "a".repeat(ELEMENTS_JSON_MAX_CHARS);
   const out = capElementsJson(exact);
   assert.equal(out, exact, "exactly-at-cap input should pass through");
-  assert.equal(out.length, ELEMENTS_JSON_MAX_BYTES);
+  assert.equal(out.length, ELEMENTS_JSON_MAX_CHARS);
 });
 
-test("capElementsJson one-byte-over-cap input IS truncated (boundary)", () => {
-  const over = "a".repeat(ELEMENTS_JSON_MAX_BYTES + 1);
+test("capElementsJson one-char-over-cap input IS truncated (boundary)", () => {
+  const over = "a".repeat(ELEMENTS_JSON_MAX_CHARS + 1);
   const out = capElementsJson(over);
-  assert.ok(out.length <= ELEMENTS_JSON_MAX_BYTES, "one-byte-over must be truncated");
+  assert.ok(out.length <= ELEMENTS_JSON_MAX_CHARS, "one-char-over must be truncated");
   assert.ok(out.endsWith(ELEMENTS_JSON_TRUNCATION_MARKER), "must end with marker");
 });
 
