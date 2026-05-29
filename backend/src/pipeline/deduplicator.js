@@ -120,18 +120,109 @@ const STOP_WORDS = new Set([
   "should","page","click","fill","submit","navigate","go","open","visit",
 ]);
 
-function buildTfIdfVector(text) {
-  const terms = (text || "")
+/**
+ * tokenize(text) → string[] of normalised, stop-word-filtered terms.
+ *
+ * Extracted helper so the TF-vector builder and the batch-DF builder
+ * share one tokenisation contract — changing the stop-word list or the
+ * non-alphanumeric stripping rule lands in exactly one place.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function tokenize(text) {
+  return (text || "")
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .split(" ")
     .filter(t => t.length > 2 && !STOP_WORDS.has(t));
+}
 
+/**
+ * Bundle-A fix #13 — extract corpus text from a test for TF / DF building.
+ * Single source of truth so `buildTfIdfVector`, `buildDocumentFrequency`, and
+ * `semanticSimilarity` all index over the same fields.
+ *
+ * @param {object} test
+ * @returns {string}
+ */
+function corpusText(test) {
+  return [test?.name || "", test?.description || "", ...(test?.steps || [])].join(" ");
+}
+
+/**
+ * Bundle-A fix #13 — build a batch-wide document-frequency map for
+ * smoothed TF-IDF weighting. Counts the number of TESTS each term
+ * appears in (not the raw occurrences). Used by
+ * {@link buildTfIdfVector} when invoked with a `dfContext` to depress
+ * the weight of common domain words ("submit", "user", "form") that
+ * would otherwise inflate cosine similarity across structurally
+ * different tests.
+ *
+ * Returns `{ df: Map<term, docCount>, totalDocs: number }` so the IDF
+ * formula `log((totalDocs + 1) / (df + 1)) + 1` (smoothed, matches
+ * scikit-learn `TfidfVectorizer` default) can be computed by callers.
+ *
+ * @param {object[]} tests
+ * @returns {{ df: Map<string, number>, totalDocs: number }}
+ */
+export function buildDocumentFrequency(tests) {
+  const df = new Map();
+  let totalDocs = 0;
+  if (!Array.isArray(tests)) return { df, totalDocs };
+  for (const t of tests) {
+    if (!t) continue;
+    const unique = new Set(tokenize(corpusText(t)));
+    for (const term of unique) {
+      df.set(term, (df.get(term) || 0) + 1);
+    }
+    totalDocs += 1;
+  }
+  return { df, totalDocs };
+}
+
+/**
+ * buildTfIdfVector(text, dfContext?) → Map<term, weight>
+ *
+ * When `dfContext` is omitted, returns a raw TF (term-frequency) vector
+ * — backwards-compatible with the pre-fix-#13 API. When provided,
+ * applies smoothed IDF (`log((totalDocs + 1) / (df + 1)) + 1`) so the
+ * cosine that downstream callers compute is a real TF-IDF cosine.
+ *
+ * Bundle-A fix #13 — production callers (`deduplicateTests`,
+ * `deduplicateAcrossRuns`) now build the DF map once per batch and
+ * thread it through, so cosine similarity stops falsely matching
+ * structurally different tests that share common domain vocabulary.
+ *
+ * @param {string} text
+ * @param {{ df?: Map<string, number>, totalDocs?: number }} [dfContext]
+ * @returns {Map<string, number>}
+ */
+function buildTfIdfVector(text, dfContext) {
+  const terms = tokenize(text);
   const tf = new Map();
   for (const term of terms) tf.set(term, (tf.get(term) || 0) + 1);
-  return tf;
+
+  // No DF context → return raw TF (legacy callers, unit tests that
+  // build vectors directly without a corpus).
+  if (!dfContext || !(dfContext.df instanceof Map) || !Number.isFinite(dfContext.totalDocs) || dfContext.totalDocs <= 0) {
+    return tf;
+  }
+
+  // Smoothed IDF — `log((N + 1) / (df + 1)) + 1`. The `+1` constant
+  // ensures even maximum-DF terms (present in every document) keep a
+  // non-zero weight, mirroring scikit-learn's `TfidfVectorizer`
+  // default and avoiding the degenerate all-zero vector edge case
+  // when one test contains only super-common terms.
+  const tfidf = new Map();
+  for (const [term, count] of tf) {
+    const df = dfContext.df.get(term) || 0;
+    const idf = Math.log((dfContext.totalDocs + 1) / (df + 1)) + 1;
+    tfidf.set(term, count * idf);
+  }
+  return tfidf;
 }
 
 /**
@@ -157,27 +248,31 @@ export function cosineSimilarity(vecA, vecB) {
 }
 
 /**
- * semanticSimilarity(testA, testB) → number 0–1
+ * semanticSimilarity(testA, testB, dfContext?) → number 0–1
  *
  * Combines name, description, and steps into a single bag-of-words
- * TF-IDF vector and returns cosine similarity. Resolves defect #1
- * (semantic duplicates with different wording) and defect #4
- * (description field previously ignored).
+ * TF (or TF-IDF when `dfContext` is supplied) vector and returns
+ * cosine similarity. Resolves defect #1 (semantic duplicates with
+ * different wording) and defect #4 (description field previously
+ * ignored).
+ *
+ * Bundle-A fix #13 — accepts an optional `dfContext` so production
+ * callers (`deduplicateTests`, `deduplicateAcrossRuns`) get real
+ * TF-IDF: common domain words ("submit", "user", "form") get a low
+ * IDF weight and stop driving false-positive cosine matches across
+ * structurally different tests. When `dfContext` is omitted the
+ * function falls back to TF-only — preserving the pre-fix API for
+ * existing unit tests and ad-hoc callers.
  *
  * @param {object} testA
  * @param {object} testB
+ * @param {{ df?: Map<string, number>, totalDocs?: number }} [dfContext]
  * @returns {number}
  */
-export function semanticSimilarity(testA, testB) {
-  const textOf = t => [
-    t.name || "",
-    t.description || "",
-    ...(t.steps || []),
-  ].join(" ");
-
+export function semanticSimilarity(testA, testB, dfContext) {
   return cosineSimilarity(
-    buildTfIdfVector(textOf(testA)),
-    buildTfIdfVector(textOf(testB)),
+    buildTfIdfVector(corpusText(testA), dfContext),
+    buildTfIdfVector(corpusText(testB), dfContext),
   );
 }
 
@@ -393,6 +488,15 @@ export function deduplicateTests(tests) {
 
   const afterLayer1 = Array.from(hashMap.values());
 
+  // Bundle-A fix #13 — build the batch-wide document-frequency map ONCE
+  // before Layer 3 runs, then thread it into every `semanticSimilarity`
+  // call below. Pre-fix the cosine was computed over raw term-frequency
+  // vectors, so common domain words ("submit", "user", "form") had the
+  // same weight as discriminative ones — inflating similarity across
+  // structurally different tests. Real IDF weights depress those terms
+  // so the cosine reflects actual content overlap.
+  const dfContext = buildDocumentFrequency(afterLayer1);
+
   // ── Layers 2+3: fuzzy name + semantic similarity ─────────────────────────
   // Bundle-A fix #12 — per-sourceUrl bucketing reduces the O(n²) walk to
   // O(sum_u k_u²) where k_u is the number of tests per URL bucket. Pre-fix
@@ -452,10 +556,11 @@ export function deduplicateTests(tests) {
         }
 
         // Layer 3 — semantic TF-IDF (defects #1, #2). Same URL + scenario
-        // guards apply as Layer 2.
+        // guards apply as Layer 2. `dfContext` (built above) makes this
+        // real TF-IDF instead of TF-only (Bundle-A fix #13).
         if (
           sameDedupScenario(candidate.scenario, kept.scenario) &&
-          semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD
+          semanticSimilarity(candidate, kept, dfContext) >= SEMANTIC_SIMILARITY_THRESHOLD
         ) {
           if (candidate._quality > kept._quality) {
             const idxOut = retained.indexOf(kept);
@@ -512,6 +617,12 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
 
   const existingHashes = new Set(existingTests.map(hashTest));
   const existingNames = new Set(existingTests.map(t => normalizeText(t.name)));
+  // Bundle-A fix #13 — DF built over the union of new + existing so the
+  // IDF weights reflect the full population the cosine compares against.
+  // Building it ONCE (outside `.filter`) is the whole point — pre-fix the
+  // semantic call recomputed term frequencies on every pair without any
+  // corpus context at all, so common domain words drove false positives.
+  const dfContext = buildDocumentFrequency([...newTests, ...existingTests]);
 
   return newTests.filter(t => {
     // Layer 1 — structural hash
@@ -552,7 +663,8 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
       const semanticMatch = existingTests.find(e =>
         t.sourceUrl && e.sourceUrl === t.sourceUrl &&
         sameDedupScenario(t.scenario, e.scenario) &&
-        semanticSimilarity(t, e) >= SEMANTIC_SIMILARITY_THRESHOLD
+        // Bundle-A fix #13 — real TF-IDF via the batch-wide DF context.
+        semanticSimilarity(t, e, dfContext) >= SEMANTIC_SIMILARITY_THRESHOLD
       );
       if (semanticMatch) return false;
     }

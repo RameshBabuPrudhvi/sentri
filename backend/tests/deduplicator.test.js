@@ -982,6 +982,132 @@ test("bucketing perf: 1000 tests across 10 URLs completes under 2 seconds", () =
   assert.ok(elapsed < 2000, `1000 tests × 10 URLs must complete < 2000ms, took ${elapsed}ms`);
 });
 
+// ── 11. Bundle-A fix #13 — real TF-IDF via batch document frequency ────────
+//
+// Pre-fix `buildTfIdfVector` was a misnomer — it built TF-only vectors
+// (no IDF) so common domain words drove false-positive cosine matches
+// across structurally different tests. With a batch-DF context, the
+// IDF weight depresses those terms and the cosine reflects real overlap.
+
+import { buildDocumentFrequency } from "../src/pipeline/deduplicator.js";
+
+console.log("\n📚  semanticSimilarity — real TF-IDF over batch DF context (fix #13)");
+
+test("buildDocumentFrequency: counts documents (not raw occurrences) per term", () => {
+  // "form" appears in both tests once each → df=2, totalDocs=2.
+  // "login" appears in test 1 twice → still df=1 (document count).
+  const t1 = { name: "login login form" };
+  const t2 = { name: "search form" };
+  const { df, totalDocs } = buildDocumentFrequency([t1, t2]);
+  assert.equal(totalDocs, 2);
+  assert.equal(df.get("form"), 2, "form appears in both → df=2");
+  assert.equal(df.get("login"), 1, "login in only one doc → df=1 even though it occurs twice in t1");
+  assert.equal(df.get("search"), 1);
+});
+
+test("buildDocumentFrequency: handles empty / non-array / nullish inputs defensively", () => {
+  assert.deepEqual(buildDocumentFrequency([]), { df: new Map(), totalDocs: 0 });
+  assert.deepEqual(buildDocumentFrequency(null), { df: new Map(), totalDocs: 0 });
+  assert.deepEqual(buildDocumentFrequency(undefined), { df: new Map(), totalDocs: 0 });
+  const out = buildDocumentFrequency([null, undefined, { name: "" }]);
+  assert.equal(out.totalDocs, 1, "only the one defined test counts");
+});
+
+test("semanticSimilarity: TF-IDF lowers cosine for tests sharing only common batch vocabulary", () => {
+  // Bugs.md fix #13 contract: "common domain words" lose weight under
+  // real IDF and stop driving false-positive cosine matches.
+  //
+  // Fixture strategy: pick terms that (a) are NOT in `STOP_WORDS` (so
+  // they actually land in the TF vector) and (b) appear in nearly every
+  // document in the batch so their IDF collapses to near-zero. Then
+  // each pair gets ONE discriminative term distinguishing it from the
+  // others. Pre-fix the shared common terms dominate the cosine; post-
+  // fix the IDF weight makes the discriminative term carry the signal.
+  const batch = [
+    { name: "button input dialog modal field render login flow" },
+    { name: "button input dialog modal field render signup flow" },
+    { name: "button input dialog modal field render checkout flow" },
+    { name: "button input dialog modal field render search flow" },
+    { name: "button input dialog modal field render profile flow" },
+  ];
+  const dfContext = buildDocumentFrequency(batch);
+  const a = batch[0];
+  const b = batch[3];
+
+  const tfOnly = semanticSimilarity(a, b); // pre-fix path (no DF)
+  const tfIdf = semanticSimilarity(a, b, dfContext);
+
+  // Sanity precondition: TF-only would have classified these as a
+  // duplicate (they share 7 of 8 tokens → cosine ≈ 0.875).
+  assert.ok(
+    tfOnly >= SEMANTIC_SIMILARITY_THRESHOLD,
+    `precondition: TF-only cosine (${tfOnly.toFixed(3)}) should hit the false-positive threshold (≥ ${SEMANTIC_SIMILARITY_THRESHOLD})`,
+  );
+  // Fix #13 contract: with the discriminative "login" / "search" tokens
+  // each appearing in only 1/5 documents (high IDF), and the seven
+  // shared tokens each appearing in 5/5 (IDF collapses to 1), the
+  // TF-IDF cosine must be STRICTLY LOWER than the TF-only cosine.
+  // We don't require it to drop below the dedup threshold (the absolute
+  // value depends on the smoothing constant), but the direction MUST
+  // be lower — that's the corpus-aware weighting working as advertised.
+  assert.ok(
+    tfIdf < tfOnly,
+    `TF-IDF cosine (${tfIdf.toFixed(3)}) must be strictly LESS than the TF-only cosine (${tfOnly.toFixed(3)}) — common-term IDF must depress similarity`,
+  );
+});
+
+test("semanticSimilarity: identical tests still score 1.0 under TF-IDF", () => {
+  // Self-similarity must stay 1.0 regardless of weighting scheme —
+  // IDF scales every term equally on the same vector, so cosine
+  // (which is scale-invariant) is unchanged.
+  const t = { name: "Verify login form validation errors", description: "Negative scenario test", steps: ["Open login", "Submit empty form"] };
+  const batch = [t, { name: "another unrelated checkout test" }, { name: "yet another search test" }];
+  const dfContext = buildDocumentFrequency(batch);
+  assert.equal(semanticSimilarity(t, t, dfContext), 1);
+});
+
+test("semanticSimilarity: omitting dfContext falls back to TF-only (backwards-compat)", () => {
+  // Pre-fix-#13 callers and unit tests pass two args — that path
+  // MUST still produce a defined finite number and a sensible cosine.
+  const a = { name: "Verify login form validation errors" };
+  const b = { name: "Verify login form validation error" };
+  const sim = semanticSimilarity(a, b);
+  assert.ok(Number.isFinite(sim) && sim >= 0 && sim <= 1, `TF-only fallback must return [0,1], got ${sim}`);
+});
+
+test("deduplicateTests: real TF-IDF stops common-vocabulary false positives in the production path", () => {
+  // End-to-end: a 5-test batch on the SAME URL + scenario where most
+  // tokens are saturated across the batch and only ONE token per test
+  // is discriminative. Pre-fix TF-only cosine ≈ 7/8 → fires the
+  // semantic-layer false positive and the batch collapses to one or
+  // two survivors. Post-fix IDF gives the discriminative tokens the
+  // dominant weight so each test stands on its own.
+  //
+  // Fixture name pattern matches the `semanticSimilarity` test above:
+  // 7 common tokens (NOT in `STOP_WORDS`) + 1 discriminative ending.
+  const sourceUrl = "http://app.com/forms";
+  const common = "button input dialog modal field render";
+  const tests = ["login", "signup", "checkout", "search", "profile"].map(verb => ({
+    name: `${common} ${verb} workflow end to end`,
+    sourceUrl, scenario: "positive",
+    // Make playwrightCode structurally distinct so Layer 1 hash dedup
+    // doesn't shrink the batch before Layer 3 runs.
+    playwrightCode: `await page.goto('/forms/${verb}');\nawait expect(page).toHaveURL('/forms/${verb}');`,
+    steps: [`Open the ${verb} screen`, "Render the form", "Verify success state"],
+  }));
+  const { unique, removed } = deduplicateTests(tests);
+  // The five tests are semantically distinct (different page flows
+  // distinguished by their `verb` token). Pre-fix the TF-only cosine
+  // would have flagged adjacent pairs as duplicates and collapsed the
+  // batch. Post-fix the IDF weight makes the discriminative `verb`
+  // dominate the cosine and all five survive.
+  assert.equal(
+    unique.length,
+    5,
+    `real-TF-IDF dedup must preserve all 5 distinct tests, got ${unique.length} (removed=${removed})`,
+  );
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);
