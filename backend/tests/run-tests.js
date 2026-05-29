@@ -62,6 +62,9 @@ const files = [
   "tests/agent-tools-orchestrator.test.js",
   "tests/agent-reviewer-loop.test.js",
   "tests/agent-orchestrator.test.js",
+  // Bundle-A fix #1 — orchestrator threads `replyToId` across supervisor
+  // handoffs so the UI timeline can reconstruct the multi-step thread.
+  "tests/agent-orchestrator-reply-chain.test.js",
   // AUTO-023 B4.1 — supervisor prompt builder + decision normaliser
   // branch coverage (terminate vs. route, missing instruction, empty
   // nextRole fallback).
