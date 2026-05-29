@@ -13,6 +13,24 @@ import assert from "node:assert/strict";
 
 process.env.DB_PATH = ":memory:";
 
+// `roleEligible(workspaceId, role)` in `agentOrchestrator.js` calls
+// `resolveRoute({ workspaceId, agentRole })` whenever workspaceId is
+// non-null. With an empty in-memory DB (no `provider_routes` rows and
+// no `agent_configs` rows), the resolver falls through to
+// `detectProvider()` — which returns `null` when no provider env key
+// is set, so the resolved route is `null` and every nextRole gets
+// rejected as ineligible. The orchestrator then falls into the
+// linear-fallback path WITHOUT emitting any handoff envelopes, which
+// is what made the pre-fix run report `expected 3 ..., got 0`.
+//
+// Seeding a placeholder env key BEFORE importing the registry makes
+// `detectProvider()` synthesise a transient route, so `roleEligible`
+// returns true for the canonical dispatchable roles and the
+// orchestrator emits the envelopes this test is pinning. The
+// orchestrator never actually dispatches to the real provider —
+// `runAgent` is a fully synchronous stub.
+process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "sk-test-placeholder-for-role-eligibility-only";
+
 const { getDatabase } = await import("../src/database/sqlite.js");
 const { ensureDefaultWorkspaces } = await import("../src/database/repositories/workspaceRepo.js");
 getDatabase();

@@ -58,9 +58,7 @@ const files = [
   "tests/pipeline-orchestrator-secret-reset.test.js",
   // Bundle-A fix #7 — quality re-score runs AFTER healing transforms so
   // the `selector.semantic` factor matches the post-transform code.
-  // TODO: re-enable after resolving enhancer fast-path interaction with
-  // F2 anchored STRONG_ASSERTION_PATTERNS in the test fixture.
-  // "tests/pipeline-orchestrator-quality-rescoring.test.js",
+  "tests/pipeline-orchestrator-quality-rescoring.test.js",
   // Bundle-A fix #20 — steps 5/6/7 emit agent_event with agent="system"
   // so deterministic post-processing doesn't conflate with author LLM runs.
   "tests/pipeline-orchestrator-system-agent.test.js",
@@ -90,10 +88,7 @@ const files = [
   "tests/agent-orchestrator.test.js",
   // Bundle-A fix #1 — orchestrator threads `replyToId` across supervisor
   // handoffs so the UI timeline can reconstruct the multi-step thread.
-  // TODO: re-enable after resolving emitAgentMessage validation failure
-  // in CI's :memory: DB context (workspaceId passes Zod but listByRun
-  // returns 0 rows — likely a DB-singleton isolation issue).
-  // "tests/agent-orchestrator-reply-chain.test.js",
+  "tests/agent-orchestrator-reply-chain.test.js",
   // AUTO-023 B4.1 — supervisor prompt builder + decision normaliser
   // branch coverage (terminate vs. route, missing instruction, empty
   // nextRole fallback).
