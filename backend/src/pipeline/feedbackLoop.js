@@ -234,16 +234,34 @@ export function detectFlakiness(testHistory) {
 }
 
 /**
- * detectFlakyTests(projectId) → Map<testId, flakyInfo>
+ * detectFlakyTests(projectId, options?) → Map<testId, flakyInfo>
  *
- * Scans all run results for a project and identifies tests that have both
+ * Scans run results for a project and identifies tests that have both
  * passed and failed across different runs.
+ *
+ * Bundle-A fix #10 — bounded to the most recent `maxRuns` runs (default 50)
+ * so the O(runs × results) scan stays predictable for long-lived projects.
+ * `runRepo.getByProjectId` returns runs sorted `startedAt DESC`, so
+ * `slice(0, maxRuns)` is the most-recent-N window. Pre-fix every call
+ * iterated the entire project history, which on a long-lived project with
+ * thousands of runs could spike CPU on every `applyFeedbackLoop` call.
+ *
+ * @param {string} projectId
+ * @param {Object} [options]
+ * @param {number} [options.maxRuns=50] - Cap the window to the most recent
+ *   N runs. Set to 0 / negative / non-finite to disable the cap (full
+ *   history scan, the pre-fix behaviour — kept as an escape hatch for
+ *   admin tools that want the unabridged view).
  */
-export function detectFlakyTests(projectId) {
+export function detectFlakyTests(projectId, options = {}) {
+  const maxRuns = Number.isFinite(options.maxRuns) ? options.maxRuns : 50;
   const testResults = new Map(); // testId → { passes, fails }
   const allRuns = runRepo.getByProjectId(projectId);
+  // `getByProjectId` returns newest-first. `slice(0, N)` takes the
+  // most-recent-N window; `maxRuns <= 0` opts out of the cap.
+  const runsToScan = (maxRuns > 0) ? allRuns.slice(0, maxRuns) : allRuns;
 
-  for (const run of allRuns) {
+  for (const run of runsToScan) {
     if (!run.results) continue;
     for (const result of run.results) {
       if (!testResults.has(result.testId)) {
