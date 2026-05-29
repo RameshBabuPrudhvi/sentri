@@ -187,6 +187,30 @@ export const FUZZY_NAME_THRESHOLD = 0.80;
 /** Semantic (TF-IDF cosine) similarity threshold */
 export const SEMANTIC_SIMILARITY_THRESHOLD = 0.65;
 
+/**
+ * Bundle-A fix #11 — scenario guard for fuzzy / semantic dedup.
+ *
+ * Two tests with similar names on the same URL are treated as the same
+ * scenario when:
+ *   - both omit `scenario` (legacy path — falls back to pre-fix behaviour
+ *     so existing duplicates still dedupe), OR
+ *   - either side omits `scenario` (one of the two is legacy / partial), OR
+ *   - both have the same `scenario` value (e.g. both `"positive"`).
+ *
+ * Different non-null scenarios (`"positive"` vs `"negative"`) are treated
+ * as different and must NOT be deduplicated even when the names + URL
+ * match — "Login with valid credentials" and "Login with invalid
+ * credentials" are the intended positive / negative coverage of the same
+ * flow and both must survive.
+ *
+ * Exported as a named helper so both `deduplicateTests` (within-batch)
+ * and `deduplicateAcrossRuns` (cross-run) share one implementation and
+ * the semantics can't drift between the two layers.
+ */
+export function sameDedupScenario(a, b) {
+  return a == null || b == null || a === b;
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -384,6 +408,7 @@ export function deduplicateTests(tests) {
       if (
         normCandName.length >= 15 &&
         candidate.sourceUrl && candidate.sourceUrl === kept.sourceUrl &&
+        sameDedupScenario(candidate.scenario, kept.scenario) &&
         fuzzyNameSimilarity(normCandName, normalizeText(kept.name)) >= FUZZY_NAME_THRESHOLD
       ) {
         // Keep the higher-quality test
@@ -400,9 +425,11 @@ export function deduplicateTests(tests) {
       // yields cosine ≈ 1.0, causing false positives.
       // Guard with sourceUrl so tests on different pages that share vocabulary
       // are not falsely deduplicated.
+      // Bundle-A fix #11 — scenario guard (see `sameDedupScenario` docblock).
       if (
         normCandName.length >= 15 &&
         candidate.sourceUrl && candidate.sourceUrl === kept.sourceUrl &&
+        sameDedupScenario(candidate.scenario, kept.scenario) &&
         semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD
       ) {
         if (candidate._quality > kept._quality) {
@@ -469,9 +496,13 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     // Layer 3 — fuzzy name match (defect #3)
     // Guard with sourceUrl (consistent with Layer 2) so tests targeting
     // different pages with similar names are not falsely deduplicated.
+    // Bundle-A fix #11 — scenario guard so positive/negative coverage of
+    // the same flow on the same URL is never collapsed (see
+    // `sameDedupScenario` docblock).
     if (normName.length >= 15) {
       const fuzzyMatch = existingTests.find(e =>
         t.sourceUrl && e.sourceUrl === t.sourceUrl &&
+        sameDedupScenario(t.scenario, e.scenario) &&
         fuzzyNameSimilarity(normName, normalizeText(e.name)) >= FUZZY_NAME_THRESHOLD
       );
       if (fuzzyMatch) return false;
@@ -483,9 +514,11 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     // Also require the normalized name to be long enough (≥ 15 chars, consistent
     // with Layers 2 and 3) — short names produce tiny TF-IDF vectors where a
     // single shared term yields cosine ≈ 1.0, causing false positives.
+    // Bundle-A fix #11 — scenario guard (see `sameDedupScenario`).
     if (normName.length >= 15) {
       const semanticMatch = existingTests.find(e =>
         t.sourceUrl && e.sourceUrl === t.sourceUrl &&
+        sameDedupScenario(t.scenario, e.scenario) &&
         semanticSimilarity(t, e) >= SEMANTIC_SIMILARITY_THRESHOLD
       );
       if (semanticMatch) return false;

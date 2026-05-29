@@ -723,6 +723,136 @@ test("output is always within [0, 1]", () => {
   }
 });
 
+// ── 9. Bundle-A fix #11 — scenario guard on fuzzy / semantic dedup ──────────
+//
+// Positive AND negative scenario tests on the same URL with similar names
+// (e.g. "Login with valid credentials" vs "Login with invalid credentials")
+// must BOTH survive — they're the intended coverage of the same flow.
+// Pre-fix the sourceUrl guard was the only check, and the semantic-vocabulary
+// overlap was high enough to trip the cosine threshold so dedup collapsed
+// the two into one.
+
+import { sameDedupScenario } from "../src/pipeline/deduplicator.js";
+
+console.log("\n🎭  deduplicateTests / deduplicateAcrossRuns — scenario guard");
+
+test("sameDedupScenario: same scenario → true", () => {
+  assert.equal(sameDedupScenario("positive", "positive"), true);
+  assert.equal(sameDedupScenario("negative", "negative"), true);
+});
+
+test("sameDedupScenario: different scenarios → false (the bug case)", () => {
+  assert.equal(sameDedupScenario("positive", "negative"), false);
+  assert.equal(sameDedupScenario("negative", "positive"), false);
+});
+
+test("sameDedupScenario: either side omits scenario → true (legacy fallback)", () => {
+  // Pre-fix behaviour preserved when EITHER side lacks `scenario` so existing
+  // duplicates still dedupe. Required so we don't introduce a perf regression
+  // by accidentally treating legacy null-scenario tests as different.
+  assert.equal(sameDedupScenario(null, "positive"), true);
+  assert.equal(sameDedupScenario("positive", null), true);
+  assert.equal(sameDedupScenario(undefined, "negative"), true);
+  assert.equal(sameDedupScenario("negative", undefined), true);
+  assert.equal(sameDedupScenario(null, null), true);
+});
+
+test("deduplicateTests: positive + negative on same URL with similar names → BOTH retained", () => {
+  // The bug fixture from Bugs.md. Pre-fix the semantic layer collapsed
+  // these because TF-IDF cosine across name+description+steps was high
+  // enough and the URLs matched.
+  const positive = {
+    name: "Login with valid credentials succeeds",
+    description: "Verify happy-path login with correct username + password",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/dashboard');",
+    steps: ["Go to login", "Enter valid credentials", "Submit", "Check dashboard"],
+    sourceUrl: "http://app.com/login",
+    scenario: "positive",
+  };
+  const negative = {
+    name: "Login with invalid credentials fails",
+    description: "Verify error path when credentials are rejected",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/login');",
+    steps: ["Go to login", "Enter invalid credentials", "Submit", "Check error"],
+    sourceUrl: "http://app.com/login",
+    scenario: "negative",
+  };
+  const { unique } = deduplicateTests([positive, negative]);
+  assert.equal(
+    unique.length,
+    2,
+    `positive + negative on same URL must both be retained, got ${unique.length}`,
+  );
+});
+
+test("deduplicateTests: SAME scenario on same URL with similar names → still deduplicated", () => {
+  // Negative-path / no-regression: when the scenario matches, the
+  // existing dedup behaviour is preserved.
+  const a = {
+    name: "Login form validation errors displayed correctly",
+    description: "Tests login form error display",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/login');",
+    steps: ["Go to login", "Submit empty", "Check errors"],
+    sourceUrl: "http://app.com/login",
+    scenario: "negative",
+  };
+  const b = {
+    name: "Login form validation error displayed correctly",
+    description: "Tests login form error display behaviour",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveTitle('Login');",
+    steps: ["Go to login", "Submit form", "Check error"],
+    sourceUrl: "http://app.com/login",
+    scenario: "negative",
+  };
+  const { unique } = deduplicateTests([a, b]);
+  assert.equal(unique.length, 1, "same-scenario similar tests on same page still dedupe");
+});
+
+test("deduplicateAcrossRuns: positive + existing negative on same URL → new test passes through", () => {
+  const existing = [{
+    name: "Login with invalid credentials fails",
+    description: "Verify error path when credentials are rejected",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/login');",
+    steps: ["Go to login", "Enter invalid credentials", "Submit", "Check error"],
+    sourceUrl: "http://app.com/login",
+    scenario: "negative",
+  }];
+  const newTest = {
+    name: "Login with valid credentials succeeds",
+    description: "Verify happy-path login with correct username + password",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/dashboard');",
+    steps: ["Go to login", "Enter valid credentials", "Submit", "Check dashboard"],
+    sourceUrl: "http://app.com/login",
+    scenario: "positive",
+  };
+  const result = deduplicateAcrossRuns([newTest], existing);
+  assert.equal(
+    result.length,
+    1,
+    "positive-scenario test must pass through when only a negative-scenario exists for the same flow",
+  );
+});
+
+test("deduplicateAcrossRuns: SAME scenario as existing on same URL → still filtered", () => {
+  // No-regression for the cross-run path.
+  const existing = [{
+    name: "Login with valid credentials succeeds",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/dashboard');",
+    steps: ["Go to login", "Enter valid credentials", "Submit"],
+    sourceUrl: "http://app.com/login",
+    scenario: "positive",
+  }];
+  const newTest = {
+    name: "Login with valid credentials succeed",  // tiny diff to exercise fuzzy layer
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveTitle('Welcome');",
+    steps: ["Go to login", "Enter valid credentials", "Click submit"],
+    sourceUrl: "http://app.com/login",
+    scenario: "positive",
+  };
+  const result = deduplicateAcrossRuns([newTest], existing);
+  assert.equal(result.length, 0, "same-scenario near-duplicate still filters at cross-run layer");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);
