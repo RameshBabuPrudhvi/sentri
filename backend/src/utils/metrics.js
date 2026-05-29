@@ -400,3 +400,25 @@ export const reviewerVerdictDowngradedTotal = new client.Counter({
   labelNames: ["reason"],
   registers: [register],
 });
+
+// Bundle-A fix #9 — feedback-loop regeneration failure counter. Bumps
+// every time `regenerateFailingTest` catches a non-abort error and
+// returns null (i.e. the auto-regen path failed for reasons OTHER than
+// user cancellation). Pre-fix these failures were swallowed silently
+// — operators had no signal that regeneration was failing en masse
+// (LLM provider outage, JSON parse failure, validator exception). The
+// metric closes the observability gap so dashboards / alerts can fire
+// when the auto-regen success rate drops.
+//
+// `reason` is a closed-set label so cardinality stays bounded:
+//   • parse_error      — `parseJSON` threw on the LLM response
+//   • provider_error   — `generateText` threw (rate limit, auth, 5xx)
+//   • internal_error   — any other unexpected throw (validator,
+//                        repo, etc.) — operators investigate via the
+//                        accompanying structured warn log line.
+export const feedbackLoopRegenerationFailuresTotal = new client.Counter({
+  name: "app_feedback_loop_regeneration_failures_total",
+  help: "Bundle-A fix #9 — non-abort failures inside `regenerateFailingTest`. `reason` ∈ {parse_error, provider_error, internal_error}. Pair with the structured warn log to triage feedback-loop regression.",
+  labelNames: ["reason"],
+  registers: [register],
+});

@@ -40,6 +40,9 @@ const files = [
   // Bundle-A fix #8 — `buildImprovementPrompt` byte-size cap on the
   // elements-JSON block so verbose snapshots can't balloon the prompt.
   "tests/feedback-loop-prompt-cap.test.js",
+  // Bundle-A fix #9 — `regenerateFailingTest` surfaces non-abort errors
+  // via a warn log + `app_feedback_loop_regeneration_failures_total`.
+  "tests/feedback-loop-regen-errors.test.js",
   "tests/pipeline-orchestrator.test.js",
   // Bundle-A fix #6 — orchestrator resets `run.secretScanBlocked` at
   // entry so re-entry on the same run doesn't carry a stale flag.

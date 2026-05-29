@@ -55,6 +55,8 @@ import { buildCapabilityCoverageBlock } from "./prompts/playwrightCapabilityGuid
 import { scoreTestWithFactors, normalizeQualityToConfidence } from "./deduplicator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
+import { formatLogLine } from "../utils/logFormatter.js";
+import { feedbackLoopRegenerationFailuresTotal } from "../utils/metrics.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 //
@@ -366,6 +368,30 @@ export function buildQualityAnalytics(improvements, testMap) {
 // gap. Hardcoded constant per Bugs.md "no new env vars" rule.
 export const ELEMENTS_JSON_MAX_BYTES = 8000;
 export const ELEMENTS_JSON_TRUNCATION_MARKER = "…[truncated]";
+
+// Bundle-A fix #9 — classify a non-abort `regenerateFailingTest` error
+// into the closed-set Prometheus reason label. Exported so a unit test
+// can pin every branch without booting a real AI provider. Pure
+// function (no side effects, no DB / env reads) — safe to call from
+// any code path that needs to bucket a regeneration failure.
+//
+// Returns one of:
+//   • "parse_error"    — JSON / parse failure on the LLM response
+//   • "provider_error" — provider call failed (rate-limited, 5xx, auth,
+//                        network, timeout, configuration)
+//   • "internal_error" — everything else (validator, repo, etc.)
+export function classifyRegenerationFailure(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  if (msg.includes("parse") || msg.includes("json")) return "parse_error";
+  if (
+    err?.status != null ||
+    err?.statusCode != null ||
+    /rate.?limit|rate-?limited|timeout|econnrefused|enotfound|network|provider/i.test(msg)
+  ) {
+    return "provider_error";
+  }
+  return "internal_error";
+}
 
 export function capElementsJson(jsonStr) {
   if (typeof jsonStr !== "string" || jsonStr.length <= ELEMENTS_JSON_MAX_BYTES) return jsonStr;
@@ -895,6 +921,32 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     return finalCandidate || null;
   } catch (err) {
     if (err.name === "AbortError") throw err; // propagate abort
+    // Bundle-A fix #9 — surface non-abort errors instead of silently
+    // returning null. Operators need a signal that the auto-regen path
+    // failed (LLM provider outage, JSON parse failure, validator
+    // exception) so dashboards/alerts can fire on the metric and the
+    // structured log line carries enough context to triage. Pre-fix
+    // every non-abort throw landed silently in `return null` — a
+    // sustained provider outage looked like "regeneration just isn't
+    // helping any tests" rather than "the provider is down".
+    //
+    // Reason classification is a small closed set:
+    //   • parse_error    — `parseJSON` threw on the LLM response shape
+    //   • provider_error — `generateText` threw (rate-limited, 5xx, auth)
+    //   • internal_error — any other throw (validator, repo, etc.)
+    // The full error message lands on the warn line; the metric label
+    // stays bounded so cardinality is safe.
+    const reason = classifyRegenerationFailure(err);
+    try {
+      feedbackLoopRegenerationFailuresTotal.inc({ reason });
+    } catch { /* best-effort */ }
+    // `options.runId` is the originating run id — threaded through to
+    // the log line so operators can correlate with the run-detail view.
+    console.warn(formatLogLine(
+      "warn",
+      options?.runId || null,
+      `[feedbackLoop] regenerateFailingTest failed (${reason}) for test ${test?.id || "?"} (${failureCategory}): ${msg}`,
+    ));
     return null; // Regeneration failed — keep original
   }
 }
