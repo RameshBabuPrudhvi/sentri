@@ -77,6 +77,46 @@ const VALID_PAGE_ACTIONS = new Set([
   "evaluate", "evaluateHandle",
   "keyboard", "mouse", "touchscreen",
   "on", "once", "off",
+  // Bundle-A fix #17 — additions for previously-rejected real Playwright
+  // methods. Audited against `@playwright/test` 1.4x public API. These
+  // were the main false-positives the validator surfaced as "invalid
+  // Playwright method" against AI-generated tests that legitimately
+  // used advanced page features (downloads, PDFs, script injection,
+  // coverage capture, etc.).
+  //
+  // Page document/DOM manipulation:
+  "setContent",       // set page HTML directly (download / email-render tests)
+  "addScriptTag",     // inject <script> (analytics/polyfill stubbing)
+  "addStyleTag",      // inject <style> (theme/CSS regression tests)
+  // Page lifecycle / window control:
+  "bringToFront",     // multi-tab tests need to focus a background tab
+  "pdf",              // PDF export tests (Chromium only — runtime asserts that)
+  "setOfflineMode",   // offline-mode E2E tests
+  // Page introspection / measurement:
+  "boundingBox",      // visual-position assertions, accessibility checks
+  "coverage",         // browser-coverage capture (AUTO-009 surface)
+  // Page<->Node communication:
+  "exposeFunction",   // call into Node from page scripts
+  "exposeBinding",    // exposeFunction + frame/source binding
+  // Page video / downloads / file chooser:
+  "video",            // page.video() — handle returned from `recordVideo`
+  "saveAs",           // download.saveAs() in download tests
+  "path",             // download.path() (also handle on test attachments)
+  "suggestedFilename", // download.suggestedFilename()
+  "delete",           // download.delete() — name overlaps with HTTP DELETE
+                      //   which is already in the set, but Set dedupes.
+  // Locator / element-handle helpers used in advanced tests:
+  "elementHandle", "elementHandles",
+  "and", "or",        // 1.34+ locator combinators
+  "describeOptions",  // 1.42+ test info
+  "clear",            // 1.28+ locator.clear() (alternative to fill(''))
+  // Network response / request helpers (route handler chains):
+  "headers", "headersArray", "ok", "status", "statusText", "json", "body", "text",
+  "allHeaders", "headerValue", "headerValues", "request", "response",
+  // Frame helpers (page.mainFrame(), page.frames(), iframe traversal):
+  "mainFrame", "frames", "childFrames", "parentFrame", "isDetached", "name",
+  // Worker / service-worker helpers:
+  "workers", "serviceWorker", "serviceWorkers", "backgroundPages",
 ]);
 
 /**
