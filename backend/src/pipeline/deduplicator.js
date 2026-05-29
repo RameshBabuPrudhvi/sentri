@@ -379,8 +379,13 @@ const QUALITY_FACTORS = [
   { id: "type.high-value",   label: "High-value test type",   delta:  15, kind: "reward",  hit: (t)    => HIGH_VALUE_TYPES.has((t.type || "").toLowerCase()) },
   // ── Selectors ──
   { id: "selector.semantic", label: "Semantic selectors",     delta:  10, kind: "reward",  hit: (_, c) => c.includes("getByRole") || c.includes("getByLabel") || c.includes("getByText") },
-  { id: "selector.testid",   label: "Test-ID selectors",      delta:  10, kind: "reward",  hit: (_, c) => c.includes("data-testid") || c.includes("test-id") },
-  { id: "selector.fragile",  label: "Fragile nth selectors",  delta: -10, kind: "penalty", hit: (_, c) => (c.match(/\.nth\(|nth-child|nth-of-type/g) || []).length > 2 },
+  // Bundle-A fix — `selector.testid` and `selector.fragile` check for CSS
+  // tokens (`data-testid`, `nth-child`) that live INSIDE string arguments
+  // (e.g. `page.locator('[data-testid="x"]')`). The F3 strip pass removes
+  // string contents, so these two factors use `rawCode` (4th arg) instead
+  // of the stripped `code` (2nd arg) to avoid false negatives.
+  { id: "selector.testid",   label: "Test-ID selectors",      delta:  10, kind: "reward",  hit: (_, _c, raw) => raw.includes("data-testid") || raw.includes("test-id") },
+  { id: "selector.fragile",  label: "Fragile nth selectors",  delta: -10, kind: "penalty", hit: (_, _c, raw) => (raw.match(/\.nth\(|nth-child|nth-of-type/g) || []).length > 2 },
 ];
 
 /**
@@ -409,7 +414,7 @@ export function scoreTestWithFactors(test) {
   const factors = [];
   let raw = 0;
   for (const f of QUALITY_FACTORS) {
-    if (f.hit(test, code)) {
+    if (f.hit(test, code, rawCode)) {
       factors.push({ id: f.id, label: f.label, delta: f.delta, kind: f.kind });
       raw += f.delta;
     }
