@@ -13,6 +13,7 @@ import { Clock, Play, Trash2, ToggleLeft, ToggleRight, RefreshCw, ChevronDown } 
 import { api } from "../../api.js";
 import { fmtFutureRelative, fmtRelativeDate } from "../../utils/formatters.js";
 import { invalidateAutomationStatus } from "../../utils/automationStatus.js";
+import { useToast } from "../../context/ToastContext.jsx";
 
 // ─── Common presets ────────────────────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ export default function ScheduleManager({ projectId }) {
   const [error, setError]             = useState(null);
   const [success, setSuccess]         = useState(null);
   const [showEditor, setShowEditor]   = useState(false);
+  const { showToast } = useToast();
 
   // Editor state
   const [cronExpr, setCronExpr]       = useState("0 9 * * 1");
@@ -130,8 +132,10 @@ export default function ScheduleManager({ projectId }) {
       setSuccess("Schedule saved.");
       setShowEditor(false);
       invalidateAutomationStatus(projectId, "schedule");
+      showToast("Schedule saved", "success");
     } catch (err) {
       setError(err.message || "Failed to save schedule.");
+      showToast(err.message || "Failed to save schedule.", "error");
     } finally {
       setSaving(false);
     }
@@ -150,10 +154,13 @@ export default function ScheduleManager({ projectId }) {
       });
       setSchedule(data.schedule);
       setEnabled(data.schedule.enabled);
-      setSuccess(data.schedule.enabled ? "Schedule enabled." : "Schedule paused.");
+      const msg = data.schedule.enabled ? "Schedule enabled." : "Schedule paused.";
+      setSuccess(msg);
       invalidateAutomationStatus(projectId, "schedule");
+      showToast(msg, "success");
     } catch (err) {
       setError(err.message || "Failed to update schedule.");
+      showToast(err.message || "Failed to update schedule.", "error");
     } finally {
       setSaving(false);
     }
@@ -170,8 +177,10 @@ export default function ScheduleManager({ projectId }) {
       setShowEditor(false);
       setSuccess("Schedule removed.");
       invalidateAutomationStatus(projectId, "schedule");
+      showToast("Schedule removed", "success");
     } catch (err) {
       setError(err.message || "Failed to remove schedule.");
+      showToast(err.message || "Failed to remove schedule.", "error");
     } finally {
       setDeleting(false);
     }

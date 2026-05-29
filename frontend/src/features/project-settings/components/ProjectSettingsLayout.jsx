@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { api } from "../../../api.js";
 import usePageTitle from "../../../hooks/usePageTitle.js";
-import { useNotifications } from "../../../context/NotificationContext.jsx";
+import { useToast } from "../../../context/ToastContext.jsx";
 import SidebarShell from "../../shared/components/SidebarShell.jsx";
 import PageSkeleton from "../../../components/layout/PageSkeleton.jsx";
 import { useProjectSettingsSections } from "../hooks/useProjectSettingsSections.js";
@@ -29,7 +29,7 @@ export default function ProjectSettingsLayout() {
   const { id: projectId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { addNotification } = useNotifications();
+  const { showToast } = useToast();
   const { groups, canEdit } = useProjectSettingsSections();
 
   // Hydrate the project. Reuses `api.getProject` (the same endpoint the
@@ -60,13 +60,15 @@ export default function ProjectSettingsLayout() {
   //      `ConfigurablePanel` (`components/project/ConfigurablePanel.jsx:105`),
   //      which backs both `QualityGatesPanel` and `WebVitalsBudgetsPanel`.
   //
-  // Without the second branch, every save/clear/error from QualityGates +
-  // WebVitals would render as the default "info" type regardless of actual
-  // outcome — a regression the legacy `ProjectQualityCard` didn't have
-  // because it accepted both shapes implicitly.
-  //
-  // Unifying the panel-side contract would be cleaner but touches 7+ files;
-  // accepting both here is the smaller-blast-radius fix.
+  // UX-001: previously this routed every panel toast into `addNotification()`
+  // — i.e. the notification BELL, not a visible toast — so users saving
+  // Auto-Approval / Quality Gates / Web Vitals / Coverage / Iteration Cap /
+  // PII Firewall / Vision Healing in Project Settings saw no confirmation.
+  // Now we forward to the global `useToast()` provider mounted in App.jsx.
+  // The bell stays for durable async events (run-complete, scheduled-trigger
+  // fired). Unifying the panel-side contract to a single signature would be
+  // cleaner but touches 7+ files; accepting both here is the smaller-
+  // blast-radius fix.
   const onToast = useCallback((msg, typeArg) => {
     if (!msg) return;
     let type;
@@ -84,11 +86,9 @@ export default function ProjectSettingsLayout() {
       type = msg.type || "info";
       message = msg.message;
     }
-    addNotification({
-      type: type === "error" ? "error" : type === "success" ? "success" : "info",
-      title: message,
-    });
-  }, [addNotification]);
+    if (!message) return;
+    showToast(message, type === "error" ? "error" : type === "success" ? "success" : "info");
+  }, [showToast]);
 
   const refresh = useCallback(() => projectQuery.refetch(), [projectQuery]);
 

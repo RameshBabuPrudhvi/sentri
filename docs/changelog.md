@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **UX-001** — Saving Auto-Approval, Quality Gates, Web Vitals, Coverage, and project/workspace settings now shows a visible confirmation toast on success and a red error toast on failure. Previously these mutations were silent or routed to the notification bell. (#40)
+- **UX-001** — Approve / reject / restore / delete actions on Tests, Review Queue, Test Detail, and Project Detail now show success and error toasts. (#40)
+- Bulk approve / reject on Review Queue now reports the actual number of tests affected (previously inflated when a multi-test project group failed). (#40)
+
+### Added
+
+- Workspace-wide save/update/delete confirmations via a global toast surface. Success toasts dismiss after 3.5 s, errors after 5 s, and toasts with an action button (e.g. Undo) linger 5 s. Toasts have a manual dismiss × button. (#40)
+- **A11Y** — Toasts announce to screen readers via `role="alert"` (errors) and `role="status"` (success / info). (#40)
+- **UX** — Bulk approve / reject on Review Queue now offers an inline **Undo** action on the success toast that restores affected tests to Draft. (#40)
+
+### Changed
+
+- **Refactor** — Test Lab page decomposed into smaller components, hooks, and utility modules. No behaviour change. (#40)
+
+- **SEC / Perf** — Web fonts (Inter, JetBrains Mono) self-hosted instead of loaded from Google Fonts CDN — closes a GDPR exposure, unblocks CSP hardening, and removes a ~120 ms render-blocking external request on cold loads. (#40)
+
+- **Security** — Defence-in-depth HTML sanitization on AI-generated markdown rendered in AI Chat, Chat History, and Step Results — guards against future grammar changes accidentally introducing an XSS sink. (#40)
+
+- **UI** — Code preview on Review Queue now correctly labels generated Playwright code as "JavaScript" (was mislabelled "TypeScript"). (#40)
+
+- **UX** — Empty states on Reports and on the Project Detail review tab now coach the user toward the next action (create a project, run regression, generate more tests, audit approvals, or clear filters) instead of showing bare text. (#40)
+
 ## [1.9.0] — 2026-05-26
 
 ### Added

@@ -55,19 +55,19 @@
  *   Called when the user clicks View on an active row.
  * @param {() => void} props.onSwitchToCrawl
  *   Empty-state CTA target — caller flips the parent tab to "crawl".
- * @param {React.ComponentType} props.QueueRow      - The row component.
- *   Injected so this file stays decoupled from the page-internal
- *   `<QueueRow>` definition (which closes over `<ProjIcon>` + the
- *   `PIPELINE_STAGES` constant).
- * @param {React.ComponentType} props.EmptyState    - Shared empty-state
- *   primitive. Injected for the same reason — keeps this file free of
- *   side-effect imports beyond React + lucide.
- * @param {React.ComponentType} props.ClockIcon     - Lucide icon for
- *   the empty state; injected so this file doesn't reach into
- *   `lucide-react` (the parent already imports it for the tablist).
+ *
+ * `QueueRow`, `EmptyState`, and `ClockIcon` used to be injected via props so
+ * this file stayed decoupled from the page-internal `<QueueRow>` definition
+ * (which closed over `<ProjIcon>` + `PIPELINE_STAGES`). Now that `QueueRow`
+ * is its own module under `components/test-lab/`, all three are imported
+ * directly — the DI ceremony added boilerplate without a real benefit once
+ * the page-internal coupling was gone.
  */
 
 import React from "react";
+import { Clock } from "lucide-react";
+import EmptyState from "../shared/EmptyState.jsx";
+import QueueRow from "./QueueRow.jsx";
 
 export default function QueueTab({
   activeQueueRuns,
@@ -78,9 +78,6 @@ export default function QueueTab({
   onStop,
   onAttach,
   onSwitchToCrawl,
-  QueueRow,
-  EmptyState,
-  ClockIcon,
 }) {
   // Apply project filter — when "all" the input arrays pass through
   // unchanged. Filtering here (not in the parent) so the parent doesn't
@@ -140,7 +137,7 @@ export default function QueueTab({
         // surface a "Clear filter" secondary action so the user has
         // an escape hatch without retyping the dropdown.
         <EmptyState
-          icon={<ClockIcon size={32} color="var(--accent)" />}
+          icon={<Clock size={32} color="var(--accent)" />}
           title={queueFilter === "all" ? "No runs yet" : "No runs for this project"}
           description={queueFilter === "all"
             ? "Start a crawl or generate tests from a requirement to see them here."

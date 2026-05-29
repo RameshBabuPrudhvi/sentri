@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Play, X, RefreshCw, Smartphone, Globe, Monitor } from "lucide-react";
 import { api } from "../../api.js";
 import ModalShell from "../shared/ModalShell.jsx";
+import { useToast } from "../../context/ToastContext.jsx";
 
 // DIF-002: Browser engine presets — mirrors BROWSER_PRESETS in backend/src/runner/config.js.
 // Kept as a static list to avoid an extra API call. Must stay in sync with the backend.
@@ -92,6 +93,7 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   // Sync if defaultProjectId changes after mount
   useEffect(() => {
@@ -136,10 +138,12 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
       // dead-import / undefined-vs-"fast" inconsistency in the runner path.
       body.networkCondition = networkCondition || "fast";
       const { runId } = await api.runTests(projectId, Object.keys(body).length > 0 ? body : undefined);
+      showToast("Regression run started", "success");
       onClose();
       navigate(`/runs/${runId}`);
     } catch (err) {
       setError(err.message || "Failed to start run.");
+      showToast(err.message || "Failed to start run.", "error");
       setRunning(false);
     }
   }

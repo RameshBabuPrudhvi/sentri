@@ -31,6 +31,7 @@ import CodePreviewPanel from "../components/test/CodePreviewPanel.jsx";
 import AiTestEditor from "../components/test/AiTestEditor.jsx";
 import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
 import TestFixturePanel from "../components/test/TestFixturePanel.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 
 function RunIcon({ status }) {
   if (status === "passed" || status === "completed")
@@ -74,6 +75,7 @@ export default function TestDetail() {
   const runs = detailQuery.data?.runs ?? [];
   const loading = detailQuery.isLoading;
   const [running, setRunning] = useState(false);
+  const { showToast } = useToast();
 
   const setTest = useCallback((updater) => {
     queryClient.setQueryData(testQueryKeys.detail(testId), (prev) => {
@@ -143,13 +145,15 @@ export default function TestDetail() {
     // than waiting for the 60s background tick.
     api.revokeApproval(testId).then(() => {
       invalidateAutoApprovalsCache();
+      showToast("Approval revoked — test returned to draft", "success");
       return load();
-    }).catch(() => {
+    }).catch((err) => {
       // Refetch on failure so the UI shows the real server-side state
       // (e.g. another user may have revoked first → 400 "only approved
       // tests can be revoked"). Without this, the armed state clears but
       // the test data isn't refreshed, leaving the user thinking the
       // revoke succeeded when it didn't.
+      showToast(err?.message || "Failed to revoke approval.", "error");
       load();
     });
   }
@@ -200,8 +204,10 @@ export default function TestDetail() {
       setTest(updated); setEditing(false); setStepsView("steps");
       if (updated._codePreview) setCodePreview(updated._codePreview);
       if (updated._regenerationError) setRegenWarning(updated._regenerationError);
+      showToast("Test updated", "success");
     } catch (err) {
       setEditError(err.message || "Failed to save changes.");
+      showToast(err.message || "Failed to save changes.", "error");
     } finally {
       setSaving(false);
     }
@@ -213,8 +219,10 @@ export default function TestDetail() {
     try {
       const updated = await api.updateTest(testId, { playwrightCode: codePreview.generatedCode });
       setTest(updated); setCodePreview(null);
+      showToast("Generated code applied", "success");
     } catch (err) {
       setRegenWarning(err.message || "Failed to apply generated code.");
+      showToast(err.message || "Failed to apply generated code.", "error");
     } finally { setApplyingPreview(false); }
   }
 
@@ -274,9 +282,10 @@ export default function TestDetail() {
     setRunning(true);
     try {
       const { runId } = await api.runSingleTest(testId);
+      showToast("Test run started", "success");
       navigate(`/runs/${runId}`);
     } catch (err) {
-      alert(err.message);
+      showToast(err.message || "Failed to start test run.", "error");
       setRunning(false);
     }
   }
@@ -864,12 +873,16 @@ export default function TestDetail() {
                   placeholder="PROJ-123"
                   autoFocus
                   onKeyDown={e => {
-                    if (e.key === "Enter") api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); });
+                    if (e.key === "Enter") api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() })
+                      .then(t => { setTest(t); setEditingIssueKey(false); showToast("Linked issue updated", "success"); })
+                      .catch(err => showToast(err.message || "Failed to update linked issue.", "error"));
                     if (e.key === "Escape") setEditingIssueKey(false);
                   }}
                 />
                 <button className="btn btn-xs td-inline-save-btn"
-                  onClick={() => api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); })}>
+                  onClick={() => api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() })
+                    .then(t => { setTest(t); setEditingIssueKey(false); showToast("Linked issue updated", "success"); })
+                    .catch(err => showToast(err.message || "Failed to update linked issue.", "error"))}>
                   <Save size={10} />
                 </button>
                 <button className="btn btn-ghost btn-xs" onClick={() => setEditingIssueKey(false)}><X size={10} /></button>
@@ -900,7 +913,9 @@ export default function TestDetail() {
                   onKeyDown={e => {
                     if (e.key === "Enter") {
                       const tags = tagsDraft.split(",").map(t => t.trim()).filter(Boolean);
-                      api.updateTest(testId, { tags }).then(t => { setTest(t); setEditingTags(false); });
+                      api.updateTest(testId, { tags })
+                        .then(t => { setTest(t); setEditingTags(false); showToast("Tags updated", "success"); })
+                        .catch(err => showToast(err.message || "Failed to update tags.", "error"));
                     }
                     if (e.key === "Escape") setEditingTags(false);
                   }}
@@ -908,7 +923,9 @@ export default function TestDetail() {
                 <button className="btn btn-xs td-inline-save-btn"
                   onClick={() => {
                     const tags = tagsDraft.split(",").map(t => t.trim()).filter(Boolean);
-                    api.updateTest(testId, { tags }).then(t => { setTest(t); setEditingTags(false); });
+                    api.updateTest(testId, { tags })
+                      .then(t => { setTest(t); setEditingTags(false); showToast("Tags updated", "success"); })
+                      .catch(err => showToast(err.message || "Failed to update tags.", "error"));
                   }}>
                   <Save size={10} />
                 </button>
@@ -962,7 +979,9 @@ export default function TestDetail() {
               </div>
             )}
             {test.reviewStatus !== "approved" && (
-              <button className={`btn btn-sm td-approve-btn`} onClick={() => api.approveTest(test.projectId, testId).then(load)}>
+              <button className={`btn btn-sm td-approve-btn`} onClick={() => api.approveTest(test.projectId, testId)
+                .then(() => { showToast("Test approved", "success"); return load(); })
+                .catch(err => showToast(err.message || "Failed to approve test.", "error"))}>
                 <CheckCircle2 size={13} /> Approve Test
               </button>
             )}

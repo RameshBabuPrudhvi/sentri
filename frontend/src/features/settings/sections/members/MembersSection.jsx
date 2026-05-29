@@ -6,6 +6,7 @@ import { api } from "../../../../api.js";
 import { useAuth } from "../../../../context/AuthContext.jsx";
 import { useMembersQuery } from "../../../../hooks/queries/useSettingsQueries.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
+import { useToast } from "../../../../context/ToastContext.jsx";
 
 /**
  * Members section (ACL-002). Lists workspace members and lets admins invite
@@ -29,6 +30,7 @@ export default function MembersSection() {
   const [inviteRole, setInviteRole] = useState("viewer");
   const [inviting, setInviting] = useState(false);
   const [inviteMsg, setInviteMsg] = useState(null);
+  const { showToast } = useToast();
 
   const membersQuery = useMembersQuery();
   const members = membersQuery.data || [];
@@ -47,8 +49,10 @@ export default function MembersSection() {
       setInviteRole("viewer");
       setInviteMsg({ type: "ok", text: "Member invited successfully." });
       await load();
+      showToast("Member invited", "success");
     } catch (err) {
       setInviteMsg({ type: "err", text: err.message });
+      showToast(err.message || "Failed to invite member.", "error");
     } finally {
       setInviting(false);
     }
@@ -58,8 +62,10 @@ export default function MembersSection() {
     try {
       await api.updateMemberRole(userId, role);
       await load();
+      showToast("Member role updated", "success");
     } catch (err) {
       setError(err.message);
+      showToast(err.message || "Failed to update member role.", "error");
     }
   }
 
@@ -68,8 +74,10 @@ export default function MembersSection() {
     try {
       await api.removeMember(userId);
       await load();
+      showToast(`${name} removed from workspace`, "success");
     } catch (err) {
       setError(err.message);
+      showToast(err.message || "Failed to remove member.", "error");
     }
   }
 

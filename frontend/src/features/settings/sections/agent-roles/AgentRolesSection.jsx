@@ -5,6 +5,7 @@ import {
 import { api } from "../../../../api.js";
 import { AGENT_ROLES, FAMILY_EMOJI } from "../../../../config.js";
 import SectionTitle from "../../shared/SectionTitle.jsx";
+import { useToast } from "../../../../context/ToastContext.jsx";
 
 /**
  * Agent Roles section (AI-005 + provider-rename refactor).
@@ -67,6 +68,7 @@ export default function AgentRolesSection() {
   const [busy, setBusy]           = useState(false);
   const [probes, setProbes]       = useState({});
   const [agentMode, setAgentMode] = useState("pipeline");
+  const { showToast } = useToast();
 
   const load = useCallback(async () => {
     try {
@@ -109,13 +111,16 @@ export default function AgentRolesSection() {
         maxTokens: form.maxTokens ? Number(form.maxTokens) : null,
         fallbackRole: null, // deprecated B3.2 — fallback lives on the provider
       };
+      const wasEditing = !!editingRole;
       if (editingRole) await api.updateAgentRole(editingRole, payload);
       else             await api.createAgentRole(payload);
       setEditingRole("");
       setForm(EMPTY_FORM);
       await load();
+      showToast(wasEditing ? "Agent role updated" : "Agent role saved", "success");
     } catch (err) {
       setError(err.message || "Failed to save agent role.");
+      showToast(err.message || "Failed to save agent role.", "error");
     } finally {
       setBusy(false);
     }
@@ -139,8 +144,10 @@ export default function AgentRolesSection() {
       await api.deleteAgentRole(role);
       if (editingRole === role) { setEditingRole(""); setForm(EMPTY_FORM); }
       await load();
+      showToast("Agent role deleted", "success");
     } catch (err) {
       setError(err.message || "Failed to delete agent role.");
+      showToast(err.message || "Failed to delete agent role.", "error");
     }
   }
 
@@ -170,8 +177,10 @@ export default function AgentRolesSection() {
       setBusy(true);
       const res = await api.setAgentMode(nextMode);
       setAgentMode(res?.mode || nextMode);
+      showToast(`Agent mode set to ${res?.mode || nextMode}`, "success");
     } catch (err) {
       setError(err.message || "Failed to save agent mode.");
+      showToast(err.message || "Failed to save agent mode.", "error");
     } finally {
       setBusy(false);
     }

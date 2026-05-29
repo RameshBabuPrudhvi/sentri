@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Bot, User, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import { api } from "../api.js";
 import { useAuth } from "../context/AuthContext.jsx";
-import { useNotifications } from "../context/NotificationContext.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import { fmtRelativeTimeFull } from "../utils/formatters.js";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 import { invalidateAutoApprovalsCache } from "../queryClient.js";
@@ -40,7 +40,7 @@ export default function ApprovalsTimeline() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
-  const { addNotification } = useNotifications();
+  const { showToast } = useToast();
   const { user } = useAuth();
 
   // URL-driven project filter — mirrors the ReviewQueue pattern so a
@@ -241,9 +241,9 @@ export default function ApprovalsTimeline() {
       // ReviewQueue tray reflect this revoke on their next render, without
       // waiting for the 60s background tick.
       invalidateAutoApprovalsCache();
-      addNotification({ title: "Approval revoked", body: "Test returned to draft." });
+      showToast("Approval revoked — test returned to draft", "success");
     } catch (err) {
-      addNotification({ title: "Revoke failed", body: err?.message || "Failed to revoke approval." });
+      showToast(err?.message || "Failed to revoke approval.", "error");
     }
   };
 
