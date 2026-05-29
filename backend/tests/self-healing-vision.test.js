@@ -407,5 +407,135 @@ await test("envelope: missing ctx.project.workspaceId no-ops the emit (guard wor
   assert.equal(rows.length, 0, "no envelope emitted when workspaceId is missing");
 });
 
+// ─── Bundle-A fix #2 — envelope emit on FAILED heals ────────────────────────
+// Pre-fix `tryVisionHeal` only emitted handoff envelopes on successful heals.
+// Decline paths (pixelmatch sub-threshold, LLM sub-threshold, provider
+// outage) fell through silently, leaving operators with a gap in the
+// healer→reviewer thread between the failure and the next stage.
+
+await test("envelope: pixelmatch sub-threshold emits vision_pixelmatch_failed envelope", async () => {
+  const runId = `RUN-VH-${Math.random().toString(36).slice(2, 10)}`;
+  const testId = `TC-vh-${Math.random().toString(36).slice(2, 6)}@v1`;
+  const r = await tryVisionHeal(
+    {
+      runId,
+      testId,
+      action: "click",
+      label: "Sign in",
+      project: { id: "P", visionHealing: "pixelmatch_only", workspaceId: WS_VH },
+      failureScreenshot: SHOT,
+      baselineCrop: BASELINE,
+    },
+    { pixelmatchHeal: async () => ({ confidence: 0.3 }) },
+  );
+  assert.equal(r, null, "sub-threshold heal returns null");
+
+  const rows = agentMessageRepo.listByRun(runId, WS_VH);
+  assert.equal(rows.length, 1, "exactly one failure envelope emitted");
+  assert.equal(rows[0].artifact?.kind, "vision_pixelmatch_failed");
+  assert.equal(rows[0].artifact?.healed, false);
+  assert.equal(rows[0].artifact?.confidence, 0.3, "declined confidence preserved on envelope");
+  assert.equal(rows[0].fromRole, "healer");
+  assert.equal(rows[0].toRole, "reviewer");
+});
+
+await test("envelope: pixelmatch throw emits vision_pixelmatch_failed with null confidence", async () => {
+  const runId = `RUN-VH-${Math.random().toString(36).slice(2, 10)}`;
+  const testId = `TC-vh-${Math.random().toString(36).slice(2, 6)}@v1`;
+  const r = await tryVisionHeal(
+    {
+      runId,
+      testId,
+      action: "click",
+      label: "Sign in",
+      project: { id: "P", visionHealing: "pixelmatch_only", workspaceId: WS_VH },
+      failureScreenshot: SHOT,
+      baselineCrop: BASELINE,
+    },
+    { pixelmatchHeal: async () => { throw new Error("CV crash"); } },
+  );
+  assert.equal(r, null);
+
+  const rows = agentMessageRepo.listByRun(runId, WS_VH);
+  assert.equal(rows.length, 1, "throw path still emits failure envelope");
+  assert.equal(rows[0].artifact?.kind, "vision_pixelmatch_failed");
+  assert.equal(rows[0].artifact?.confidence, null, "throw path leaves confidence null");
+});
+
+await test("envelope: LLM-vision sub-threshold emits vision_llm_failed envelope", async () => {
+  const runId = `RUN-VH-${Math.random().toString(36).slice(2, 10)}`;
+  const testId = `TC-vh-${Math.random().toString(36).slice(2, 6)}@v1`;
+  const r = await tryVisionHeal(
+    {
+      runId,
+      testId,
+      action: "fill",
+      label: "Email",
+      project: { id: "P", visionHealing: "pixelmatch_and_llm", workspaceId: WS_VH },
+      failureScreenshot: SHOT,
+      baselineCrop: null,
+    },
+    { llmVisionHeal: async () => ({ confidence: 0.4, model: "gpt-4o", costUsd: 0.0008 }) },
+  );
+  assert.equal(r, null);
+
+  const rows = agentMessageRepo.listByRun(runId, WS_VH);
+  assert.equal(rows.length, 1, "exactly one failure envelope emitted");
+  assert.equal(rows[0].artifact?.kind, "vision_llm_failed");
+  assert.equal(rows[0].artifact?.healed, false);
+  assert.equal(rows[0].artifact?.confidence, 0.4);
+  assert.equal(rows[0].artifact?.model, "gpt-4o");
+  assert.equal(rows[0].artifact?.costUsd, 0.0008, "decline cost preserved for budget accounting");
+});
+
+await test("envelope: LLM-vision throw emits vision_llm_failed (no rethrow, envelope still fires)", async () => {
+  const runId = `RUN-VH-${Math.random().toString(36).slice(2, 10)}`;
+  const testId = `TC-vh-${Math.random().toString(36).slice(2, 6)}@v1`;
+  const r = await tryVisionHeal(
+    {
+      runId,
+      testId,
+      action: "click",
+      label: "Submit",
+      project: { id: "P", visionHealing: "pixelmatch_and_llm", workspaceId: WS_VH },
+      failureScreenshot: SHOT,
+      baselineCrop: null,
+    },
+    { llmVisionHeal: async () => { throw new Error("provider 503"); } },
+  );
+  assert.equal(r, null);
+
+  const rows = agentMessageRepo.listByRun(runId, WS_VH);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].artifact?.kind, "vision_llm_failed");
+  assert.equal(rows[0].artifact?.confidence, null);
+});
+
+await test("envelope: pixelmatch_and_llm with both stages declining emits BOTH failure envelopes", async () => {
+  const runId = `RUN-VH-${Math.random().toString(36).slice(2, 10)}`;
+  const testId = `TC-vh-${Math.random().toString(36).slice(2, 6)}@v1`;
+  const r = await tryVisionHeal(
+    {
+      runId,
+      testId,
+      action: "click",
+      label: "X",
+      project: { id: "P", visionHealing: "pixelmatch_and_llm", workspaceId: WS_VH },
+      failureScreenshot: SHOT,
+      baselineCrop: BASELINE,
+    },
+    {
+      pixelmatchHeal: async () => ({ confidence: 0.5 }),
+      llmVisionHeal: async () => ({ confidence: 0.4, model: "claude-3-5-sonnet", costUsd: 0.002 }),
+    },
+  );
+  assert.equal(r, null);
+
+  const rows = agentMessageRepo.listByRun(runId, WS_VH);
+  assert.equal(rows.length, 2, "expect pixelmatch_failed + llm_failed envelopes");
+  assert.equal(rows[0].artifact?.kind, "vision_pixelmatch_failed");
+  assert.equal(rows[1].artifact?.kind, "vision_llm_failed");
+});
+
 if (process.exitCode) process.exit(1);
 console.log("\n[MNT-001] vision healing tests passed");

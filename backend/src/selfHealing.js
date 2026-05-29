@@ -233,6 +233,15 @@ export async function tryVisionHeal(ctx, deps = {}) {
   const key = `${ctx.action}::${ctx.label}`;
 
   // ── Stage 7 — pixelmatch CV (deterministic, free) ──────────────────────
+  // Bundle-A fix #2 — emit a `vision_pixelmatch_failed` envelope on the
+  // decline / throw paths so the healer→reviewer thread carries a
+  // complete record of EVERY heal attempt, not only the wins. Without
+  // this, operators replaying the run see "nothing happened" between
+  // the failure and the next stage even though the host actually tried
+  // a CV heal that returned sub-threshold. Tracked here (not in the
+  // outer catch) so the envelope captures the exact confidence the
+  // pixelmatch backend reported.
+  let pixelmatchDeclineConfidence = null;
   if (deps.pixelmatchHeal && ctx.baselineCrop) {
     try {
       const r = await deps.pixelmatchHeal(ctx.failureScreenshot, ctx.baselineCrop, PIXEL_CONFIDENCE);
@@ -256,7 +265,24 @@ export async function tryVisionHeal(ctx, deps = {}) {
           confidence: r.confidence, box: r.box || null, healed: true,
         };
       }
-    } catch { /* fall through to stage 8 / no-heal */ }
+      // Sub-threshold — capture confidence for the failure envelope below.
+      pixelmatchDeclineConfidence = (r && Number.isFinite(r.confidence)) ? r.confidence : null;
+    } catch { /* fall through to stage 8 / no-heal — confidence stays null */ }
+    // Bundle-A fix #2 — record the declined CV attempt before falling
+    // through. `healed: false` keeps `persistHealingEvents` from treating
+    // the envelope as a successful heal.
+    emitHandoffEnvelope({
+      runId: _runId, threadId: _threadId, workspaceId: _workspaceId,
+      fromRole: "healer", toRole: "reviewer",
+      artifact: {
+        kind: "vision_pixelmatch_failed",
+        testId: ctx.testId, action: ctx.action, label: ctx.label,
+        confidence: pixelmatchDeclineConfidence,
+        threshold: PIXEL_CONFIDENCE,
+        healed: false,
+      },
+      rationale: "Healer pixelmatch CV heal declined (sub-threshold or error)",
+    });
   }
 
   // ── Stage 8 — LLM vision (paid, gated) ─────────────────────────────────
@@ -291,6 +317,14 @@ export async function tryVisionHeal(ctx, deps = {}) {
 
   if (!deps.llmVisionHeal) return null;
 
+  // Bundle-A fix #2 — track LLM heal outcome so the decline / throw path
+  // emits a `vision_llm_failed` envelope before returning null. Pre-fix
+  // the LLM-decline / provider-outage branches fell silently to
+  // `return null`, leaving the healer→reviewer thread with no record
+  // that stage 8 actually ran.
+  let llmDeclineConfidence = null;
+  let llmDeclineModel = null;
+  let llmDeclineCostUsd = 0;
   try {
     const r = await deps.llmVisionHeal({
       failure: ctx.failureScreenshot,
@@ -327,7 +361,31 @@ export async function tryVisionHeal(ctx, deps = {}) {
         healed: true,
       };
     }
-  } catch { /* provider outage / network error — return no-heal */ }
+    // Sub-threshold response — capture details for the failure envelope.
+    if (r) {
+      llmDeclineConfidence = Number.isFinite(r.confidence) ? r.confidence : null;
+      llmDeclineModel = r.model || null;
+      llmDeclineCostUsd = Number.isFinite(r.costUsd) ? r.costUsd : 0;
+    }
+  } catch { /* provider outage / network error — envelope below records the attempt */ }
+
+  // Bundle-A fix #2 — record the declined LLM heal attempt so the
+  // healer→reviewer thread captures stage 8 ran. Cost is preserved
+  // because budget accounting must still see the spend even on declines.
+  emitHandoffEnvelope({
+    runId: _runId, threadId: _threadId, workspaceId: _workspaceId,
+    fromRole: "healer", toRole: "reviewer",
+    artifact: {
+      kind: "vision_llm_failed",
+      testId: ctx.testId, action: ctx.action, label: ctx.label,
+      confidence: llmDeclineConfidence,
+      threshold: LLM_CONFIDENCE,
+      model: llmDeclineModel,
+      costUsd: llmDeclineCostUsd,
+      healed: false,
+    },
+    rationale: "Healer LLM-vision heal declined (sub-threshold or error)",
+  });
 
   return null;
 }

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Autonomous agent orchestrator now threads `replyToId` across supervisor handoffs, tool_call, and tool_result envelopes so the run-detail conversation timeline reconstructs the multi-step thread as a connected chain instead of orphan roots.
+- Vision healing now emits `vision_pixelmatch_failed` and `vision_llm_failed` healer→reviewer envelopes on declined heals (sub-threshold or provider outage), so the run timeline records every heal attempt rather than going silent between the failure and the next stage.
 - **UX-001** — Saving Auto-Approval, Quality Gates, Web Vitals, Coverage, and project/workspace settings now shows a visible confirmation toast on success and a red error toast on failure. Previously these mutations were silent or routed to the notification bell. (#40)
 - **UX-001** — Approve / reject / restore / delete actions on Tests, Review Queue, Test Detail, and Project Detail now show success and error toasts. (#40)
 - Bulk approve / reject on Review Queue now reports the actual number of tests affected (previously inflated when a multi-test project group failed). (#40)
