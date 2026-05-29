@@ -940,10 +940,7 @@ _(automated: not yet — frontend test runner is plain Node `assert/strict` with
 - Rapid successive toasts: the second call clears the first one's auto-dismiss timer and immediately replaces its content (single-toast queue, no stacking). Verify by clicking Save twice within 1 s on Quality Gates — only the second toast remains visible.
 - Action handler throws: the toast still dismisses cleanly; error is logged to `console.error`. Verify by mocking a failing Undo handler in DevTools.
 - The notification bell (`NotificationProvider`) still receives durable async events (run-complete, scheduled-trigger fired, PR-check posted) — these are NOT routed to toast. Verify a completed run on another project still shows in the bell, not as a toast.
-
-**Known gap (UX-001 follow-up):**
-
-- `ProjectQualityCard` panels still emit `{type, message}` while `EnvironmentsTab` + `ConfigurablePanel` emit `(msg, type)` — `Automation.jsx:74-88` has a compat shim that normalises both shapes. Long-term, panel callsites should migrate to the `(msg, type)` signature so the shim can be removed. Tracked as a separate follow-up; until then, both shapes are accepted.
+- All panel callsites use the unified `onToast(message, type)` positional signature — `AutoApprovalPanel`, `CoveragePanel`, `IterationCapPanel`, `PiiFirewallPanel`, `VisionHealingPanel`, `EnvironmentsTab`, and `ConfigurablePanel`. The pre-UX-001 `{ type, message }` object form was migrated in the same PR; no compat shim remains in `Automation.jsx` / `ProjectSettingsLayout.jsx`.
 
 ---
 

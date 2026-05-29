@@ -39,7 +39,7 @@ export default function CoveragePanel({ project, canEdit, onToast }) {
     const trimmedThreshold = regressionThreshold.trim();
     const thresholdVal = trimmedThreshold === "" ? null : Number(trimmedThreshold);
     if (thresholdVal !== null && (!Number.isFinite(thresholdVal) || thresholdVal < 0 || thresholdVal > 100)) {
-      onToast?.({ type: "error", message: "Regression alert threshold must be empty (disabled) or a number between 0 and 100." });
+      onToast?.("Regression alert threshold must be empty (disabled) or a number between 0 and 100.", "error");
       return;
     }
     setSaving(true);
@@ -49,9 +49,9 @@ export default function CoveragePanel({ project, canEdit, onToast }) {
         sourcemapBaseUrl: sourcemapBaseUrl.trim() || null,
         coverageRegressionThresholdPct: thresholdVal,
       });
-      onToast?.({ type: "success", message: "Coverage settings saved." });
+      onToast?.("Coverage settings saved.", "success");
     } catch (err) {
-      onToast?.({ type: "error", message: err?.message || "Failed to save coverage settings." });
+      onToast?.(err?.message || "Failed to save coverage settings.", "error");
     } finally {
       setSaving(false);
     }

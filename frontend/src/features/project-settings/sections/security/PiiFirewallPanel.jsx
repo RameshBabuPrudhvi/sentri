@@ -36,14 +36,14 @@ export default function PiiFirewallPanel({ project, canEdit, onToast }) {
         strictPiiFirewall: strict,
         piiAllowlist: allowlist,
       });
-      onToast?.({
-        type: "success",
-        message: strict
+      onToast?.(
+        strict
           ? `PII firewall enabled · ${allowlist.length} allowlist entr${allowlist.length === 1 ? "y" : "ies"}.`
           : "PII firewall disabled — crawl snapshots will be sent to the LLM unredacted.",
-      });
+        "success",
+      );
     } catch (err) {
-      onToast?.({ type: "error", message: err?.message || "Failed to save PII firewall settings." });
+      onToast?.(err?.message || "Failed to save PII firewall settings.", "error");
     } finally {
       setSaving(false);
     }
