@@ -385,7 +385,10 @@ export const ELEMENTS_JSON_TRUNCATION_MARKER = "…[truncated]";
 //   • "internal_error" — everything else (validator, repo, etc.)
 export function classifyRegenerationFailure(err) {
   const msg = String(err?.message || err || "").toLowerCase();
-  if (msg.includes("parse") || msg.includes("json")) return "parse_error";
+  // Provider indicators (HTTP status, network keywords) checked FIRST so
+  // an error like `new Error("No JSON response from provider")` with
+  // `status: 502` lands in `provider_error`, not `parse_error`. Pre-fix
+  // the `parse`/`json` substring check ran first and mis-bucketed these.
   if (
     err?.status != null ||
     err?.statusCode != null ||
@@ -393,6 +396,7 @@ export function classifyRegenerationFailure(err) {
   ) {
     return "provider_error";
   }
+  if (msg.includes("parse") || msg.includes("json")) return "parse_error";
   return "internal_error";
 }
 

@@ -48,6 +48,13 @@ test("classifyRegenerationFailure: HTTP-status errors → provider_error", () =>
   assert.equal(classifyRegenerationFailure(err500), "provider_error");
 });
 
+test("classifyRegenerationFailure: provider error with 'json' in message → provider_error (not parse_error)", () => {
+  // Devin Review finding: pre-fix the "json" substring check ran before
+  // the status check, so this error was mis-bucketed as parse_error.
+  const err = Object.assign(new Error("No JSON response from provider"), { status: 502 });
+  assert.equal(classifyRegenerationFailure(err), "provider_error");
+});
+
 test("classifyRegenerationFailure: provider/network keywords → provider_error", () => {
   assert.equal(classifyRegenerationFailure(new Error("ECONNREFUSED 127.0.0.1:8000")), "provider_error");
   assert.equal(classifyRegenerationFailure(new Error("Request timeout after 30s")), "provider_error");
