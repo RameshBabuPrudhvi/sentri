@@ -41,40 +41,11 @@ const STRONG_ASSERTION_PATTERNS = [
 ];
 
 /**
- * Bundle-A fix #14 — strip string literals and line/block comments from
- * code before running substring / regex assertion-presence checks.
- *
- * Pre-fix `hasNoAssertions` used a bare `.includes("expect(")` check,
- * so a test containing `console.log("expect(loaded)")` (and no real
- * `expect()` call) was incorrectly classified as HAVING assertions and
- * the enhancer skipped injection — leaving the test with zero coverage.
- *
- * Strips:
- *   - `// line comments` through end-of-line
- *   - `/* block comments *⁠/` (single-line or multi-line)
- *   - `'single-quoted'`, `"double-quoted"`, ` ``template-literal`` `
- *     string contents (the literal delimiters are kept so subsequent
- *     parsing logic that cares about token boundaries still sees them).
- *
- * Backslash-escaped quotes inside string literals are honoured so a
- * string like `"he said \"hi\""` doesn't terminate early.
- *
- * Best-effort: not a full JavaScript tokeniser (template-literal
- * `${interpolations}` are stripped along with the rest of the string
- * body). Good enough for the assertion-presence heuristic — false
- * positives are tests where a `${expect(real)}` interpolation hides
- * a real assertion, which is exotic enough to ignore. The
- * `HAS_PAGE_LOAD_ASSERTION_RE` pattern below still anchors on actual
- * code, not stripped-out string contents, so the page-load check
- * stays accurate.
- *
- * @param {string} code
- * @returns {string} Code with string contents + comments redacted.
+ * Strip string literals and comments from code before assertion-presence
+ * checks. Delegates to the shared `utils/codeStripping.js` implementation
+ * (Bundle-A fix #14 + follow-up #F3). See that module's docblock for the
+ * full stripping contract.
  */
-// Bundle-A follow-up #F3 — thin delegate to `utils/codeStripping.js` so the
-// implementation lives in exactly one place (DRY). Existing call sites in
-// this file (`hasStrongAssertions`, `hasWeakAssertions`, `hasNoAssertions`)
-// keep working unchanged.
 function stripStringsAndComments(code) {
   return sharedStripStringsAndComments(code);
 }
