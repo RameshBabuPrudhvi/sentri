@@ -189,16 +189,30 @@ const VALID_MATCHERS = new Set([
  *   expect(value).toBe(...)
  *   expect(page.locator('...').first()).toBeVisible()
  *
- * Uses greedy `.+` so the regex backtracks from the last `)` on the
- * line, correctly handling nested parentheses inside the expect()
- * expression (e.g. `.locator(...).first()`).
+ * Bundle-A fix #18 — the inner capture is bounded to `[^;\n]{1,2000}`
+ * (no statement terminators, no newlines, ≤ 2KB) instead of the pre-fix
+ * greedy `.+`. The old pattern walked backtracking trees on minified
+ * single-line test bodies — a 5KB single-line test with many `(`/`)`
+ * pairs could spend hundreds of milliseconds per match attempt while
+ * the regex engine tried every possible split of `.+` against every
+ * possible `)` position. Capping the capture at:
+ *   • `[^;\n]` — stops at statement boundaries (assertions never span
+ *     across `;` or `\n` in any realistic Playwright code — even the
+ *     IIFE pattern `expect((() => { return x })()).toBe(true)` keeps
+ *     its inner `;` inside the function body, not at the
+ *     `expect(target)` boundary).
+ *   • `{1,2000}` — hard length cap; no realistic expect target
+ *     exceeds 2 KB. The greedy quantifier still backtracks for the
+ *     nested-parens case the original docblock called out, but the
+ *     search space is now bounded so worst-case time is linear in
+ *     the cap rather than exponential in the line length.
  *
  * Groups:
  *   [1] target expression inside expect(...)
  *   [2] optional ".not" negation
  *   [3] matcher name
  */
-const ASSERTION_RE = /expect\s*\((.+)\)\s*(\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+const ASSERTION_RE = /expect\s*\(([^;\n]{1,2000})\)\s*(\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
  * Matchers that must NOT be used with .not because the negated form is

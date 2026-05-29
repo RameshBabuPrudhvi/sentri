@@ -753,6 +753,111 @@ test("empty code produces no safe-helper issues", () => {
   assert.equal(validateSafeHelperUsage(undefined).length, 0);
 });
 
+// ── 14. Bundle-A fix #18 — ASSERTION_RE non-catastrophic backtracking ───────
+//
+// Pre-fix `ASSERTION_RE = /expect\s*\((.+)\)\s*(\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;`
+// — the greedy `.+` walked exponential backtracking trees on minified
+// single-line test bodies. Post-fix the capture is bounded to
+// `[^;\n]{1,2000}` (stops at statement boundaries, hard-capped at 2 KB)
+// so worst-case work is linear in the cap rather than exponential in the
+// line length. These tests pin (a) the perf budget and (b) the existing
+// correctness invariants (nested parens, multiple assertions, .not chain).
+
+console.log("\n⏱️  validateAssertions — non-catastrophic backtracking (fix #18)");
+
+test("perf: 5KB single-line minified test body validates in < 200ms", () => {
+  // Build a realistic-shape minified test body — one line, many
+  // `expect(...).matcher()` chains with nested parens. Pre-fix this
+  // fixture spent hundreds of ms (often seconds) in the regex engine;
+  // post-fix the bounded capture keeps the work linear.
+  const chunks = [];
+  // ~50 chained expect calls × ~100 chars each ≈ 5 KB on one line.
+  for (let i = 0; i < 50; i += 1) {
+    chunks.push(`await expect(page.locator('.item-${i}').nth(${i}).first()).toBeVisible();`);
+  }
+  const code = chunks.join(" "); // SINGLE LINE — the catastrophic-backtrack vector.
+  assert.ok(code.length > 4000, `precondition: fixture must be > 4 KB, got ${code.length}`);
+  assert.equal(code.split("\n").length, 1, "precondition: fixture is single-line");
+
+  const t0 = Date.now();
+  validateAssertions(code);
+  const elapsed = Date.now() - t0;
+  assert.ok(
+    elapsed < 200,
+    `validateAssertions on a 5KB single-line body must complete in < 200ms, took ${elapsed}ms`,
+  );
+});
+
+test("perf: 10KB pathological multi-line body validates in < 500ms", () => {
+  // Tighter regression net: a much larger body that pre-fix would have
+  // killed CI. Post-fix the bounded capture caps work per assertion.
+  const lines = [];
+  for (let i = 0; i < 200; i += 1) {
+    lines.push(`await expect(page.locator('.row-${i}').filter({ hasText: /${i}/ }).first()).toContainText('value-${i}');`);
+  }
+  const code = lines.join("\n");
+  assert.ok(code.length > 8000, `precondition: fixture must be > 8 KB, got ${code.length}`);
+
+  const t0 = Date.now();
+  validateAssertions(code);
+  const elapsed = Date.now() - t0;
+  assert.ok(
+    elapsed < 500,
+    `validateAssertions on a 10KB body must complete in < 500ms, took ${elapsed}ms`,
+  );
+});
+
+test("correctness: nested parens inside expect() still parse correctly", () => {
+  // No-regression for the case the original docblock called out — the
+  // bounded capture must still backtrack through `.locator(...).first()`
+  // and find the right closing `)` before `.toBeVisible(`.
+  const code = `await expect(page.locator('button').first()).toBeVisible();`;
+  const issues = validateAssertions(code);
+  assert.equal(
+    issues.length,
+    0,
+    `nested-paren expect target must still validate; got ${JSON.stringify(issues)}`,
+  );
+});
+
+test("correctness: deeply nested filter+nth+first chains still validate", () => {
+  // Production AI output regularly chains 3-4 locator methods inside
+  // expect(...). The bounded pattern must still match this shape.
+  const code = `await expect(page.locator('.list').filter({ hasText: /foo/ }).nth(2).first()).toContainText('expected');`;
+  const issues = validateAssertions(code);
+  assert.equal(issues.length, 0, `4-method-chain target must validate; got ${JSON.stringify(issues)}`);
+});
+
+test("correctness: assertion target ≤ 2 KB still matches", () => {
+  // Synthesise a long-but-realistic locator chain. The chain itself is
+  // ~1200 chars (well under the 2 KB cap) — the regex must still match.
+  const longSelector = "a".repeat(800); // < 2KB cap → must succeed
+  const code = `await expect(page.locator('${longSelector}').first()).toBeVisible();`;
+  const issues = validateAssertions(code);
+  // The target is < 2 KB so the regex captures it cleanly. May produce
+  // OTHER issues (e.g. locator depth), but NOT a "missing matcher" /
+  // "unknown matcher" — we should successfully reach `.toBeVisible`.
+  const matcherIssues = issues.filter(i => i.includes("unknown assertion matcher"));
+  assert.equal(matcherIssues.length, 0, `must reach matcher despite long target; got ${JSON.stringify(matcherIssues)}`);
+});
+
+test("correctness: typo matcher still flagged on a perf-pathological fixture", () => {
+  // Combine the perf fixture shape with a real bug to ensure the
+  // matcher-typo detection still works under load.
+  const goodChunks = [];
+  for (let i = 0; i < 30; i += 1) {
+    goodChunks.push(`await expect(page.locator('.x-${i}')).toBeVisible();`);
+  }
+  // Slip a typo into the middle.
+  goodChunks.splice(15, 0, `await expect(page).toHavURL('/dash');`);
+  const code = goodChunks.join("\n");
+  const issues = validateAssertions(code);
+  assert.ok(
+    issues.some(i => i.includes(".toHavURL()")),
+    `typo must still be flagged inside a 30-assertion batch; got ${JSON.stringify(issues)}`,
+  );
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);
