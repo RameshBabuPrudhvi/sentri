@@ -313,23 +313,19 @@ function buildPageLoadAssertion(url, title) {
 export function enhanceTest(test, snapshot, classifiedPage) {
   let code = test.playwrightCode || "";
   const advancedScenario = isAdvancedPlaywrightScenario(code);
+  // Strip strings + comments ONCE so all assertion-presence checks below
+  // see only real code. The raw `code` is kept for actual string
+  // manipulation (injection, replacement) that follows.
+  const cleanCode = stripStringsAndComments(code);
 
   // ── Fast-path: already fully enhanced ────────────────────────────────────
   // A test qualifies only when it has at least one strong assertion AND a
   // page-load anchor (toHaveURL or toHaveTitle inside an actual expect()
   // chain) AND at least one expect() call.
-  //
-  // We use a regex that requires the matcher to appear after `expect(`
-  // so that mentions in comments or string literals don't trigger the
-  // fast-path.  Example false positive without this:
-  //   await expect(el).toBeVisible();
-  //   // TODO: add toHaveURL assertion
-  // → code.includes("toHaveURL") is true but there is no real page-load
-  //   assertion, so the test should NOT be fast-pathed.
   if (
     hasStrongAssertions(code) &&
     !hasNoAssertions(code) &&
-    HAS_PAGE_LOAD_ASSERTION_RE.test(code)
+    HAS_PAGE_LOAD_ASSERTION_RE.test(cleanCode)
   ) {
     return { ...test, _assertionEnhanced: false };
   }
@@ -395,7 +391,7 @@ export function enhanceTest(test, snapshot, classifiedPage) {
   }
 
   // Already has strong assertions — ensure page load assertion exists
-  if (!HAS_PAGE_LOAD_ASSERTION_RE.test(code)) {
+  if (!HAS_PAGE_LOAD_ASSERTION_RE.test(cleanCode)) {
     if (advancedScenario) {
       return { ...test, _assertionEnhanced: false, _enhancementSkipped: "advanced_capability_flow" };
     }
