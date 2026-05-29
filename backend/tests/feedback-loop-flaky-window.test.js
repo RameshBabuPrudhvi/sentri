@@ -38,18 +38,19 @@ function seedRun({ id, daysAgo, results }) {
 // Clean slate so prior tests' seeded rows don't pollute results.
 getDatabase().prepare("DELETE FROM runs WHERE projectId = ?").run(PROJECT_ID);
 // Seed project rows so the FK on runs.projectId is satisfied.
-// workspaceId left NULL — the column is nullable (migration 005) and
-// ensureDefaultWorkspaces() does NOT create a '__default__' workspace.
+// projects table (migration 001) has: id, name, url, credentials, status, createdAt, deletedAt.
+// No updatedAt or workspaceId in the base schema — those are added by later migrations
+// but as nullable columns, so omitting them is safe.
 try {
   const now = new Date().toISOString();
   getDatabase().prepare(
-    `INSERT OR IGNORE INTO projects (id, name, url, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(PROJECT_ID, "Flaky Window Test Project", "http://app.example.test", now, now);
+    `INSERT OR IGNORE INTO projects (id, name, url, createdAt)
+     VALUES (?, ?, ?, ?)`,
+  ).run(PROJECT_ID, "Flaky Window Test Project", "http://app.example.test", now);
   getDatabase().prepare(
-    `INSERT OR IGNORE INTO projects (id, name, url, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run("PRJ-FLAKY-WINDOW-SMALL", "Small Project", "http://app.example.test", now, now);
+    `INSERT OR IGNORE INTO projects (id, name, url, createdAt)
+     VALUES (?, ?, ?, ?)`,
+  ).run("PRJ-FLAKY-WINDOW-SMALL", "Small Project", "http://app.example.test", now);
 } catch { /* may already exist from a prior test run */ }
 
 // 51 OLD runs (days 51..101): `t-old` flip-flops (alternates pass/fail).
