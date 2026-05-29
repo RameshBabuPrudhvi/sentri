@@ -58,6 +58,17 @@ function normalizeVerdict(reviewer) {
     // matched the terminal checks), looping until `maxRounds`. Map it
     // explicitly so the terminal check fires.
     if (reviewer.intent === "reject") return "reject_final";
+    // Bundle-A fix #5 — symmetric remap for the prompt-vocabulary
+    // `"revise"` token. The `verdict` branch below already maps
+    // `verdict === "revise"` → `"request_revision"`, but a reviewer
+    // wrapper that emits envelope-shape `{ intent: "revise" }` (e.g.
+    // the supervisor LLM bridge converting a parsed prompt response
+    // into an envelope) pre-fix fell through the LOOP_INTENT_VOCAB
+    // check and silently normalised to `"accept"` — burning the
+    // requested revision round. Mirror the `reject → reject_final`
+    // pattern above so envelope-shape and verdict-shape callers
+    // produce the same downstream behaviour.
+    if (reviewer.intent === "revise") return "request_revision";
     if (LOOP_INTENT_VOCAB.has(reviewer.intent)) return reviewer.intent;
     return "accept";
   }

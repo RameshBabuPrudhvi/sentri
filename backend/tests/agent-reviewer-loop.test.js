@@ -355,6 +355,28 @@ test("non-downgrade rounds do NOT bump app_reviewer_verdict_downgraded_total", a
   assert.equal(afterVal, beforeVal, "valid revise→accept must not bump the downgrade counter");
 });
 
+// Bundle-A fix #5 — envelope-shape `{ intent: "revise" }` must drive a
+// real revision round (mirroring the prompt-shape `verdict: "revise"`
+// remap). Pre-fix `"revise"` fell through `LOOP_INTENT_VOCAB` and
+// silently normalised to `"accept"`, burning the requested revision.
+test("intent='revise' is normalised to request_revision (envelope/verdict parity)", async () => {
+  let authorCalls = 0;
+  const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => { authorCalls += 1; return artifact; },
+    runReviewer: async ({ round }) => round === 0
+      // Envelope-shape with the prompt-vocabulary token.
+      ? { intent: "revise", artifact: { issues: [{ testId: "t1", problem: "weak assertion" }] } }
+      : { intent: "accept" },
+    maxReviewRounds: 3,
+  });
+  // Round 1 acceptance (the revise on round 0 actually drove a second
+  // round) — the pre-fix behaviour would terminate on round 0 with
+  // authorCalls === 1.
+  assert.equal(out.outcome, "accept");
+  assert.equal(out.round, 1, "accepted on the second round (revise was honoured)");
+  assert.equal(authorCalls, 2, "author called twice — once initial, once for the revision");
+});
+
 test("loop normalises unrecognized reviewer.intent values to accept (no silent unsanitized loop)", async () => {
   // Closed-set guard: the six envelope INTENTS that aren't loop
   // vocabulary (`handoff`, `question`, `answer`, `final`, `tool_call`,
