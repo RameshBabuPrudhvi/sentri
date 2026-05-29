@@ -101,8 +101,16 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 5);
+  // Bundle-A fix #20 — steps 5/6/7 are deterministic post-processing, NOT
+  // LLM author calls. Labelling them `agent: "system"` instead of "author"
+  // keeps the conversation UI honest: the author lane shows only the
+  // generative LLM work, while mechanical dedup / enhancement / validation
+  // surface under a separate system lane. Pre-fix every post-processing
+  // emit landed under the same author lane as the actual generation calls,
+  // so operators couldn't tell from the timeline whether a step was an
+  // LLM dispatch or local algorithmic work.
   emitAgentEvent(run.id, {
-    step: 5, agent: "author", phase: "start",
+    step: 5, agent: "system", phase: "start",
     message: "Comparing all tests for overlapping scenarios.",
     workspaceId: project.workspaceId,
   });
@@ -113,22 +121,24 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
   structuredLog("pipeline.dedup", { runId: run.id, input: rawTests.length, unique: unique.length, removed, final: finalTests.length });
   emitAgentEvent(run.id, {
-    step: 5, agent: "author", phase: "finding",
+    step: 5, agent: "system", phase: "finding",
     message: removed > 0
       ? `Removed ${removed} duplicate${removed !== 1 ? "s" : ""}.`
       : "No duplicates found — the suite is already lean.",
     workspaceId: project.workspaceId,
   });
   emitAgentEvent(run.id, {
-    step: 5, agent: "author", phase: "done",
+    step: 5, agent: "system", phase: "done",
     workspaceId: project.workspaceId,
   });
 
   // ── Step 6: Enhance assertions ──────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 6);
+  // Bundle-A fix #20 — see step 5 docblock. Enhancer is template-driven
+  // text substitution, not an LLM call.
   emitAgentEvent(run.id, {
-    step: 6, agent: "author", phase: "start",
+    step: 6, agent: "system", phase: "start",
     message: "Reviewing assertions — upgrading weak page-load checks to meaningful behavioural ones.",
     workspaceId: project.workspaceId,
   });
@@ -137,14 +147,14 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
   structuredLog("pipeline.enhance", { runId: run.id, enhanced: enhancedCount, total: enhancedTests.length });
   emitAgentEvent(run.id, {
-    step: 6, agent: "author", phase: "finding",
+    step: 6, agent: "system", phase: "finding",
     message: enhancedCount > 0
       ? `Enhanced ${enhancedCount} test${enhancedCount !== 1 ? "s" : ""} with stronger assertions.`
       : "No assertions needed upgrading.",
     workspaceId: project.workspaceId,
   });
   emitAgentEvent(run.id, {
-    step: 6, agent: "author", phase: "done",
+    step: 6, agent: "system", phase: "done",
     workspaceId: project.workspaceId,
   });
 
@@ -203,8 +213,10 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   // ── Step 7: Validate ────────────────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 7);
+  // Bundle-A fix #20 — see step 5 docblock. Validator is acorn parse +
+  // regex checks, not an LLM call.
   emitAgentEvent(run.id, {
-    step: 7, agent: "author", phase: "start",
+    step: 7, agent: "system", phase: "start",
     message: "Final quality check — selector stability and assertion coverage.",
     workspaceId: project.workspaceId,
   });
@@ -230,14 +242,14 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
   structuredLog("pipeline.validate", { runId: run.id, valid: validatedTests.length, rejected });
   emitAgentEvent(run.id, {
-    step: 7, agent: "author", phase: "finding",
+    step: 7, agent: "system", phase: "finding",
     message: rejected > 0
       ? `Rejected ${rejected} test${rejected !== 1 ? "s" : ""} with brittle selectors or weak coverage.`
       : "All tests passed quality review.",
     workspaceId: project.workspaceId,
   });
   emitAgentEvent(run.id, {
-    step: 7, agent: "author", phase: "done",
+    step: 7, agent: "system", phase: "done",
     workspaceId: project.workspaceId,
   });
 

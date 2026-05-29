@@ -56,6 +56,9 @@ const files = [
   // Bundle-A fix #7 — quality re-score runs AFTER healing transforms so
   // the `selector.semantic` factor matches the post-transform code.
   "tests/pipeline-orchestrator-quality-rescoring.test.js",
+  // Bundle-A fix #20 — steps 5/6/7 emit agent_event with agent="system"
+  // so deterministic post-processing doesn't conflate with author LLM runs.
+  "tests/pipeline-orchestrator-system-agent.test.js",
   "tests/chat-window.test.js",
   "tests/test-edit-prompt.test.js",
   "tests/test-edit-chat.test.js",
