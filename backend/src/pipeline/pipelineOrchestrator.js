@@ -148,16 +148,45 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
     workspaceId: project.workspaceId,
   });
 
-  // ── Step 6a: Re-score quality factors against the enhanced code ─────────
+  // ── Step 6a: Apply self-healing transforms ────────────────────────────
+  // Rewrite raw Playwright calls (page.click, page.fill, page.getByRole().click())
+  // into self-healing helpers (safeClick, safeFill, safeExpect) BEFORE validation.
+  // Without this, the validator rejects code that uses raw Playwright methods —
+  // but at runtime executeTest.js applies the same transforms, so the code would
+  // actually work. This was the #1 cause of false-positive rejections, especially
+  // with Ollama which frequently ignores the "use safeClick" prompt instruction.
+  //
+  // Bundle-A fix #7 — order matters: healing transforms run BEFORE the quality
+  // re-score below. Transforms rewrite `page.click("Submit")` → `safeClick(...)`
+  // and drop the literal `getByRole`/`getByLabel`/`getByText` calls that the
+  // `selector.semantic` rubric factor rewards. Re-scoring after transforms
+  // gives the post-transform shape the right quality attribution, so the
+  // Review Queue's "why was this drafted?" popover matches what the operator
+  // actually sees in the persisted code.
+  let healingTransformed = 0;
+  for (const t of enhancedTests) {
+    if (t.playwrightCode) {
+      const before = t.playwrightCode;
+      t.playwrightCode = applyHealingTransforms(t.playwrightCode);
+      if (t.playwrightCode !== before) healingTransformed++;
+    }
+  }
+  if (healingTransformed > 0) {
+    log(run, `🩹 ${healingTransformed} test(s) had raw Playwright calls rewritten to self-healing helpers`);
+  }
+
+  // ── Step 6b: Re-score quality factors against the enhanced + transformed code ──
   // The dedup stage (Step 5) attached `_quality` and `_qualityFactors` based
   // on the *pre-enhancement* `playwrightCode`. Step 6 then injects assertions
-  // (toBeVisible, toHaveURL, …) which directly affect the rubric outcome —
-  // a test that hit `assert.none -30` before enhancement should no longer
-  // carry that penalty after the enhancer adds an `expect(...)`. Without
-  // this re-score, the Review Queue's "why was this drafted?" popover
-  // shows penalties that no longer apply to the persisted code, and
-  // `qualityScore` is systematically biased downward for any test that
-  // benefited from enhancement.
+  // (toBeVisible, toHaveURL, …) and Step 6a rewrites raw Playwright into
+  // self-healing helpers — both of which directly affect the rubric outcome.
+  // Bundle-A fix #7 moved this block to AFTER the healing transforms so the
+  // score reflects the canonical persisted code shape (no `selector.semantic`
+  // misattribution for tests rewritten to `safeClick` / `safeFill` /
+  // `safeExpect`). Pre-fix the re-score ran against pre-transform code, so
+  // every test that benefited from a `page.click("Submit")` → `safeClick`
+  // rewrite carried a stale `selector.semantic` bonus the validator would
+  // never have awarded against the actual persisted code.
   for (const t of enhancedTests) {
     const { score, factors } = scoreTestWithFactors(t);
     t._quality = score;
@@ -169,25 +198,6 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
     // `deduplicateTests` and a test strengthened by the assertion enhancer
     // could miss the auto-approval threshold despite deserving to clear it.
     t.confidenceScore = normalizeQualityToConfidence(score);
-  }
-
-  // ── Step 6b: Apply self-healing transforms ────────────────────────────
-  // Rewrite raw Playwright calls (page.click, page.fill, page.getByRole().click())
-  // into self-healing helpers (safeClick, safeFill, safeExpect) BEFORE validation.
-  // Without this, the validator rejects code that uses raw Playwright methods —
-  // but at runtime executeTest.js applies the same transforms, so the code would
-  // actually work. This was the #1 cause of false-positive rejections, especially
-  // with Ollama which frequently ignores the "use safeClick" prompt instruction.
-  let healingTransformed = 0;
-  for (const t of enhancedTests) {
-    if (t.playwrightCode) {
-      const before = t.playwrightCode;
-      t.playwrightCode = applyHealingTransforms(t.playwrightCode);
-      if (t.playwrightCode !== before) healingTransformed++;
-    }
-  }
-  if (healingTransformed > 0) {
-    log(run, `🩹 ${healingTransformed} test(s) had raw Playwright calls rewritten to self-healing helpers`);
   }
 
   // ── Step 7: Validate ────────────────────────────────────────────────────
