@@ -38,6 +38,9 @@ const files = [
   "tests/pii-sanitizer.test.js",
   "tests/feedback-loop.test.js",
   "tests/pipeline-orchestrator.test.js",
+  // Bundle-A fix #6 — orchestrator resets `run.secretScanBlocked` at
+  // entry so re-entry on the same run doesn't carry a stale flag.
+  "tests/pipeline-orchestrator-secret-reset.test.js",
   "tests/chat-window.test.js",
   "tests/test-edit-prompt.test.js",
   "tests/test-edit-chat.test.js",

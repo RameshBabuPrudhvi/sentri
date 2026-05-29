@@ -88,6 +88,16 @@ export function sanitizeRunInputs(project, run, { snapshotsByUrl = {}, classifie
  * @returns {{ validatedTests: object[], enhancedTests: object[], rejected: number, removed: number, enhancedCount: number, dedupStats: object }}
  */
 export async function runPostGenerationPipeline(rawTests, project, run, { snapshotsByUrl = {}, classifiedPagesByUrl = {}, signal } = {}) {
+  // Bundle-A fix #6 — reset the run-level `secretScanBlocked` flag at
+  // orchestrator entry so a re-entry on the same run (e.g. crawler
+  // hands the same `run` object to a second pipeline pass after a
+  // partial batch) doesn't carry a stale `true` from a previous batch.
+  // Step 7 below promotes the flag on any test where the secret
+  // scanner blocked, so the post-stage value is always fresh-from-this-
+  // run. Explicit `false` (not `delete`) so downstream CI/UI consumers
+  // that read `!!run.secretScanBlocked` see the expected primitive.
+  run.secretScanBlocked = false;
+
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 5);
