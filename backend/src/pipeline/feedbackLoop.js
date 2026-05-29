@@ -352,6 +352,28 @@ export function buildQualityAnalytics(improvements, testMap) {
 
 // ── Improvement prompt builder ────────────────────────────────────────────────
 
+// Bundle-A fix #8 — byte-size cap for the elements-JSON block in the
+// improvement prompt. The per-tier `maxElements` cap bounds the COUNT
+// of elements but not their cumulative serialised size — a single
+// element with a verbose `outerHTML` attribute can spend hundreds of
+// bytes, and the cumulative payload can balloon the prompt past the
+// model's context window or simply burn tokens for no marginal signal.
+// 8 KB is a safe ceiling: large enough to carry every realistic
+// element snapshot the prompt actually uses, small enough that even
+// the smallest context window (~8K tokens ≈ 32 KB) keeps room for the
+// rest of the prompt. Truncation appends a sentinel so the LLM can
+// see the cut and operators reading the prompt log understand the
+// gap. Hardcoded constant per Bugs.md "no new env vars" rule.
+export const ELEMENTS_JSON_MAX_BYTES = 8000;
+export const ELEMENTS_JSON_TRUNCATION_MARKER = "…[truncated]";
+
+export function capElementsJson(jsonStr) {
+  if (typeof jsonStr !== "string" || jsonStr.length <= ELEMENTS_JSON_MAX_BYTES) return jsonStr;
+  // Reserve room for the marker so the final string still fits under the cap.
+  const slice = jsonStr.slice(0, ELEMENTS_JSON_MAX_BYTES - ELEMENTS_JSON_TRUNCATION_MARKER.length);
+  return `${slice}${ELEMENTS_JSON_TRUNCATION_MARKER}`;
+}
+
 function buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier) {
   const categoryInstructions = {
     NETWORK_MOCK_FAIL: `The test failed around network interception/mocking.
@@ -432,7 +454,7 @@ ${test.playwrightCode}
 PAGE CONTEXT:
 - Title: ${snapshot?.title || "unknown"}
 - Forms: ${snapshot?.forms || 0}
-- Elements: ${JSON.stringify((snapshot?.elements || []).slice(0, TIER_CONFIG[tier || "cloud"].maxElements), null, 2)}
+- Elements: ${capElementsJson(JSON.stringify((snapshot?.elements || []).slice(0, TIER_CONFIG[tier || "cloud"].maxElements), null, 2))}
 
 INSTRUCTIONS:
 ${categoryInstructions[failureCategory] || categoryInstructions.UNKNOWN}

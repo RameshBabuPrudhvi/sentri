@@ -37,6 +37,9 @@ const files = [
   "tests/secret-scanner.test.js",
   "tests/pii-sanitizer.test.js",
   "tests/feedback-loop.test.js",
+  // Bundle-A fix #8 — `buildImprovementPrompt` byte-size cap on the
+  // elements-JSON block so verbose snapshots can't balloon the prompt.
+  "tests/feedback-loop-prompt-cap.test.js",
   "tests/pipeline-orchestrator.test.js",
   // Bundle-A fix #6 — orchestrator resets `run.secretScanBlocked` at
   // entry so re-entry on the same run doesn't carry a stale flag.
