@@ -202,7 +202,7 @@ export function buildDocumentFrequency(tests) {
  * structurally different tests that share common domain vocabulary.
  *
  * @param {string} text
- * @param {{ df?: Map<string, number>, totalDocs?: number }} [dfContext]
+ * @param {Object} [dfContext]
  * @returns {Map<string, number>}
  */
 function buildTfIdfVector(text, dfContext) {
@@ -271,7 +271,7 @@ export function cosineSimilarity(vecA, vecB) {
  *
  * @param {object} testA
  * @param {object} testB
- * @param {{ df?: Map<string, number>, totalDocs?: number }} [dfContext]
+ * @param {Object} [dfContext]
  * @returns {number}
  */
 export function semanticSimilarity(testA, testB, dfContext) {
