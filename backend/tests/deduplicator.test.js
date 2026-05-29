@@ -1108,6 +1108,73 @@ test("deduplicateTests: real TF-IDF stops common-vocabulary false positives in t
   );
 });
 
+// ── 12. Bundle-A follow-up #F3 — rubric ignores strings & comments ──────────
+//
+// Pre-fix `scoreTestWithFactors` ran `c.includes("getByRole")` directly
+// against the raw playwrightCode, so a `// TODO: use getByRole later`
+// comment or a `'toHaveURL'` log string earned the matching factor
+// reward. Post-fix the code is routed through `stripStringsAndComments`
+// before the substring checks, so only REAL method calls count.
+
+console.log("\n🧹  scoreTestWithFactors — strings/comments don't drive false rewards (#F3)");
+
+test("`// TODO: use getByRole` comment does NOT earn selector.semantic reward", () => {
+  const t = {
+    name: "Comment-only getByRole mention",
+    playwrightCode: [
+      "await page.goto('/');",
+      "// TODO: rewrite using page.getByRole instead of CSS",
+      "await page.locator('.btn').click();",
+    ].join("\n"),
+  };
+  const { factors } = scoreTestWithFactors(t);
+  const factorIds = factors.map(f => f.id);
+  assert.ok(
+    !factorIds.includes("selector.semantic"),
+    `comment-only getByRole mention must NOT earn the reward; got factors: ${factorIds.join(", ")}`,
+  );
+});
+
+test("`'toHaveURL'` inside a string literal does NOT earn assert.url reward", () => {
+  const t = {
+    name: "String-literal toHaveURL mention",
+    playwrightCode: [
+      "await page.goto('/');",
+      "const note = 'should add toHaveURL later';",
+      "await expect(page).toBeTruthy();",
+    ].join("\n"),
+  };
+  const { factors } = scoreTestWithFactors(t);
+  const factorIds = factors.map(f => f.id);
+  assert.ok(
+    !factorIds.includes("assert.url"),
+    `string-literal toHaveURL must NOT earn the reward; got factors: ${factorIds.join(", ")}`,
+  );
+});
+
+test("REAL getByRole call still earns selector.semantic reward (no over-strip)", () => {
+  // Positive control: my F3 fix must not strip real code calls.
+  const t = {
+    name: "Real getByRole call",
+    playwrightCode: "await page.getByRole('button', { name: 'Submit' }).click();",
+  };
+  const { factors } = scoreTestWithFactors(t);
+  const factorIds = factors.map(f => f.id);
+  assert.ok(
+    factorIds.includes("selector.semantic"),
+    `real getByRole call must earn the reward; got factors: ${factorIds.join(", ")}`,
+  );
+});
+
+test("REAL toHaveURL call still earns assert.url reward (no over-strip)", () => {
+  const t = {
+    name: "Real toHaveURL call",
+    playwrightCode: "await expect(page).toHaveURL('/dash');",
+  };
+  const { factors } = scoreTestWithFactors(t);
+  assert.ok(factors.map(f => f.id).includes("assert.url"), "real toHaveURL must earn assert.url");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

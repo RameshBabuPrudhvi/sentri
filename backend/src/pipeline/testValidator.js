@@ -117,6 +117,14 @@ const VALID_PAGE_ACTIONS = new Set([
   "mainFrame", "frames", "childFrames", "parentFrame", "isDetached", "name",
   // Worker / service-worker helpers:
   "workers", "serviceWorker", "serviceWorkers", "backgroundPages",
+  // Bundle-A follow-up #F4 — methods on returned-object receivers that
+  // are now validated (receiver list expanded to include `mouse`,
+  // `keyboard`, `coverage`, etc.). Names added so `page.mouse.click(x,y)`
+  // and `page.keyboard.press('Enter')` validate cleanly.
+  "move", "down", "up", "wheel",                       // mouse
+  "insertText",                                         // keyboard
+  "startJSCoverage", "stopJSCoverage",                  // coverage
+  "startCSSCoverage", "stopCSSCoverage",                // coverage
 ]);
 
 /**
@@ -124,8 +132,17 @@ const VALID_PAGE_ACTIONS = new Set([
  * Captures: the receiver expression + the method name.
  *   e.g.  page.clicks(...)  →  method = "clicks"
  *         locator.fillup()  →  method = "fillup"
+ *
+ * Bundle-A follow-up #F4 — receiver list expanded to include common
+ * returned-object identifiers (`download`, `response`, `mouse`,
+ * `keyboard`, `touchscreen`, `worker`, `coverage`). Pre-fix chained
+ * method calls on these (e.g. `download.saveAs(...)`,
+ * `response.json()`, `page.mouse.click(x,y)`) were silently unvalidated
+ * — typos like `download.savAs(...)` would slip through. The
+ * VALID_PAGE_ACTIONS allowlist already documents the legal methods
+ * via the fix #17 additions; this expansion closes the validation gap.
  */
-const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request|browser|api|test|expect|testInfo|route)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request|browser|api|test|expect|testInfo|route|download|response|mouse|keyboard|touchscreen|worker|coverage)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
  * validateActions(code) → string[]

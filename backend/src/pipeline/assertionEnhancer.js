@@ -4,6 +4,12 @@
  * Detects weak/missing assertions and rewrites them using page context.
  */
 import { isAdvancedPlaywrightScenario } from "./prompts/playwrightCapabilityGuide.js";
+// Bundle-A follow-up #F3 — `stripStringsAndComments` extracted to a shared
+// util so this module's assertion-presence checks and `deduplicator.js`'s
+// quality rubric (which had the same string/comment false-positive bug)
+// route through one implementation. The local copy below is preserved for
+// the rest of this file's call sites but now delegates to the shared one.
+import { stripStringsAndComments as sharedStripStringsAndComments } from "../utils/codeStripping.js";
 
 // ── Assertion quality detection ───────────────────────────────────────────────
 
@@ -14,17 +20,24 @@ const WEAK_ASSERTION_PATTERNS = [
   /expect\(.*\)\.not\.toBeNull/,
 ];
 
+// Bundle-A follow-up #F2 — anchor each matcher pattern to method-call
+// syntax (`.toHaveURL(`) rather than bare substring. Defence-in-depth
+// alongside fix #14's `stripStringsAndComments` pass: if a future caller
+// runs these patterns without the strip, a code identifier or property
+// name like `obj.toHaveURL = …` won't false-match. Pre-fix these were
+// bare substrings (`/toHaveURL/`) which would match anywhere the token
+// appeared, including (without the strip) in comments and strings.
 const STRONG_ASSERTION_PATTERNS = [
-  /toHaveURL/,
-  /toHaveTitle/,
-  /toBeVisible/,
-  /toHaveText/,
-  /toContainText/,
-  /toBeEnabled/,
-  /toHaveValue/,
-  /toBeChecked/,
-  /toHaveCount/,
-  /toBeDisabled/,
+  /\.toHaveURL\s*\(/,
+  /\.toHaveTitle\s*\(/,
+  /\.toBeVisible\s*\(/,
+  /\.toHaveText\s*\(/,
+  /\.toContainText\s*\(/,
+  /\.toBeEnabled\s*\(/,
+  /\.toHaveValue\s*\(/,
+  /\.toBeChecked\s*\(/,
+  /\.toHaveCount\s*\(/,
+  /\.toBeDisabled\s*\(/,
 ];
 
 /**
@@ -58,50 +71,12 @@ const STRONG_ASSERTION_PATTERNS = [
  * @param {string} code
  * @returns {string} Code with string contents + comments redacted.
  */
+// Bundle-A follow-up #F3 — thin delegate to `utils/codeStripping.js` so the
+// implementation lives in exactly one place (DRY). Existing call sites in
+// this file (`hasStrongAssertions`, `hasWeakAssertions`, `hasNoAssertions`)
+// keep working unchanged.
 function stripStringsAndComments(code) {
-  if (!code) return "";
-  let out = "";
-  let i = 0;
-  while (i < code.length) {
-    const ch = code[i];
-    const next = code[i + 1];
-    // Line comment `// …\n`
-    if (ch === "/" && next === "/") {
-      const eol = code.indexOf("\n", i + 2);
-      if (eol < 0) { i = code.length; continue; }
-      // Preserve the newline so line-anchored regexes still work.
-      out += "\n";
-      i = eol + 1;
-      continue;
-    }
-    // Block comment `/* … */`
-    if (ch === "/" && next === "*") {
-      const end = code.indexOf("*/", i + 2);
-      i = end < 0 ? code.length : end + 2;
-      continue;
-    }
-    // String literals: keep the delimiters, drop the contents.
-    if (ch === "'" || ch === '"' || ch === "`") {
-      const quote = ch;
-      out += quote;
-      i += 1;
-      while (i < code.length && code[i] !== quote) {
-        if (code[i] === "\\" && i + 1 < code.length) {
-          i += 2; // skip escaped char
-          continue;
-        }
-        i += 1;
-      }
-      if (i < code.length) {
-        out += quote;
-        i += 1;
-      }
-      continue;
-    }
-    out += ch;
-    i += 1;
-  }
-  return out;
+  return sharedStripStringsAndComments(code);
 }
 
 export function hasStrongAssertions(playwrightCode) {
@@ -143,10 +118,26 @@ export function hasNoAssertions(playwrightCode) {
  * literals (`'toHaveURL'`) are NOT matched.
  *
  * Pattern: `expect(` … `)` … `.toHaveURL(` or `.toHaveTitle(`
- * The `.+` is greedy so it backtracks from the last `)` on the line,
- * correctly handling nested parens like `expect(page.locator('x').first())`.
+ *
+ * Bundle-A follow-up #F1 — both captures are bounded (`[^;\n]{1,2000}`
+ * + `[^;\n]{0,200}`) instead of the pre-fix greedy `.+` / `.*` with the
+ * `/s` flag. The old pattern walked exponential backtracking trees on
+ * minified single-line test bodies — same class of vulnerability as
+ * `ASSERTION_RE` (fixed by Bundle-A fix #18). The `/s` flag (dotall —
+ * makes `.` match newlines) made it worse here: a multi-line input
+ * could trigger backtracking across every newline.
+ *
+ * Capture bounds:
+ *   • `[^;\n]{1,2000}` — expect target ≤ 2 KB, stops at statement
+ *     boundary. Same bound used by `testValidator.js#ASSERTION_RE`.
+ *   • `[^;\n]{0,200}`  — between `)` and `.toHaveURL(` is realistically
+ *     0-5 chars (`.not`, whitespace); 200 is a generous cap.
+ *
+ * Dropped `/s` flag (no longer needed) so `.` reverts to default
+ * "doesn't match newlines" — the `[^;\n]` character classes already
+ * stop at newlines, but removing `/s` is defence-in-depth.
  */
-const HAS_PAGE_LOAD_ASSERTION_RE = /expect\s*\(.+\).*\.(?:toHaveURL|toHaveTitle)\s*\(/s;
+const HAS_PAGE_LOAD_ASSERTION_RE = /expect\s*\([^;\n]{1,2000}\)[^;\n]{0,200}\.(?:toHaveURL|toHaveTitle)\s*\(/;
 
 /**
  * Bundle-A fix #15 — assertion-injection anchor that matches the test

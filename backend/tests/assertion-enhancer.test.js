@@ -856,6 +856,83 @@ test("AUTH template: text `Invalid` and `error` keywords still present (no behav
   assert.match(r.playwrightCode, /not\.toContainText\('error'\)/);
 });
 
+// ── 14. Bundle-A follow-up #F1/F2 — anchored matcher patterns + bounded RE ──
+//
+// F1: `HAS_PAGE_LOAD_ASSERTION_RE` no longer uses greedy `.+`/`.*` with
+//     `/s` — bounded to `[^;\n]{1,2000}` so it can't catastrophically
+//     backtrack on minified single-line inputs.
+// F2: `STRONG_ASSERTION_PATTERNS` now anchor to `.toHaveURL(` method-call
+//     syntax instead of bare `toHaveURL` substring — defence-in-depth
+//     alongside fix #14's strip pass.
+
+console.log("\n🔍  HAS_PAGE_LOAD_ASSERTION_RE / STRONG_ASSERTION_PATTERNS — anchored (#F1/#F2)");
+
+test("F2: a property assignment `obj.toHaveURL = fn` does NOT count as a strong assertion", () => {
+  // Pre-fix the bare `/toHaveURL/` substring would match the LHS of an
+  // assignment. Post-fix the `\.toHaveURL\s*\(` anchor requires actual
+  // method-call syntax.
+  const code = "const obj = { toHaveURL: () => true }; obj.toHaveURL = () => false;";
+  assert.equal(
+    hasStrongAssertions(code),
+    false,
+    "property assignment must not register as a strong assertion",
+  );
+});
+
+test("F2: real `.toHaveURL(...)` call still counts", () => {
+  // Positive control — the anchored pattern must still match real calls.
+  const code = "await expect(page).toHaveURL('/dash');";
+  assert.equal(hasStrongAssertions(code), true);
+});
+
+test("F1: 5KB single-line `expect(...).toHaveURL(...)` body validates in < 200ms", () => {
+  // Performance budget for the bounded regex. Pre-fix the greedy `.+`
+  // with `/s` walked exponential backtracking trees on this fixture.
+  const chunks = [];
+  for (let i = 0; i < 50; i += 1) {
+    chunks.push(`await expect(page.locator('.item-${i}').nth(${i}).first()).toHaveURL('/page-${i}');`);
+  }
+  const code = chunks.join(" ");
+  assert.ok(code.length > 4000, `precondition: fixture must be > 4 KB, got ${code.length}`);
+
+  // The enhancer's fast-path calls HAS_PAGE_LOAD_ASSERTION_RE — drive it
+  // via enhanceTest with the perf fixture as `playwrightCode`.
+  const t = {
+    name: "Pathological perf fixture",
+    playwrightCode: code,
+    sourceUrl: "http://ex.com/page",
+  };
+  const t0 = Date.now();
+  enhanceTest(t, SNAPSHOT, null);
+  const elapsed = Date.now() - t0;
+  assert.ok(
+    elapsed < 200,
+    `enhanceTest on a 5KB single-line body with toHaveURL chains must finish < 200ms, took ${elapsed}ms`,
+  );
+});
+
+test("F1: nested-parens expect target still validates the page-load regex", () => {
+  // The bounded pattern must still match the canonical
+  // `expect(page.locator('x').first()).toHaveURL(...)` shape.
+  const t = {
+    name: "Nested parens with toHaveURL",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await expect(page.locator('h1').first()).toBeVisible();",
+      "  await expect(page).toHaveURL('/dash');",
+      "});",
+    ].join("\n"),
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  // Has strong assertions + a real toHaveURL → fast-path should fire
+  // (i.e. `_assertionEnhanced: false` because the test is already fully
+  // enhanced).
+  assert.equal(r._assertionEnhanced, false,
+    "fast-path must fire for a test with nested-paren toHaveURL");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

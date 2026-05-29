@@ -12,6 +12,11 @@
 
 import { createHash } from "node:crypto";
 import { formatLogLine } from "../utils/logFormatter.js";
+// Bundle-A follow-up #F3 — strip strings + comments before running the
+// quality rubric's substring checks so a `// TODO: use getByRole` comment
+// or a `'toHaveURL'` string literal doesn't earn the +10 `selector.semantic`
+// reward. Same class of bug Bundle-A fix #14 patched in `assertionEnhancer.js`.
+import { stripStringsAndComments } from "../utils/codeStripping.js";
 
 /**
  * fingerprintHash(str) → 16-char hex string (64-bit via SHA-256 truncation)
@@ -393,7 +398,14 @@ const QUALITY_FACTORS = [
  * @returns {{ score: number, factors: Array<{ id: string, label: string, delta: number, kind: "reward"|"penalty" }> }}
  */
 export function scoreTestWithFactors(test) {
-  const code = test.playwrightCode || "";
+  // Bundle-A follow-up #F3 — strip strings + comments BEFORE running each
+  // factor's substring predicate. The QUALITY_FACTORS rubric uses
+  // `c.includes("getByRole")`, `c.includes("toHaveURL")`, etc.; a
+  // `// TODO: use getByRole` mention or a `'toHaveURL'` log string would
+  // otherwise incorrectly earn the matching reward. Same class of bug
+  // Bundle-A fix #14 patched in `assertionEnhancer.js`.
+  const rawCode = test.playwrightCode || "";
+  const code = stripStringsAndComments(rawCode);
   const factors = [];
   let raw = 0;
   for (const f of QUALITY_FACTORS) {

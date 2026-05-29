@@ -32,6 +32,9 @@ const files = [
   "tests/api-test-prompt.test.js",
   "tests/deduplicator.test.js",
   "tests/assertion-enhancer.test.js",
+  // Bundle-A follow-up #F3 — shared `stripStringsAndComments` helper
+  // used by both `assertionEnhancer.js` and `deduplicator.js`.
+  "tests/code-stripping.test.js",
   "tests/test-validator.test.js",
   "tests/test-validator-allowlist.test.js",
   "tests/secret-scanner.test.js",
