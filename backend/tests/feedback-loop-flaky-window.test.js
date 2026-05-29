@@ -37,6 +37,12 @@ function seedRun({ id, daysAgo, results }) {
 
 // Clean slate so prior tests' seeded rows don't pollute results.
 getDatabase().prepare("DELETE FROM runs WHERE projectId = ?").run(PROJECT_ID);
+// Seed a project row so the FK on runs.projectId is satisfied.
+try {
+  getDatabase().prepare(
+    "INSERT OR IGNORE INTO projects (id, name, url, workspaceId, createdAt, updatedAt) VALUES (?, ?, ?, '__default__', datetime('now'), datetime('now'))",
+  ).run(PROJECT_ID, "Flaky Window Test Project", "http://app.example.test");
+} catch { /* may already exist from a prior test run */ }
 
 // 51 OLD runs (days 51..101): `t-old` flip-flops (alternates pass/fail).
 for (let i = 0; i < 51; i += 1) {

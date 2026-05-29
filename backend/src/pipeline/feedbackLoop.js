@@ -948,7 +948,7 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     console.warn(formatLogLine(
       "warn",
       options?.runId || null,
-      `[feedbackLoop] regenerateFailingTest failed (${reason}) for test ${test?.id || "?"} (${failureCategory}): ${msg}`,
+      `[feedbackLoop] regenerateFailingTest failed (${reason}) for test ${test?.id || "?"} (${failureCategory}): ${err?.message || "unknown"}`,
     ));
     return null; // Regeneration failed — keep original
   }

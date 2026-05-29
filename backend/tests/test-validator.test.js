@@ -772,7 +772,7 @@ test("perf: 5KB single-line minified test body validates in < 200ms", () => {
   // post-fix the bounded capture keeps the work linear.
   const chunks = [];
   // ~50 chained expect calls × ~100 chars each ≈ 5 KB on one line.
-  for (let i = 0; i < 50; i += 1) {
+  for (let i = 0; i < 80; i += 1) {
     chunks.push(`await expect(page.locator('.item-${i}').nth(${i}).first()).toBeVisible();`);
   }
   const code = chunks.join(" "); // SINGLE LINE — the catastrophic-backtrack vector.

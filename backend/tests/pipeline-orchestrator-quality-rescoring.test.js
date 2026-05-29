@@ -54,7 +54,7 @@ test("re-score happens AFTER healing transforms (no stale selector.semantic bonu
       "test('Contact submit', async ({ page }) => {",
       "  await page.goto('http://app.example.test/contact');",
       "  await page.getByRole('button', { name: 'Submit' }).click();",
-      "  await safeExpect(page, expect, 'Thanks', 'heading');",
+      "  await expect(page.getByText('Thanks')).toBeVisible();",
       "});",
     ].join("\n"),
   };
@@ -62,7 +62,8 @@ test("re-score happens AFTER healing transforms (no stale selector.semantic bonu
   await runPostGenerationPipeline([t], PROJECT, run, {});
 
   // Precondition: the transform stage actually ran and rewrote the
-  // semantic-locator click into safeClick.
+  // semantic-locator click into safeClick (and getByText().toBeVisible
+  // into safeExpect).
   assert.ok(
     !t.playwrightCode.includes("getByRole"),
     "precondition: healing transforms must have rewritten getByRole().click() to safeClick",
@@ -105,7 +106,7 @@ test("scoring factors agree with the post-transform code shape (general invarian
       "test('Contact submit', async ({ page }) => {",
       "  await page.goto('http://app.example.test/contact');",
       "  await page.getByRole('button', { name: 'Submit' }).click();",
-      "  await safeExpect(page, expect, 'Thanks', 'heading');",
+      "  await expect(page.getByText('Thanks')).toBeVisible();",
       "});",
     ].join("\n"),
   };

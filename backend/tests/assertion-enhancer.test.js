@@ -889,7 +889,7 @@ test("F1: 5KB single-line `expect(...).toHaveURL(...)` body validates in < 200ms
   // Performance budget for the bounded regex. Pre-fix the greedy `.+`
   // with `/s` walked exponential backtracking trees on this fixture.
   const chunks = [];
-  for (let i = 0; i < 50; i += 1) {
+  for (let i = 0; i < 80; i += 1) {
     chunks.push(`await expect(page.locator('.item-${i}').nth(${i}).first()).toHaveURL('/page-${i}');`);
   }
   const code = chunks.join(" ");

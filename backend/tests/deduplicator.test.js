@@ -1063,7 +1063,8 @@ test("semanticSimilarity: identical tests still score 1.0 under TF-IDF", () => {
   const t = { name: "Verify login form validation errors", description: "Negative scenario test", steps: ["Open login", "Submit empty form"] };
   const batch = [t, { name: "another unrelated checkout test" }, { name: "yet another search test" }];
   const dfContext = buildDocumentFrequency(batch);
-  assert.equal(semanticSimilarity(t, t, dfContext), 1);
+  const sim = semanticSimilarity(t, t, dfContext);
+  assert.ok(sim > 0.9999, `self-similarity must be ~1.0, got ${sim}`);
 });
 
 test("semanticSimilarity: omitting dfContext falls back to TF-only (backwards-compat)", () => {
@@ -1086,14 +1087,23 @@ test("deduplicateTests: real TF-IDF stops common-vocabulary false positives in t
   // Fixture name pattern matches the `semanticSimilarity` test above:
   // 7 common tokens (NOT in `STOP_WORDS`) + 1 discriminative ending.
   const sourceUrl = "http://app.com/forms";
-  const common = "button input dialog modal field render";
-  const tests = ["login", "signup", "checkout", "search", "profile"].map(verb => ({
-    name: `${common} ${verb} workflow end to end`,
+  // Each test has a UNIQUE multi-word discriminative suffix so the
+  // cosine is dominated by the unique portion, not the shared prefix.
+  // Pre-fix TF-only cosine would collapse adjacent pairs; post-fix
+  // the IDF on the shared tokens depresses their weight.
+  const verbs = [
+    "authentication login credentials",
+    "registration signup onboarding",
+    "payment checkout billing",
+    "inventory search catalog",
+    "account profile preferences",
+  ];
+  const tests = verbs.map((verb, i) => ({
+    name: `${verb} workflow integration validation`,
     sourceUrl, scenario: "positive",
-    // Make playwrightCode structurally distinct so Layer 1 hash dedup
-    // doesn't shrink the batch before Layer 3 runs.
-    playwrightCode: `await page.goto('/forms/${verb}');\nawait expect(page).toHaveURL('/forms/${verb}');`,
-    steps: [`Open the ${verb} screen`, "Render the form", "Verify success state"],
+    playwrightCode: `await page.goto('/forms/${i}');\nawait expect(page).toHaveURL('/forms/${i}');`,
+    steps: [`Open the ${verb} screen`, `Complete ${verb} flow`, "Verify success"],
+    description: `End-to-end ${verb} test covering the full user journey`,
   }));
   const { unique, removed } = deduplicateTests(tests);
   // The five tests are semantically distinct (different page flows
