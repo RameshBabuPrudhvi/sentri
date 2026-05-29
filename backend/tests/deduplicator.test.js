@@ -853,6 +853,135 @@ test("deduplicateAcrossRuns: SAME scenario as existing on same URL → still fil
   assert.equal(result.length, 0, "same-scenario near-duplicate still filters at cross-run layer");
 });
 
+// ── 10. Bundle-A fix #12 — per-sourceUrl bucketing perf + correctness ───────
+//
+// Per-URL bucketing replaces the O(n²) walk with O(sum_u k_u²) where k_u is
+// the per-URL bucket size. Pure perf change — correctness MUST be identical
+// to pre-fix dedup. These tests:
+//   (a) pin the correctness invariants the bucketing must preserve
+//       (override semantics, multi-URL isolation, no-sourceUrl pass-through)
+//   (b) assert a perf budget so a future refactor that accidentally
+//       reverts to the global walk is caught at CI time.
+
+console.log("\n🪣  deduplicateTests — per-sourceUrl bucketing (fix #12)");
+
+test("bucketing: tests on N URLs only compare within their URL group", () => {
+  // Two URL groups of two similar-named tests each. Within each group,
+  // the pair should dedupe (same scenario, similar name, same URL).
+  // Across groups, none should dedupe.
+  const groupA = ["Verify login form validation errors A", "Verify login form validation error A"];
+  const groupB = ["Verify checkout cart totals calculation B", "Verify checkout cart totals calc B"];
+  const tests = [
+    ...groupA.map((name, i) => ({
+      name, sourceUrl: "http://app.com/login", scenario: "negative",
+      playwrightCode: `await page.goto('/login');\nawait expect(page).toHaveURL('/login');\n// ${i}`,
+      steps: ["Go to login", "Submit", "Check errors", "More steps"],
+    })),
+    ...groupB.map((name, i) => ({
+      name, sourceUrl: "http://app.com/checkout", scenario: "positive",
+      playwrightCode: `await page.goto('/checkout');\nawait expect(page).toHaveURL('/checkout');\n// ${i}`,
+      steps: ["Go to checkout", "Verify totals", "More steps to lengthen"],
+    })),
+  ];
+  const { unique } = deduplicateTests(tests);
+  // One survivor per group → 2 total. Bucketing must not lose this.
+  assert.equal(unique.length, 2, `expected 2 survivors (one per URL bucket), got ${unique.length}`);
+});
+
+test("bucketing: override (higher-quality candidate) is reflected in bucket lookup", () => {
+  // Three near-duplicate tests on the same URL with increasing quality.
+  // The bucketing path must replace the bucket entry on each override so
+  // the FINAL survivor is the highest-quality one — not whichever happened
+  // to land first.
+  const sourceUrl = "http://app.com/dash";
+  const low = {
+    name: "Verify dashboard widget renders correctly",
+    sourceUrl, scenario: "positive",
+    playwrightCode: "await page.goto('/dash');",
+    steps: ["Go to dashboard", "Look at widget", "More steps for length"],
+  };
+  const mid = {
+    name: "Verify dashboard widget render correctly",
+    sourceUrl, scenario: "positive",
+    playwrightCode: "await page.goto('/dash');\nawait expect(page).toHaveURL('/dash');",
+    steps: ["Go to dashboard", "Look at widget", "More steps for length"],
+  };
+  const high = {
+    name: "Verify dashboard widget renders correctly!",
+    sourceUrl, scenario: "positive",
+    playwrightCode: [
+      "await page.goto('/dash');",
+      "await expect(page).toHaveURL('/dash');",
+      "await expect(page).toHaveTitle('Dashboard');",
+      "await expect(page.getByRole('heading')).toBeVisible();",
+    ].join("\n"),
+    steps: ["Go to dashboard", "Look at widget", "More steps for length"],
+    priority: "high",
+    type: "e2e",
+  };
+  const { unique } = deduplicateTests([low, mid, high]);
+  assert.equal(unique.length, 1, `expected 1 survivor after dedup, got ${unique.length}`);
+  // The highest-quality candidate must win regardless of input order.
+  // Quality is a function of playwrightCode + metadata — `high` has more
+  // assertions + high priority + e2e type, so its score must dominate.
+  const survivor = unique[0];
+  assert.ok(
+    survivor._quality >= scoreTest(low) && survivor._quality >= scoreTest(mid),
+    `survivor quality (${survivor._quality}) must be >= low (${scoreTest(low)}) and mid (${scoreTest(mid)})`,
+  );
+});
+
+test("bucketing: tests without sourceUrl pass through dedup unchanged", () => {
+  // No-sourceUrl tests skip fuzzy/semantic per the existing guard. Bucketing
+  // must NOT regress this — pre-fix they landed in `retained` unconditionally
+  // and the bucketed path must do the same.
+  const tests = [
+    {
+      name: "Test without source URL one",
+      playwrightCode: "await page.goto('/a');\nawait expect(page).toHaveURL('/a');",
+      steps: ["s1", "s2", "s3"],
+    },
+    {
+      name: "Test without source URL one",
+      playwrightCode: "await page.goto('/b');\nawait expect(page).toHaveURL('/b');",
+      steps: ["s1", "s2", "s3"],
+    },
+  ];
+  const { unique } = deduplicateTests(tests);
+  // Structurally different (different goto URLs → different Layer-1 hashes)
+  // AND no sourceUrl means Layer 2/3 can't fire → both survive.
+  assert.equal(unique.length, 2, "no-sourceUrl tests bypass Layer 2/3 dedup");
+});
+
+test("bucketing perf: 1000 tests across 10 URLs completes under 2 seconds", () => {
+  // Spec target from `docs/roadmap/Bugs.md#fix-12`. 100 tests per URL × 10
+  // URLs = 1000 candidates after Layer 1. The pre-fix global walk does
+  // 1000² = 1M comparisons (one full TF-IDF cosine per pair on miss).
+  // The bucketed path does 10 × 100² = 100k comparisons (10× fewer).
+  // A 2s budget is generous on the bucketed path AND tight on the
+  // pre-fix path — protects against regressions in either direction.
+  const tests = [];
+  for (let u = 0; u < 10; u += 1) {
+    for (let i = 0; i < 100; i += 1) {
+      tests.push({
+        // Make every name structurally distinct so Layer-1 hash dedup
+        // doesn't shrink the candidate set before Layer 2/3 runs. We
+        // want the perf test to actually exercise the O(k_u²) layer.
+        name: `Unique test name for url ${u} and index ${i} with extra padding text`,
+        description: `desc ${u}-${i}`,
+        sourceUrl: `http://app.com/page${u}`,
+        scenario: i % 2 === 0 ? "positive" : "negative",
+        playwrightCode: `await page.goto('/page${u}/${i}');\nawait expect(page).toHaveURL('/page${u}/${i}');`,
+        steps: ["go", "act", `index ${i}`, `padding ${u}`],
+      });
+    }
+  }
+  const t0 = Date.now();
+  deduplicateTests(tests);
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed < 2000, `1000 tests × 10 URLs must complete < 2000ms, took ${elapsed}ms`);
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

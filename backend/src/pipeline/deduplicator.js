@@ -394,53 +394,86 @@ export function deduplicateTests(tests) {
   const afterLayer1 = Array.from(hashMap.values());
 
   // ── Layers 2+3: fuzzy name + semantic similarity ─────────────────────────
-  // O(n²) over the already-deduplicated set — acceptable since n is typically
-  // small (< 200 tests per batch after layer 1).
+  // Bundle-A fix #12 — per-sourceUrl bucketing reduces the O(n²) walk to
+  // O(sum_u k_u²) where k_u is the number of tests per URL bucket. Pre-fix
+  // every candidate walked the entire `retained` list even though the inner
+  // URL-equality guard (`candidate.sourceUrl === kept.sourceUrl`) rejected
+  // cross-URL pairs immediately. With N tests spread across M URLs, the old
+  // path was N² comparisons; the bucketed path is at most N²/M (much less
+  // when URLs are well-distributed). Pure perf — correctness is preserved:
+  // every comparison the old loop performed still happens, just lookup-
+  // indexed by URL.
+  //
+  // Tests without `sourceUrl` keep the pre-fix behaviour exactly: they skip
+  // Layer 2/3 (the URL guard always failed for them) and land in `retained`
+  // unconditionally. We track them in a dedicated `null`-bucket only so the
+  // override semantics below stay symmetric.
+  const bucketsByUrl = new Map(); // sourceUrl → kept[] (subset of `retained`)
   for (const candidate of afterLayer1) {
-    let dominated = false;
     const normCandName = normalizeText(candidate.name);
+    const url = candidate.sourceUrl || null;
 
-    for (const kept of retained) {
-      // Layer 2 — fuzzy name (defect #3)
-      // Guard with sourceUrl (consistent with deduplicateAcrossRuns Layer 3)
-      // so tests targeting different pages with similar names are not falsely
-      // deduplicated within the same batch.
-      if (
-        normCandName.length >= 15 &&
-        candidate.sourceUrl && candidate.sourceUrl === kept.sourceUrl &&
-        sameDedupScenario(candidate.scenario, kept.scenario) &&
-        fuzzyNameSimilarity(normCandName, normalizeText(kept.name)) >= FUZZY_NAME_THRESHOLD
-      ) {
-        // Keep the higher-quality test
-        if (candidate._quality > kept._quality) {
-          retained.splice(retained.indexOf(kept), 1, candidate);
-        }
-        dominated = true;
-        break;
-      }
+    // Tests without a `sourceUrl` skip Layer 2/3 entirely (pre-fix
+    // behaviour — the URL-equality guard always failed for them). They
+    // land in `retained` unconditionally and don't participate in any
+    // bucket — no other candidate could fuzzy-match them via URL anyway.
+    if (!url) {
+      retained.push(candidate);
+      continue;
+    }
 
-      // Layer 3 — semantic TF-IDF (defects #1, #2)
-      // Guard with name length (consistent with deduplicateAcrossRuns Layer 4)
-      // — short names produce tiny TF-IDF vectors where a single shared term
-      // yields cosine ≈ 1.0, causing false positives.
-      // Guard with sourceUrl so tests on different pages that share vocabulary
-      // are not falsely deduplicated.
-      // Bundle-A fix #11 — scenario guard (see `sameDedupScenario` docblock).
-      if (
-        normCandName.length >= 15 &&
-        candidate.sourceUrl && candidate.sourceUrl === kept.sourceUrl &&
-        sameDedupScenario(candidate.scenario, kept.scenario) &&
-        semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD
-      ) {
-        if (candidate._quality > kept._quality) {
-          retained.splice(retained.indexOf(kept), 1, candidate);
+    const bucket = bucketsByUrl.get(url);
+    let dominated = false;
+    // Short-name candidates can never WIN a fuzzy/semantic match (the
+    // `normCandName.length >= 15` guard pre-fix). They still need to
+    // join the per-URL bucket so a LATER long-named candidate can
+    // compare against them — preserves the exact comparison set the
+    // pre-fix global walk produced.
+    if (normCandName.length >= 15 && bucket && bucket.length > 0) {
+      for (const kept of bucket) {
+        // Layer 2 — fuzzy name (defect #3). URL match is implicit (we're
+        // iterating the per-URL bucket); scenario guard from fix #11
+        // applies.
+        if (
+          sameDedupScenario(candidate.scenario, kept.scenario) &&
+          fuzzyNameSimilarity(normCandName, normalizeText(kept.name)) >= FUZZY_NAME_THRESHOLD
+        ) {
+          if (candidate._quality > kept._quality) {
+            // Override: replace `kept` with `candidate` in both the output
+            // list and its per-URL bucket so subsequent candidates compare
+            // against the higher-quality survivor.
+            const idxOut = retained.indexOf(kept);
+            if (idxOut >= 0) retained[idxOut] = candidate;
+            const idxBucket = bucket.indexOf(kept);
+            if (idxBucket >= 0) bucket[idxBucket] = candidate;
+          }
+          dominated = true;
+          break;
         }
-        dominated = true;
-        break;
+
+        // Layer 3 — semantic TF-IDF (defects #1, #2). Same URL + scenario
+        // guards apply as Layer 2.
+        if (
+          sameDedupScenario(candidate.scenario, kept.scenario) &&
+          semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD
+        ) {
+          if (candidate._quality > kept._quality) {
+            const idxOut = retained.indexOf(kept);
+            if (idxOut >= 0) retained[idxOut] = candidate;
+            const idxBucket = bucket.indexOf(kept);
+            if (idxBucket >= 0) bucket[idxBucket] = candidate;
+          }
+          dominated = true;
+          break;
+        }
       }
     }
 
-    if (!dominated) retained.push(candidate);
+    if (!dominated) {
+      retained.push(candidate);
+      if (!bucketsByUrl.has(url)) bucketsByUrl.set(url, []);
+      bucketsByUrl.get(url).push(candidate);
+    }
   }
 
   const unique = retained.sort((a, b) => b._quality - a._quality);
