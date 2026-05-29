@@ -220,7 +220,7 @@ const INTENT_TEMPLATES = {
   // Bundle-A fix #16: scope the negative-text check to dedicated error
   // regions so legitimate body copy (e.g. "Invalid email format" input
   // hints, "Error Reports" admin links) doesn't false-positive after a
-  // successful login. `.catch(() => {})` swallows the not-found case
+  // successful login. .catch(() => {}) swallows the not-found case
   // — the happy path has no error region to assert against.
   await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('Invalid').catch(() => {});
   await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('error').catch(() => {});`,
@@ -291,7 +291,7 @@ const TYPE_TEMPLATES = {
   security: (snapshot) => `
   // Security — verify auth boundary.
   // Bundle-A fix #16: scope to dedicated error regions (see
-  // `AUTH_ERROR_REGION_SELECTOR` docblock above) to avoid false-positives
+  // AUTH_ERROR_REGION_SELECTOR docblock above) to avoid false-positives
   // on legitimate body copy like "Error reports" admin links.
   await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('Invalid').catch(() => {});
   await expect(page.locator('${AUTH_ERROR_REGION_SELECTOR}').first()).not.toContainText('error').catch(() => {});`,
