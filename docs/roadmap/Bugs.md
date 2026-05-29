@@ -1,6 +1,6 @@
 # Bundle B — `fix: browser runtime + self-healing reliability`
 ## Branch
-`bundle-b-runtime-reliability` off `develop`.
+`bundle-b` off `develop`.
 ## Goal
 Land all runtime + browser-process correctness fixes. Higher blast radius
 than Bundle A because it touches Playwright lifecycle and the crawl path.
