@@ -57,6 +57,10 @@ import { logActivity } from "../utils/activityLogger.js";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { feedbackLoopRegenerationFailuresTotal } from "../utils/metrics.js";
+// Bundle-A fix #19 — bot-detection regexes sourced from the shared module
+// so this classifier and `pipeline/stateExplorer.js`'s crawl-time gate
+// share one pattern list. See `utils/botDetection.js` for rationale.
+import { BOT_DETECTION_PATTERNS } from "../utils/botDetection.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 //
@@ -98,31 +102,12 @@ const FAILURE_PATTERNS = [
   // tests. Bot-detection pages reliably surface one of the URL/text patterns
   // below; falling back to UNKNOWN for naked "access denied" preserves the
   // feedback loop's chance to repair an auth-flow test.
-  ["BOT_BLOCK", [
-    /\/sorry\//i,
-    /\/captcha/i,
-    /\/challenge/i,
-    // `/blocked` mirrors the `stateExplorer.js` anti-bot URL list referenced
-    // in the comment block above. Without it a SUT that redirects to
-    // `/blocked` (Cloudflare's "you have been blocked" page, custom WAF
-    // landing pages) falls through to SELECTOR_ISSUE on the secondary
-    // locator timeout — defeating the entire reason this category exists.
-    //
-    // Anchored to a path-segment boundary (`/blocked` followed by `/`,
-    // `?`, `#`, or end-of-string) so legitimate application paths like
-    // `/users/blocked-list`, `/content/blocked-items`, or
-    // `/admin/blocked-accounts` are NOT misclassified as bot-blocks. The
-    // canonical anti-bot landing page is exactly `/blocked` (Cloudflare,
-    // most WAF vendors); apps that nest functionality under `/blocked-*`
-    // are a real-world false-positive risk per Lifeguard BUG-0003.
-    /\/blocked(?:[/?#]|$)/i,
-    /recaptcha/i,
-    /unusual traffic/i,
-    /are you a robot/i,
-    /detected unusual traffic/i,
-    /verify you are human/i,
-    /cloudflare.*challenge/i,
-  ]],
+  // Bundle-A fix #19 — pattern list lifted to `utils/botDetection.js` so
+  // the post-run classifier here and `pipeline/stateExplorer.js`'s
+  // crawl-time gate share ONE source of truth. The `\/blocked(?:[/?#]|$)`
+  // boundary anchor (lifeguard BUG-0003) lives in the shared module's
+  // docblock and no longer needs to be re-explained in each consumer.
+  ["BOT_BLOCK", BOT_DETECTION_PATTERNS],
   ["SELECTOR_ISSUE", [
     /locator.*not found/i,
     /element not visible/i,

@@ -46,6 +46,9 @@ const files = [
   // Bundle-A fix #10 — `detectFlakyTests` scoped to last N runs (default 50)
   // instead of walking the full project history.
   "tests/feedback-loop-flaky-window.test.js",
+  // Bundle-A fix #19 — shared bot-detection pattern module so the
+  // post-run classifier and the state explorer's crawl-time gate never drift.
+  "tests/bot-detection.test.js",
   "tests/pipeline-orchestrator.test.js",
   // Bundle-A fix #6 — orchestrator resets `run.secretScanBlocked` at
   // entry so re-entry on the same run doesn't carry a stale flag.
