@@ -857,7 +857,7 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ### 🍞 Toast feedback on save/update/delete (UX-001)
 
-_(automated: not yet — frontend test runner is plain Node `assert/strict` with no JSX render harness; behaviour is verified manually until a React testing framework is wired up.)_
+_(automated: see `tests/e2e/specs/toast-feedback-ui.spec.mjs` for project-create success toast + project-edit "Project updated" toast + error-path `role="alert"` toast. Coverage tracked in `tests/e2e/COVERAGE.md`. Settings-section toasts (Agent Roles, AI Providers, Integrations, Members, Account) remain manual until the next backfill PR.)_
 
 **Preconditions:** Logged in as User A (admin) for full coverage, plus a separate User B (`qa_lead`) session for delete-account flow.
 
