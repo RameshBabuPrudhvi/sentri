@@ -169,4 +169,51 @@ test.describe('Toast feedback UI (UX-001)', () => {
     }
     await expect(errToast.first()).toBeVisible();
   });
+
+  test('Settings → Members invite fires a "Member invited" toast', async ({ page, request }) => {
+    // Regression guard for `MembersSection.jsx:52` — pre-UX-001 the invite
+    // form only set inline `inviteMsg`; the user couldn't tell the action
+    // landed without scrolling back to the form. Admin role is required;
+    // `signInVerifiedUser` returns the user as workspace admin (first
+    // member of a new workspace).
+    await signInVerifiedUser({ page, request });
+
+    await page.goto('/settings/members');
+
+    // The invite form lives at `MembersSection.jsx:108-139`. Email field
+    // is the only `type="email"` input on the page; role defaults to
+    // `viewer`, which is fine.
+    const inviteeEmail = `invitee-${Date.now()}@example.test`;
+    await page.getByRole('textbox', { name: /invite by email/i }).fill(inviteeEmail);
+    await page.getByRole('button', { name: /^invite$/i }).click();
+
+    const toast = page.getByRole('status').filter({ hasText: /member invited/i });
+    await expect(toast).toBeVisible();
+  });
+
+  test('Settings → Account → Export fires an "Account export downloaded" toast', async ({ page, request }) => {
+    // Regression guard for `AccountSection.jsx:52` — pre-UX-001 the export
+    // succeeded silently except for the inline `setStatus` banner. The
+    // toast confirms the action immediately even if the user has scrolled
+    // past the banner.
+    const { password } = await signInVerifiedUser({ page, request });
+
+    await page.goto('/settings/account');
+
+    // Password confirmation is required unless the user signed in via
+    // OAuth — registered users always have a password, so fill it.
+    await page.getByPlaceholder(/current password/i).fill(password);
+
+    // Playwright `waitForEvent('download')` swallows the file-download
+    // side effect cleanly. Without it, the spec would race against the
+    // `URL.createObjectURL` cleanup at `AccountSection.jsx:50`.
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: /export account data/i }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/sentri-account-export-\d{4}-\d{2}-\d{2}\.json/);
+
+    const toast = page.getByRole('status').filter({ hasText: /account export downloaded/i });
+    await expect(toast).toBeVisible();
+  });
 });

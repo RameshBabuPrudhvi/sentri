@@ -857,7 +857,7 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ### 🍞 Toast feedback on save/update/delete (UX-001)
 
-_(automated: see `tests/e2e/specs/toast-feedback-ui.spec.mjs` for project-create success toast + project-edit "Project updated" toast + error-path `role="alert"` toast. Coverage tracked in `tests/e2e/COVERAGE.md`. Settings-section toasts (Agent Roles, AI Providers, Integrations, Members, Account) remain manual until the next backfill PR.)_
+_(automated: see `tests/e2e/specs/toast-feedback-ui.spec.mjs` for project-create success toast + project-edit "Project updated" toast + error-path `role="alert"` toast + Settings → Members invite toast + Settings → Account export-download toast. Coverage tracked in `tests/e2e/COVERAGE.md`. The remaining Settings-section toasts — Agent Roles, AI Providers, Integrations (GitHub install ID), and the Auto-Approval / Quality Gates / Coverage / Web Vitals panels on `/projects/:id/settings/*` — need provider-key / role-config / GitHub-app fixtures and are queued for the Tier-1 backfill PR.)_
 
 **Preconditions:** Logged in as User A (admin) for full coverage, plus a separate User B (`qa_lead`) session for delete-account flow.
 
