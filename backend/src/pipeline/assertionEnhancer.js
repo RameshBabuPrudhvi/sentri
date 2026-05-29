@@ -27,16 +27,113 @@ const STRONG_ASSERTION_PATTERNS = [
   /toBeDisabled/,
 ];
 
+/**
+ * Bundle-A fix #14 — strip string literals and line/block comments from
+ * code before running substring / regex assertion-presence checks.
+ *
+ * Pre-fix `hasNoAssertions` used a bare `.includes("expect(")` check,
+ * so a test containing `console.log("expect(loaded)")` (and no real
+ * `expect()` call) was incorrectly classified as HAVING assertions and
+ * the enhancer skipped injection — leaving the test with zero coverage.
+ *
+ * Strips:
+ *   - `// line comments` through end-of-line
+ *   - `/* block comments *⁠/` (single-line or multi-line)
+ *   - `'single-quoted'`, `"double-quoted"`, ` ``template-literal`` `
+ *     string contents (the literal delimiters are kept so subsequent
+ *     parsing logic that cares about token boundaries still sees them).
+ *
+ * Backslash-escaped quotes inside string literals are honoured so a
+ * string like `"he said \"hi\""` doesn't terminate early.
+ *
+ * Best-effort: not a full JavaScript tokeniser (template-literal
+ * `${interpolations}` are stripped along with the rest of the string
+ * body). Good enough for the assertion-presence heuristic — false
+ * positives are tests where a `${expect(real)}` interpolation hides
+ * a real assertion, which is exotic enough to ignore. The
+ * `HAS_PAGE_LOAD_ASSERTION_RE` pattern below still anchors on actual
+ * code, not stripped-out string contents, so the page-load check
+ * stays accurate.
+ *
+ * @param {string} code
+ * @returns {string} Code with string contents + comments redacted.
+ */
+function stripStringsAndComments(code) {
+  if (!code) return "";
+  let out = "";
+  let i = 0;
+  while (i < code.length) {
+    const ch = code[i];
+    const next = code[i + 1];
+    // Line comment `// …\n`
+    if (ch === "/" && next === "/") {
+      const eol = code.indexOf("\n", i + 2);
+      if (eol < 0) { i = code.length; continue; }
+      // Preserve the newline so line-anchored regexes still work.
+      out += "\n";
+      i = eol + 1;
+      continue;
+    }
+    // Block comment `/* … */`
+    if (ch === "/" && next === "*") {
+      const end = code.indexOf("*/", i + 2);
+      i = end < 0 ? code.length : end + 2;
+      continue;
+    }
+    // String literals: keep the delimiters, drop the contents.
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const quote = ch;
+      out += quote;
+      i += 1;
+      while (i < code.length && code[i] !== quote) {
+        if (code[i] === "\\" && i + 1 < code.length) {
+          i += 2; // skip escaped char
+          continue;
+        }
+        i += 1;
+      }
+      if (i < code.length) {
+        out += quote;
+        i += 1;
+      }
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 export function hasStrongAssertions(playwrightCode) {
-  return STRONG_ASSERTION_PATTERNS.some(p => p.test(playwrightCode));
+  // Bundle-A fix #14 — strip strings + comments so a `// toHaveURL`
+  // mention or a `'toBeVisible'` string literal can't masquerade as
+  // a real assertion.
+  const clean = stripStringsAndComments(playwrightCode || "");
+  return STRONG_ASSERTION_PATTERNS.some(p => p.test(clean));
 }
 
 export function hasWeakAssertions(playwrightCode) {
-  return WEAK_ASSERTION_PATTERNS.some(p => p.test(playwrightCode));
+  const clean = stripStringsAndComments(playwrightCode || "");
+  return WEAK_ASSERTION_PATTERNS.some(p => p.test(clean));
 }
 
+/**
+ * Bundle-A fix #14 — true assertion presence check.
+ *
+ * Pre-fix used `!playwrightCode.includes("expect(")` which returned
+ * `false` (i.e. "has assertions") for any test where the literal
+ * substring `expect(` appeared anywhere — including inside string
+ * literals (`console.log("expect(loaded)")`) and comments
+ * (`// TODO: add expect(...) call`). The enhancer would then skip
+ * injection on a test that genuinely has zero assertions.
+ *
+ * The fix strips strings + comments before running the presence
+ * check so only REAL `expect(` calls count, then uses the same
+ * `\bexpect\s*\(` anchor as `HAS_PAGE_LOAD_ASSERTION_RE`.
+ */
 export function hasNoAssertions(playwrightCode) {
-  return !playwrightCode.includes("expect(");
+  const clean = stripStringsAndComments(playwrightCode || "");
+  return !/\bexpect\s*\(/.test(clean);
 }
 
 /**

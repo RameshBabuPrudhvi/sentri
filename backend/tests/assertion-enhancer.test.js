@@ -575,6 +575,110 @@ test("fast-path does NOT trigger when toHaveTitle appears only in a string liter
   assert.equal(r._enhancementReason, "added_page_load_assertion");
 });
 
+// ── 11. Bundle-A fix #14 — hasNoAssertions ignores `expect(` in strings/comments ──
+//
+// Pre-fix `hasNoAssertions` used a bare `.includes("expect(")` so any test
+// containing the substring `expect(` anywhere (inside a string literal, a
+// comment, a log line) was classified as HAVING assertions — and the
+// enhancer skipped injection on a test that genuinely had zero coverage.
+
+console.log("\n🧹  hasNoAssertions — string/comment-safe detection (fix #14)");
+
+test("hasNoAssertions: bare console.log('expect(loaded)') with NO real expect() → flagged as no-assertions", () => {
+  // Bugs.md fix #14 fixture. Pre-fix this returned `false` (the substring
+  // `expect(` is present inside the string literal); post-fix it returns
+  // `true` because the string-stripping pass removes the literal's body
+  // before the presence check runs.
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  console.log('expect(loaded)');",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), true, "string-literal `expect(` must not count as a real assertion");
+});
+
+test("hasNoAssertions: `// expect(...)` line comment → flagged as no-assertions", () => {
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  // TODO: add expect(page).toHaveURL(...)",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), true, "line-comment `expect(` mention must not count");
+});
+
+test("hasNoAssertions: `/* expect(...) */` block comment → flagged as no-assertions", () => {
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  /* placeholder for expect(page).toBeVisible() */",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), true, "block-comment `expect(` mention must not count");
+});
+
+test("hasNoAssertions: template-literal `${expect(...)}` (no real call) → flagged as no-assertions", () => {
+  // Template-literal contents are stripped wholesale, so even a fake
+  // `${expect(...)}` in a string template won't fool the detector.
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  const msg = `assertion would be expect(foo)`;",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), true, "template-literal `expect(` mention must not count");
+});
+
+test("hasNoAssertions: REAL expect() call with sibling string mentioning expect → has assertions", () => {
+  // Positive control: a real `expect()` call still registers even when
+  // the file ALSO contains decoy `expect(` mentions inside strings or
+  // comments. We must not over-strip and lose true positives.
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  await expect(page).toHaveURL('/x');",
+    "  console.log('expect(decoy)');",
+    "  // TODO: add another expect()",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), false, "real expect() call must still register");
+});
+
+test("enhancer injects assertions on a test whose only `expect(` is inside a string literal", () => {
+  // End-to-end: the enhancer must drive the `no_assertions` branch on
+  // this test (pre-fix it incorrectly fast-pathed because the substring
+  // check returned false). The final code MUST contain a real injected
+  // assertion.
+  const stringOnlyTest = {
+    name: "Test with expect inside string only",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  console.log('expect(something)');",
+      "  await safeClick(page, 'Continue');",
+      "});",
+    ].join("\n"),
+    steps: ["s"],
+    type: "functional",
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(stringOnlyTest, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, true, "enhancer must inject because the test genuinely has no assertions");
+  assert.equal(r._enhancementReason, "no_assertions");
+  // Verify a real assertion was injected.
+  assert.match(r.playwrightCode, /\bexpect\s*\(.+\)\.\w+/, "must inject at least one real expect() chain");
+});
+
+test("hasStrongAssertions: `'toHaveURL'` inside a string literal does NOT count", () => {
+  // Companion guard for the symmetric bug — pre-fix `hasStrongAssertions`
+  // ran the regex directly against the raw code, so a string literal
+  // containing `'toHaveURL'` would falsely register as a strong
+  // assertion. Fix #14 strips strings/comments before the check.
+  const code = "const note = 'should add toHaveURL later';";
+  assert.equal(hasStrongAssertions(code), false, "matcher substring inside a string must not count");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);
