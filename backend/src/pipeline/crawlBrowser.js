@@ -12,6 +12,7 @@ import { SmartCrawlQueue, fingerprintStructure, extractPathPattern, stripNoisePa
 import { takeSnapshot } from "./pageSnapshot.js";
 import { log, logWarn, logSuccess, emitRunEvent } from "../utils/runLogger.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as crawlSnapshotRepo from "../database/repositories/crawlSnapshotRepo.js";
 import { signRunArtifacts } from "../middleware/appSetup.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { performAutoLogin } from "./autoLogin.js";
@@ -202,7 +203,14 @@ export async function crawlPages(project, run, { signal } = {}) {
       const page = await context.newPage();
       try {
         log(run, `📄 Visiting (depth ${depth}): ${url}`);
+        // B1.3 (AUDIT-ROADMAP) — record the navigation wall-clock so the
+        // per-page row in `crawl_snapshots` carries `loadMs`. B2's adaptive
+        // element timeout reads `crawlSnapshotRepo.getLoadTimesByRunId`
+        // post-crawl to compute `run.p95LoadMs`; persisting it now means
+        // B2 ships without an ALTER TABLE follow-up.
+        const navStart = Date.now();
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+        const loadMs = Date.now() - navStart;
         // takeSnapshot() now calls waitForLoadState('networkidle') internally,
         // so we no longer need the arbitrary 800ms static wait here.
 
@@ -311,6 +319,20 @@ export async function crawlPages(project, run, { signal } = {}) {
           } catch (persistErr) {
             logWarn(run, `Failed to persist accessibility violations for ${url}: ${persistErr.message}`);
           }
+        }
+
+        // B1.3 (AUDIT-ROADMAP Bundle 1) — stream the snapshot to
+        // `crawl_snapshots` immediately so peak heap stays O(1 page) for a
+        // crash-recoverable crawl. Idempotent via `INSERT OR IGNORE` on
+        // (runId, url); re-crawling the same URL within a run is a no-op
+        // rather than an error. Best-effort: a persistence hiccup must
+        // never fail the crawl (the in-memory `snapshots[]` accumulation
+        // below is the legacy shadow path that downstream pipeline stages
+        // still consume during the B1 → B2 transition).
+        try {
+          crawlSnapshotRepo.save(run.id, url, snapshot, { loadMs });
+        } catch (persistErr) {
+          logWarn(run, `Failed to persist crawl snapshot for ${url}: ${persistErr.message}`);
         }
 
         snapshots.push(snapshot);

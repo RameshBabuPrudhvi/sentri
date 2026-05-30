@@ -27,6 +27,7 @@ import { startWorker, stopWorker } from "./workers/runWorker.js";
 import { closeRedis, isRedisAvailable } from "./utils/redisClient.js";
 import { formatLogLine } from "./utils/logFormatter.js";
 import { browserPool } from "./runner/browserPool.js";
+import { drain as drainDbWriteQueue } from "./utils/dbWriteQueue.js";
 
 dotenv.config();
 
@@ -105,6 +106,24 @@ async function gracefulShutdown(signal) {
     await closeQueue();
     await closeRedis();
     await new Promise((resolve) => healthServer.close(resolve));
+    // B1.2 (AUDIT-ROADMAP) — flush pending batched writes BEFORE
+    // closing the DB so per-test `run_test_results` rows queued via
+    // `enqueueDbWrite()` in `testRunner.js` are not lost on SIGTERM.
+    // Mirrors the equivalent step in `index.js` graceful-shutdown.
+    // Without this, the standalone worker (which IS the primary
+    // execution environment for BullMQ-dispatched runs) drops the
+    // last batch (≤ DB_WRITE_BATCH_SIZE rows / ≤ DB_WRITE_FLUSH_MS ms)
+    // on every restart — silently undermining B1.1's crash-recovery
+    // contract because resume's `getCompletedTestIds()` would not see
+    // the lost rows and would re-execute already-completed tests.
+    try {
+      const flushed = drainDbWriteQueue();
+      if (flushed > 0) {
+        console.log(formatLogLine("info", null, `[worker] Drained ${flushed} batched write(s)`));
+      }
+    } catch (err) {
+      console.warn(formatLogLine("warn", null, `[worker] dbWriteQueue.drain failed: ${err?.message || err}`));
+    }
     await closeDatabase();
     process.exit(0);
   } catch (err) {

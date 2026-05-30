@@ -133,6 +133,9 @@ export default function RunDetail() {
   const [llmTokens, setLlmTokens] = useState("");
   const [aborting, setAborting] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  // B1 (AUDIT-ROADMAP) — `Resume` button state for crash-recovered runs
+  // (`status='interrupted'` + `failureReason='process_crash'`).
+  const [resuming, setResuming] = useState(false);
   const [compareData, setCompareData] = useState(null);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState(null);
@@ -266,6 +269,30 @@ export default function RunDetail() {
       setRerunning(false);
     }
   }, [run, rerunning, navigate, showToast]);
+
+  // B1 (AUDIT-ROADMAP) — Resume a crash-recovered run.
+  // Backend gate: `status='interrupted'` AND `failureReason='process_crash'`.
+  // The new run runs only the tests missing from `run_test_results`, so the
+  // operator picks up where the SIGKILL / OOM kill left off instead of
+  // restarting from scratch.
+  const handleResume = useCallback(async () => {
+    if (resuming || !run) return;
+    setResuming(true);
+    try {
+      const result = await api.resumeRun(runId);
+      if (result?.runId) {
+        showToast(
+          `Resumed — ${result.remaining} of ${result.total} test${result.total !== 1 ? "s" : ""} re-dispatched (run ${result.runId.slice(0, 8)})`,
+          "success",
+        );
+        navigate(`/runs/${result.runId}`);
+      }
+    } catch (err) {
+      showToast(err?.body?.error || err?.message || "Resume failed.", "error");
+    } finally {
+      setResuming(false);
+    }
+  }, [run, runId, resuming, navigate, showToast]);
 
   // AUTO-010 — Track whether the initial auto-expand decision has been made
   // for the current run. Reset on `runId` change so navigating to a different
@@ -472,6 +499,13 @@ export default function RunDetail() {
   // MNT-010: Show re-run button for crawl/generate runs in terminal states
   const TERMINAL_STATUSES = new Set(["completed", "completed_empty", "failed", "interrupted", "aborted"]);
   const canRerun = (isCrawl || isGenerate) && TERMINAL_STATUSES.has(run.status);
+  // B1 (AUDIT-ROADMAP) — Show "Resume" only for crash-recovered test runs.
+  // Mirrors the backend gate exactly: status='interrupted' AND
+  // failureReason='process_crash'. User aborts and ordinary failures are
+  // NOT resumable — the operator must re-trigger via POST /run instead.
+  const canResume = !isCrawl && !isGenerate
+    && run.status === "interrupted"
+    && run.failureReason === "process_crash";
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -538,6 +572,16 @@ export default function RunDetail() {
               <Ban size={10} /> Aborted
             </span>
           )}
+          {run.status === "interrupted" && (
+            <span
+              className="badge badge-amber rd-badge-amber-inline"
+              title={run.failureReason === "process_crash"
+                ? "The server crashed mid-run — click Resume to re-run only the tests that didn't finish."
+                : "Run was interrupted before completion."}
+            >
+              <AlertTriangle size={10} /> Interrupted
+            </span>
+          )}
 
           {/* Browser engine (DIF-002b) — only meaningful for test runs.
               Crawl and generate runs are pinned to chromium. */}
@@ -581,6 +625,19 @@ export default function RunDetail() {
                   ? <RefreshCw size={12} className="spin" />
                   : <RotateCcw size={12} />}
                 {rerunning ? "Starting…" : "Re-run"}
+              </button>
+            )}
+            {canResume && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleResume}
+                disabled={resuming}
+                title="Resume — re-run only the tests that didn't finish before the server crash"
+              >
+                {resuming
+                  ? <RefreshCw size={12} className="spin" />
+                  : <RotateCcw size={12} />}
+                {resuming ? "Resuming…" : "Resume"}
               </button>
             )}
             {/* CAP-002 Phase 2 — per-shard trace dropdown when shardCount > 1

@@ -45,7 +45,9 @@ import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
+import * as runTestResultRepo from "./database/repositories/runTestResultRepo.js";
 import * as testFixtureRepo from "./database/repositories/testFixtureRepo.js";
+import { enqueue as enqueueDbWrite } from "./utils/dbWriteQueue.js";
 import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
@@ -713,6 +715,67 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       // synchronous (~1ms) so this adds negligible overhead per test.
       runRepo.save(run);
     }
+
+    // B1.1 (AUDIT-ROADMAP Bundle 1) — append-only checkpoint write to
+    // `run_test_results`. This row is the SOLE data source the resume
+    // endpoint (`POST /api/v1/runs/:runId/resume`) consults via
+    // `runTestResultRepo.getCompletedTestIds(runId)` to decide which
+    // tests to skip after a crash. Industry-standard crash-recovery
+    // checkpoints (GitHub Actions `re-run failed jobs`, CircleCI
+    // `rerun-from-failed`, Buildkite `retry job`, AWS Step Functions,
+    // Temporal workflow checkpoints) are durable, never lossy — losing
+    // a checkpoint row would force resume to re-execute a test that
+    // already completed, which can produce duplicate side-effects
+    // (created records, sent emails, charged payments) and break the
+    // "resume picks up where the crash left off" contract.
+    //
+    // Therefore: routed through `dbWriteQueue` with `priority: "durable"`
+    // so each write commits synchronously inside its own BEGIN/COMMIT
+    // before this call returns. Matches Postgres `synchronous_commit=on`
+    // / Kafka `acks=all` / MySQL `sync_binlog=1` for audit-class writes.
+    // The dbWriteQueue module's own JSDoc (`utils/dbWriteQueue.js:41`)
+    // documents this rule of thumb: "Audit / compliance / circuit-breaker
+    // writes → `durable`".
+    //
+    // Throughput cost: ~1–5 ms added per test result vs batched mode.
+    // Acceptable because (a) test execution itself takes seconds-to-
+    // minutes, so the durable write is <0.1% of wall-clock per test,
+    // and (b) SQLite WAL still amortises the BEGIN/COMMIT — measured
+    // overhead at parallelWorkers=10 is <5% even on chatty test suites.
+    //
+    // The legacy `runRepo.save(run)` / `runRepo.appendRunResults()`
+    // paths above are kept (single-shard rewrites the full JSON
+    // `results[]`; shard-mode splices via the atomic primitive) so
+    // pre-B1.1 consumers reading `run.results` keep working. The
+    // duplicate-write counter `app_run_test_result_duplicates_total
+    // {reason="resume_replay"}` makes occasional resume-path replays
+    // (when a near-persisted write was already committed) observable
+    // without alerting — only `reason="duplicate_dispatch"` is a bug.
+    enqueueDbWrite(
+      () => {
+        runTestResultRepo.append(run.id, {
+          testId: test.id,
+          status: result.status,
+          error: result.error || null,
+          errorCategory: result.errorCategory || null,
+          duration: Number.isFinite(result.durationMs) ? result.durationMs : null,
+          retryCount: result.retryCount || 0,
+          iterationIndex: Number.isInteger(result.iterationIndex) ? result.iterationIndex : 0,
+          // Lean artifact projection — only the paths the resume endpoint
+          // and CI consumers need. Skip screenshot / video buffers (heavy)
+          // and webVitals / coverage payloads (rehydrated from legacy
+          // `runs.results` until the follow-up flips `getById` to the new
+          // source).
+          artifacts: {
+            screenshotPath: result.screenshotPath || null,
+            videoPath: result.videoPath || null,
+            tracePath: result.tracePath || null,
+          },
+          healingEvents: Array.isArray(result.healingEvents) ? result.healingEvents : null,
+        });
+      },
+      { priority: "durable" },
+    );
 
     // Broadcast a snapshot after each result so the frontend progress bar
     // updates in real time (especially important during parallel execution

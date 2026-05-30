@@ -72,6 +72,11 @@
       "role": "qa_lead",
       "source": "backend/src/routes/runs.js:257"
     },
+    "POST /api/v1/runs/:runId/resume": {
+      "role": "admin",
+      "source": "backend/src/routes/runs.js",
+      "$comment": "B1 (AUDIT-ROADMAP) — resume a crash-recovered run (status='interrupted', failureReason='process_crash'). Admin-gated because resume replays against the original environment + credentials; mirrors GitHub Actions 're-run failed jobs' / CircleCI 'rerun-from-failed' / Buildkite 'retry job'. Skips tests with a row in `run_test_results` so the dispatch slice is exactly the missing tail."
+    },
     "POST /api/v1/projects/:id/trigger-tokens": {
       "role": "admin",
       "source": "backend/src/routes/runs.js:379"

@@ -21,6 +21,10 @@
 import assert from "node:assert/strict";
 import { getDatabase } from "../src/database/sqlite.js";
 import * as healingRepo from "../src/database/repositories/healingRepo.js";
+// B1.2 (AUDIT-ROADMAP) — `healingRepo.set` is now queued by default (spec
+// `:176-179`). Tests that follow "write → read" drain the queue between
+// the two so the read sees the inserted rows.
+import { drain as drainDbWriteQueue } from "../src/utils/dbWriteQueue.js";
 
 let passed = 0;
 let failed = 0;
@@ -63,6 +67,7 @@ test("countByTestIds sums healing rows across small input arrays (single chunk)"
   healingRepo.set("TC-PR11-A::click::a", { strategyIndex: 0, succeededAt: now, failCount: 0 });
   healingRepo.set("TC-PR11-A::fill::b",  { strategyIndex: 1, succeededAt: now, failCount: 0 });
   healingRepo.set("TC-PR11-B::click::c", { strategyIndex: 2, succeededAt: null, failCount: 1 });
+  drainDbWriteQueue(); // B1.2 — flush queued INSERTs before counting.
 
   assert.equal(healingRepo.countByTestIds(["TC-PR11-A", "TC-PR11-B"]), 3);
   // Only the two rows with strategyIndex >= 0 AND succeededAt count as successes.
@@ -80,6 +85,7 @@ test("base-ID dedup: passing both `TC-X` and `TC-X@v2` does NOT double-count ove
   const now = new Date().toISOString();
   healingRepo.set("TC-PR11-V@v2::click::submit", { strategyIndex: 0, succeededAt: now, failCount: 0 });
   healingRepo.set("TC-PR11-V::click::login",     { strategyIndex: 0, succeededAt: now, failCount: 0 });
+  drainDbWriteQueue(); // B1.2 — flush before count/get.
 
   const cnt = healingRepo.countByTestIds(["TC-PR11-V", "TC-PR11-V@v2"]);
   assert.equal(cnt, 2, "two healing rows must be counted exactly twice — not four");
@@ -100,6 +106,7 @@ test("counts work across MORE than one chunk (>100 base IDs) without losing rows
     healingRepo.set(`${id}::click::x`, { strategyIndex: 0, succeededAt: now, failCount: 0 });
     ids.push(id);
   }
+  drainDbWriteQueue(); // B1.2 — flush all 150 queued INSERTs before counting.
   assert.equal(healingRepo.countByTestIds(ids), 150, "every row must be counted exactly once across chunk boundaries");
   assert.equal(healingRepo.countSuccessesByTestIds(ids), 150);
   const rows = healingRepo.getByTestIds(ids);

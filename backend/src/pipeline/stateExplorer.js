@@ -33,6 +33,7 @@ import { extractFlows, flowToJourney } from "./flowGraph.js";
 import { extractPathPatternWithParams, stripNoiseParams } from "./smartCrawl.js";
 import { log, logWarn, logSuccess, emitRunEvent } from "../utils/runLogger.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as crawlSnapshotRepo from "../database/repositories/crawlSnapshotRepo.js";
 import { signRunArtifacts } from "../middleware/appSetup.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { performAutoLogin } from "./autoLogin.js";
@@ -237,6 +238,30 @@ async function captureState(page, ctx) {
     if (!ctx.snapshotsByUrl[snapshot.url]) {
       ctx.snapshotsByUrl[snapshot.url] = snapshot;
     }
+    // B1.3 (AUDIT-ROADMAP Bundle 1) — stream the novel state to
+    // `crawl_snapshots` immediately. Idempotent on (runId, url) — re-
+    // entries at the same URL with a different state fingerprint are
+    // dropped by the UNIQUE constraint, which is correct for B1.3's
+    // "one snapshot per page" contract. B3's per-state persistence would
+    // require a richer key (runId, url, stateFp); deferred until then.
+    // Best-effort: a persistence hiccup must never fail the explorer.
+    //
+    // `loadMs` is intentionally not passed: explorer states are captured
+    // POST-ACTION (after a click / form fill), not post-navigation, so
+    // there's no `page.goto()` wall-clock to record. `takeSnapshot` does
+    // not produce a `_loadMs` field, and synthesising one from action
+    // timing would mix two different signals (navigation vs interaction)
+    // and pollute B2's adaptive-timeout p95 in `crawlSnapshotRepo.
+    // getLoadTimesByRunId()`. Only `crawlBrowser.js` records `loadMs`,
+    // exclusively around `page.goto()`. Explorer rows therefore store
+    // `loadMs: NULL` and are filtered out by B2's percentile query.
+    if (ctx.run?.id) {
+      try {
+        crawlSnapshotRepo.save(ctx.run.id, snapshot.url, snapshot);
+      } catch (persistErr) {
+        logWarn(ctx.run, `Failed to persist explorer snapshot for ${snapshot.url}: ${persistErr.message}`);
+      }
+    }
   }
   return { snapshot, fp, isNovel };
 }
@@ -391,7 +416,10 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
     logWarn(run, `launchBrowser failed for project=${project?.id} tuning=${JSON.stringify(tuning || {})}: ${launchErr.message}`);
     throw launchErr;
   }
-  const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [], limits };
+  // B1.3 (AUDIT-ROADMAP) — `ctx.run` lets `captureState` persist each novel
+  // snapshot to `crawl_snapshots` without rippling a new arg through every
+  // helper callsite.
+  const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [], limits, run };
   let startState = null;
   let harCapture = null;
 

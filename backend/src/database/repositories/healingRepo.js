@@ -4,6 +4,17 @@
  */
 
 import { getDatabase } from "../sqlite.js";
+// B1.2 (AUDIT-ROADMAP) — route the hot `set()` write through the
+// write-batching queue so `parallelWorkers > 1` worker fan-outs amortise
+// the SQLite BEGIN/COMMIT round-trip. Spec at
+// `docs/roadmap/AUDIT-ROADMAP.md:176-179` enumerates `healingRepo.set()`
+// as one of the three highest-frequency paths to route through the queue;
+// without this wiring the throughput acceptance criterion at `:279-280`
+// (≥ 20% p50 reduction at parallelWorkers=10) cannot be met. The reads
+// (`get`, `getByTestId`, `countByTestIds`, etc.) drain the queue first so
+// callers always see the latest writes. The drain is a no-op when the
+// queue is empty, so the per-read overhead is negligible.
+import { enqueue as enqueueDbWrite, drain as drainDbWriteQueue } from "../../utils/dbWriteQueue.js";
 
 /**
  * Get a healing entry by key.
@@ -11,6 +22,8 @@ import { getDatabase } from "../sqlite.js";
  * @returns {Object|undefined}
  */
 export function get(key) {
+  // B1.2 — flush any queued `set()` writes before reading.
+  drainDbWriteQueue();
   const db = getDatabase();
   return db.prepare("SELECT * FROM healing_history WHERE key = ?").get(key) || undefined;
 }
@@ -73,21 +86,28 @@ function chunkedTestIdQuery(db, testIds, sqlFn) {
 
 export function set(key, entry) {
   const db = getDatabase();
+  // Schema migration must run synchronously — the queued INSERT depends
+  // on the column existing.
   ensureStrategyVersionColumn(db);
-  db.prepare(`
-    INSERT INTO healing_history (key, strategyIndex, succeededAt, failCount, strategyVersion)
-    VALUES (@key, @strategyIndex, @succeededAt, @failCount, @strategyVersion)
-    ON CONFLICT(key) DO UPDATE SET
-      strategyIndex = @strategyIndex,
-      succeededAt = @succeededAt,
-      failCount = @failCount,
-      strategyVersion = @strategyVersion
-  `).run({
+  // Snapshot params up-front so a caller mutating `entry` between
+  // enqueue and flush can't change what gets persisted.
+  const params = {
     key,
     strategyIndex: entry.strategyIndex ?? -1,
     succeededAt: entry.succeededAt || null,
     failCount: entry.failCount || 0,
     strategyVersion: entry.strategyVersion ?? null,
+  };
+  enqueueDbWrite(() => {
+    db.prepare(`
+      INSERT INTO healing_history (key, strategyIndex, succeededAt, failCount, strategyVersion)
+      VALUES (@key, @strategyIndex, @succeededAt, @failCount, @strategyVersion)
+      ON CONFLICT(key) DO UPDATE SET
+        strategyIndex = @strategyIndex,
+        succeededAt = @succeededAt,
+        failCount = @failCount,
+        strategyVersion = @strategyVersion
+    `).run(params);
   });
 }
 
@@ -96,6 +116,7 @@ export function set(key, entry) {
  * @returns {Object<string, Object>}
  */
 export function getAllAsDict() {
+  drainDbWriteQueue(); // B1.2 — see `get()` for rationale.
   const db = getDatabase();
   const rows = db.prepare("SELECT * FROM healing_history").all();
   const dict = {};
@@ -115,6 +136,7 @@ export function getAllAsDict() {
  * @returns {Object<string, Object>} Map of `"action::label"` → entry.
  */
 export function getByTestId(testId) {
+  drainDbWriteQueue(); // B1.2 — see `get()` for rationale.
   const db = getDatabase();
   // Ensure the strategyVersion column exists before querying — the ORDER BY
   // clause references it, but the column is not in the initial schema (001).
@@ -176,6 +198,7 @@ export function getByTestId(testId) {
  */
 export function getByTestIds(testIds) {
   if (!testIds || testIds.length === 0) return [];
+  drainDbWriteQueue(); // B1.2 — see `get()` for rationale.
   const db = getDatabase();
   ensureStrategyVersionColumn(db);
   // Chunk the OR fanout, then concat. We re-sort the merged result so
@@ -205,6 +228,9 @@ export function getByTestIds(testIds) {
  * @param {string[]} testIds
  */
 export function deleteByTestIds(testIds) {
+  // B1.2 — flush queued `set()` writes so an in-flight INSERT can't
+  // land AFTER this DELETE and leave a stale row.
+  drainDbWriteQueue();
   const db = getDatabase();
   const stmt = db.prepare("DELETE FROM healing_history WHERE key LIKE ?");
   const txn = db.transaction(() => {
@@ -223,6 +249,7 @@ export function deleteByTestIds(testIds) {
  */
 export function countByTestIds(testIds) {
   if (!testIds || testIds.length === 0) return 0;
+  drainDbWriteQueue(); // B1.2 — see `get()` for rationale.
   const db = getDatabase();
   const counts = chunkedTestIdQuery(db, testIds, (clauses, params) =>
     db.prepare(`SELECT COUNT(*) as cnt FROM healing_history WHERE ${clauses}`).get(...params).cnt
@@ -237,6 +264,7 @@ export function countByTestIds(testIds) {
  */
 export function countSuccessesByTestIds(testIds) {
   if (!testIds || testIds.length === 0) return 0;
+  drainDbWriteQueue(); // B1.2 — see `get()` for rationale.
   const db = getDatabase();
   const counts = chunkedTestIdQuery(db, testIds, (clauses, params) =>
     db.prepare(

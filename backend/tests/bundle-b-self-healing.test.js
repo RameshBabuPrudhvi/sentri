@@ -12,6 +12,12 @@ import {
   recordHealingFailure,
   STRATEGY_VERSION,
 } from "../src/selfHealing.js";
+// B1.2 (AUDIT-ROADMAP) — `healingRepo.set` is now routed through the
+// write-batching queue per spec at `docs/roadmap/AUDIT-ROADMAP.md:176-179`.
+// Tests that follow "write → read" must drain the queue between the two
+// or the read sees stale state. `recordHealing` /`recordHealingFailure`
+// and the direct `healingRepo.set` calls in this file all need this.
+import { drain as drainDbWriteQueue } from "../src/utils/dbWriteQueue.js";
 
 function test(name, fn) {
   return Promise.resolve()
@@ -39,6 +45,9 @@ await test("#7 stage-7 pixelmatch decline calls recordHealingFailure", () => {
   recordHealingFailure(testId, "click", "Buy");
   recordHealingFailure(testId, "click", "Buy");
   recordHealingFailure(testId, "click", "Buy");
+  // B1.2 — `recordHealing` / `recordHealingFailure` route through the
+  // queue; flush before `getHealingHint` reads the post-decay state.
+  drainDbWriteQueue();
   assert.equal(getHealingHint(testId, "click", "Buy"), -1,
     "three stage-7 declines should demote the hint");
 });
@@ -49,9 +58,13 @@ await test("#8 version_mismatch discards bump app_healing_hints_discarded_total"
   const healingRepo = await import("../src/database/repositories/healingRepo.js");
   const testId = `bundle-b-fix8-${Date.now()}`;
   recordHealing(testId, "click", "Submit", 0);
+  // B1.2 — flush before reading the row back.
+  drainDbWriteQueue();
   const key = `${testId}::click::Submit`;
   const row = healingRepo.get(key);
   healingRepo.set(key, { ...row, strategyVersion: STRATEGY_VERSION + 999 });
+  // Flush the second set before `getHealingHint` consults it.
+  drainDbWriteQueue();
   const valueOf = (m) => m.values.find((v) => v.labels.reason === "version_mismatch")?.value || 0;
   const before = valueOf(await healingHintsDiscardedTotal.get());
   const idx = getHealingHint(testId, "click", "Submit");
@@ -87,7 +100,12 @@ await test("#10 stale capped hint > decay window is re-eligible (failCount reset
     succeededAt: new Date(eightDaysAgoMs).toISOString(),
     failCount: 3,
   });
+  // B1.2 — flush the seeded row before `getHealingHint` runs the decay
+  // reset path. `getHealingHint` itself also calls `healingRepo.set` (to
+  // persist failCount=0), so drain again before the read-back.
+  drainDbWriteQueue();
   const idx = getHealingHint(testId, "click", "Pay");
+  drainDbWriteQueue();
   assert.equal(idx, 3, "stale hint should decay and become re-eligible");
   assert.equal(healingRepo.get(key).failCount, 0, "failCount should have been reset");
 });

@@ -23,6 +23,11 @@ import * as runLogRepo from "../src/database/repositories/runLogRepo.js";
 import * as runRepo from "../src/database/repositories/runRepo.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import { log, logWarn, logError, logSuccess } from "../src/utils/runLogger.js";
+// B1.2 (AUDIT-ROADMAP) — `runLogRepo.appendLog` is now queued by default
+// (spec at `docs/roadmap/AUDIT-ROADMAP.md:176-179`). Tests that need
+// read-after-write visibility flush the queue before reading. Mirror of
+// the pattern in `db-write-queue.test.js`.
+import { drain as drainDbWriteQueue } from "../src/utils/dbWriteQueue.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,9 +59,26 @@ function resetDb() {
 let passed = 0;
 let failed = 0;
 
+// B1.2 — `runLogRepo.appendLog` is now queued by default (spec
+// `:176-179`), so any read-after-write in this file must flush the
+// queue first. Wrap the readers in module-local shims that drain
+// before delegating — ES-module namespace imports are sealed so we
+// can't monkey-patch `runLogRepo.*` directly; using shadowed local
+// names keeps the rest of the test bodies unchanged.
+const getByRunId = (runId) => { drainDbWriteQueue(); return runLogRepo.getByRunId(runId); };
+const getMessagesByRunId = (runId) => { drainDbWriteQueue(); return runLogRepo.getMessagesByRunId(runId); };
+const countByRunId = (runId) => { drainDbWriteQueue(); return runLogRepo.countByRunId(runId); };
+// Wrap `runRepo.getById` similarly — the integration tests rehydrate
+// `run.logs` through it, which calls `runLogRepo.getMessagesByRunId`
+// internally; a stale queue would surface as empty `run.logs`.
+const getRunById = (id) => { drainDbWriteQueue(); return runRepo.getById(id); };
+
 function test(name, fn) {
   try {
     fn();
+    // Drain at end too so cleanup (`deleteByRunId` / `hardDeleteById`)
+    // doesn't race a still-pending append from the test body.
+    drainDbWriteQueue();
     console.log(`  ✅ ${name}`);
     passed++;
   } catch (err) {
@@ -77,7 +99,7 @@ console.log("\n── runLogRepo ──");
 test("appendLog inserts a row with correct fields", () => {
   const runId = uid("RUN");
   runLogRepo.appendLog(runId, "info", "[12:00:00] hello");
-  const rows = runLogRepo.getByRunId(runId);
+  const rows = getByRunId(runId);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].runId, runId);
   assert.equal(rows[0].level, "info");
@@ -93,7 +115,7 @@ test("seq is monotonically increasing within a run", () => {
   runLogRepo.appendLog(runId, "info",  "msg 1");
   runLogRepo.appendLog(runId, "warn",  "msg 2");
   runLogRepo.appendLog(runId, "error", "msg 3");
-  const rows = runLogRepo.getByRunId(runId);
+  const rows = getByRunId(runId);
   assert.deepEqual(rows.map(r => r.seq), [1, 2, 3]);
   runLogRepo.deleteByRunId(runId);
 });
@@ -104,8 +126,8 @@ test("seq counters are independent between runs", () => {
   runLogRepo.appendLog(runA, "info", "A-1");
   runLogRepo.appendLog(runA, "info", "A-2");
   runLogRepo.appendLog(runB, "info", "B-1");
-  const rowsA = runLogRepo.getByRunId(runA);
-  const rowsB = runLogRepo.getByRunId(runB);
+  const rowsA = getByRunId(runA);
+  const rowsB = getByRunId(runB);
   assert.deepEqual(rowsA.map(r => r.seq), [1, 2]);
   assert.deepEqual(rowsB.map(r => r.seq), [1]);
   runLogRepo.deleteByRunId(runA);
@@ -117,13 +139,13 @@ test("getByRunId returns rows ordered by seq ASC", () => {
   runLogRepo.appendLog(runId, "info", "first");
   runLogRepo.appendLog(runId, "warn", "second");
   runLogRepo.appendLog(runId, "info", "third");
-  const rows = runLogRepo.getByRunId(runId);
+  const rows = getByRunId(runId);
   assert.deepEqual(rows.map(r => r.message), ["first", "second", "third"]);
   runLogRepo.deleteByRunId(runId);
 });
 
 test("getByRunId returns empty array for unknown runId", () => {
-  const rows = runLogRepo.getByRunId("RUN-DOES-NOT-EXIST");
+  const rows = getByRunId("RUN-DOES-NOT-EXIST");
   assert.deepEqual(rows, []);
 });
 
@@ -131,19 +153,19 @@ test("getMessagesByRunId returns plain string array", () => {
   const runId = uid("RUN");
   runLogRepo.appendLog(runId, "info", "line one");
   runLogRepo.appendLog(runId, "info", "line two");
-  const msgs = runLogRepo.getMessagesByRunId(runId);
+  const msgs = getMessagesByRunId(runId);
   assert.deepEqual(msgs, ["line one", "line two"]);
   runLogRepo.deleteByRunId(runId);
 });
 
 test("countByRunId returns accurate row count", () => {
   const runId = uid("RUN");
-  assert.equal(runLogRepo.countByRunId(runId), 0);
+  assert.equal(countByRunId(runId), 0);
   runLogRepo.appendLog(runId, "info", "a");
   runLogRepo.appendLog(runId, "info", "b");
-  assert.equal(runLogRepo.countByRunId(runId), 2);
+  assert.equal(countByRunId(runId), 2);
   runLogRepo.deleteByRunId(runId);
-  assert.equal(runLogRepo.countByRunId(runId), 0);
+  assert.equal(countByRunId(runId), 0);
 });
 
 test("deleteByRunId removes only rows for the target run", () => {
@@ -151,17 +173,21 @@ test("deleteByRunId removes only rows for the target run", () => {
   const runB = uid("RUN");
   runLogRepo.appendLog(runA, "info", "keep");
   runLogRepo.appendLog(runB, "info", "delete me");
+  // Drain before delete so the queued INSERT lands before the DELETE.
+  drainDbWriteQueue();
   runLogRepo.deleteByRunId(runB);
-  assert.equal(runLogRepo.countByRunId(runA), 1);
-  assert.equal(runLogRepo.countByRunId(runB), 0);
+  assert.equal(countByRunId(runA), 1);
+  assert.equal(countByRunId(runB), 0);
   runLogRepo.deleteByRunId(runA);
 });
 
 test("deleteByRunIds batch-removes rows for multiple runs", () => {
   const ids = [uid("RUN"), uid("RUN"), uid("RUN")];
   for (const id of ids) runLogRepo.appendLog(id, "info", "msg");
+  // Flush queued appends before the batch DELETE.
+  drainDbWriteQueue();
   runLogRepo.deleteByRunIds(ids);
-  for (const id of ids) assert.equal(runLogRepo.countByRunId(id), 0);
+  for (const id of ids) assert.equal(countByRunId(id), 0);
 });
 
 test("deleteByRunIds is a no-op for empty array", () => {
@@ -175,7 +201,7 @@ test("level values are preserved correctly", () => {
   runLogRepo.appendLog(runId, "info",  "info msg");
   runLogRepo.appendLog(runId, "warn",  "warn msg");
   runLogRepo.appendLog(runId, "error", "error msg");
-  const rows = runLogRepo.getByRunId(runId);
+  const rows = getByRunId(runId);
   assert.deepEqual(rows.map(r => r.level), ["info", "warn", "error"]);
   runLogRepo.deleteByRunId(runId);
 });
@@ -193,7 +219,7 @@ test("runRepo.create() + getById() hydrates logs from run_logs", () => {
   // Manually insert some log rows (simulates runLogger.log())
   runLogRepo.appendLog(run.id, "info", "[ts] step one");
   runLogRepo.appendLog(run.id, "warn", "[ts] step two");
-  const fetched = runRepo.getById(run.id);
+  const fetched = getRunById(run.id);
   assert.deepEqual(fetched.logs, ["[ts] step one", "[ts] step two"]);
   runRepo.hardDeleteById(run.id);
 });
@@ -201,7 +227,7 @@ test("runRepo.create() + getById() hydrates logs from run_logs", () => {
 test("runRepo.getById() returns logs:[] when run has no log rows", () => {
   const run = makeRun(proj.id);
   runRepo.create(run);
-  const fetched = runRepo.getById(run.id);
+  const fetched = getRunById(run.id);
   assert.deepEqual(fetched.logs, []);
   runRepo.hardDeleteById(run.id);
 });
@@ -210,9 +236,11 @@ test("runRepo.hardDeleteById() cascades into run_logs", () => {
   const run = makeRun(proj.id);
   runRepo.create(run);
   runLogRepo.appendLog(run.id, "info", "will be purged");
-  assert.equal(runLogRepo.countByRunId(run.id), 1);
+  assert.equal(countByRunId(run.id), 1);
+  // Drain so the queued INSERT lands before the cascade DELETE.
+  drainDbWriteQueue();
   runRepo.hardDeleteById(run.id);
-  assert.equal(runLogRepo.countByRunId(run.id), 0);
+  assert.equal(countByRunId(run.id), 0);
 });
 
 test("runRepo.hardDeleteByProjectId() cascades into run_logs", () => {
@@ -224,9 +252,11 @@ test("runRepo.hardDeleteByProjectId() cascades into run_logs", () => {
   runRepo.create(run2);
   runLogRepo.appendLog(run1.id, "info", "log A");
   runLogRepo.appendLog(run2.id, "info", "log B");
+  // Drain before the cascade so queued INSERTs land first.
+  drainDbWriteQueue();
   runRepo.hardDeleteByProjectId(localProj.id);
-  assert.equal(runLogRepo.countByRunId(run1.id), 0);
-  assert.equal(runLogRepo.countByRunId(run2.id), 0);
+  assert.equal(countByRunId(run1.id), 0);
+  assert.equal(countByRunId(run2.id), 0);
 });
 
 // ─── Integration: runLogger ───────────────────────────────────────────────────
@@ -238,12 +268,12 @@ test("log() persists entry to run_logs AND appends to run.logs array", () => {
   run.logs = [];
   runRepo.create(run);
   log(run, "test message");
-  // In-memory array updated
+  // In-memory array updated synchronously
   assert.equal(run.logs.length, 1);
   assert.ok(run.logs[0].includes("test message"));
-  // Persisted to run_logs
-  assert.equal(runLogRepo.countByRunId(run.id), 1);
-  const rows = runLogRepo.getByRunId(run.id);
+  // Persisted to run_logs (after queue drain via the wrapped readers)
+  assert.equal(countByRunId(run.id), 1);
+  const rows = getByRunId(run.id);
   assert.ok(rows[0].message.includes("test message"));
   assert.equal(rows[0].level, "info");
   runRepo.hardDeleteById(run.id);
@@ -254,7 +284,7 @@ test("logWarn() stores level=warn in run_logs", () => {
   run.logs = [];
   runRepo.create(run);
   logWarn(run, "something suspicious");
-  const rows = runLogRepo.getByRunId(run.id);
+  const rows = getByRunId(run.id);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].level, "warn");
   assert.ok(rows[0].message.includes("something suspicious"));
@@ -266,7 +296,7 @@ test("logError() stores level=error in run_logs", () => {
   run.logs = [];
   runRepo.create(run);
   logError(run, "something broke");
-  const rows = runLogRepo.getByRunId(run.id);
+  const rows = getByRunId(run.id);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].level, "error");
   runRepo.hardDeleteById(run.id);
@@ -277,7 +307,7 @@ test("logSuccess() stores level=info in run_logs", () => {
   run.logs = [];
   runRepo.create(run);
   logSuccess(run, "all done");
-  const rows = runLogRepo.getByRunId(run.id);
+  const rows = getByRunId(run.id);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].level, "info");
   assert.ok(rows[0].message.includes("all done"));
@@ -291,7 +321,7 @@ test("multiple log() calls produce monotonically increasing seq", () => {
   log(run, "alpha");
   logWarn(run, "beta");
   logError(run, "gamma");
-  const rows = runLogRepo.getByRunId(run.id);
+  const rows = getByRunId(run.id);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map(r => r.seq), [1, 2, 3]);
   // In-memory array and DB are in sync
@@ -307,8 +337,8 @@ test("runRepo.save() does not write logs column back to runs table", () => {
   // Save the run (as pipeline code does after every step)
   runRepo.save(run);
   // The logs must come from run_logs, not the runs.logs column
-  const fetched = runRepo.getById(run.id);
-  assert.deepEqual(fetched.logs, runLogRepo.getMessagesByRunId(run.id));
+  const fetched = getRunById(run.id);
+  assert.deepEqual(fetched.logs, getMessagesByRunId(run.id));
   // Verify the runs.logs column is not being written (still NULL or '[]')
   const db = getDatabase();
   const raw = db.prepare("SELECT logs FROM runs WHERE id = ?").get(run.id);

@@ -535,3 +535,54 @@ export const browserPoolDisconnectsTotal = new client.Counter({
   labelNames: ["type"],
   registers: [register],
 });
+
+// ─── B1.2 — DB write-batching queue ──────────────────────────────────────────
+// Three metrics that together answer "is the SQLite write queue healthy?":
+//   • depth gauge — current backlog; sustained non-zero signals undersized
+//     batch / flush interval relative to write volume.
+//   • batch duration — flush wall-clock; drives the queue-write latency SLO.
+//   • batch size — operations per flush; combined with depth tells operators
+//     whether flushes are size-triggered (good — saturating the batch) or
+//     time-triggered (queue is under-utilised and the per-op overhead of
+//     setTimeout dominates).
+const DB_BATCH_DURATION_BUCKETS = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1];
+const DB_BATCH_SIZE_BUCKETS = [1, 5, 10, 25, 50, 100, 250];
+
+export const dbWriteQueueDepth = new client.Gauge({
+  name: "app_db_write_queue_depth",
+  help: "B1.2 — current size of the SQLite write-batching queue. Sustained non-zero values signal `DB_WRITE_BATCH_SIZE` / `DB_WRITE_FLUSH_MS` are undersized relative to write volume — operators tune via env. Postgres deployments always read 0 (queue is a passthrough).",
+  registers: [register],
+});
+
+export const dbWriteBatchDurationSeconds = new client.Histogram({
+  name: "app_db_write_batch_duration_seconds",
+  help: "B1.2 — wall-clock duration per batched-write flush. Drives the queue-write latency SLO and helps detect SQLite WAL contention regressions.",
+  buckets: DB_BATCH_DURATION_BUCKETS,
+  registers: [register],
+});
+
+export const dbWriteBatchSize = new client.Histogram({
+  name: "app_db_write_batch_size",
+  help: "B1.2 — operations per flush. Combined with `app_db_write_queue_depth`, distinguishes size-triggered flushes (saturating the batch) from time-triggered ones (queue under-utilised).",
+  buckets: DB_BATCH_SIZE_BUCKETS,
+  registers: [register],
+});
+
+// B1.1 — Duplicate-write counter on the `run_test_results` append path.
+// Bumped every time `runTestResultRepo.append()` detects an existing row
+// for `(runId, testId, iterationIndex)`. `reason` is closed-set so
+// cardinality stays bounded:
+//   • resume_replay     — expected when `POST /runs/:id/resume` re-enqueues a
+//                         test whose result was almost-persisted before crash.
+//   • duplicate_dispatch — unexpected; indicates a bug double-dispatching the
+//                         same test in the runner / shard worker. Any
+//                         sustained non-zero rate fires an alert.
+// Matches the Splunk / Datadog convention of logging every dedup decision
+// rather than silently swallowing — operators must be able to distinguish
+// "the resume path worked" from "we have a write-amplification bug".
+export const runTestResultDuplicatesTotal = new client.Counter({
+  name: "app_run_test_result_duplicates_total",
+  help: "B1.1 — duplicate-write rejections on `run_test_results.append`. `reason='resume_replay'` is expected (POST /runs/:id/resume replaying a near-persisted result); `reason='duplicate_dispatch'` signals a runner bug double-dispatching the same test — alert on any sustained non-zero rate.",
+  labelNames: ["reason"],
+  registers: [register],
+});
