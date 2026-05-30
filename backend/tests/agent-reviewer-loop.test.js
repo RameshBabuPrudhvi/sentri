@@ -298,6 +298,85 @@ test("loop records termination metric with bounded outcome label", async () => {
   assert.equal(sawAccept, true);
 });
 
+// Bundle-A fix #3 — pin the `app_reviewer_verdict_downgraded_total`
+// counter increments on every downgrade. Pre-fix the downgrade only
+// emitted an `agent_event` row; operators had no Prometheus signal to
+// alert on reviewer-prompt-drift or hallucinated testIds.
+test("downgrade bumps app_reviewer_verdict_downgraded_total{reason=unknown_test_ids}", async () => {
+  const metric = register.getSingleMetric("app_reviewer_verdict_downgraded_total");
+  assert.ok(metric, "counter must be registered");
+
+  const beforeJson = await metric.get();
+  const beforeVal = beforeJson.values.find(
+    (v) => v.labels?.reason === "unknown_test_ids",
+  )?.value ?? 0;
+
+  // Drive a downgrade: reviewer requests revision with an unknown testId.
+  // `validateRevisionIssues` filters every issue out → `safeIssues.length
+  // === 0` → downgrade path fires → counter increments.
+  await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async ({ round }) => round === 0
+      ? { verdict: "revise", artifact: { issues: [{ testId: "missing", problem: "bad id" }] } }
+      : { verdict: "accept" },
+    maxReviewRounds: 2,
+  });
+
+  const afterJson = await metric.get();
+  const afterVal = afterJson.values.find(
+    (v) => v.labels?.reason === "unknown_test_ids",
+  )?.value ?? 0;
+  assert.equal(
+    afterVal,
+    beforeVal + 1,
+    `counter should increment by 1 on downgrade, before=${beforeVal} after=${afterVal}`,
+  );
+});
+
+test("non-downgrade rounds do NOT bump app_reviewer_verdict_downgraded_total", async () => {
+  // Negative-path guard: a clean accept and a valid request_revision
+  // (with a known testId) must both leave the counter untouched.
+  const metric = register.getSingleMetric("app_reviewer_verdict_downgraded_total");
+  const beforeVal = (await metric.get()).values.find(
+    (v) => v.labels?.reason === "unknown_test_ids",
+  )?.value ?? 0;
+
+  await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => artifact,
+    runReviewer: async ({ round }) => round === 0
+      ? { intent: "request_revision", artifact: { issues: [{ testId: "t1", problem: "weak assertion" }] } }
+      : { intent: "accept" },
+    maxReviewRounds: 3,
+  });
+
+  const afterVal = (await metric.get()).values.find(
+    (v) => v.labels?.reason === "unknown_test_ids",
+  )?.value ?? 0;
+  assert.equal(afterVal, beforeVal, "valid revise→accept must not bump the downgrade counter");
+});
+
+// Bundle-A fix #5 — envelope-shape `{ intent: "revise" }` must drive a
+// real revision round (mirroring the prompt-shape `verdict: "revise"`
+// remap). Pre-fix `"revise"` fell through `LOOP_INTENT_VOCAB` and
+// silently normalised to `"accept"`, burning the requested revision.
+test("intent='revise' is normalised to request_revision (envelope/verdict parity)", async () => {
+  let authorCalls = 0;
+  const out = await runReviewerAuthorLoop({ tests: [{ id: "t1" }] }, {
+    runAuthor: async ({ artifact }) => { authorCalls += 1; return artifact; },
+    runReviewer: async ({ round }) => round === 0
+      // Envelope-shape with the prompt-vocabulary token.
+      ? { intent: "revise", artifact: { issues: [{ testId: "t1", problem: "weak assertion" }] } }
+      : { intent: "accept" },
+    maxReviewRounds: 3,
+  });
+  // Round 1 acceptance (the revise on round 0 actually drove a second
+  // round) — the pre-fix behaviour would terminate on round 0 with
+  // authorCalls === 1.
+  assert.equal(out.outcome, "accept");
+  assert.equal(out.round, 1, "accepted on the second round (revise was honoured)");
+  assert.equal(authorCalls, 2, "author called twice — once initial, once for the revision");
+});
+
 test("loop normalises unrecognized reviewer.intent values to accept (no silent unsanitized loop)", async () => {
   // Closed-set guard: the six envelope INTENTS that aren't loop
   // vocabulary (`handoff`, `question`, `answer`, `final`, `tool_call`,

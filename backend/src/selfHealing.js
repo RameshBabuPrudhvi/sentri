@@ -32,6 +32,7 @@
 
 import * as healingRepo from "./database/repositories/healingRepo.js";
 import { looksLikeCssSelector } from "./utils/selectorHeuristics.js";
+import { healingHintsDiscardedTotal } from "./utils/metrics.js";
 // AUTO-023 Bundle 2 — emit a healer-thread envelope on every vision-heal
 // outcome so the run's `agent_messages` thread carries a real handoff
 // (healer → reviewer) the operator can replay alongside the per-stage
@@ -89,11 +90,29 @@ export function getHealingHint(testId, action, label) {
   if (!testId || !action || typeof label !== "string") return -1;
   const key = `${testId}::${action}::${label}`;
   const entry = healingRepo.get(key);
-  if ((entry?.failCount || 0) >= HEALING_HINT_MAX_FAILS) return -1;
+  if (!entry) return -1;
+  // Bundle-B fix #10 — TTL-based decay. A hint capped on failCount but whose
+  // `succeededAt` is older than the decay window gets a second chance: reset
+  // failCount to 0 so the next run can re-try the strategy. The previous
+  // success is evidence the strategy DID work once; a single transient page
+  // change shouldn't condemn it forever.
+  if ((entry.failCount || 0) >= HEALING_HINT_MAX_FAILS) {
+    if (entry.succeededAt && (Date.now() - Date.parse(entry.succeededAt)) > HEALING_HINT_DECAY_MS) {
+      healingRepo.set(key, { ...entry, failCount: 0 });
+      entry.failCount = 0;
+    } else {
+      return -1;
+    }
+  }
   // Ignore hints from a different strategy version — the strategyIndex
   // may point to a different strategy after strategies were reordered.
-  if (entry?.strategyVersion != null && entry.strategyVersion !== STRATEGY_VERSION) return -1;
-  return entry?.strategyIndex ?? -1;
+  // Bundle-B fix #8 — bump the discarded-hints metric so dashboards can
+  // surface a stale-hint backlog instead of it being silently invisible.
+  if (entry.strategyVersion != null && entry.strategyVersion !== STRATEGY_VERSION) {
+    try { healingHintsDiscardedTotal.inc({ reason: "version_mismatch" }); } catch { /* best-effort */ }
+    return -1;
+  }
+  return entry.strategyIndex ?? -1;
 }
 
 /**
@@ -107,10 +126,28 @@ export function getHealingHistoryForTest(testId) {
   const result = {};
   for (const [shortKey, val] of Object.entries(entries)) {
     const idx = val.strategyIndex;
-    if ((val?.failCount || 0) >= HEALING_HINT_MAX_FAILS) continue;
+    let failCount = val?.failCount || 0;
+    // Bundle-B fix #10 — TTL-based decay (mirrors getHealingHint). When a
+    // capped hint's `succeededAt` is older than the decay window, reset it
+    // and re-include the row so the next run can retry the strategy.
+    if (failCount >= HEALING_HINT_MAX_FAILS) {
+      if (val.succeededAt && (Date.now() - Date.parse(val.succeededAt)) > HEALING_HINT_DECAY_MS) {
+        // Use the row's full key (preserved on `val.key` from healingRepo.getByTestId)
+        // so the upsert lands on the same row rather than creating a sibling.
+        if (val.key) healingRepo.set(val.key, { ...val, failCount: 0 });
+        failCount = 0;
+      } else {
+        continue;
+      }
+    }
     if (!Number.isInteger(idx) || idx < 0) continue;
     // Skip hints from a different strategy version
-    if (val.strategyVersion != null && val.strategyVersion !== STRATEGY_VERSION) continue;
+    // Bundle-B fix #8 — bump the discarded-hints metric so the stale-hint
+    // backlog is observable in Grafana.
+    if (val.strategyVersion != null && val.strategyVersion !== STRATEGY_VERSION) {
+      try { healingHintsDiscardedTotal.inc({ reason: "version_mismatch" }); } catch { /* best-effort */ }
+      continue;
+    }
     result[shortKey] = idx;
   }
   return result;
@@ -125,6 +162,13 @@ const HEALING_RETRY_COUNT     = parseInt(process.env.HEALING_RETRY_COUNT, 10) ||
 const HEALING_RETRY_DELAY     = parseInt(process.env.HEALING_RETRY_DELAY, 10) || 400;
 const HEALING_HINT_MAX_FAILS  = parseInt(process.env.HEALING_HINT_MAX_FAILS, 10) || 3;
 const HEALING_VISIBLE_WAIT_CAP = parseInt(process.env.HEALING_VISIBLE_WAIT_CAP, 10) || 1200;
+// Bundle-B fix #10 — TTL decay window for stale healing hints. When a hint's
+// `succeededAt` is older than this many days AND its `failCount` is at the
+// cap, the next read resets `failCount` to 0 so the hint becomes eligible
+// again. Without this, a single transient page change that burned the
+// failCount cap leaves the hint dead permanently.
+const HEALING_HINT_DECAY_DAYS = parseInt(process.env.HEALING_HINT_DECAY_DAYS, 10) || 7;
+const HEALING_HINT_DECAY_MS = HEALING_HINT_DECAY_DAYS * 24 * 60 * 60 * 1000;
 
 // Strategy version — bump this whenever the strategy waterfall order changes
 // (e.g. adding/removing/reordering strategies in safeClick, safeFill, etc.).
@@ -233,6 +277,15 @@ export async function tryVisionHeal(ctx, deps = {}) {
   const key = `${ctx.action}::${ctx.label}`;
 
   // ── Stage 7 — pixelmatch CV (deterministic, free) ──────────────────────
+  // Bundle-A fix #2 — emit a `vision_pixelmatch_failed` envelope on the
+  // decline / throw paths so the healer→reviewer thread carries a
+  // complete record of EVERY heal attempt, not only the wins. Without
+  // this, operators replaying the run see "nothing happened" between
+  // the failure and the next stage even though the host actually tried
+  // a CV heal that returned sub-threshold. Tracked here (not in the
+  // outer catch) so the envelope captures the exact confidence the
+  // pixelmatch backend reported.
+  let pixelmatchDeclineConfidence = null;
   if (deps.pixelmatchHeal && ctx.baselineCrop) {
     try {
       const r = await deps.pixelmatchHeal(ctx.failureScreenshot, ctx.baselineCrop, PIXEL_CONFIDENCE);
@@ -256,7 +309,31 @@ export async function tryVisionHeal(ctx, deps = {}) {
           confidence: r.confidence, box: r.box || null, healed: true,
         };
       }
-    } catch { /* fall through to stage 8 / no-heal */ }
+      // Sub-threshold — capture confidence for the failure envelope below.
+      pixelmatchDeclineConfidence = (r && Number.isFinite(r.confidence)) ? r.confidence : null;
+    } catch { /* fall through to stage 8 / no-heal — confidence stays null */ }
+    // Bundle-B fix #7 — record the stage-7 pixelmatch decline as a healing
+    // failure so the row's `failCount` advances and `getHealingHint` can
+    // eventually demote a hint that consistently fails the CV check. Note
+    // this shares the same key namespace as DOM-strategy hints — by design
+    // per the bundle spec; if a hint cannot be visually verified either,
+    // demoting it is the correct outcome.
+    try { recordHealingFailure(ctx.testId, ctx.action, ctx.label); } catch { /* best-effort */ }
+    // Bundle-A fix #2 — record the declined CV attempt before falling
+    // through. `healed: false` keeps `persistHealingEvents` from treating
+    // the envelope as a successful heal.
+    emitHandoffEnvelope({
+      runId: _runId, threadId: _threadId, workspaceId: _workspaceId,
+      fromRole: "healer", toRole: "reviewer",
+      artifact: {
+        kind: "vision_pixelmatch_failed",
+        testId: ctx.testId, action: ctx.action, label: ctx.label,
+        confidence: pixelmatchDeclineConfidence,
+        threshold: PIXEL_CONFIDENCE,
+        healed: false,
+      },
+      rationale: "Healer pixelmatch CV heal declined (sub-threshold or error)",
+    });
   }
 
   // ── Stage 8 — LLM vision (paid, gated) ─────────────────────────────────
@@ -291,6 +368,14 @@ export async function tryVisionHeal(ctx, deps = {}) {
 
   if (!deps.llmVisionHeal) return null;
 
+  // Bundle-A fix #2 — track LLM heal outcome so the decline / throw path
+  // emits a `vision_llm_failed` envelope before returning null. Pre-fix
+  // the LLM-decline / provider-outage branches fell silently to
+  // `return null`, leaving the healer→reviewer thread with no record
+  // that stage 8 actually ran.
+  let llmDeclineConfidence = null;
+  let llmDeclineModel = null;
+  let llmDeclineCostUsd = 0;
   try {
     const r = await deps.llmVisionHeal({
       failure: ctx.failureScreenshot,
@@ -327,7 +412,31 @@ export async function tryVisionHeal(ctx, deps = {}) {
         healed: true,
       };
     }
-  } catch { /* provider outage / network error — return no-heal */ }
+    // Sub-threshold response — capture details for the failure envelope.
+    if (r) {
+      llmDeclineConfidence = Number.isFinite(r.confidence) ? r.confidence : null;
+      llmDeclineModel = r.model || null;
+      llmDeclineCostUsd = Number.isFinite(r.costUsd) ? r.costUsd : 0;
+    }
+  } catch { /* provider outage / network error — envelope below records the attempt */ }
+
+  // Bundle-A fix #2 — record the declined LLM heal attempt so the
+  // healer→reviewer thread captures stage 8 ran. Cost is preserved
+  // because budget accounting must still see the spend even on declines.
+  emitHandoffEnvelope({
+    runId: _runId, threadId: _threadId, workspaceId: _workspaceId,
+    fromRole: "healer", toRole: "reviewer",
+    artifact: {
+      kind: "vision_llm_failed",
+      testId: ctx.testId, action: ctx.action, label: ctx.label,
+      confidence: llmDeclineConfidence,
+      threshold: LLM_CONFIDENCE,
+      model: llmDeclineModel,
+      costUsd: llmDeclineCostUsd,
+      healed: false,
+    },
+    rationale: "Healer LLM-vision heal declined (sub-threshold or error)",
+  });
 
   return null;
 }
@@ -375,19 +484,26 @@ export function getSelfHealingHelperCode(healingHints) {
     // trying to write. The sandboxed safe* helpers populate this on entry so
     // the value survives the test throwing later in the same retry attempt.
     // The host reads it via err.__valueIntents in executeTest.js.
+    //
+    // Bundle-B fix #11 — also store under a step-indexed key
+    // ("fill::Name::step3") so two same-label fills with different values
+    // BOTH retain their value intent. The simple key keeps last-write-wins
+    // semantics for the host-side re-action (which only re-actions the most
+    // recent failed verb), while the step-indexed key gives audit consumers
+    // access to every recorded intent.
     const __valueIntents = {};
+    const __valueIntentStepCounter = {};
 
-    // pierce: selector prefix — used for elements discovered inside shadow roots.
-    // Playwright's CSS engine supports ">>" to pierce shadow DOM, and its built-in
-    // "pierce/" prefix resolves through shadow boundaries. We normalise to the
-    // Playwright css:pierce engine syntax here.
-    function buildPierceLocator(page, selector) {
-      // Strip our internal "pierce:" prefix if present before building the locator.
+    // Bundle-B fix #9 — honest naming. Previously this helper was named
+    // \`buildPierceLocator\` and claimed to traverse shadow DOM via a
+    // "css:pierce engine". Playwright has no such engine: \`page.locator('css=…')\`
+    // is plain CSS, which already pierces *open* shadow roots by default but
+    // cannot reach *closed* shadow roots — there is no Playwright primitive
+    // that does. Renamed to reflect what the code actually is. Callers using
+    // the legacy "pierce:" prefix on selectors continue to work; the prefix
+    // is stripped here for backward compatibility.
+    function buildCssLocator(page, selector) {
       const rawSelector = selector.startsWith('pierce:') ? selector.slice(7) : selector;
-      // Playwright supports piercing shadow DOM via the css engine with the
-      // ":shadow" pseudo or via ">> css=" chains. The most broadly compatible
-      // approach is page.locator('css=selector') with Playwright's built-in
-      // pierce support for shadow-including descendant combinators.
       return page.locator(\`css=\${rawSelector}\`);
     }
 
@@ -617,7 +733,7 @@ export function getSelfHealingHelperCode(healingHints) {
           // standard locators above cannot reach (Angular, Lit, Stencil, LWC).
           // Only attempt when text looks like a CSS selector; human-readable
           // text like "Sign in" produces invalid css= locators.
-          ...(looksLikeSelector(text) ? [p => buildPierceLocator(p, text)] : []),
+          ...(looksLikeSelector(text) ? [p => buildCssLocator(p, text)] : []),
         ];
 
       const healingKey = 'click::' + text;
@@ -735,16 +851,24 @@ export function getSelfHealingHelperCode(healingHints) {
           p => p.locator(\`input[title*="\${labelOrPlaceholder}"]\`),
           // pierce: strategy — reaches input elements inside shadow DOM roots.
           // Only attempt when text looks like a CSS selector.
-          ...(looksLikeSelector(labelOrPlaceholder) ? [p => onlyFillable(buildPierceLocator(p, labelOrPlaceholder))] : []),
+          ...(looksLikeSelector(labelOrPlaceholder) ? [p => onlyFillable(buildCssLocator(p, labelOrPlaceholder))] : []),
         ];
 
       const healingKey = 'fill::' + labelOrPlaceholder;
       // MNT-001 — record the intended value BEFORE attempting the fill so a
       // throw inside the retry loop still leaves the value reachable by the
-      // host-side vision-heal re-action path. Last-write-wins is fine: if the
-      // test re-fills the same field with a different value, the later
-      // intent reflects what the test actually wanted at failure time.
+      // host-side vision-heal re-action path. Last-write-wins on the simple
+      // key matches what the re-action path needs: replay the LAST attempted
+      // value at the failure coordinate.
+      //
+      // Bundle-B fix #11 — also write under a step-indexed key so a second
+      // safeFill on the same label doesn't erase the first call's intent in
+      // the audit trail. Step counter is per-healingKey so two fills on
+      // different labels start at step1 each.
       __valueIntents[healingKey] = { value: strValue };
+      const __step = (__valueIntentStepCounter[healingKey] || 0) + 1;
+      __valueIntentStepCounter[healingKey] = __step;
+      __valueIntents[healingKey + '::step' + __step] = { value: strValue };
 
       await retry(async () => {
         // Re-resolve on every attempt so a DOM re-render (common in SPAs)
@@ -1059,7 +1183,7 @@ export function getSelfHealingHelperCode(healingHints) {
               p => p.locator(\`[aria-label*="\${text}"]\`),
               // pierce: strategy — asserts visibility of elements inside shadow roots.
               // Only attempt when text looks like a CSS selector.
-              ...(looksLikeSelector(text) ? [p => buildPierceLocator(p, text)] : []),
+              ...(looksLikeSelector(text) ? [p => buildCssLocator(p, text)] : []),
             ]),
         ];
 

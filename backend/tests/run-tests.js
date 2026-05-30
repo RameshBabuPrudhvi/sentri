@@ -32,12 +32,42 @@ const files = [
   "tests/api-test-prompt.test.js",
   "tests/deduplicator.test.js",
   "tests/assertion-enhancer.test.js",
+  // Bundle-A follow-up #F3 — shared `stripStringsAndComments` helper
+  // used by both `assertionEnhancer.js` and `deduplicator.js`.
+  "tests/code-stripping.test.js",
   "tests/test-validator.test.js",
   "tests/test-validator-allowlist.test.js",
   "tests/secret-scanner.test.js",
   "tests/pii-sanitizer.test.js",
   "tests/feedback-loop.test.js",
+  // Bundle-A fix #8 — `buildImprovementPrompt` byte-size cap on the
+  // elements-JSON block so verbose snapshots can't balloon the prompt.
+  "tests/feedback-loop-prompt-cap.test.js",
+  // Bundle-A fix #9 — `regenerateFailingTest` surfaces non-abort errors
+  // via a warn log + `app_feedback_loop_regeneration_failures_total`.
+  "tests/feedback-loop-regen-errors.test.js",
+  // Bundle-A fix #10 — `detectFlakyTests` scoped to last N runs (default 50)
+  // instead of walking the full project history.
+  "tests/feedback-loop-flaky-window.test.js",
+  // Bundle-A fix #19 — shared bot-detection pattern module so the
+  // post-run classifier and the state explorer's crawl-time gate never drift.
+  "tests/bot-detection.test.js",
+  // Bundle-B (`docs/roadmap/Bugs.md`) — three rollup files, one per
+  // affected layer. Each pins one fix per test case so a regression
+  // points straight at the spec line.
+  "tests/bundle-b-runner.test.js",
+  "tests/bundle-b-self-healing.test.js",
+  "tests/bundle-b-state-explorer.test.js",
   "tests/pipeline-orchestrator.test.js",
+  // Bundle-A fix #6 — orchestrator resets `run.secretScanBlocked` at
+  // entry so re-entry on the same run doesn't carry a stale flag.
+  "tests/pipeline-orchestrator-secret-reset.test.js",
+  // Bundle-A fix #7 — quality re-score runs AFTER healing transforms so
+  // the `selector.semantic` factor matches the post-transform code.
+  "tests/pipeline-orchestrator-quality-rescoring.test.js",
+  // Bundle-A fix #20 — steps 5/6/7 emit agent_event with agent="system"
+  // so deterministic post-processing doesn't conflate with author LLM runs.
+  "tests/pipeline-orchestrator-system-agent.test.js",
   "tests/chat-window.test.js",
   "tests/test-edit-prompt.test.js",
   "tests/test-edit-chat.test.js",
@@ -62,10 +92,27 @@ const files = [
   "tests/agent-tools-orchestrator.test.js",
   "tests/agent-reviewer-loop.test.js",
   "tests/agent-orchestrator.test.js",
+  // Bundle-A fix #1 — orchestrator threads `replyToId` across supervisor
+  // handoffs so the UI timeline can reconstruct the multi-step thread.
+  "tests/agent-orchestrator-reply-chain.test.js",
   // AUTO-023 B4.1 — supervisor prompt builder + decision normaliser
   // branch coverage (terminate vs. route, missing instruction, empty
   // nextRole fallback).
   "tests/supervisor-prompt.test.js",
+  // §17 #7 / TD-017 — Zod request-validation middleware. Pins the wire
+  // error shape, parsed-replace contract, location-prefixed issue paths,
+  // and the registration-time guard against non-Zod schemas.
+  "tests/validate-request.test.js",
+  // CR-009 + §11.3 — SSE listener cap + backpressure regression. Pins
+  // `emitRunEvent` delivery to healthy listeners, ends slow consumers
+  // with writableLength > 1 MiB, and locks in the runListeners.size
+  // contract the route's 503 gate relies on.
+  "tests/sse-caps.test.js",
+  // §17 #1 / TD-012 — direct unit coverage for `utils/csv.js` after the
+  // extraction from `routes/tests.js`. `fixture-iteration.test.js` still
+  // exercises the same helpers via the routes' `__testables` re-export;
+  // this file owns the new module's import surface.
+  "tests/csv.test.js",
   // AUTO-023 B4.1 — supervisor LLM bridge (generateText → parseJSON →
   // normalizeSupervisorDecision). Pins happy-path JSON, parse-error
   // termination, dispatch-error termination (never re-thrown), and

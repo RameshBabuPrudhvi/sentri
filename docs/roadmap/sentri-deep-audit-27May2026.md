@@ -7,53 +7,56 @@
 
 ---
 
-## 0. Progress Update — PR #40 (Hot-Fix branch)
+## 0. Progress Tracker
 
-> Last updated against commit `63296d2` (Hot-Fix PR · final).
+> Live tracker of open audit findings. Completed items are removed from this section after they ship — see `docs/changelog.md` for shipped history.
 >
-> Status legend: ✅ Done · 🟡 Partial · 🔴 Not started
+> Status legend: 🟡 Partial · 🔴 Not started
+>
+> Last updated against PR #2 (`bundle-b`) commit `4763a4c`.
 
-PR #40 was scoped to UX feedback (UX-001) but also picked up several audit items along the way. Status of every audit finding below:
+### 0.1 What's still open
 
-| Audit ID | Finding | Status | Where landed |
+| Audit ID | Finding | Status | Notes |
 |---|---|---|---|
-| **§3.2 / CR-006 / TD-008** | Stored XSS via LLM markdown in `AIChat.jsx` / `ChatHistory.jsx` (no DOMPurify) | ✅ **Done** | `frontend/src/utils/markdown.js` — DOMPurify allowlist (defence-in-depth on top of the parser's existing escape-first guarantee). `dompurify ^3.2.0` added to `frontend/package.json`. |
-| **§3.4 / TD-015** | Google Fonts CDN dependency in `tokens.css` (GDPR / CSP / perf / air-gap) | ✅ **Done** | `@fontsource/inter` + `@fontsource/jetbrains-mono` self-hosted via `frontend/src/main.jsx`; rationale documented inline in `frontend/src/styles/tokens.css`. |
-| **§6.1** | "TypeScript" mislabel on Review Queue code preview | ✅ **Done** | `frontend/src/pages/ReviewQueue.jsx` — corrected to "JavaScript". |
-| **§6.1** | Bulk approve has no Undo | ✅ **Done** | `frontend/src/pages/ReviewQueue.jsx` `executeBulkAction` — inline **Undo** CTA on the success toast wires through `bulkUpdateTests(pid, ids, "restore")` per project. Toast linger extended to 5s when an action button is present. Industry pattern matches Gmail / Linear / GitHub. |
-| **§6.1** | "No keyboard shortcuts" claim | ✅ Was wrong — already shipped | `frontend/src/pages/ReviewQueue.jsx:703-729` implements `a` / `r` / `j` / `k` / `↑` / `↓`. Audit overstated. |
-| **§6.1** | "Quality score has no tooltip" claim | ✅ Was wrong — already shipped | `QualityScoreChip` opens a factor-breakdown popover on click. Audit overstated. |
-| **§7.5** | CSP `style-src 'unsafe-inline'` (inline styles throughout SPA) | 🟡 **Substantial progress** | `RunToast.jsx` → `.rt-toast*` CSS partial. `RunDetail.jsx` (108→3 inline styles), `Tests.jsx` (114→6), `TestRunView.jsx` (131→3) fully swept — all remaining are data-driven (progress-bar widths, per-category palettes) that need hash-based CSP. `TestLab.jsx` deferred to other agent. ~340 inline styles eliminated; ~12 data-driven carve-outs remain across the three files. |
-| **§3.1 / TD-006 / TD-007** | Monolithic frontend pages (`TestLab.jsx` 1,899 / `ReviewQueue.jsx` 1,460 / `TestDetail.jsx` 1,012) | 🔴 Not addressed | Out of scope for the hot-fix branch. Defer to a dedicated decomposition PR. |
-| **§3.3** | TestLab dual SSE hooks / dual source of truth | 🔴 Not addressed | Migration was already in flight per the in-code comment; defer. |
-| **§6.3** | Sidebar IA overload (11 items) | 🔴 Not addressed | Requires a dedicated IA pass. |
-| **§6.4** | Empty states lack CTAs | ✅ **Done** | `frontend/src/pages/Reports.jsx` migrated from bare `.empty-state` markup to the shared `<EmptyState>` primitive with two coached branches (`Create a project` first-run / `Run regression tests` + `Browse tests` fallback). `frontend/src/pages/ProjectDetail.jsx:481` "No drafts" bare text replaced with per-filter coached states: draft-empty → "Inbox zero" with `Generate more tests →` + `Audit approvals` CTAs (mirroring `frontend/src/pages/ReviewQueue.jsx:973-1007`); approved-empty → `Review N drafts` CTA; rejected-empty → status copy; filtered-empty → `Clear filters` CTA. New `.pd-empty-sm--coached` modifier in `frontend/src/styles/pages/project-detail.css`. Previously confirmed: `Tests.jsx`, `Projects.jsx`, `Runs.jsx`, `HealingDashboard.jsx` already use `<EmptyState>` with CTAs. |
-| **§4 — backend (CR-001, 002, 003, 004, 007; TD-001..004, 011, 012, 014, 016..018)** | All backend findings | 🔴 Not addressed | Out of scope for a frontend hot-fix. |
-| **§5 — agent architecture (CR-005, 008; TD-005, 009, 010, 013)** | All AI/agent findings | 🔴 Not addressed | Out of scope. |
-| **§7.1–§7.4 — backend security** | VM sandbox, Helm secrets, SSRF, audit atomicity | 🔴 Not addressed | Out of scope. |
-| **§8–§12** | Performance, enterprise readiness, observability, product strategy | 🔴 Not addressed | Out of scope. |
+| **§4.1 / CR-001 / TD-001** | `deasync.loopWhile` event-loop stall on every PG query (`postgres-adapter.js:562`) | 🔴 Not started | §18 #1 strategic item (6–8 weeks). Async-pg migration touches every repo file under test coverage. |
+| **§5.3 / CR-002 / TD-002** | VM sandbox `process.env` exposure in `runner/codeExecutor.js` | 🔴 Not started | §18 #2 (3 weeks). Move AI-generated code to `worker_threads` with `env: THREAD_NO_ENV`. |
+| **§5.1 / CR-008 / TD-005** | Supervisor prompt is 9 lines for a 5-role routing decision | 🔴 Not started | Needs task-decomposition context, few-shot routing examples, termination criteria. Run against eval harness to validate (depends on CR-005). |
+| **§5.4 / CR-005 / TD-009** | Eval harness gate dormant — synthetic goldens only | 🔴 Not started | AUTO-022b: record real goldens via `EVAL_RECORD=1` against the live API, enable CI gate. |
+| **§7.4 / TD-018** | Audit-log writes not atomic with the business operation | 🔴 Not started | Cross-cutting refactor across every `logActivity()` call site. Needs its own PR. |
+| **§17 #4 / TD-016** | CI uses `npm install` not `npm ci` (no `backend/package-lock.json`) | 🔴 Not started | Requires generating + committing the lockfile first. |
+| **§10.2 / §17 #8** | No container image vulnerability scanning | 🟡 Partial — image hardened, gate deferred | Backend Dockerfile `apt-get upgrade -y` clears 6 Debian-layer CVEs (`libcap2`, `libgnutls30` — 2 CRITICAL + 4 HIGH). OTel bumps clear 14 HIGH npm-pkg CVEs. The Trivy CI gate itself is **not wired** — 15 remaining HIGH CVEs are all transitive deps of `playwright` / `@playwright/test` (`cross-spawn`, `glob`, `minimatch`, `protobufjs`, `tar`) that need a Playwright version bump + E2E re-validation in a dedicated security PR before the gate can be enforced. |
+| **§8.1 / TD-010** | No browser warm pool (`browserPool.js` missing) | 🔴 Not started | MNT-015 — in-sprint target per audit, still unshipped. 40–60% run-time win. |
+| **§4.5 / CR-007 / TD-011** | Single global BullMQ queue, no per-tenant fairness | 🔴 Not started | §18 #7 (4 weeks). Per-workspace queues + fair-share scheduling. |
+| **§5.5 / TD-014** | Healing waterfall has no human-review escalation | 🔴 Not started | Wire stage-8 failures into the review queue with a `healingEscalation` project setting. |
+| **§5.6 / TD-013** | Agent tool registry is too narrow (5 tools, no `runner.executeTest`) | 🔴 Not started | Depends on TD-010 browser pool for `playwright.dryRun` → real execution. |
+| **§9** | Enterprise readiness — no SAML/OIDC, no custom RBAC, no resource-level perms, no IP allowlist | 🔴 Not started | §18 #5 (3 weeks for SSO). |
+| **§11.1** | OTel trace context not propagated across HTTP → BullMQ → AI provider boundaries | 🔴 Not started | W3C `traceparent` propagation through the job payload. |
+| **§12.1** | No `@sentri/sdk` NPM package | 🔴 Not started | §18 #6 (3 weeks). |
+| **§12.2** | Autonomous mode invisible — `agentMode` toggle only mutable via direct DB write | 🔴 Not started | Settings UI toggle + telemetry on adoption. |
+| **§12.3** | No plan / pricing tier model | 🔴 Not started | Commercial foundation gap. |
+| **§3.1 / TD-006 / TD-007** | Monolithic frontend pages — `ReviewQueue.jsx` (1,460), `TestDetail.jsx` (1,012) | 🔴 Not started | TestLab.jsx already decomposed in PR #40 (1,907→~995). Two remaining files. |
+| **§3.3** | TestLab dual SSE hooks / dual source of truth | 🔴 Not started | Pre-existing migration in flight per in-code comment. |
+| **§6.3** | Sidebar IA overload (11 items, Miller's Law violation) | 🔴 Not started | Needs a dedicated IA pass. |
+| **§17 #7 / TD-017** | Zod validation foundation shipped, 2 routes piloted — remaining route files still on hand-rolled guards | 🟡 Partial | Foundation: `backend/src/middleware/validateRequest.js`. Pilot: `POST /workspaces/switch` + `POST /workspaces/current/members`. ~30 routes still using `if (!req.body.foo || typeof ...)` — migrate one route file per PR as they're touched. |
+| **§17 #1 / TD-012** | `routes/tests.js` god-object (1,941 lines, 8 concerns) | 🟡 Partial | `parseCsvRows` + `clampIterationCap` extracted to `utils/csv.js` (~80 LOC). The full 8-concern split (`routes/approvals.js`, `routes/recorder.js`, `routes/baselines.js`, `routes/exports.js`) is still a dedicated PR — `REFACTOR-NOTE` at the top of the file documents the target shape. |
+| **§7.3** | SSRF guard's DNS-rebinding TOCTOU window | 🟡 Documented | JSDoc on `safeFetch` describes the residual gap + defence-in-depth + eventual fix (custom undici dispatcher with `connect.lookup`). Code fix is a separate PR. |
+| **§7.5** | CSP `style-src 'unsafe-inline'` (frontend) | 🟡 Substantial progress (PR #40) | ~340 inline styles eliminated across `RunDetail.jsx`, `Tests.jsx`, `TestRunView.jsx`, `RunToast.jsx`. ~12 data-driven carve-outs (progress-bar widths, per-category palettes) need hash-based CSP. `TestLab.jsx` deferred. |
 
-### Additional work shipped in this PR (not in original audit)
+### 0.2 Readiness subscores (current state)
 
-- **UX-001 toast feedback** — every user-initiated mutation (save / update / delete / approve / reject / run / abort) across ~25 pages and components now emits a visible toast on success and error. Previously silent or routed to the notification bell. Global `ToastContext` with WAI-ARIA `role="status"` / `role="alert"` + `aria-live` + WCAG 2.2 SC 2.2.1 dismiss button.
+Cumulative effect of PR #40 (frontend hot-fix) + PR #2 (`bundle-b` backend hot-fix) on the §20 scorecard:
 
-- **Undo CTA on bulk approve/reject** — industry-standard pattern (Gmail / Linear / GitHub). Toast surfaces an inline "Undo" button that calls `bulkUpdateTests(pid, ids, "restore")` per-project. Action toasts linger 5s. Partial-success undo skips failed project groups.
-
-- **DS-001 inline-style sweep** — `RunDetail.jsx` (108→3), `Tests.jsx` (114→6), `TestRunView.jsx` (131→3). Filter pills use CSS custom properties (`--t-active-bg` / `--t-active-color`) for data-driven colour; layout/sizing/transition rules in dedicated CSS partials (`run-detail.css`, `tests.css`, `test-run-view.css`). ~340 inline styles eliminated.
-
-- **Bug fixes** — `successCount` unit mismatch in ReviewQueue + Tests bulk actions (was mixing test-ID count with project-group count); unmemoized ToastContext provider value; missing null guards in Automation `onPanelToast`; missing `showToast` in IntegrationsSection useEffect deps; duplicate `### Fixed` heading in changelog.
-
-### Net effect on overall readiness score
-
-The audit's overall **5.9 / 10** reflected the state before this PR. The frontend-scoped subscores move as follows (other subscores unchanged):
-
-| Dimension | Audit score | After PR #40 | Notes |
+| Dimension | Audit score | Current | Notes |
 |---|---|---|---|
-| Frontend Architecture | 6.0/10 | **7.0/10** | XSS gap closed; font-CDN closed; toast feedback across ~25 surfaces; coached empty states; ~340 inline styles eliminated (RunDetail + Tests + TestRunView); TestLab decomposition (1,907→~995 lines by other agent). Monolithic ReviewQueue + TestDetail still pending. |
-| Security Posture | 6.5/10 | **7.0/10** | DOMPurify defence-in-depth on markdown; GDPR/CSP-clean font hosting; `data-lang` attr escaped. VM-sandbox, Helm secrets, SSRF still open (backend scope). |
-| Core QA Pipeline Quality | 7.5/10 | 7.5/10 | No backend changes in this PR. |
+| Frontend Architecture | 6.0/10 | **7.0/10** | XSS gap closed, font-CDN closed, toast feedback (~25 surfaces), coached empty states, ~340 inline styles eliminated, TestLab decomposed. |
+| Security Posture | 6.5/10 | **7.2/10** | DOMPurify on markdown, GDPR-clean fonts, Helm `change-me` secrets refuse to render, SSE listener bound, base image + OTel deps upgraded clearing 20 HIGH/CRITICAL CVEs (libcap2 / libgnutls30 / OpenTelemetry). Trivy CI gate itself not yet wired — 15 transitive Playwright CVEs need a dedicated bump PR before the gate can be enforced. |
+| DevOps / CI | 6.0/10 | **6.5/10** | Migration prefix linter blocks recurrence of §4.2. `npm install` → `npm ci` and Trivy gate still open. |
+| Observability | 6.5/10 | **7.2/10** | Grafana overview dashboard ships with the chart, SSE backpressure cap prevents memory growth. Disconnected OTel traces still open. |
+| Backend Architecture | 6.0/10 | **6.2/10** | Reusable Zod validation middleware lays the foundation; one helper module extracted from the routes god-object. Monolith boundary + deasync still open. |
+| Core QA Pipeline Quality | 7.5/10 | 7.5/10 | No structural change yet. |
 
-Refreshed **overall readiness: ~6.2 / 10** (frontend sub-points only; backend unchanged).
+Refreshed **overall readiness: ~6.5 / 10** (frontend + backend hot-fixes).
 
 ---
 

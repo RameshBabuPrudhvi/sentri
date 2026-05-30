@@ -48,12 +48,12 @@ export default function AutoApprovalPanel({ project, canEdit, onToast }) {
     setSaving(true);
     try {
       await api.updateProject(project.id, { autoApproveThreshold: threshold });
-      onToast?.({
-        type: "success",
-        message: threshold === null
+      onToast?.(
+        threshold === null
           ? "Auto-approval disabled."
           : `Auto-approval threshold set to ${threshold}.`,
-      });
+        "success",
+      );
       // Re-fetch stats so the calibration line reflects the new state. Mirror
       // the mount-time error handling so a post-save fetch failure surfaces
       // the same visible note rather than leaving a stale (or missing) line.
@@ -66,7 +66,7 @@ export default function AutoApprovalPanel({ project, canEdit, onToast }) {
         setStatsError(err?.message || "Could not load calibration stats.");
       }
     } catch (err) {
-      onToast?.({ type: "error", message: err?.message || "Failed to save threshold." });
+      onToast?.(err?.message || "Failed to save threshold.", "error");
     } finally {
       setSaving(false);
     }
@@ -80,7 +80,7 @@ export default function AutoApprovalPanel({ project, canEdit, onToast }) {
     const trimmed = value.trim();
     const threshold = trimmed === "" ? null : Number(trimmed);
     if (threshold !== null && (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1)) {
-      onToast?.({ type: "error", message: "Threshold must be empty or a number greater than 0 and at most 1." });
+      onToast?.("Threshold must be empty or a number greater than 0 and at most 1.", "error");
       return;
     }
     const isFirstEnable = threshold !== null && project.autoApproveThreshold == null;

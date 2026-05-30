@@ -18,6 +18,8 @@
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
+import fsp from "fs/promises";
+import os from "os";
 import { getHealingHistoryForTest, tryVisionHeal } from "../selfHealing.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as elementBaselineRepo from "../database/repositories/elementBaselineRepo.js";
@@ -319,6 +321,17 @@ export async function performVisionHealReaction(page, action, box, label, key, i
 }
 
 /**
+ * Bundle-B fix #4 — ring-buffer cap on accumulated network log entries.
+ * Long-running tests on chatty SPAs were unbounded — a single test could
+ * accumulate tens of thousands of entries and OOM the worker. With the
+ * cap, the oldest entry is evicted on each push when the buffer is full.
+ * 500 entries is enough to cover the most network-heavy real-world test
+ * we've measured (a checkout flow with retries) and bounds memory at
+ * ~250 KB per run.
+ */
+const MAX_NETWORK_LOG_ENTRIES = 500;
+
+/**
  * Attach network & console listeners to a page.
  * Returns { networkLogs, consoleLogs, dispose } — the arrays are mutated
  * in-place as events arrive. Call `dispose()` before closing the page to
@@ -327,13 +340,18 @@ export async function performVisionHealReaction(page, action, box, label, key, i
  */
 function attachPageListeners(page) {
   const networkLogs = [];
+  // Bundle-B fix #1 — pair request/response by the Playwright Request object,
+  // not by URL. Two concurrent same-URL requests with staggered responses
+  // were corrupting each other's entries with the previous URL-string match.
+  // The Request → entry map gives a stable identity even when the URL collides.
+  const requestEntries = new WeakMap();
   const consoleLogs = [];
   let closed = false;
 
   page.on("request", (req) => {
     if (closed) return;
     try {
-      networkLogs.push({
+      const entry = {
         id: uuidv4(),
         method: req.method(),
         url: req.url(),
@@ -341,14 +359,27 @@ function attachPageListeners(page) {
         status: null,
         size: null,
         duration: null,
-      });
+      };
+      // Bundle-B fix #4 — evict oldest entry when the ring buffer is full.
+      if (networkLogs.length >= MAX_NETWORK_LOG_ENTRIES) {
+        networkLogs.shift();
+      }
+      networkLogs.push(entry);
+      requestEntries.set(req, entry);
     } catch { /* page may be closing */ }
   });
 
   page.on("response", async (res) => {
     if (closed) return;
     try {
-      const entry = networkLogs.find((n) => n.url === res.url() && n.status === null);
+      // Bundle-B fix #1 — look up the entry by Request identity. Falls back
+      // to URL-match for response events whose request never fired (extremely
+      // rare, e.g. cached service-worker responses); the prior URL-only path
+      // is preserved as fallback so behaviour stays a strict superset.
+      let entry = requestEntries.get(res.request());
+      if (!entry) {
+        entry = networkLogs.find((n) => n.url === res.url() && n.status === null);
+      }
       if (entry) {
         entry.status = res.status();
         entry.duration = Date.now() - entry.startTime;
@@ -436,15 +467,39 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   }
 
   // ── Browser-based test path — browser must be available ────────────────
+  // Bundle-B fix #5 — health-probe the supplied browser before doing any
+  // work. A disconnected browser (CDP socket dead, child process crashed,
+  // OOM kill) used to surface as a cryptic "Target closed" deep inside
+  // newContext. Surfacing a structured error here lets the parent runner
+  // recognise it (`err.code === "ERR_BROWSER_DISCONNECTED"`), restart the
+  // browser, and retry the test once instead of marking it failed.
   if (!browser) {
-    throw new Error(
+    const e = new Error(
       `Browser test "${test.name}" requires a browser instance but none was launched. ` +
       `This can happen if the test was misclassified as API-only during batch setup.`
     );
+    e.code = "ERR_BROWSER_MISSING";
+    throw e;
+  }
+  if (typeof browser.isConnected === "function" && !browser.isConnected()) {
+    const e = new Error(
+      `Browser is disconnected before test "${test.name}" could start — parent runner should restart browser and retry once.`
+    );
+    e.code = "ERR_BROWSER_DISCONNECTED";
+    e.recoverable = true;
+    throw e;
   }
 
   const testVideoDir = path.join(VIDEOS_DIR, runId, `step${stepIndex}`);
   if (!fs.existsSync(testVideoDir)) fs.mkdirSync(testVideoDir, { recursive: true });
+
+  // Bundle-B fix #6 — per-run downloads directory. Without this, Playwright
+  // writes downloaded files to the OS temp dir under a single Playwright-
+  // owned path that bleeds across parallel runs and never gets cleaned. A
+  // per-run dir scoped under os.tmpdir() lets us wipe it deterministically
+  // in the cleanup hook below regardless of test outcome.
+  const testDownloadsDir = path.join(os.tmpdir(), "sentri-downloads", runId, `step${stepIndex}`);
+  if (!fs.existsSync(testDownloadsDir)) fs.mkdirSync(testDownloadsDir, { recursive: true });
 
   // DIF-003: Resolve device emulation descriptor (viewport, userAgent, touch, etc.)
   const deviceDescriptor = resolveDevice(opts.device);
@@ -466,6 +521,9 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     ignoreHTTPSErrors: true,
     // Enable downloads so page.waitForEvent('download') works (#42)
     acceptDownloads: true,
+    // Bundle-B fix #6 — scope downloads to the per-run dir created above so
+    // the cleanup hook can wipe them without colliding with parallel runs.
+    downloadsPath: testDownloadsDir,
     // AUTO-007: Locale, timezone, and geolocation context options
     ...(contextLocale ? { locale: contextLocale } : {}),
     ...(contextTimezone ? { timezoneId: contextTimezone } : {}),
@@ -525,9 +583,15 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   await injectCursorOverlay(page);
   page.on("load", () => { injectCursorOverlay(page).catch(() => {}); });
 
-  // Start CDP screencast (returns cleanup fn or null)
+  // Start CDP screencast (returns cleanup fn or null).
+  //
+  // BUG-0001 / BUG-0004 — held by `let` (not `const`) so the timeout
+  // handler below can null it out after firing the stop. That prevents
+  // the `finally` block from calling `stopScreencast()` a second time
+  // (which would send CDP commands on an already-detached session and
+  // log a duplicate "[screencast] stopped" line).
   const screencastResult = await startScreencast(page, runId);
-  const stopScreencast = screencastResult?.stop ?? null;
+  let stopScreencast = screencastResult?.stop ?? null;
 
   // Attach network / console listeners — dispose() must be called before
   // page.close() to prevent async response handlers from crashing Node.
@@ -589,11 +653,31 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   let testTimeoutHandle;
   const testTimeoutPromise = new Promise((_, reject) => {
     testTimeoutHandle = setTimeout(() => {
-      // Force-close the page to unblock any hung Playwright operation.
-      // This triggers errors inside the testExecution IIFE which are
-      // swallowed by the .catch(() => {}) on line below.
-      page.close().catch(() => {});
+      // BUG-0001 — Reject FIRST (synchronously) so `Promise.race` resolves
+      // within BROWSER_TEST_TIMEOUT regardless of what the cleanup work
+      // below does. The previous shape `async () => { await
+      // stopScreencast(); ...; reject(); }` could hang forever when
+      // Chromium itself was the hung party (the exact scenario this
+      // timeout is meant to recover from), because `stopScreencast`
+      // sends CDP commands and the CDP socket was dead.
       reject(new Error(`Browser test timed out after ${BROWSER_TEST_TIMEOUT}ms`));
+
+      // Then trigger cleanup as best-effort fire-and-forget. Order
+      // matters: stop the screencast BEFORE the page close because the
+      // CDP session becomes invalid the moment the page is gone.
+      //
+      // BUG-0004 — Null the reference after firing so the `finally`
+      // block's `if (stopScreencast)` check skips the second call.
+      // Without this, the same CDP detach fires twice on every
+      // timed-out test (harmless thanks to catch guards in
+      // screencast.js, but produces duplicate "[screencast] stopped"
+      // log lines that confuse on-call engineers).
+      const _stop = stopScreencast;
+      stopScreencast = null;
+      Promise.resolve()
+        .then(() => _stop ? _stop() : null)
+        .catch(() => { /* CDP may be dead — best-effort */ })
+        .finally(() => { page.close().catch(() => {}); });
     }, BROWSER_TEST_TIMEOUT);
   });
 
@@ -966,10 +1050,15 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     await page.close().catch(() => {});
     await context.close().catch(() => {});
 
-    // Move the video to a stable named path (skip when ffmpeg was missing)
+    // Bundle-B fix #3 — Move the video to a stable named path using async
+    // fs/promises. Sync FS calls in this hot cleanup path were blocking the
+    // event loop on every test (8 calls × N parallel tests), starving the
+    // BullMQ worker of progress events on large runs. Promise-based fs APIs
+    // give the loop a chance to interleave other work and unblock SSE.
     if (videoEnabled) {
       try {
-        const files = fs.readdirSync(testVideoDir).filter(f => f.endsWith(".webm"));
+        const allFiles = await fsp.readdir(testVideoDir);
+        const files = allFiles.filter(f => f.endsWith(".webm"));
         if (files.length > 0) {
           const src = path.join(testVideoDir, files[0]);
           const videoName = `${runId}-step${stepIndex}.webm`;
@@ -983,30 +1072,39 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
             await writeArtifactBuffer({
               artifactPath: `/artifacts/videos/${videoName}`,
               absolutePath: dst,
-              buffer: fs.readFileSync(src),
+              buffer: await fsp.readFile(src),
               contentType: "video/webm",
             });
           } catch (uploadErr) {
             // If writeArtifactBuffer threw before the local write completed,
             // dst won't exist — preserve src by renaming it as a last-resort
             // fallback so we don't lose the only copy of the video.
-            if (!fs.existsSync(dst)) {
-              try { fs.renameSync(src, dst); } catch { /* ignore */ }
+            const dstExists = await fsp.access(dst).then(() => true).catch(() => false);
+            if (!dstExists) {
+              try { await fsp.rename(src, dst); } catch { /* ignore */ }
             }
             console.warn(formatLogLine("warn", null,
               `[executeTest] S3 video upload failed for step ${stepIndex}, falling back to local path: ${uploadErr.message}`));
           }
-          if (fs.existsSync(src)) fs.unlinkSync(src);
-          if (fs.existsSync(dst)) result.videoPath = `/artifacts/videos/${videoName}`;
+          // Best-effort unlink — the rename fallback above may have moved
+          // src already; in that case ENOENT is the expected outcome.
+          await fsp.unlink(src).catch(() => {});
+          const dstExists = await fsp.access(dst).then(() => true).catch(() => false);
+          if (dstExists) result.videoPath = `/artifacts/videos/${videoName}`;
         }
-        fs.rmSync(testVideoDir, { recursive: true, force: true });
+        await fsp.rm(testVideoDir, { recursive: true, force: true });
       } catch (videoErr) {
         console.warn(formatLogLine("warn", null, `[executeTest] Video move failed for step ${stepIndex}: ${videoErr.message}`));
       }
     } else {
       // No video was recorded — clean up the empty directory
-      try { fs.rmSync(testVideoDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      await fsp.rm(testVideoDir, { recursive: true, force: true }).catch(() => {});
     }
+
+    // Bundle-B fix #6 — wipe the per-run downloads dir regardless of test
+    // outcome. Best-effort: a stale temp dir is cosmetically ugly but never
+    // fatal, so swallow ENOENT etc.
+    await fsp.rm(testDownloadsDir, { recursive: true, force: true }).catch(() => {});
   }
 
   return result;

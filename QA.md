@@ -855,6 +855,95 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🍞 Toast feedback on save/update/delete (UX-001)
+
+_(automated: see `tests/e2e/specs/toast-feedback-ui.spec.mjs` for project-create success toast + project-edit "Project updated" toast + error-path `role="alert"` toast + Settings → Members invite toast + Settings → Account export-download toast. Coverage tracked in `tests/e2e/COVERAGE.md`. The remaining Settings-section toasts — Agent Roles, AI Providers, Integrations (GitHub install ID), and the Auto-Approval / Quality Gates / Coverage / Web Vitals panels on `/projects/:id/settings/*` — need provider-key / role-config / GitHub-app fixtures and are queued for the Tier-1 backfill PR.)_
+
+**Preconditions:** Logged in as User A (admin) for full coverage, plus a separate User B (`qa_lead`) session for delete-account flow.
+
+**Background:** Multiple surfaces previously fired no visible confirmation on save/update/delete. The `Automation` page wired panel callbacks to `addNotification()` (notification bell) instead of `showToast()`. `NewProject` silently navigated away. Settings sections only set inline `setError` on failure. UX-001 introduced a global `<ToastProvider>` at `frontend/src/context/ToastContext.jsx`, mounted in `App.jsx:74`, and migrated every `api.update*` / `api.create*` / `api.delete*` callsite to emit a visible toast.
+
+**A. Workspace settings — Automation page (`/automation`):**
+
+1. Open `/automation` → Triggers & Schedules tab → expand any project's Quality settings (now lives at `/projects/:id/settings/review`).
+2. Set Auto-Approval threshold to `0.8` → click **Save** → first-time enable modal opens → click **Enable auto-approval** → green toast `"Auto-approval threshold set to 0.8."` appears bottom-right.
+3. Clear the threshold input → click **Save** → toast `"Auto-approval disabled."`
+4. Save Coverage settings → toast `"Coverage settings saved."`
+5. Save Quality Gates → toast `"Quality gates saved."` Clear → toast `"Quality gates cleared."`
+6. Save Web Vitals Budgets → toast `"Web Vitals budgets saved."`
+
+**B. Project create / edit (`/projects/new`, `/projects/new?edit=PRJ-X`):**
+
+7. Create a new project → after `POST /projects` succeeds → green toast `"Project created"` appears BEFORE navigation to `/projects/:id` (the toast survives the route change because `<ToastProvider>` is mounted at App.jsx).
+8. Edit project name + URL → save → green toast `"Project updated"`.
+9. Submit an invalid payload (e.g. backend returns 4xx) → red toast with the API error message; the inline error banner also renders for context.
+
+**C. Settings → Agent Roles (`/settings/agent_roles`, admin-only):**
+
+10. Save a new role config → toast `"Agent role saved"`.
+11. Edit an existing config → toast `"Agent role updated"`.
+12. Delete a role → toast `"Agent role deleted"`.
+13. Change agent **Mode** dropdown → toast `"Agent mode set to <mode>"`.
+14. Trigger an error (e.g. cycle on `fallbackRole`) → red toast with the API error message + red inline banner above the form.
+
+**D. Settings → AI Providers (`/settings/ai_providers`, admin-only):**
+
+15. Add an AI Provider → toast `"AI Provider added"`.
+16. Edit an existing provider → toast `"AI Provider updated"`.
+17. Delete a provider → confirm in browser prompt → toast `"AI Provider deleted"`.
+18. Rotate API key → toast `"API key rotated"`.
+19. Click **Set as default** on a provider → toast `"Set as workspace default"`. Click **Unpin default** → toast `"Cleared workspace default"`.
+20. **Import / export** (UX-001 follow-up — `AiProvidersSection.jsx:972-1011`):
+    - Click **Export** → green toast with `"Exported N provider(s)."` + the same text in the inline banner.
+    - Click **Import** with a clean JSON file → green toast with the per-row counts (`"3 created · 1 overwritten"`).
+    - Import a file with row-level errors → red toast with the same partial-success summary that the inline banner shows (so partial failures don't read as fully successful).
+
+**E. Settings → Integrations (`/settings/integrations`, admin-only):**
+
+21. Save GitHub PR-checks settings on a project row → toast `"GitHub check settings saved"`.
+22. Click **Install App** on a project row → redirect to GitHub. After install callback bounces back to `/settings/integrations?github=installed` → green toast `"GitHub App installed"` + inline banner.
+23. Failure case (invalid installation ID) → red toast with the API error message.
+
+**F. Settings → Members (`/settings/members`, admin-only):**
+
+24. Invite a member → toast `"Member invited"`.
+25. Change a member's role → toast `"Member role updated"`.
+26. Remove a member → confirm in browser prompt → toast `"<Name> removed from workspace"`.
+
+**G. Settings → Security (`/settings/security`):**
+
+27. Save workspace MFA policy (admin) → toast `"Workspace MFA policy updated"` AND inline `setStatus` banner — both render (Option A from the spec; banner survives the 3.5s fade for long forms, toast confirms the action immediately).
+
+**H. Settings → Account (`/settings/account`):**
+
+28. Click **Export account data** with correct password → JSON downloads → toast `"Account export downloaded"`.
+29. Click **Delete account** → confirm (5-second auto-disarm) → toast `"Account deleted"` fires BEFORE `logout()`. The toast survives the redirect to `/login`.
+30. Trigger a delete failure (wrong password) → red toast with the API error message.
+
+**I. Already-correct surfaces — regression check (PR #7 baseline + Auto-Approval action toasts):**
+
+31. **Project Detail** → Environments tab → Add / Edit / Delete → toast.
+32. **Project Detail** → Approve / Reject / Restore single test → toast.
+33. **Review Queue** → bulk approve N tests → toast `"N tests approved"` with an inline **Undo** button (5s linger). Click Undo → toast `"Restored N tests"` and Draft badge re-increments.
+34. **ApprovalsTimeline** → Revoke a single auto-approval → toast `"Approval revoked"`; failure → toast `"Revoke failed"`.
+
+**J. Accessibility check (run once per release):**
+
+35. With a screen reader (VoiceOver / NVDA), trigger a success toast → announced via `role="status"` / `aria-live="polite"`.
+36. Trigger an error toast → announced via `role="alert"` / `aria-live="assertive"` (errors are higher priority).
+37. Tab to the toast's **×** dismiss button → activatable via Enter / Space.
+38. Tab to a toast's action button (e.g. Review Queue **Undo**) → activatable via keyboard; dismisses toast and runs the action.
+
+**Negative / edge:**
+
+- Toast auto-dismiss timing: success/info = 3.5 s, error = 5 s, action toasts (with Undo / View run) = 5 s regardless of type. Pre-fix the action would lose its CTA before users could react.
+- Rapid successive toasts: the second call clears the first one's auto-dismiss timer and immediately replaces its content (single-toast queue, no stacking). Verify by clicking Save twice within 1 s on Quality Gates — only the second toast remains visible.
+- Action handler throws: the toast still dismisses cleanly; error is logged to `console.error`. Verify by mocking a failing Undo handler in DevTools.
+- The notification bell (`NotificationProvider`) still receives durable async events (run-complete, scheduled-trigger fired, PR-check posted) — these are NOT routed to toast. Verify a completed run on another project still shows in the bell, not as a toast.
+- All panel callsites use the unified `onToast(message, type)` positional signature — `AutoApprovalPanel`, `CoveragePanel`, `IterationCapPanel`, `PiiFirewallPanel`, `VisionHealingPanel`, `EnvironmentsTab`, and `ConfigurablePanel`. The pre-UX-001 `{ type, message }` object form was migrated in the same PR; no compat shim remains in `Automation.jsx` / `ProjectSettingsLayout.jsx`.
+
+---
+
 ### 🧩 Agent Roles (AI-004)
 
 **Preconditions:** User A (admin) logged in; at least one extra workspace member at `qa_lead` or `viewer` role for the negative checks. A second workspace + admin (User D in a separate workspace) for the cross-workspace isolation check.

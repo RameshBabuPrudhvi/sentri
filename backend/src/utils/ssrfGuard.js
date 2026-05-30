@@ -151,6 +151,43 @@ export async function validateUrl(raw) {
  * - Re-resolves DNS to mitigate DNS rebinding attacks.
  * - Blocks redirects (`redirect: "error"`) to prevent open-redirect SSRF bypass.
  *
+ * ### §7.3 — Residual DNS-rebinding TOCTOU window (documented, accepted)
+ *
+ * `resolveAndCheckDns` does a separate `dns.promises.resolve4/6()` lookup
+ * before calling `fetch()`. Node's underlying `undici` HTTP client then
+ * performs its OWN DNS resolution when opening the TCP connection — and
+ * does not expose a hook to (a) reuse our pre-resolved address, or
+ * (b) intercept the address it resolves at connect time. So a determined
+ * attacker can race a sub-TTL DNS response between these two lookups and
+ * direct the actual TCP connection to a private IP that our pre-check
+ * didn't see.
+ *
+ * Why this is acceptable for now:
+ *
+ *  1. **The window is small.** The attacker needs to time a DNS response
+ *     flip to land between our `resolve4/6` and undici's connect — sub-ms
+ *     on a warm process. Not impossible, but not a casual attack.
+ *
+ *  2. **The defence-in-depth layers reduce blast radius.** `redirect:
+ *     "error"` blocks the 302 → cloud-metadata pivot. Outbound network
+ *     policy on the host (k8s NetworkPolicy, security group egress
+ *     deny-list to 169.254.169.254 and RFC-1918 ranges) is the canonical
+ *     production fix — the application layer is best-effort. The Helm
+ *     chart's NetworkPolicy template (planned, not yet shipped) is the
+ *     right place to land this.
+ *
+ *  3. **The true fix requires a custom undici dispatcher** that re-checks
+ *     the resolved address inside its `connect()` callback before opening
+ *     the socket. Tracked separately — the API surface for that landed in
+ *     `undici@5.18` (`connect: { socketPath, lookup: ... }` hook). Wiring
+ *     it through `fetch` requires constructing an `Agent` with a custom
+ *     `connect` and passing it via the `dispatcher:` option, which is not
+ *     yet shimmed into the rest of the codebase.
+ *
+ * For now: every caller of `safeFetch` should ALSO be behind an outbound
+ * network policy in production. Treat `safeFetch` as the necessary
+ * application-layer check, not the only check.
+ *
  * @param {string} url     - The URL to fetch.
  * @param {Object} options - Standard fetch options (method, headers, body, signal, etc.).
  * @returns {Promise<Response>}

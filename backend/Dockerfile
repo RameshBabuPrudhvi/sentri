@@ -1,6 +1,10 @@
 FROM node:20-slim
 
-RUN apt-get update && apt-get install -y \
+# §10.2 — `apt-get upgrade` after `apt-get update` pulls Debian security-pool
+# fixes for the base layer's `libcap2` / `libgnutls30` CVEs (and any future
+# layer-level findings) that Trivy gates HIGH/CRITICAL on. Combined with the
+# install step in one RUN so the apt cache is dropped in the same layer.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
   chromium \
   ffmpeg \
   libnss3 \

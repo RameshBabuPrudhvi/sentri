@@ -218,6 +218,15 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
   // already uses `??`; pre-fix this initializer was the only
   // asymmetric coercion in the loop.
   let lastArtifact = initialMessage?.artifact ?? null;
+  // Bundle-A fix #1 — track the id of the last orchestrator-emitted
+  // envelope so each supervisor→nextRole handoff carries `replyToId`
+  // pointing at the prior round's terminal envelope (matches the
+  // pattern in `agentLoop.js#runReviewerAuthorLoop` where
+  // `lastReviewerMsgId` threads reviewer→author handoffs). Without
+  // this, the UI timeline can't reconstruct the multi-step thread:
+  // every supervisor handoff persisted `replyToId: null` so the
+  // frontend rendered each step as an orphan root.
+  let lastEmittedMsgId = null;
   // AUTO-023 B4.2 — resolve quota gate ONCE per thread so cap reads
   // are cached across steps. `null` from caller falls back to the
   // workspace-spend-cap default.
@@ -300,10 +309,13 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
     // activity chronologically before the supervisor's handoff —
     // operators saw the agent invoke a tool before the supervisor told
     // it to act.
-    emitAgentMessage({
+    // Bundle-A fix #1 — thread `replyToId` to the prior round's terminal
+    // envelope so the supervisor → nextRole handoff chain is connected.
+    const supervisorHandoffMsg = emitAgentMessage({
       runId, workspaceId, threadId, traceId: getCurrentTraceId() || `trace-${runId || "standalone"}`,
-      fromRole: "supervisor", toRole: nextRole, intent: "handoff", artifact: { instruction: decision.instruction }, rationale: decision.rationale || null, round: step, replyToId: null, createdAt: nowIso(),
+      fromRole: "supervisor", toRole: nextRole, intent: "handoff", artifact: { instruction: decision.instruction }, rationale: decision.rationale || null, round: step, replyToId: lastEmittedMsgId, createdAt: nowIso(),
     });
+    lastEmittedMsgId = supervisorHandoffMsg?.id || lastEmittedMsgId;
     const msg = await runAgent({ role: nextRole, instruction: decision.instruction, thread, step, workspaceId, runId, threadId, signal });
     thread.push(msg);
     // AUTO-023 B5.3 — skip `lastArtifact` updates for tool envelopes.
@@ -342,8 +354,13 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
           // (only `playwright.dryRun.testCode` is scanned today; other
           // tools' args are non-free-form).
           artifact: { tool: msg.artifact.tool, args: redactToolArgsForPersistence(msg.artifact.tool, msg.artifact.args || {}) },
-          rationale: msg.rationale || null, round: step, replyToId: null, createdAt: nowIso(),
+          // Bundle-A fix #1 — connect tool_call to the supervisor's
+          // handoff that authorised the role's run, completing the chain.
+          rationale: msg.rationale || null, round: step, replyToId: lastEmittedMsgId, createdAt: nowIso(),
         });
+        // Tool calls become the new chain head so the matching
+        // tool_result (and the next supervisor handoff) point at them.
+        lastEmittedMsgId = toolCallId;
       }
       let resultMsg;
       try {
@@ -408,13 +425,16 @@ export async function runAutonomousThread(initialMessage, opts = {}) {
               tool: msg.artifact.tool,
               result: summarizeToolResult(msg.artifact.tool, resultMsg.artifact.result),
             };
-        emitAgentMessage({
+        const toolResultMsg = emitAgentMessage({
           runId, workspaceId, threadId,
           traceId: getCurrentTraceId() || `trace-${runId}`,
           fromRole: resultMsg.fromRole, toRole: resultMsg.toRole, intent: "tool_result",
           artifact: envelopeArtifact, rationale: resultMsg.rationale, round: step,
           replyToId: toolCallId, createdAt: nowIso(),
         });
+        // Bundle-A fix #1 — the tool_result becomes the chain head so
+        // the next supervisor handoff threads against it.
+        lastEmittedMsgId = toolResultMsg?.id || lastEmittedMsgId;
       }
     }
 
