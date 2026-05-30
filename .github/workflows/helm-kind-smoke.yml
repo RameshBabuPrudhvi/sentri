@@ -40,11 +40,18 @@ jobs:
           # we're only validating the manifests render + Postgres/Redis
           # boot. The probes will fail (nginx doesn't serve /api/v1/health),
           # so we explicitly disable them via `--set` overrides below.
+          # `helm/sentri/templates/secret.yaml` refuses to render with
+          # the bundled `change-me` placeholders (CR-003 / TD-003). The
+          # `--set` values below are deliberate low-entropy `x`-repeats
+          # so gitleaks' generic-secret detector doesn't flag them and a
+          # human can't mistake them for real values.
           helm install sentri ./helm/sentri \
             --set ingress.host=test.local \
             --set backend.image=nginx:alpine \
             --set worker.image=nginx:alpine \
             --set autoscaling.enabled=false \
+            --set secrets.JWT_SECRET=xxxxxxxx-helm-test-placeholder-xxxxxxxx \
+            --set secrets.ENCRYPTION_KEY=xxxxxxxx-helm-test-placeholder-xxxxxxxx \
             --wait=false
       - name: Wait for Postgres + Redis Ready
         # These are the only real pods in this smoke harness (backend +

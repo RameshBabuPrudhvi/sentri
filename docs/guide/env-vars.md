@@ -318,6 +318,7 @@ S3_ENDPOINT=https://minio.internal:9000
 | `HEALING_RETRY_COUNT` | `3` | Retries per interaction before giving up |
 | `HEALING_RETRY_DELAY` | `400` | Pause between retries (ms) |
 | `HEALING_HINT_MAX_FAILS` | `3` | Skip healing hints that have failed this many consecutive times |
+| `HEALING_HINT_DECAY_DAYS` | `7` | Bundle-B fix #10 — TTL decay window for stale healing hints. When a hint's `failCount` is at the cap AND its `succeededAt` is older than this many days, the next read resets `failCount` to 0 so the hint is re-tried. Without decay, a single transient page change that burned the cap leaves the hint dead permanently. |
 | `HEALING_VISIBLE_WAIT_CAP` | `1200` | Max `waitFor` timeout per strategy in `firstVisible` (ms) |
 
 ### AI Chat
@@ -361,6 +362,15 @@ Trace ↔ log correlation: when OTel is active, every `formatLogLine()` and `str
   - `app_crawl_pages_total` — pages discovered per crawl, bumped by `pagesCrawled` at the end of each crawl run.
 
 Counter naming uses `app_*` rather than a product-name prefix so Prometheus dashboards and alerting rules don't need to be migrated during a [product rebrand](./rebranding.md).
+
+### SSE — Server-Sent Events resilience caps
+
+Two defence-in-depth knobs on the per-run SSE stream (`backend/src/routes/sse.js`). Both have safe defaults — operators only override under stress-testing or when running unusually large fan-out scenarios. CR-009 closes a slow-leak; §11.3 closes a memory-growth leak.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SSE_MAX_LISTENERS_PER_RUN` | `50` | **CR-009** — Per-run, per-process cap on concurrent SSE listeners. New `GET /api/v1/runs/:runId/events` connections beyond the cap return HTTP 503 with `retryAfter: 5` instead of growing `runListeners.get(runId)` without bound on connection leaks (mobile sleep, network drop, abnormal close). Lower-bounded at `1` so a misconfigured `0` doesn't disable SSE entirely. Cap is per-instance — multi-replica deployments naturally shard listeners across pods, so a single run with 50 reviewers on the same pod is already an edge case. |
+| `SSE_MAX_WRITABLE_BYTES` | `1048576` (1 MiB) | **§11.3** — Per-listener backpressure high-water mark, in bytes. On every write, if `res.writableLength` exceeds this cap the listener is `end()`-ed and skipped instead of being written to. A slow consumer (mobile on throttled connection, paused tab, half-closed proxy) keeps Node's stream buffer growing without bound for the run's lifetime — a 20-minute run emitting 500+ log events at ~1 KB each is ~500 KB of backlog per stalled client. Lower-bounded at `64 * 1024` (64 KiB). EventSource clients reconnect automatically with their normal retry backoff and re-hydrate from the snapshot on the next handshake. |
 
 ### OAuth
 

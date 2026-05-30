@@ -1,3 +1,15 @@
 ingress:
   enabled: true
   host: test.local
+
+# CI-only obviously-fake placeholders. `helm/sentri/templates/secret.yaml`
+# refuses to render with the bundled `change-me` placeholders (CR-003 /
+# TD-003), so the `validate` job must override both. These are deliberate
+# low-entropy `x`-repeats so:
+#   1. gitleaks' generic-secret detector doesn't flag them.
+#   2. A human glancing at the file can't mistake them for real values.
+# Production deployments override via sealed-secrets / a values file kept
+# out of git.
+secrets:
+  JWT_SECRET: xxxxxxxx-helm-test-placeholder-xxxxxxxx
+  ENCRYPTION_KEY: xxxxxxxx-helm-test-placeholder-xxxxxxxx

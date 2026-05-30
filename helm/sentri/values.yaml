@@ -36,5 +36,13 @@ env:
   REDIS_URL: redis://sentri-redis:6379
   WORKER_CONCURRENCY: "2"
 secrets:
+  # CR-003 / TD-003 — These MUST be overridden at install time. The chart's
+  # `templates/secret.yaml` calls `fail` if either value is empty or still
+  # set to the `change-me` placeholder, so `helm install` will refuse to
+  # render rather than silently ship weak crypto. Provide via:
+  #   helm install sentri ./helm/sentri \
+  #     --set secrets.JWT_SECRET=$(openssl rand -hex 32) \
+  #     --set secrets.ENCRYPTION_KEY=$(openssl rand -hex 32)
+  # …or a sealed-secrets / external-secrets values override file.
   JWT_SECRET: change-me
   ENCRYPTION_KEY: change-me

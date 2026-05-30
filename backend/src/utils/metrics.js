@@ -422,3 +422,61 @@ export const feedbackLoopRegenerationFailuresTotal = new client.Counter({
   labelNames: ["reason"],
   registers: [register],
 });
+
+// Bundle-B fix #8 — healing-hint discard counter. Bumps every time a stored
+// hint is rejected because its `strategyVersion` doesn't match the current
+// `STRATEGY_VERSION`. Operators alert on a sustained non-zero rate to spot
+// a stale-hint backlog after a strategies-array reorder. `reason` is a
+// closed-set label so cardinality stays bounded; today the only documented
+// reason is `version_mismatch`, but the label leaves room for future
+// discard triggers (e.g. `decay_expired` for stale hints) without a
+// schema break.
+export const healingHintsDiscardedTotal = new client.Counter({
+  name: "app_healing_hints_discarded_total",
+  help: "Bundle-B fix #8 — healing hints discarded by `getHealingHint` / `getHealingHistoryForTest`. `reason` ∈ {version_mismatch}. Non-zero rate signals a stale-hint backlog after a STRATEGY_VERSION bump.",
+  labelNames: ["reason"],
+  registers: [register],
+});
+
+// ─── Bundle-B fix #19 — state-explorer metrics ───────────────────────────────
+// Five metrics covering the explorer's hot path so operators can answer
+// "is exploration making progress / hitting bot blocks / running long?"
+// without grepping run logs.
+const EXPLORER_DURATION_BUCKETS = [1, 5, 15, 30, 60, 120, 300, 600, 900];
+
+// Aggregate counter — no `projectId` label. Unbounded labels are a
+// Prometheus anti-pattern (one time series per project blows up TSDB
+// memory on multi-tenant deployments). Per-project attribution lives in
+// the structured `New state` log line emitted alongside each increment;
+// dashboards aggregate the counter rate platform-wide.
+export const explorerStatesDiscoveredTotal = new client.Counter({
+  name: "app_explorer_states_discovered_total",
+  help: "Novel states recorded by the state explorer. Counts only novel snapshots (per `captureState`'s isNovel branch), not every visit. Per-project attribution is in the structured run log.",
+  registers: [register],
+});
+
+export const explorerActionsAttemptedTotal = new client.Counter({
+  name: "app_explorer_actions_attempted_total",
+  help: "Bundle-B fix #19 — actions the explorer attempted to dispatch on a page, labelled by action type (click/fill/submit/select/check). Counted PRE-dispatch so the counter reflects intent even when the action fails to resolve a target.",
+  labelNames: ["type"],
+  registers: [register],
+});
+
+export const explorerBotBlockSkipsTotal = new client.Counter({
+  name: "app_explorer_bot_block_skips_total",
+  help: "Bundle-B fix #19 — actions / forms that triggered an off-origin or bot-block navigation and were skipped + restored. A sustained non-zero rate signals the target site is rate-limiting or fingerprinting the crawler.",
+  registers: [register],
+});
+
+export const explorerGlobalTimeoutTotal = new client.Counter({
+  name: "app_explorer_global_timeout_total",
+  help: "Bundle-B fix #19 — explorations that hit the global 15-minute hard cap (`GLOBAL_TIMEOUT_HARD_CAP_MS`). Any non-zero rate signals operator tuning that's exceeding the budget — investigate via the `Global timeout capped` log line.",
+  registers: [register],
+});
+
+export const explorerDurationSeconds = new client.Histogram({
+  name: "app_explorer_duration_seconds",
+  help: "Bundle-B fix #19 — end-to-end state-exploration duration in seconds. Buckets sized to surface p95/p99 against the 15-minute hard cap.",
+  buckets: EXPLORER_DURATION_BUCKETS,
+  registers: [register],
+});
