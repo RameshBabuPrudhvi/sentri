@@ -87,91 +87,91 @@
     },
     "POST /api/v1/projects/:id/tests": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:318"
+      "source": "backend/src/routes/tests.js"
     },
     "PATCH /api/v1/tests/:testId": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:97"
+      "source": "backend/src/routes/tests.js"
     },
     "DELETE /api/v1/projects/:id/tests/:testId": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:364"
+      "source": "backend/src/routes/tests.js"
     },
     "POST /api/v1/projects/:id/tests/generate": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:382"
+      "source": "backend/src/routes/tests.js"
     },
     "POST /api/v1/projects/:id/record": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:858"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/tests/:testId/run": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:487"
+      "source": "backend/src/routes/tests.js"
     },
     "PATCH /api/v1/projects/:id/tests/:testId/approve": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:538"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "PATCH /api/v1/projects/:id/tests/:testId/reject": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:555"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "POST /api/v1/projects/:id/tests/bulk": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:589"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "PATCH /api/v1/projects/:id/tests/:testId/restore": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:572"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "POST /api/v1/tests/:testId/revoke": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "GET /api/v1/projects/:id/approval-stats": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "POST /api/v1/tests/:testId/baselines/:stepNumber/accept": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:751"
+      "source": "backend/src/routes/tests.js"
     },
     "DELETE /api/v1/tests/:testId/baselines/:stepNumber": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:822"
+      "source": "backend/src/routes/tests.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/stop": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:948"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/input": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:1141"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/assertion": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:1172"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/pause": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/resume": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/pop-last": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/device": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/probe": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/tests/:testId/fix": {
       "role": "qa_lead",

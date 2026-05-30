@@ -63,7 +63,7 @@
  * count colour, quick-action icon swatch) flow through CSS custom
  * properties set inline on the element — the rest of the rule lives here
  * so CSP can drop `style-src 'unsafe-inline'` once every static value is
- * class-driven. AGENT.md §127 carves out runtime-numeric / runtime-colour
+ * class-driven. AGENTS.md §127 carves out runtime-numeric / runtime-colour
  * properties; using a custom property keeps that carve-out tight (one
  * property) instead of a 7-property style block.
  */

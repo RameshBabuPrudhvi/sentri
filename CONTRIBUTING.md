@@ -8,7 +8,7 @@ Thank you for your interest in contributing. This document explains how to contr
 
 - **Search first.** Check [open issues](https://github.com/RameshBabuPrudhvi/sentri/issues), [open PRs](https://github.com/RameshBabuPrudhvi/sentri/pulls), and [ROADMAP.md](ROADMAP.md) before starting work. Duplicate PRs are closed immediately.
 - **Open an issue before a PR** for any non-trivial change — new features, architectural changes, or anything that touches more than one subsystem. This avoids wasted effort if the direction isn't right.
-- **Read the key docs.** [AGENT.md](AGENT.md) covers architecture and hard DO NOTs. [STANDARDS.md](STANDARDS.md) covers code conventions. [REVIEW.md](REVIEW.md) is the PR checklist you'll be held to.
+- **Read the key docs.** [AGENTS.md](AGENTS.md) covers architecture and hard DO NOTs. [STANDARDS.md](STANDARDS.md) covers code conventions. [REVIEW.md](REVIEW.md) is the PR checklist you'll be held to.
 
 ---
 

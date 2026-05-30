@@ -8,6 +8,9 @@
  * |------------------------|---------------------|
  * | `/api/v1/projects`     | `routes/projects`   |
  * | `/api/v1` (tests)      | `routes/tests`      |
+ * | `/api/v1` (recorder)   | `routes/recorder`   |
+ * | `/api/v1` (testExports)| `routes/testExports`|
+ * | `/api/v1` (testApprovals)| `routes/testApprovals`|
  * | `/api/v1` (runs)       | `routes/runs`       |
  * | `/api/v1` (SSE)        | `routes/sse`        |
  * | `/api/v1` (dashboard)  | `routes/dashboard`  |
@@ -43,6 +46,8 @@ import { closeRedis } from "./utils/redisClient.js";
 import { ensureDefaultWorkspaces } from "./database/repositories/workspaceRepo.js";
 import { closeQueue } from "./queue.js";
 import { startWorker, stopWorker } from "./workers/runWorker.js";
+import { browserPool } from "./runner/browserPool.js";
+import { aiRateLimit } from "./middleware/aiRateLimit.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app, serveIndexWithNonce } from "./middleware/appSetup.js";
@@ -51,6 +56,9 @@ import { workspaceScope } from "./middleware/workspaceScope.js";
 // ─── Route modules ────────────────────────────────────────────────────────────
 import projectsRouter from "./routes/projects.js";
 import testsRouter from "./routes/tests.js";
+import recorderRouter from "./routes/recorder.js";
+import testExportsRouter from "./routes/testExports.js";
+import testApprovalsRouter from "./routes/testApprovals.js";
 import runsRouter from "./routes/runs.js";
 import triggerRouter from "./routes/trigger.js";
 import sseRouter from "./routes/sse.js";
@@ -218,14 +226,17 @@ async function gracefulShutdown(signal) {
       runAbortControllers.clear();
     }
 
-    // 5. Stop BullMQ worker and close queue (INF-003)
+    // 5. Drain warm Playwright contexts before queue / Redis teardown (MNT-015)
+    await browserPool.drainAndClose();
+
+    // 6. Stop BullMQ worker and close queue (INF-003)
     await stopWorker();
     await closeQueue();
 
-    // 6. Close Redis connections (INF-002)
+    // 7. Close Redis connections (INF-002)
     await closeRedis();
 
-    // 7. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
+    // 8. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
     await closeDatabase();
     console.log(formatLogLine("info", null, "[shutdown] Graceful shutdown complete"));
     process.exit(0);
@@ -313,10 +324,30 @@ app.get("/api/docs", (req, res) => {
 </html>`);
 });
 
-// All other API routes require a valid JWT token + workspace context (ACL-001).
-// workspaceScope injects req.workspaceId and req.userRole from the JWT or DB.
+// MNT-015 — per-workspace AI cost-weighted limiter. Mounted at the API
+// prefix BEFORE the route-level chains below so it runs exactly once,
+// but AFTER `requireAuth` + `workspaceScope` so `req.workspaceId` is set.
+// Path-matched + POST-only so auth, SSE, /health, and every GET bypass
+// the bucket (NEXT.md acceptance criterion). The router-level chains
+// below re-run `requireAuth` + `workspaceScope` for non-AI routes — a
+// matched AI request is short-circuited here at 429 BEFORE reaching the
+// router, so auth runs at most twice on the allow-path (cheap: cached
+// JWT decode) and once on the rejected path.
+const aiMutationLimiter = aiRateLimit();
+const aiMutationPaths = [
+  `${API_PREFIX}/chat`,
+  `${API_PREFIX}/projects/:id/crawl`,
+  `${API_PREFIX}/projects/:id/tests/generate`,
+  `${API_PREFIX}/tests/:testId/fix`,
+  `${API_PREFIX}/settings/agent-roles/:role/test`,
+];
+app.post(aiMutationPaths, requireAuth, workspaceScope, aiMutationLimiter);
+
 app.use(`${API_PREFIX}/projects`, requireAuth, workspaceScope, projectsRouter);
 app.use(API_PREFIX, requireAuth, workspaceScope, testsRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, recorderRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, testExportsRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, testApprovalsRouter);
 app.use(API_PREFIX, requireAuth, workspaceScope, runsRouter);
 app.use(API_PREFIX, requireAuth, workspaceScope, sseRouter);
 app.use(API_PREFIX, requireAuth, workspaceScope, dashboardRouter);

@@ -8,7 +8,7 @@
 
 | Situation | Read this |
 |---|---|
-| Every task, always | **This file** (AGENT.md) |
+| Every task, always | **This file** (AGENTS.md) |
 | Starting the next PR | [NEXT.md](./NEXT.md) — current sprint spec, files, acceptance criteria. **Do not read ROADMAP.md** unless you need context on items beyond the current PR. |
 | Writing or modifying code | [STANDARDS.md](./STANDARDS.md) |
 | Looking up a utility, CSS class, hook, repo, env var, or auth strategy | [REFERENCE.md](./REFERENCE.md) — Ctrl+F only, never top-to-bottom |

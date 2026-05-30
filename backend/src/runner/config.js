@@ -46,6 +46,12 @@ export const BROWSER_PRESETS = [
 ];
 const BROWSER_ENGINES = { chromium, firefox, webkit };
 export const DEFAULT_BROWSER = (() => {
+  // Only honour the Sentri-specific `BROWSER_DEFAULT` env var. We deliberately
+  // do NOT fall back to `BROWSER` — that's a well-known env var set by Linux
+  // desktops, Create React App (`BROWSER=none`), and various tooling. An
+  // operator with `BROWSER=firefox` in their shell (unrelated to Sentri) would
+  // silently flip every Sentri test to Firefox, which breaks Chromium-only
+  // surfaces (CDP screencast, recorder, shadow-DOM crawling).
   const raw = (process.env.BROWSER_DEFAULT || "chromium").toLowerCase();
   return BROWSER_ENGINES[raw] ? raw : "chromium";
 })();

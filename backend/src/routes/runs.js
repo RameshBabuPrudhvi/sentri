@@ -20,7 +20,7 @@
 import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
-import * as environmentRepo from "../database/repositories/environmentRepo.js";
+import { resolveEnvOrThrow } from "../utils/routeHelpers.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
@@ -64,10 +64,11 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
   // DIF-012: optional per-run environment override. Validates the env
   // belongs to this project so callers can't run against a sibling
   // project's environment by ID guessing.
-  const environmentId = req.body?.environmentId || null;
-  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
-  if (environmentId && (!environment || environment.projectId !== project.id)) {
-    return res.status(400).json({ error: "invalid environmentId" });
+  let environment;
+  try {
+    environment = resolveEnvOrThrow(req.body?.environmentId, project);
+  } catch (err) {
+    return res.status(err.httpStatus || 400).json({ error: err.message });
   }
 
   const { dialsConfig } = req.body || {};
@@ -175,12 +176,13 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // (before the no-tests / no-approved-tests checks) so a bad envId fails
   // fast with `invalid environmentId` rather than masking behind a
   // misleading "no tests found" error. Matches the ordering used by the
-  // crawl path (runs.js:98-102) and the trigger path (trigger.js:454-458),
-  // and the contract documented in QA.md (line 903).
-  const environmentId = req.body?.environmentId || null;
-  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
-  if (environmentId && (!environment || environment.projectId !== project.id)) {
-    return res.status(400).json({ error: "invalid environmentId" });
+  // crawl path above and the trigger path (trigger.js), and the contract
+  // documented in QA.md (line 903).
+  let environment;
+  try {
+    environment = resolveEnvOrThrow(req.body?.environmentId, project);
+  } catch (err) {
+    return res.status(err.httpStatus || 400).json({ error: err.message });
   }
 
   const allTests = testRepo.getByProjectId(project.id);
@@ -227,7 +229,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // output even though the queue itself follows the approved-test order.
   const riskById = new Map(riskOrderedTests.map((t) => [t.id, t.riskScore]));
   // Pre-seed `results` with "skipped (over budget)" markers — every test must
-  // have a resolution (AGENT.md issue-handling rule); silently dropping
+  // have a resolution (AGENTS.md issue-handling rule); silently dropping
   // budget-truncated tests would violate observability.
   const initialResults = budgetSkipped.map((t) => ({
     testId: t.id,

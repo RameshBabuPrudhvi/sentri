@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 
 const files = [
   "tests/code-parsing.test.js",
+  "tests/browser-pool.test.js",
+  "tests/ai-rate-limit.test.js",
   "tests/self-healing.test.js",
   // MNT-001 — host-side vision-healing waterfall (stages 7 pixelmatch + 8 LLM).
   // Stub-driven via dependency injection; no real CV / no real network in CI.

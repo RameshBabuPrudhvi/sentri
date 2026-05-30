@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
+import testApprovalsRouter from "../src/routes/testApprovals.js";
 import runsRouter from "../src/routes/runs.js";
 import sseRouter from "../src/routes/sse.js";
 import * as runRepo from "../src/database/repositories/runRepo.js";
@@ -26,6 +27,7 @@ function mountRoutesOnce() {
   app.use("/api/auth", authRouter);
   app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
   app.use("/api", requireAuth, workspaceScope, testsRouter);
+  app.use("/api", requireAuth, workspaceScope, testApprovalsRouter);
   app.use("/api", requireAuth, workspaceScope, runsRouter);
   app.use("/api", requireAuth, workspaceScope, sseRouter);
   mounted = true;

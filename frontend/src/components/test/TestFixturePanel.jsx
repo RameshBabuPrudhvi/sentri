@@ -14,7 +14,7 @@ import { fmtDateTime } from "../../utils/formatters.js";
  * - Optional `iterationCap` override field — server clamps to [1, 100] and
  *   reports truncation back via `truncated: true` in the response.
  *
- * The component lives in `frontend/src/components/test/` per AGENT.md (no
+ * The component lives in `frontend/src/components/test/` per AGENTS.md (no
  * helpers defined mid-component file), and is mounted from `TestDetail.jsx`
  * to satisfy the PROC-001 no-orphan-routes invariant for the two new
  * fixture endpoints in `frontend/src/api.js`.

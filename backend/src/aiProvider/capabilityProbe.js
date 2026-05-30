@@ -187,7 +187,7 @@ async function probeReachability(route, opts = {}) {
     });
     return { ok: true };
   } catch (err) {
-    // AGENT.md / STANDARDS.md: never use bare `console.*` for application
+    // AGENTS.md / STANDARDS.md: never use bare `console.*` for application
     // logging. Wrap through `formatLogLine` so structured-log pipelines
     // (LOG_JSON mode) pick this up with timestamps + level metadata. The
     // diagnostic context (status, elapsedMs, route attribution) is

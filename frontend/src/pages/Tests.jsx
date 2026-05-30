@@ -493,7 +493,7 @@ export default function Tests() {
           // the previous onMouseEnter / onMouseLeave handlers entirely.
           // Per-card colours flow through CSS custom properties (`--t-card-bg`
           // / `--t-card-fg` / `--t-badge-bg`) — only the data-driven swatch
-          // values stay inline, per AGENT.md §127.
+          // values stay inline, per AGENTS.md §127.
           <div
             key={i}
             className="card t-quick-card"
@@ -550,7 +550,7 @@ export default function Tests() {
             {/* Status filter icons. The pill shell + count dot are CSS
                 (`.t-pill` / `.t-pill-count`); per-filter colours flow
                 through CSS custom properties so the rule cascade stays
-                in one place. AGENT.md §127 carve-out for data-driven
+                in one place. AGENTS.md §127 carve-out for data-driven
                 colour. */}
             {STATUS_FILTERS.map(f => {
               const active = filter === f.key;

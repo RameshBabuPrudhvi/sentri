@@ -126,7 +126,7 @@ router.get("/audit/verify", requireRole("admin"), (req, res) => {
     }
     return res.json(activityRepo.verifyAuditChain(req.workspaceId));
   } catch (err) {
-    // AGENT.md: 5xx never leaks internal details. Log server-side, return
+    // AGENTS.md: 5xx never leaks internal details. Log server-side, return
     // a stable error code the frontend can branch on.
     console.error(formatLogLine("error", null, `[audit/verify] ${err.message}`));
     return res.status(500).json({ error: "Audit chain verification unavailable.", code: "AUDIT_VERIFY_FAILED" });
@@ -333,7 +333,7 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), auditExpo
 
     return res.json({ rows, nextCursor });
   } catch (err) {
-    // AGENT.md: 5xx errors never leak internal details. Log server-side,
+    // AGENTS.md: 5xx errors never leak internal details. Log server-side,
     // return a stable code so the UI can render a clean "try again" state.
     console.error(formatLogLine("error", null, `[audit-log] ${err.message}`));
     return res.status(500).json({ error: "Audit log unavailable.", code: "AUDIT_READ_FAILED" });

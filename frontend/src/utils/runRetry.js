@@ -3,7 +3,7 @@
  * @description Pure helper for the G11 "Retry failed run" path.
  *
  * Extracted from `frontend/src/pages/TestLab.jsx#handleRetry` so the
- * payload-building logic lives in `utils/` (AGENT.md §40 — "Never define a
+ * payload-building logic lives in `utils/` (AGENTS.md §40 — "Never define a
  * helper mid-component file") and can be unit-tested without rendering the
  * 2500-line TestLab component. The React-state side-effects (setActiveRun,
  * setLaunching, ensureAiProvider, …) stay in the page; this module is

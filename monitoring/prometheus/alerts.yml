@@ -279,6 +279,46 @@ groups:
           summary: "Prometheus cannot scrape {{ $labels.instance }}"
           description: "/metrics endpoint is unreachable for 3 minutes. Either the backend is down, the scrape key changed, or the network path is broken. Without this signal, every other alert is silently dark."
           runbook_url: "https://docs.sentri.dev/guide/observability#backendscrapedown"
+  - name: sentri-saas-browser-pool
+    rules:
+      # ── MNT-015 browser pool saturation ────────────────────────────────────
+      # Fires when in-use slots stay above 90% of configured capacity for
+      # 5 minutes — operators add capacity (`BROWSER_POOL_SIZE` / more worker
+      # replicas) or investigate a stuck lease (test that never released its
+      # context). Per-`type` so cross-browser deployments alert on the
+      # specific engine that's saturated (chromium pool full while firefox
+      # is idle is a real failure mode worth a separate page). The 0.9
+      # threshold mirrors HikariCP / pgbouncer pool-saturation conventions.
+      - alert: BrowserPoolStarvation
+        expr: |
+          (
+            app_browser_pool_in_use
+            /
+            app_browser_pool_size
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: runner
+        annotations:
+          summary: "Browser pool {{ $labels.type }} > 90% saturated for 5 minutes"
+          description: "Pool in-use ratio is {{ $value | humanizePercentage }} for {{ $labels.type }}. New per-test acquires are queueing on the FIFO waiter, adding wall-clock latency. Either raise `BROWSER_POOL_SIZE`, add worker replicas, or inspect `app_browser_pool_acquire_wait_seconds` for the long-tail outlier holding a slot."
+          runbook_url: "https://docs.sentri.dev/guide/observability#browserpoolstarvation"
+      # ── MNT-015 unexpected browser disconnects ─────────────────────────────
+      # Healthy long-running deployments see this at zero outside the rare
+      # upstream Chromium / Playwright crash. Any non-zero rate is a hard
+      # signal worth investigating — most often a memory-starved container
+      # (Chromium OOM-killed by cgroup) or a CDP socket dropping under load.
+      - alert: BrowserPoolDisconnects
+        expr: increase(app_browser_pool_disconnects_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: runner
+        annotations:
+          summary: "Browser pool {{ $labels.type }} disconnected unexpectedly"
+          description: "The pool evicted a cached {{ $labels.type }} browser handle on a `disconnected` event in the last 15 min. Likely Chromium OOM-kill (check cgroup memory pressure) or CDP socket drop. The pool relaunches on the next acquire, but a sustained rate means tests are paying repeated cold-launch latency."
+          runbook_url: "https://docs.sentri.dev/guide/observability#browserpooldisconnects"
   - name: sentri-saas-vision-healing
     rules:
       # ── MNT-001 vision-heal budget circuit breaker ─────────────────────────

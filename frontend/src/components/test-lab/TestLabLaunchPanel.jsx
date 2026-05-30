@@ -21,7 +21,7 @@
  * `pages/TestLab.jsx`. The visual + behavioural surface is byte-
  * identical to the inline version it replaces.
  *
- * AGENT.md §40 — extraction triggers once a JSX surface exceeds a
+ * AGENTS.md §40 — extraction triggers once a JSX surface exceeds a
  * screenful (~270 lines for this panel) AND has its own reusable
  * shape. The middle-column body lives in `<TestLabConfigPanel>`; this
  * is the natural sibling.

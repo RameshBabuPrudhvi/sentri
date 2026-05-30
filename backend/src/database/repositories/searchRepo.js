@@ -4,7 +4,7 @@
  * Backs `GET /api/v1/search` (GAP-001 — audit).
  *
  * Centralises the LIKE-based two-pass ranking SQL so route handlers stay thin
- * per AGENT.md §117 ("Do not write raw SQL in route handlers — always go
+ * per AGENTS.md §117 ("Do not write raw SQL in route handlers — always go
  * through repository modules in `database/repositories/`").
  *
  * ### Ranking

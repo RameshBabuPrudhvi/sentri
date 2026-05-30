@@ -51,6 +51,7 @@ The following items have been verified complete against the codebase and are **n
 
 | ID | Title | PR / Commit                                                     |
 |----|-------|-----------------------------------------------------------------|
+| MNT-015 | Browser pool reuse + per-tenant cost-weighted AI rate limiting (warm Playwright pool, fresh-context-per-acquire, `RateLimit-*` headers, graceful-shutdown drain). | PR #1 |
 | AUTO-023 | Autonomous multi-agent collaboration — 5-bundle plan (envelope schema → linear handoff → reviewer↔author loop → supervisor orchestrator → shared memory + tool calling). | PR #34, #35, #36, #37, #38 |
 | INF-009 | Helm chart + Kubernetes readiness/liveness probes + disaster-recovery playbook (nightly `pg_dump -Fc` to S3, RTO < 4h / RPO < 24h). | PR #30 |
 | S3-02 | Shadow DOM support in crawler | PR #55                                                          |
@@ -125,7 +126,7 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-019 | Run diffing: per-test comparison across runs — new `GET /api/v1/runs/:runId/compare/:otherRunId` (`backend/src/routes/runs.js`) validates both runs under workspace ACL and returns a summary `{ total, flipped, added, removed, unchanged }` plus per-test diff rows keyed by `testId`. Frontend `api.getRunCompare(runId, otherRunId)` + new `RunCompareView` (`frontend/src/components/run/RunCompareView.jsx`) wired into `RunDetail` via a **Compare** action that loads a prior-run picker over the project's test-run history. Integration test `backend/tests/run-compare.test.js` covers happy path (all four change types), 404 unknown run, 401 unauth, and cross-workspace ACL; registered in `backend/tests/run-tests.js`. | PR #10                                                          |
 | UI-REFACTOR-001 | `ConfigurablePanel` abstraction extracted from `QualityGatesPanel` (AUTO-012) + `WebVitalsBudgetsPanel` (AUTO-017) — ~95% structural overlap eliminated; future SLO-style config UIs (SEC-005 SSO config, DIF-008 Jira integration) ship as one-file PRs. Shipped alongside an Automation page redesign: four top-level WAI-ARIA tabs (**Triggers & Schedules** · **Quality Gates** · **Integrations** · **Snippets**) with arrow-key + Home/End navigation, per-project accordions inside each tab with live status chips (`N tokens` / `Scheduled`, `Gates configured` / `Budgets set`), and a new `frontend/src/utils/automationStatus.js` parser + module-level promise cache + pub/sub invalidation bus pinning the backend response shapes (`data.schedule.enabled`, `data.qualityGates`, `data.webVitalsBudgets`) with regression coverage in `frontend/tests/automation-status.test.js`. The legacy ProjectDetail → Settings tab is removed; Quality Gates / Web Vitals Budgets now live exclusively at `/automation`. Frontend-only — no backend, schema, route, or `permissions.json` changes. _**Superseded** by the Project Settings restructure — see changelog `[Unreleased]`. The Quality Gates top-level tab on `/automation` was retired; Quality Gates + Web Vitals + Coverage + the four sibling project-scoped surfaces (Auto-Approval / Iterations / PII Firewall / Vision Healing) now live under `/projects/:id/settings/*` as a five-section sidebar mirroring the workspace Settings chrome. `ProjectQualityCard.jsx` is deleted; panels are extracted to `features/project-settings/sections/*/`. Legacy `?tab=quality` deep-links redirect to `/projects/:id/settings/quality-gates`._ | PR #6                                                           |
 | AUTO-017.3 | Web Vitals trend charts on `ProjectQualityCard` (LCP / CLS / INP / TTFB) backed by per-run averages from `recordMetric()` in `testRunner.js` via new `GET /projects/:id/metrics` route + `useProjectMetricQuery` hook; threshold lines sourced from `project.webVitalsBudgets`. _Charts now live on `QualityGatesSection` at `features/project-settings/sections/quality-gates/QualityGatesSection.jsx` after the Project Settings restructure — same data path (`useProjectMetricQuery` + `project.webVitalsBudgets`); only the host component moved._ | PR #9 |
-| PROC-001 | No-orphan-routes CI guard (`.github/workflows/no-orphan-routes.yml`) — fails PRs adding `router.<method>(…)` in `backend/src/routes/*.js` without touching `frontend/src/api.js` / pages / components; `[no-ui]` PR-title opt-out. Convention documented in REVIEW.md, AGENT.md, CONTRIBUTING.md, and the PR template. | PR #9 |
+| PROC-001 | No-orphan-routes CI guard (`.github/workflows/no-orphan-routes.yml`) — fails PRs adding `router.<method>(…)` in `backend/src/routes/*.js` without touching `frontend/src/api.js` / pages / components; `[no-ui]` PR-title opt-out. Convention documented in REVIEW.md, AGENTS.md, CONTRIBUTING.md, and the PR template. | PR #9 |
 | ~~PROC-002~~ + ~~PROC-003~~ | **Reverted in PR #10.** Sprint-promotion automation script (`scripts/promote-sprint-item.mjs` + smoke test) and its PROC-003 auto-prune extension. The regex-based transforms had too many edge cases (bundled-id `(bundled)` suffix leakage, queue-slot vs ROADMAP.md scope-text split, drifting title formats) to be reliably automated; the canonical hand-off is now the expanded manual checklist in `REVIEW.md § Sprint Tracker Hand-off`. | PR #8 (added) / PR #10 (reverted) |
 | CAP-003 | Secret scanner gate on AI-generated Playwright tests — gitleaks-style detectors, redacted findings, `run.secretScanBlocked` flag for CI consumers. | PR #12 |
 | AUTO-003 | Confidence scoring & auto-approval of low-risk tests | PR #10 |
@@ -352,7 +353,7 @@ Possible fix: integrate with project credential profiles (DIF-010) so the record
 
 ### CAP-002b — Sharding production hardening (chaos / load / SaaS-readiness) 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** L (split into sub-items below) | **Source:** PR #3 industry-standard audit — items NOT shipped in CAP-002's main scope but explicitly called out in the audit reply, recorded here per AGENT.md "every finding produces an outcome (fix or ROADMAP entry), never a silent gap".
+**Status:** 🔲 Planned | **Effort:** L (split into sub-items below) | **Source:** PR #3 industry-standard audit — items NOT shipped in CAP-002's main scope but explicitly called out in the audit reply, recorded here per AGENTS.md "every finding produces an outcome (fix or ROADMAP entry), never a silent gap".
 
 **Context:** CAP-002 (PR #3) shipped the cross-process sharding primitives end-to-end and is industry-standard for **self-hosted** deployments (7/10 against the self-hosted bar per the post-merge audit). This follow-up tracks the gaps that move us toward the **managed multi-tenant SaaS** bar (Cypress Cloud / BrowserStack / Sauce Labs / LambdaTest tier — currently scored 4/10). None of these are regressions from PR #3; they're scoped here so future reviewers don't re-discover them.
 
@@ -1257,27 +1258,11 @@ Full details: see Completed Work Summary table § INF-009 row.
 
 ---
 
-### MNT-015 — Browser pool reuse + per-tenant rate limiting 🟡 High
+### MNT-015 — Browser pool reuse + per-tenant rate limiting
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** AUDIT.md P4, B8 (formerly `PERF-001` in AUDIT_IMPL.md)
+**Status:** ✅ Complete (PR #1) — see Completed Work Summary above for the full implementation details. Shipped scope: warm Playwright browser-process pool in `backend/src/runner/browserPool.js` (per-`browserType` bucket with FIFO waiter queue, `BROWSER_POOL_SIZE` env default `WORKER_CONCURRENCY` / `MAX_WORKERS`); `testRunner.js` + `runner/executeTest.js` switched to `browserPool.acquire()` / release. **Design deviation from original spec:** the pool keeps the *browser process* warm but creates a fresh `BrowserContext` per acquire (closed on release) to preserve per-tenant isolation of storage state, video, and tracing — the spec's "warm BrowserContext with `clearCookies()`/`clearPermissions()`" would have leaked storage across workspaces. Per-workspace AI cost-weighted limiter in `backend/src/middleware/aiRateLimit.js` (AI mutation = 10 units, regular = 1 unit) keyed on `workspaceId:ai` via new `incrWithExpiry()` Redis Lua helper in `backend/src/utils/redisClient.js`; mounted on `POST /chat`, `POST /projects/:id/crawl`, `POST /projects/:id/tests/generate`, `POST /tests/:testId/fix`, `POST /settings/agent-roles/:role/test` in `backend/src/index.js` (not `appSetup.js` as originally specified — route names also updated to match current routes: `/tests/:testId/fix` instead of legacy `/tests/:id/regenerate`). Graceful shutdown drains the pool before queue / Redis teardown in `backend/src/index.js` + `backend/src/worker.js`. Telemetry: `app_browser_pool_size{type}`, `app_browser_pool_in_use{type}`, `app_browser_pool_acquires_total{type,outcome}`, `app_ai_rate_limited_total{workspace_role}` in `backend/src/utils/metrics.js`. New env vars documented: `BROWSER_POOL_SIZE`, `AI_RATE_LIMIT_PER_MIN`, `AI_RATE_LIMIT_REGULAR_PER_MIN`, `AI_RATE_LIMIT_WINDOW_SEC`. New tests registered in `backend/tests/run-tests.js`: `browser-pool.test.js` (acquire/release, FIFO queue, drain), `ai-rate-limit.test.js` (cost-weighted increment, sibling-workspace isolation, `Retry-After` on 429, bypass without `workspaceId`).
 
-**Problem:** Every test run cold-starts a new Chromium instance. For a 50-test suite this is 50 browser launches. A browser pool reduces wall-clock run time by 40–60%. AI endpoints (expensive) share rate-limit buckets with cheap GETs (ENH-005 is global-tier only).
-
-**Fix:** Extract a `BrowserPool` class (`backend/src/runner/browserPool.js`) maintaining N warm contexts (`MAX_WORKERS` default). Each test execution checks out a context and returns it without closing the browser. Add per-workspace AI rate limiting with cost weighting (AI call = 10 units, regular call = 1 unit), stored in Redis under `workspaceId:ai` keys.
-
-**Files to change:**
-- New `backend/src/runner/browserPool.js`
-- `backend/src/testRunner.js` — use `BrowserPool` instead of `playwright.launch()` per test
-- `backend/src/middleware/appSetup.js` — per-workspace AI rate limiter middleware
-- `backend/src/utils/redisClient.js` — `incrWithExpiry(key, cost, windowSec)`
-- `backend/.env.example` — `BROWSER_POOL_SIZE`
-
-**Acceptance criteria:**
-- A 10-test suite run starts in ≤3 browser launch events.
-- A workspace exceeding its AI rate limit receives 429 with `Retry-After` without affecting other workspaces.
-- Draining the pool on graceful shutdown closes all browser contexts cleanly.
-
-**Dependencies:** INF-007 (metrics to measure pool hit/miss rate).
+**Effort:** M | **Source:** AUDIT.md P4, B8 (formerly `PERF-001` in AUDIT_IMPL.md)
 
 ---
 

@@ -480,3 +480,58 @@ export const explorerDurationSeconds = new client.Histogram({
   buckets: EXPLORER_DURATION_BUCKETS,
   registers: [register],
 });
+
+// MNT-015 — browser pool and per-workspace AI limiter telemetry.
+export const browserPoolSize = new client.Gauge({
+  name: "app_browser_pool_size",
+  help: "MNT-015 — configured warm browser slot capacity by browser type.",
+  labelNames: ["type"],
+  registers: [register],
+});
+
+export const browserPoolInUse = new client.Gauge({
+  name: "app_browser_pool_in_use",
+  help: "MNT-015 — currently checked-out browser contexts by browser type.",
+  labelNames: ["type"],
+  registers: [register],
+});
+
+export const browserPoolAcquiresTotal = new client.Counter({
+  name: "app_browser_pool_acquires_total",
+  help: "MNT-015 — browser pool acquisitions by browser type and outcome (hit, miss, queue).",
+  labelNames: ["type", "outcome"],
+  registers: [register],
+});
+
+export const aiRateLimitedTotal = new client.Counter({
+  name: "app_ai_rate_limited_total",
+  help: "MNT-015 — per-workspace AI limiter rejections by workspace role bucket.",
+  labelNames: ["workspace_role"],
+  registers: [register],
+});
+
+// MNT-015 — pool acquisition latency histogram. Captures both fast-path
+// "hit" leases (single-digit ms) and queued waits when the pool is full.
+// Buckets chosen to span: warm-hit (<10 ms), cold-launch miss (200 ms – 2 s),
+// queued wait under contention (>2 s). Mirrors HikariCP `pool.Wait` and
+// pgbouncer `cl_waiting` exposition shapes so operators can SLO against
+// queue depth.
+export const browserPoolAcquireWaitSeconds = new client.Histogram({
+  name: "app_browser_pool_acquire_wait_seconds",
+  help: "MNT-015 — browser pool acquisition wait time by type and outcome.",
+  labelNames: ["type", "outcome"],
+  buckets: [0.001, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30],
+  registers: [register],
+});
+
+// MNT-015 — unhandled browser disconnects (Chromium crash, OOM kill,
+// remote endpoint hang-up). Operators alert on a non-zero rate; a healthy
+// long-running deployment should see this at zero outside the rare
+// upstream-Playwright crash. Counts the eviction event, NOT downstream
+// failures the disconnect may cause.
+export const browserPoolDisconnectsTotal = new client.Counter({
+  name: "app_browser_pool_disconnects_total",
+  help: "MNT-015 — unexpected browser disconnects detected by the pool, by type.",
+  labelNames: ["type"],
+  registers: [register],
+});

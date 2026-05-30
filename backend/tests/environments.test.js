@@ -3,6 +3,7 @@ import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
 import runsRouter from "../src/routes/runs.js";
 import testsRouter from "../src/routes/tests.js";
+import recorderRouter from "../src/routes/recorder.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import { decryptCredentials } from "../src/utils/credentialEncryption.js";
 import { createTestContext } from "./helpers/test-base.js";
@@ -26,6 +27,7 @@ function mount() {
   // runsRouter — its routes carry the `/projects/:id/...` prefix inline
   // (`router.post("/projects/:id/tests/generate")`, `router.post("/projects/:id/record")`).
   app.use("/api/v1", requireAuth, workspaceScope, testsRouter);
+  app.use("/api/v1", requireAuth, workspaceScope, recorderRouter);
   mounted = true;
 }
 

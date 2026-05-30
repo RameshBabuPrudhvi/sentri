@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
+import recorderRouter from "../src/routes/recorder.js";
 import { _testSeedSession } from "../src/runner/recorder.js";
 import { createTestContext } from "./helpers/test-base.js";
 
@@ -33,6 +34,7 @@ function mountRoutesOnce() {
   app.use("/api/auth", authRouter);
   app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
   app.use("/api", requireAuth, workspaceScope, testsRouter);
+  app.use("/api", requireAuth, workspaceScope, recorderRouter);
   mounted = true;
 }
 

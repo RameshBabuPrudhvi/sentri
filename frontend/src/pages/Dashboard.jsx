@@ -194,7 +194,7 @@ function CoveragePanel({ data, Activity, SparklineChart }) {
               : "var(--text3)";
             // Data-driven badge background / foreground — derived from the
             // pct band (≥80 green, ≥50 amber, <50 red). Inlined as
-            // `style={{...}}` deliberately per AGENT.md §127's data-
+            // `style={{...}}` deliberately per AGENTS.md §127's data-
             // driven carve-out (used by `dash-env-rate` etc): N CSS
             // classes per threshold band wouldn't be cleaner.
             const latestPctBadgeStyle = {

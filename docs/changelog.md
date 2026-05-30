@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MNT-015** — Warm Playwright browser-process pool with per-`browserType` FIFO waiter queue and `BROWSER_POOL_SIZE` env knob (default `max(PARALLEL_WORKERS, MAX_WORKERS, WORKER_CONCURRENCY, 2)`).
+- **MNT-015** — Per-workspace cost-weighted AI rate limiter (AI mutations = 10 units, regular calls = 1) on `POST /chat`, `/projects/:id/crawl`, `/projects/:id/tests/generate`, `/tests/:testId/fix`, `/settings/agent-roles/:role/test`.
+- **MNT-015** — IETF-standard `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` response headers on every AI route + `Retry-After` on 429s, so clients can back off proactively (matches GitHub / Stripe / OpenAI convention).
+- **MNT-015** — Pool telemetry: `app_browser_pool_size`, `app_browser_pool_in_use`, `app_browser_pool_acquires_total{outcome}`, `app_browser_pool_acquire_wait_seconds` histogram, `app_browser_pool_disconnects_total`, `app_ai_rate_limited_total{workspace_role}`.
+- **MNT-015** — Browser-disconnect listener evicts the cached handle on Chromium OOM kill / CDP socket drop so the next acquire relaunches instead of handing out a dead browser.
+- **MNT-015** — Two new Prometheus alerts in `monitoring/prometheus/alerts.yml`: `BrowserPoolStarvation` (>90% pool saturation for 5 min) and `BrowserPoolDisconnects` (any unexpected disconnect in 15 min).
+- **MNT-015** — Graceful-shutdown drains warm browsers before queue / Redis teardown in `backend/src/index.js` + `backend/src/worker.js`; pool is sealed post-drain so SIGTERM can't leak a zombie Chromium.
+
+### Changed
+
+- **MNT-015** — AI rate limiter consolidated to a single per-workspace token bucket; cost-weighting alone differentiates AI mutations from regular calls. The legacy `AI_RATE_LIMIT_REGULAR_PER_MIN` env var is deprecated and silently ignored.
+
+### Performance
+
+- **MNT-015** — Browser test execution reuses warm browser processes instead of launching a cold Chromium per test; each test still gets a fresh `BrowserContext` for per-tenant storage / video / tracing isolation.
+
 ## [1.9.1] — 2026-05-30
 
 ### Security

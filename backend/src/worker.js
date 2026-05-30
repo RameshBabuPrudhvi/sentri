@@ -26,6 +26,7 @@ import { closeQueue } from "./queue.js";
 import { startWorker, stopWorker } from "./workers/runWorker.js";
 import { closeRedis, isRedisAvailable } from "./utils/redisClient.js";
 import { formatLogLine } from "./utils/logFormatter.js";
+import { browserPool } from "./runner/browserPool.js";
 
 dotenv.config();
 
@@ -99,6 +100,7 @@ async function gracefulShutdown(signal) {
   _shuttingDown = true;
   console.log(formatLogLine("info", null, `[worker] ${signal} received — draining BullMQ worker`));
   try {
+    await browserPool.drainAndClose();
     await stopWorker();
     await closeQueue();
     await closeRedis();

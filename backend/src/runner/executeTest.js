@@ -552,6 +552,16 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     }
   }
 
+  // Outer guard: if ANY setup between context creation (above) and the inner
+  // try-block at line ~684 throws, the pool slot must be released. Without
+  // this, a crash in registerWebVitalsInitScript / newPage /
+  // applyNetworkCondition / injectCursorOverlay / startScreencast would
+  // permanently leak a slot (`bucket.inUse` stays incremented, context stays
+  // in `bucket.contexts`) until the pool drains at process shutdown.
+  // The inner try-finally at ~684 handles the normal + test-failure paths;
+  // this outer wrapper catches the setup-failure gap.
+  try {
+
   // AUTO-017.1: Install web-vitals observers via addInitScript *before* the
   // first page is created, so the observers fire from the first byte of the
   // navigation rather than being injected post-test (which leaves LCP/CLS
@@ -1048,7 +1058,11 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
     // Close page first then context — this flushes video to disk
     await page.close().catch(() => {});
-    await context.close().catch(() => {});
+    if (context.__sentriPoolRelease) {
+      await context.__sentriPoolRelease().catch(() => {});
+    } else {
+      await context.close().catch(() => {});
+    }
 
     // Bundle-B fix #3 — Move the video to a stable named path using async
     // fs/promises. Sync FS calls in this hot cleanup path were blocking the
@@ -1108,6 +1122,18 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   }
 
   return result;
+
+  } catch (setupErr) {
+    // Outer guard catch: release the pool slot if setup code between context
+    // creation and the inner try-block threw. Re-throw so the caller sees
+    // the original error.
+    if (context?.__sentriPoolRelease) {
+      await context.__sentriPoolRelease().catch(() => {});
+    } else if (context) {
+      await context.close().catch(() => {});
+    }
+    throw setupErr;
+  }
 }
 
 /**

@@ -3,7 +3,7 @@
  * @description Password reset token CRUD backed by SQLite (migration 003).
  *
  * Encapsulates all `password_reset_tokens` queries so route handlers never
- * write raw SQL — per AGENT.md: "Do not write raw SQL in route handlers."
+ * write raw SQL — per AGENTS.md: "Do not write raw SQL in route handlers."
  */
 
 import { getDatabase } from "../sqlite.js";

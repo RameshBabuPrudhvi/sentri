@@ -168,5 +168,5 @@
 /* OutcomeBanner spans both grid columns */
 .trv-outcome-full { grid-column: 1 / -1; }
 /* Chrome traffic-light dots — the three fixed colours are iterated from
-   an array in JSX, so they stay as inline `background` per AGENT.md §127
+   an array in JSX, so they stay as inline `background` per AGENTS.md §127
    (loop-data). No class needed — already on `.trv-chrome__light`. */

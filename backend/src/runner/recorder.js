@@ -51,7 +51,7 @@ const ACCEPTED_DEVICE_NAMES = new Set(DEVICE_PRESETS.map((d) => d.value));
  * detection scripts check, **without** pulling in the
  * `puppeteer-extra-plugin-stealth` dependency tree (which would add a
  * cat-and-mouse fingerprint patcher running on every page, plus a
- * security-review surface for anti-bot logic AGENT.md `:123` warns
+ * security-review surface for anti-bot logic AGENTS.md `:123` warns
  * against bundling without explicit justification).
  *
  * Applied via `context.addInitScript(STEALTH_SCRIPT)` ONLY when the
@@ -1068,7 +1068,7 @@ const RECORDER_SCRIPT = `
   // resolve \`{selector, label, rect}\` for an arbitrary viewport
   // coordinate via \`page.evaluate\`. Without these exports the probe
   // would have to re-implement the same Playwright + hand-rolled
-  // fallback logic, which is exactly the drift class of bug AGENT.md
+  // fallback logic, which is exactly the drift class of bug AGENTS.md
   // §"Do not duplicate shared utilities" warns against. Returns null
   // when no interactive ancestor is found so the caller can fall back
   // to the operator's manual selector paste.

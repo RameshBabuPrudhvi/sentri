@@ -6,7 +6,7 @@
  * The panel lives on the Healing dashboard and renders either a zero-state
  * explainer card or a 3-up stat grid with audit-log deep-link.
  *
- * Per AGENT.md `:127`, the original component used inline `style={{...}}`
+ * Per AGENTS.md `:127`, the original component used inline `style={{...}}`
  * objects — those have been extracted here so the component file stays
  * JSX-only and theme tokens (`--text2`, `--amber`, `--border`) can be tuned
  * without touching the React source.

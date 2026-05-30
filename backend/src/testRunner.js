@@ -35,7 +35,8 @@ import { detectCoverageRegression, fireCoverageRegressionAlert } from "./pipelin
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { clusterFailures } from "./pipeline/failureClusterer.js";
-import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
+import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
+import { browserPool } from "./runner/browserPool.js";
 import { executeWithRetries } from "./runner/retry.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { trackTelemetry } from "./utils/telemetry.js";
@@ -506,42 +507,62 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   structuredLog("run.start", { runId, projectId: project.id, tests: tests.length, workers, allApiOnly, browser: resolvedBrowser });
 
   if (!allApiOnly) {
-    try {
-      browser = await launchBrowser({ browser: resolvedBrowser });
-    } catch (launchErr) {
-      const classified = classifyError(launchErr, "run");
-      run.status = "failed";
-      run.error = classified.message;
-      run.errorCategory = classified.category;
-      run.finishedAt = new Date().toISOString();
-      // CAP-002 — no tests will execute on this run, so no shard will drain
-      // naturally via processResult. Mark every shard as "completed" so the
-      // UI badge reads `N/N` rather than `0/N` after a hard launch failure.
-      run.shardsCompleted = shardCount;
-      logError(run, classified.message);
-      structuredLog("browser.launch_failed", { runId, error: classified.message });
-      throw launchErr;
-    }
-    structuredLog("browser.launched", { runId });
+    // Lazy shim: forwards `newContext()` into the pool while keeping the
+    // `isConnected()` health probe (`executeTest.js:484` Bundle-B fix #5)
+    // honest. Without this, the probe would always return `true` and an
+    // OOM-killed Chromium between tests would skip the structured
+    // `ERR_BROWSER_DISCONNECTED` early-fail path, surfacing instead as
+    // a less-helpful "Target closed" deep inside `newContext`. The pool
+    // tracks its warm browser per type; the read-only helper reflects
+    // the cached handle's real connection state.
+    browser = {
+      isConnected: () => browserPool.isBrowserConnected(resolvedBrowser),
+      newContext: async (contextOptions = {}) => {
+        const lease = await browserPool.acquire({ browserType: resolvedBrowser, contextOptions, createPage: false });
+        return lease.context;
+      },
+    };
 
-    // Shared tracing context (separate from per-test video contexts)
+    // Shared tracing context (separate from per-test contexts).
+    //
+    // The trace context is run-scoped: it is created here and held until the
+    // `finally` block flushes the trace zip. We MUST NOT route it through
+    // `browserPool.acquire()` — that would lock a pool slot for the entire
+    // run (silently reducing effective per-run parallelism by 1, and
+    // deadlocking outright when `BROWSER_POOL_SIZE=1` because every
+    // per-test acquire would queue forever behind the trace lease). Instead
+    // we share the warm browser process via `acquireSharedBrowser()` and
+    // own the context lifecycle ourselves; per-test contexts continue to
+    // flow through `acquire()` and respect the slot accounting.
     try {
-      traceContext = await browser.newContext({
+      const sharedBrowser = await browserPool.acquireSharedBrowser(resolvedBrowser);
+      traceContext = await sharedBrowser.newContext({
         userAgent: "Mozilla/5.0 (compatible; AutonomousQA/1.0)",
         viewport: { width: 1280, height: 720 },
       });
       await traceContext.tracing.start({ screenshots: true, snapshots: true, sources: false });
     } catch (ctxErr) {
-      await browser.close().catch(() => {});
+      // Close the half-built trace context on its way out. The pre-MNT-015
+      // path relied on `browser.close()` (later in the original `finally`)
+      // to implicitly close every context — but the browser is now pooled
+      // and lives past this run, so an unclosed `traceContext` would leak
+      // a viewport buffer + tracing state on the warm browser process.
+      // The `finally` block at the bottom of this file's try-block also
+      // closes `traceContext` on the success path, but only if we make it
+      // there — a `tracing.start()` failure throws BEFORE the inner try
+      // (line 716), so its `finally` never runs for this branch.
+      if (traceContext) {
+        await traceContext.close().catch(() => {});
+        traceContext = null;
+      }
       const classified = classifyError(ctxErr, "run");
       run.status = "failed";
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
-      // CAP-002 — same rationale as the browser.launch_failed branch above:
-      // no tests run, so flush shardsCompleted to shardCount for UI clarity.
       run.shardsCompleted = shardCount;
       logError(run, classified.message);
+      structuredLog("browser.pool_acquire_failed", { runId, error: classified.message });
       throw ctxErr;
     }
   }
@@ -880,12 +901,10 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       } catch (e) {
         logWarn(run, `Trace save failed: ${e.message}`);
       }
+      // We own the trace context directly (not via a pool lease) — see
+      // `acquireSharedBrowser` rationale above. Close it here so the
+      // underlying warm browser process stays available to other tests.
       await traceContext.close().catch(() => {});
-    }
-    if (browser) {
-      await browser.close().catch((err) => {
-        console.warn(formatLogLine("warn", null, `[testRunner] browser.close() failed: ${err.message}`));
-      });
     }
   }
 

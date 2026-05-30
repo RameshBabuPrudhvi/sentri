@@ -762,7 +762,7 @@ export default function RunDetail() {
             )}
           </div>
           <div className="progress-bar progress-bar-green">
-            {/* Width is data-driven from `passRate` (0–100). AGENT.md §127
+            {/* Width is data-driven from `passRate` (0–100). AGENTS.md §127
                 carves out runtime-numeric style values — keep this inline. */}
             <div
               className="progress-bar-fill rd-passrate-fill"
@@ -820,7 +820,7 @@ export default function RunDetail() {
       {!isRunning && run.status === "failed" && run.error && !run.rateLimitError && (() => {
         const bp = getErrorBannerProps(run.errorCategory, navigate);
         // Per-category palette (bg / border / text colour) is data-driven from
-        // `getErrorBannerProps()` — kept inline per AGENT.md §127. Layout,
+        // `getErrorBannerProps()` — kept inline per AGENTS.md §127. Layout,
         // typography, and gap rules live on `.rd-alert` + `.rd-alert__cta`.
         return (
           <div
