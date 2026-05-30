@@ -29,7 +29,7 @@ import useProjectData from "../hooks/useProjectData.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { userHasRole } from "../utils/roles.js";
-import { useNotifications } from "../context/NotificationContext.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import ProjectAutomationCard from "../components/automation/ProjectAutomationCard.jsx";
 import IntegrationCards from "../components/automation/IntegrationCards.jsx";
 import IntegrationSnippets from "../components/automation/IntegrationSnippets.jsx";
@@ -63,14 +63,23 @@ export default function Automation() {
   const { projects, loading } = useProjectData({ fetchTests: false, fetchRuns: false });
   const { user: authUser } = useAuth();
   const canEdit = userHasRole(authUser, "qa_lead");
-  const { addNotification } = useNotifications();
+  const { showToast } = useToast();
 
+  // UX-001: previously routed `onToast` from child panels (AutoApprovalPanel,
+  // CoveragePanel, QualityGatesPanel, WebVitalsBudgetsPanel) into
+  // `addNotification()` — i.e. the notification bell, NOT a visible toast.
+  // Users saving Auto-Approval threshold / Quality Gates / etc. saw no
+  // confirmation. Now we surface the toast directly. The bell stays for
+  // durable async events (run-complete, scheduled-trigger fired).
+  //
+  // Signature is `(message, type)` — unified across every callsite (panels
+  // under `features/project-settings/sections/*`, `ConfigurablePanel`,
+  // `EnvironmentsTab`). The pre-UX-001 `{ type, message }` object form was
+  // migrated to positional in the same PR.
   const onPanelToast = useCallback((msg, type = "info") => {
-    addNotification({
-      type: type === "error" ? "error" : type === "success" ? "success" : "info",
-      title: msg,
-    });
-  }, [addNotification]);
+    if (!msg) return;
+    showToast(msg, type);
+  }, [showToast]);
 
   const focusProjectId = searchParams.get("project");
 

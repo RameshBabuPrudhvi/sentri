@@ -57,6 +57,9 @@ jobs:
       - name: Syntax check all source files
         run: find src -name '*.js' -exec node --check {} +
 
+      - name: Lint migrations (CR-004 — no duplicate numeric prefixes)
+        run: npm run lint:migrations
+
       - name: Run unit & integration tests
         run: npm test
 
@@ -432,6 +435,7 @@ jobs:
           context: .
           file: frontend/Dockerfile
           push: false
+          load: true
           tags: sentri-frontend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max

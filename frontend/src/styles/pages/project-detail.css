@@ -219,6 +219,32 @@
   padding: 48px 24px; text-align: center; color: var(--text2); font-size: 0.875rem;
 }
 
+/* ONB-002 (audit §6.4) — coached variant: same centred layout as `.pd-empty-sm`
+   but with explicit title + description + CTA hierarchy. Matches the
+   structural rhythm of the shared `<EmptyState>` primitive's bare variant
+   so the visual weight feels uniform across pages. The container stays
+   `.pd-empty-sm` (so cards keep the same padding); this modifier just
+   adds the inner spacing rules for the new child elements. */
+.pd-empty-sm--coached {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.pd-empty-sm__title {
+  font-weight: 600; font-size: 0.95rem; color: var(--text);
+}
+.pd-empty-sm__desc {
+  font-size: 0.82rem; color: var(--text3); line-height: 1.5;
+  max-width: 420px; margin-bottom: 6px;
+}
+.pd-empty-sm__cta {
+  margin-top: 4px;
+}
+.pd-empty-sm__actions {
+  display: flex; gap: 8px; margin-top: 4px;
+}
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
   /* Header card: stack identity + actions vertically */

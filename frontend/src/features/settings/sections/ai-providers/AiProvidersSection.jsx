@@ -13,6 +13,7 @@ import WorkspaceSpendCapsPanel from "../provider-routes/WorkspaceSpendCapsPanel.
 import ProviderRoutesIO from "../provider-routes/ProviderRoutesIO.jsx";
 import AuditLogSubtab from "../provider-routes/AuditLogSubtab.jsx";
 import AiRequestLogSubtab from "../provider-routes/AiRequestLogSubtab.jsx";
+import { useToast } from "../../../../context/ToastContext.jsx";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -806,6 +807,7 @@ export default function AiProvidersSection() {
   // alongside the DB routes so operators see env-configured Gemini / Ollama in
   // this section instead of wondering "why isn't my .env key showing up?".
   const [envProviders, setEnvProviders] = useState([]);
+  const { showToast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -884,6 +886,7 @@ export default function AiProvidersSection() {
     setBusy(true);
     try {
       const payload = buildPayload(form);
+      const wasEditing = !!form.id;
       if (form.id) {
         await api.updateAiProvider(form.id, payload);
       } else {
@@ -891,8 +894,10 @@ export default function AiProvidersSection() {
       }
       resetForm();
       await load();
+      showToast(wasEditing ? "AI Provider updated" : "AI Provider added", "success");
     } catch (err) {
       setError(err.message || "Failed to save AI Provider.");
+      showToast(err.message || "Failed to save AI Provider.", "error");
     } finally {
       setBusy(false);
     }
@@ -905,8 +910,10 @@ export default function AiProvidersSection() {
       await api.deleteAiProvider(id);
       if (form.id === id) resetForm();
       await load();
+      showToast("AI Provider deleted", "success");
     } catch (err) {
       setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message } }));
+      showToast(err.message || "Failed to delete AI Provider.", "error");
     }
   }
 
@@ -933,8 +940,10 @@ export default function AiProvidersSection() {
       setRotateOpen(null);
       setRowState((s) => ({ ...s, [id]: { kind: "ok" } }));
       await load();
+      showToast("API key rotated", "success");
     } catch (err) {
       setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message } }));
+      showToast(err.message || "Failed to rotate API key.", "error");
     }
   }
 
@@ -951,8 +960,10 @@ export default function AiProvidersSection() {
         delete next[id];
         return next;
       });
+      showToast(isDefault ? "Set as workspace default" : "Cleared workspace default", "success");
     } catch (err) {
       setRowState((s) => ({ ...s, [id]: { kind: "err", msg: err.message } }));
+      showToast(err.message || "Failed to update workspace default.", "error");
     }
   }
 
@@ -964,9 +975,16 @@ export default function AiProvidersSection() {
     try {
       const payload = await api.exportRoutes();
       const count = payload?.routes?.length ?? 0;
-      setImportMsg({ type: "ok", text: `Exported ${count} provider(s).` });
+      const text = `Exported ${count} provider(s).`;
+      setImportMsg({ type: "ok", text });
+      // UX-001 follow-up: import/export also fire toasts so the action is
+      // confirmed even when the inline banner is scrolled off-screen.
+      // The banner stays for durable reference (matches Step 5 Option A).
+      showToast(text, "success");
     } catch (err) {
-      setImportMsg({ type: "err", text: err.message || "Export failed." });
+      const text = err.message || "Export failed.";
+      setImportMsg({ type: "err", text });
+      showToast(text, "error");
     } finally {
       setIoBusy(false);
     }
@@ -988,12 +1006,17 @@ export default function AiProvidersSection() {
         // eslint-disable-next-line no-console
         console.warn("[AI Providers import] errors:", res.errors);
       }
-      setImportMsg({
-        type: res.errors?.length ? "err" : "ok",
-        text: parts.length ? parts.join(" · ") : "No changes applied.",
-      });
+      const hasErrors = !!res.errors?.length;
+      const text = parts.length ? parts.join(" · ") : "No changes applied.";
+      setImportMsg({ type: hasErrors ? "err" : "ok", text });
+      // UX-001 follow-up: surface the same summary via toast. Errors fire
+      // a red toast even when some rows succeeded so partial-failure
+      // imports don't read as fully successful.
+      showToast(text, hasErrors ? "error" : "success");
     } catch (err) {
-      setImportMsg({ type: "err", text: err.message || "Import failed." });
+      const text = err.message || "Import failed.";
+      setImportMsg({ type: "err", text });
+      showToast(text, "error");
     } finally {
       setIoBusy(false);
     }

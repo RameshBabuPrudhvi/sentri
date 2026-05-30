@@ -31,6 +31,48 @@ const router = Router();
 // Registry: runId → Set of SSE response objects (local to this process)
 export const runListeners = new Map();
 
+// CR-009 — Defence-in-depth cap on concurrent SSE listeners per run.
+// Without this a single run with thousands of reconnecting tabs / leaked
+// connections (mobile sleep, network drop, abnormal close that misses the
+// "close" handler) can grow `runListeners.get(runId)` without bound. Each
+// listener carries a 5 s heartbeat interval + the snapshot payload, so an
+// unbounded Set is a memory + event-loop pressure leak.
+//
+// The cap is per-run, per-process. Multi-instance deployments naturally
+// shard listeners across instances (each browser tab opens one EventSource
+// against whichever backend pod the load balancer picks), so a per-instance
+// cap of 50 is generous for legitimate usage (a single run with 50 reviewers
+// open simultaneously on the same pod is already an edge case) while still
+// closing the unbounded-growth attack surface.
+//
+// Override via env for stress tests; bounded below at 1 so a misconfigured
+// `0` doesn't accidentally disable all SSE on this instance.
+const MAX_LISTENERS_PER_RUN = Math.max(
+  1,
+  Number.parseInt(process.env.SSE_MAX_LISTENERS_PER_RUN || "50", 10) || 50,
+);
+
+// §11.3 — Per-listener backpressure high-water mark, in bytes.
+// `res.write()` returns false and buffers internally when the kernel TCP
+// send buffer is full. A slow consumer (mobile on a throttled connection,
+// paused tab, half-closed proxy) keeps the JS-side buffer growing without
+// bound for the lifetime of the run — a 20-minute run emitting 500+ log
+// events at ~1 KB each is ~500 KB of backlog per stalled client.
+//
+// On every write, if the underlying socket's `writableLength` exceeds this
+// cap, we treat the client as gone: end the response, remove it from the
+// listener Set, and let the close handler clean up. EventSource clients
+// will reconnect automatically with their normal retry backoff, picking up
+// from the snapshot on the next handshake.
+//
+// Default 1 MiB — gives a legitimate but slow viewer enough headroom to
+// catch up across a single burst (e.g. a 500-event log flush) without
+// permanently growing the process's resident memory.
+const MAX_WRITABLE_LENGTH = Math.max(
+  64 * 1024,
+  Number.parseInt(process.env.SSE_MAX_WRITABLE_BYTES || "1048576", 10) || 1048576,
+);
+
 /** Redis channel prefix for run events. */
 const CHANNEL_PREFIX = "sentri:run:";
 
@@ -82,6 +124,16 @@ function _deliverToLocal(runId, type, data) {
   const snapshot = [...listeners];
   for (const res of snapshot) {
     try {
+        // §11.3 — Backpressure check BEFORE the write. If this client's
+        // socket already has >MAX_WRITABLE_LENGTH bytes queued in Node's
+        // stream layer, treat them as gone: end the response and let the
+        // "close" handler remove them from the Set. Without this, a
+        // single stalled tab on a high-volume run grows resident memory
+        // until the run ends or the process OOMs.
+        if (res.writableLength > MAX_WRITABLE_LENGTH) {
+          res.end();
+          continue;
+        }
         res.write(`data: ${data}\n\n`);
         if (type === "done") res.end();
     } catch { /* client gone */ }
@@ -157,6 +209,22 @@ router.get("/runs/:runId/events", (req, res) => {
   // Verify the run belongs to the current workspace (ACL-001)
   const project = projectRepo.getByIdInWorkspace(run.projectId, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
+
+  // CR-009 — Reject before flushing headers when this instance is already at
+  // the per-run listener cap. Done here (not after `flushHeaders()`) so the
+  // caller gets a proper JSON 503 instead of an SSE stream that closes
+  // immediately. The cap only applies to actively-running runs; terminal
+  // runs short-circuit below with snapshot+done+end and never register a
+  // listener.
+  if (run.status === "running") {
+    const existing = runListeners.get(runId);
+    if (existing && existing.size >= MAX_LISTENERS_PER_RUN) {
+      return res.status(503).json({
+        error: "too many SSE listeners on this run",
+        retryAfter: 5,
+      });
+    }
+  }
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");

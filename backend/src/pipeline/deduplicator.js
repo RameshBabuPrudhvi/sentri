@@ -12,6 +12,11 @@
 
 import { createHash } from "node:crypto";
 import { formatLogLine } from "../utils/logFormatter.js";
+// Bundle-A follow-up #F3 — strip strings + comments before running the
+// quality rubric's substring checks so a `// TODO: use getByRole` comment
+// or a `'toHaveURL'` string literal doesn't earn the +10 `selector.semantic`
+// reward. Same class of bug Bundle-A fix #14 patched in `assertionEnhancer.js`.
+import { stripStringsAndComments } from "../utils/codeStripping.js";
 
 /**
  * fingerprintHash(str) → 16-char hex string (64-bit via SHA-256 truncation)
@@ -120,18 +125,109 @@ const STOP_WORDS = new Set([
   "should","page","click","fill","submit","navigate","go","open","visit",
 ]);
 
-function buildTfIdfVector(text) {
-  const terms = (text || "")
+/**
+ * tokenize(text) → string[] of normalised, stop-word-filtered terms.
+ *
+ * Extracted helper so the TF-vector builder and the batch-DF builder
+ * share one tokenisation contract — changing the stop-word list or the
+ * non-alphanumeric stripping rule lands in exactly one place.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function tokenize(text) {
+  return (text || "")
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .split(" ")
     .filter(t => t.length > 2 && !STOP_WORDS.has(t));
+}
 
+/**
+ * Bundle-A fix #13 — extract corpus text from a test for TF / DF building.
+ * Single source of truth so `buildTfIdfVector`, `buildDocumentFrequency`, and
+ * `semanticSimilarity` all index over the same fields.
+ *
+ * @param {object} test
+ * @returns {string}
+ */
+function corpusText(test) {
+  return [test?.name || "", test?.description || "", ...(test?.steps || [])].join(" ");
+}
+
+/**
+ * Bundle-A fix #13 — build a batch-wide document-frequency map for
+ * smoothed TF-IDF weighting. Counts the number of TESTS each term
+ * appears in (not the raw occurrences). Used by
+ * {@link buildTfIdfVector} when invoked with a `dfContext` to depress
+ * the weight of common domain words ("submit", "user", "form") that
+ * would otherwise inflate cosine similarity across structurally
+ * different tests.
+ *
+ * Returns `{ df: Map<term, docCount>, totalDocs: number }` so the IDF
+ * formula `log((totalDocs + 1) / (df + 1)) + 1` (smoothed, matches
+ * scikit-learn `TfidfVectorizer` default) can be computed by callers.
+ *
+ * @param {object[]} tests
+ * @returns {{ df: Map<string, number>, totalDocs: number }}
+ */
+export function buildDocumentFrequency(tests) {
+  const df = new Map();
+  let totalDocs = 0;
+  if (!Array.isArray(tests)) return { df, totalDocs };
+  for (const t of tests) {
+    if (!t) continue;
+    const unique = new Set(tokenize(corpusText(t)));
+    for (const term of unique) {
+      df.set(term, (df.get(term) || 0) + 1);
+    }
+    totalDocs += 1;
+  }
+  return { df, totalDocs };
+}
+
+/**
+ * buildTfIdfVector(text, dfContext?) → Map<term, weight>
+ *
+ * When `dfContext` is omitted, returns a raw TF (term-frequency) vector
+ * — backwards-compatible with the pre-fix-#13 API. When provided,
+ * applies smoothed IDF (`log((totalDocs + 1) / (df + 1)) + 1`) so the
+ * cosine that downstream callers compute is a real TF-IDF cosine.
+ *
+ * Bundle-A fix #13 — production callers (`deduplicateTests`,
+ * `deduplicateAcrossRuns`) now build the DF map once per batch and
+ * thread it through, so cosine similarity stops falsely matching
+ * structurally different tests that share common domain vocabulary.
+ *
+ * @param {string} text
+ * @param {Object} [dfContext]
+ * @returns {Map<string, number>}
+ */
+function buildTfIdfVector(text, dfContext) {
+  const terms = tokenize(text);
   const tf = new Map();
   for (const term of terms) tf.set(term, (tf.get(term) || 0) + 1);
-  return tf;
+
+  // No DF context → return raw TF (legacy callers, unit tests that
+  // build vectors directly without a corpus).
+  if (!dfContext || !(dfContext.df instanceof Map) || !Number.isFinite(dfContext.totalDocs) || dfContext.totalDocs <= 0) {
+    return tf;
+  }
+
+  // Smoothed IDF — `log((N + 1) / (df + 1)) + 1`. The `+1` constant
+  // ensures even maximum-DF terms (present in every document) keep a
+  // non-zero weight, mirroring scikit-learn's `TfidfVectorizer`
+  // default and avoiding the degenerate all-zero vector edge case
+  // when one test contains only super-common terms.
+  const tfidf = new Map();
+  for (const [term, count] of tf) {
+    const df = dfContext.df.get(term) || 0;
+    const idf = Math.log((dfContext.totalDocs + 1) / (df + 1)) + 1;
+    tfidf.set(term, count * idf);
+  }
+  return tfidf;
 }
 
 /**
@@ -157,27 +253,31 @@ export function cosineSimilarity(vecA, vecB) {
 }
 
 /**
- * semanticSimilarity(testA, testB) → number 0–1
+ * semanticSimilarity(testA, testB, dfContext?) → number 0–1
  *
  * Combines name, description, and steps into a single bag-of-words
- * TF-IDF vector and returns cosine similarity. Resolves defect #1
- * (semantic duplicates with different wording) and defect #4
- * (description field previously ignored).
+ * TF (or TF-IDF when `dfContext` is supplied) vector and returns
+ * cosine similarity. Resolves defect #1 (semantic duplicates with
+ * different wording) and defect #4 (description field previously
+ * ignored).
+ *
+ * Bundle-A fix #13 — accepts an optional `dfContext` so production
+ * callers (`deduplicateTests`, `deduplicateAcrossRuns`) get real
+ * TF-IDF: common domain words ("submit", "user", "form") get a low
+ * IDF weight and stop driving false-positive cosine matches across
+ * structurally different tests. When `dfContext` is omitted the
+ * function falls back to TF-only — preserving the pre-fix API for
+ * existing unit tests and ad-hoc callers.
  *
  * @param {object} testA
  * @param {object} testB
+ * @param {Object} [dfContext]
  * @returns {number}
  */
-export function semanticSimilarity(testA, testB) {
-  const textOf = t => [
-    t.name || "",
-    t.description || "",
-    ...(t.steps || []),
-  ].join(" ");
-
+export function semanticSimilarity(testA, testB, dfContext) {
   return cosineSimilarity(
-    buildTfIdfVector(textOf(testA)),
-    buildTfIdfVector(textOf(testB)),
+    buildTfIdfVector(corpusText(testA), dfContext),
+    buildTfIdfVector(corpusText(testB), dfContext),
   );
 }
 
@@ -186,6 +286,30 @@ export const FUZZY_NAME_THRESHOLD = 0.80;
 
 /** Semantic (TF-IDF cosine) similarity threshold */
 export const SEMANTIC_SIMILARITY_THRESHOLD = 0.65;
+
+/**
+ * Bundle-A fix #11 — scenario guard for fuzzy / semantic dedup.
+ *
+ * Two tests with similar names on the same URL are treated as the same
+ * scenario when:
+ *   - both omit `scenario` (legacy path — falls back to pre-fix behaviour
+ *     so existing duplicates still dedupe), OR
+ *   - either side omits `scenario` (one of the two is legacy / partial), OR
+ *   - both have the same `scenario` value (e.g. both `"positive"`).
+ *
+ * Different non-null scenarios (`"positive"` vs `"negative"`) are treated
+ * as different and must NOT be deduplicated even when the names + URL
+ * match — "Login with valid credentials" and "Login with invalid
+ * credentials" are the intended positive / negative coverage of the same
+ * flow and both must survive.
+ *
+ * Exported as a named helper so both `deduplicateTests` (within-batch)
+ * and `deduplicateAcrossRuns` (cross-run) share one implementation and
+ * the semantics can't drift between the two layers.
+ */
+export function sameDedupScenario(a, b) {
+  return a == null || b == null || a === b;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -255,8 +379,13 @@ const QUALITY_FACTORS = [
   { id: "type.high-value",   label: "High-value test type",   delta:  15, kind: "reward",  hit: (t)    => HIGH_VALUE_TYPES.has((t.type || "").toLowerCase()) },
   // ── Selectors ──
   { id: "selector.semantic", label: "Semantic selectors",     delta:  10, kind: "reward",  hit: (_, c) => c.includes("getByRole") || c.includes("getByLabel") || c.includes("getByText") },
-  { id: "selector.testid",   label: "Test-ID selectors",      delta:  10, kind: "reward",  hit: (_, c) => c.includes("data-testid") || c.includes("test-id") },
-  { id: "selector.fragile",  label: "Fragile nth selectors",  delta: -10, kind: "penalty", hit: (_, c) => (c.match(/\.nth\(|nth-child|nth-of-type/g) || []).length > 2 },
+  // Bundle-A fix — `selector.testid` and `selector.fragile` check for CSS
+  // tokens (`data-testid`, `nth-child`) that live INSIDE string arguments
+  // (e.g. `page.locator('[data-testid="x"]')`). The F3 strip pass removes
+  // string contents, so these two factors use `rawCode` (3rd arg) instead
+  // of the stripped `code` (2nd arg) to avoid false negatives.
+  { id: "selector.testid",   label: "Test-ID selectors",      delta:  10, kind: "reward",  hit: (_, _c, raw) => raw.includes("data-testid") || raw.includes("test-id") },
+  { id: "selector.fragile",  label: "Fragile nth selectors",  delta: -10, kind: "penalty", hit: (_, _c, raw) => (raw.match(/\.nth\(|nth-child|nth-of-type/g) || []).length > 2 },
 ];
 
 /**
@@ -274,11 +403,18 @@ const QUALITY_FACTORS = [
  * @returns {{ score: number, factors: Array<{ id: string, label: string, delta: number, kind: "reward"|"penalty" }> }}
  */
 export function scoreTestWithFactors(test) {
-  const code = test.playwrightCode || "";
+  // Bundle-A follow-up #F3 — strip strings + comments BEFORE running each
+  // factor's substring predicate. The QUALITY_FACTORS rubric uses
+  // `c.includes("getByRole")`, `c.includes("toHaveURL")`, etc.; a
+  // `// TODO: use getByRole` mention or a `'toHaveURL'` log string would
+  // otherwise incorrectly earn the matching reward. Same class of bug
+  // Bundle-A fix #14 patched in `assertionEnhancer.js`.
+  const rawCode = test.playwrightCode || "";
+  const code = stripStringsAndComments(rawCode);
   const factors = [];
   let raw = 0;
   for (const f of QUALITY_FACTORS) {
-    if (f.hit(test, code)) {
+    if (f.hit(test, code, rawCode)) {
       factors.push({ id: f.id, label: f.label, delta: f.delta, kind: f.kind });
       raw += f.delta;
     }
@@ -369,51 +505,97 @@ export function deduplicateTests(tests) {
 
   const afterLayer1 = Array.from(hashMap.values());
 
+  // Bundle-A fix #13 — build the batch-wide document-frequency map ONCE
+  // before Layer 3 runs, then thread it into every `semanticSimilarity`
+  // call below. Pre-fix the cosine was computed over raw term-frequency
+  // vectors, so common domain words ("submit", "user", "form") had the
+  // same weight as discriminative ones — inflating similarity across
+  // structurally different tests. Real IDF weights depress those terms
+  // so the cosine reflects actual content overlap.
+  const dfContext = buildDocumentFrequency(afterLayer1);
+
   // ── Layers 2+3: fuzzy name + semantic similarity ─────────────────────────
-  // O(n²) over the already-deduplicated set — acceptable since n is typically
-  // small (< 200 tests per batch after layer 1).
+  // Bundle-A fix #12 — per-sourceUrl bucketing reduces the O(n²) walk to
+  // O(sum_u k_u²) where k_u is the number of tests per URL bucket. Pre-fix
+  // every candidate walked the entire `retained` list even though the inner
+  // URL-equality guard (`candidate.sourceUrl === kept.sourceUrl`) rejected
+  // cross-URL pairs immediately. With N tests spread across M URLs, the old
+  // path was N² comparisons; the bucketed path is at most N²/M (much less
+  // when URLs are well-distributed). Pure perf — correctness is preserved:
+  // every comparison the old loop performed still happens, just lookup-
+  // indexed by URL.
+  //
+  // Tests without `sourceUrl` keep the pre-fix behaviour exactly: they skip
+  // Layer 2/3 (the URL guard always failed for them) and land in `retained`
+  // unconditionally. We track them in a dedicated `null`-bucket only so the
+  // override semantics below stay symmetric.
+  const bucketsByUrl = new Map(); // sourceUrl → kept[] (subset of `retained`)
   for (const candidate of afterLayer1) {
-    let dominated = false;
     const normCandName = normalizeText(candidate.name);
+    const url = candidate.sourceUrl || null;
 
-    for (const kept of retained) {
-      // Layer 2 — fuzzy name (defect #3)
-      // Guard with sourceUrl (consistent with deduplicateAcrossRuns Layer 3)
-      // so tests targeting different pages with similar names are not falsely
-      // deduplicated within the same batch.
-      if (
-        normCandName.length >= 15 &&
-        candidate.sourceUrl && candidate.sourceUrl === kept.sourceUrl &&
-        fuzzyNameSimilarity(normCandName, normalizeText(kept.name)) >= FUZZY_NAME_THRESHOLD
-      ) {
-        // Keep the higher-quality test
-        if (candidate._quality > kept._quality) {
-          retained.splice(retained.indexOf(kept), 1, candidate);
-        }
-        dominated = true;
-        break;
-      }
+    // Tests without a `sourceUrl` skip Layer 2/3 entirely (pre-fix
+    // behaviour — the URL-equality guard always failed for them). They
+    // land in `retained` unconditionally and don't participate in any
+    // bucket — no other candidate could fuzzy-match them via URL anyway.
+    if (!url) {
+      retained.push(candidate);
+      continue;
+    }
 
-      // Layer 3 — semantic TF-IDF (defects #1, #2)
-      // Guard with name length (consistent with deduplicateAcrossRuns Layer 4)
-      // — short names produce tiny TF-IDF vectors where a single shared term
-      // yields cosine ≈ 1.0, causing false positives.
-      // Guard with sourceUrl so tests on different pages that share vocabulary
-      // are not falsely deduplicated.
-      if (
-        normCandName.length >= 15 &&
-        candidate.sourceUrl && candidate.sourceUrl === kept.sourceUrl &&
-        semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD
-      ) {
-        if (candidate._quality > kept._quality) {
-          retained.splice(retained.indexOf(kept), 1, candidate);
+    const bucket = bucketsByUrl.get(url);
+    let dominated = false;
+    // Short-name candidates can never WIN a fuzzy/semantic match (the
+    // `normCandName.length >= 15` guard pre-fix). They still need to
+    // join the per-URL bucket so a LATER long-named candidate can
+    // compare against them — preserves the exact comparison set the
+    // pre-fix global walk produced.
+    if (normCandName.length >= 15 && bucket && bucket.length > 0) {
+      for (const kept of bucket) {
+        // Layer 2 — fuzzy name (defect #3). URL match is implicit (we're
+        // iterating the per-URL bucket); scenario guard from fix #11
+        // applies.
+        if (
+          sameDedupScenario(candidate.scenario, kept.scenario) &&
+          fuzzyNameSimilarity(normCandName, normalizeText(kept.name)) >= FUZZY_NAME_THRESHOLD
+        ) {
+          if (candidate._quality > kept._quality) {
+            // Override: replace `kept` with `candidate` in both the output
+            // list and its per-URL bucket so subsequent candidates compare
+            // against the higher-quality survivor.
+            const idxOut = retained.indexOf(kept);
+            if (idxOut >= 0) retained[idxOut] = candidate;
+            const idxBucket = bucket.indexOf(kept);
+            if (idxBucket >= 0) bucket[idxBucket] = candidate;
+          }
+          dominated = true;
+          break;
         }
-        dominated = true;
-        break;
+
+        // Layer 3 — semantic TF-IDF (defects #1, #2). Same URL + scenario
+        // guards apply as Layer 2. `dfContext` (built above) makes this
+        // real TF-IDF instead of TF-only (Bundle-A fix #13).
+        if (
+          sameDedupScenario(candidate.scenario, kept.scenario) &&
+          semanticSimilarity(candidate, kept, dfContext) >= SEMANTIC_SIMILARITY_THRESHOLD
+        ) {
+          if (candidate._quality > kept._quality) {
+            const idxOut = retained.indexOf(kept);
+            if (idxOut >= 0) retained[idxOut] = candidate;
+            const idxBucket = bucket.indexOf(kept);
+            if (idxBucket >= 0) bucket[idxBucket] = candidate;
+          }
+          dominated = true;
+          break;
+        }
       }
     }
 
-    if (!dominated) retained.push(candidate);
+    if (!dominated) {
+      retained.push(candidate);
+      if (!bucketsByUrl.has(url)) bucketsByUrl.set(url, []);
+      bucketsByUrl.get(url).push(candidate);
+    }
   }
 
   const unique = retained.sort((a, b) => b._quality - a._quality);
@@ -452,6 +634,12 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
 
   const existingHashes = new Set(existingTests.map(hashTest));
   const existingNames = new Set(existingTests.map(t => normalizeText(t.name)));
+  // Bundle-A fix #13 — DF built over the union of new + existing so the
+  // IDF weights reflect the full population the cosine compares against.
+  // Building it ONCE (outside `.filter`) is the whole point — pre-fix the
+  // semantic call recomputed term frequencies on every pair without any
+  // corpus context at all, so common domain words drove false positives.
+  const dfContext = buildDocumentFrequency([...newTests, ...existingTests]);
 
   return newTests.filter(t => {
     // Layer 1 — structural hash
@@ -469,9 +657,13 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     // Layer 3 — fuzzy name match (defect #3)
     // Guard with sourceUrl (consistent with Layer 2) so tests targeting
     // different pages with similar names are not falsely deduplicated.
+    // Bundle-A fix #11 — scenario guard so positive/negative coverage of
+    // the same flow on the same URL is never collapsed (see
+    // `sameDedupScenario` docblock).
     if (normName.length >= 15) {
       const fuzzyMatch = existingTests.find(e =>
         t.sourceUrl && e.sourceUrl === t.sourceUrl &&
+        sameDedupScenario(t.scenario, e.scenario) &&
         fuzzyNameSimilarity(normName, normalizeText(e.name)) >= FUZZY_NAME_THRESHOLD
       );
       if (fuzzyMatch) return false;
@@ -483,10 +675,13 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     // Also require the normalized name to be long enough (≥ 15 chars, consistent
     // with Layers 2 and 3) — short names produce tiny TF-IDF vectors where a
     // single shared term yields cosine ≈ 1.0, causing false positives.
+    // Bundle-A fix #11 — scenario guard (see `sameDedupScenario`).
     if (normName.length >= 15) {
       const semanticMatch = existingTests.find(e =>
         t.sourceUrl && e.sourceUrl === t.sourceUrl &&
-        semanticSimilarity(t, e) >= SEMANTIC_SIMILARITY_THRESHOLD
+        sameDedupScenario(t.scenario, e.scenario) &&
+        // Bundle-A fix #13 — real TF-IDF via the batch-wide DF context.
+        semanticSimilarity(t, e, dfContext) >= SEMANTIC_SIMILARITY_THRESHOLD
       );
       if (semanticMatch) return false;
     }

@@ -25,8 +25,44 @@ import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { evaluateMfaEnforcement } from "../utils/mfaEnforcement.js";
 import { setAuthCookie, JWT_TTL_SEC } from "./auth.js";
+// §17 #7 / TD-017 — Zod-backed request validation. Pilots on this file
+// per the audit follow-up: two low-risk POST endpoints (`/switch` and
+// `/current/members`) replace their hand-rolled guards with the shared
+// `validation_failed` error shape. Other routes migrate one-by-one as
+// they're touched.
+import { validateBody, z } from "../middleware/validateRequest.js";
 
 const router = Router();
+
+// Zod schema for `POST /workspaces/switch` body.
+//
+// `workspaceId` is the only required field; `.min(1)` rejects the
+// empty-string + whitespace-only payload that pre-fix passed the
+// `if (!targetId || typeof targetId !== "string")` guard's truthy
+// check (an empty string is falsy, but `"   "` is truthy and was
+// silently accepted before being looked up as a workspace key).
+const SwitchWorkspaceSchema = z.object({
+  workspaceId: z.string().trim().min(1, "workspaceId is required"),
+});
+
+// Zod schema for `POST /workspaces/current/members` body.
+//
+// `role` defaults to "viewer" when omitted. The pre-Zod fallback was
+// `role || "viewer"` which treats `null` / `""` / `0` as falsy too;
+// Zod's `.default()` only triggers on `undefined`, so a frontend
+// sending `role: null` (unselected dropdown) or `role: ""` (empty
+// form value) would 400 instead of defaulting. `z.preprocess` coerces
+// both nullish + empty-string into `undefined` BEFORE `.default()` so
+// the falsy-equivalence contract is preserved. `VALID_ROLES` is the
+// canonical RBAC enum from `requireRole.js`; using `z.enum([...VALID_ROLES])`
+// keeps the two in lock-step without re-declaring the role list.
+const InviteMemberSchema = z.object({
+  email: z.string().trim().toLowerCase().email("valid email is required"),
+  role: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.enum([...VALID_ROLES]).default("viewer"),
+  ),
+});
 
 // ─── Current workspace info ───────────────────────────────────────────────────
 
@@ -171,11 +207,12 @@ router.get("/", (req, res) => {
  * @param {Object} req.body
  * @param {string} req.body.workspaceId — The workspace to switch to.
  */
-router.post("/switch", (req, res) => {
+router.post("/switch", validateBody(SwitchWorkspaceSchema), (req, res) => {
+  // `req.body` is the parsed `SwitchWorkspaceBody` shape after the
+  // `validateBody` middleware succeeds — `workspaceId` is guaranteed
+  // to be a non-empty trimmed string, so the old hand-rolled truthy
+  // check (which let `"   "` through) is gone.
   const { workspaceId: targetId } = req.body;
-  if (!targetId || typeof targetId !== "string") {
-    return res.status(400).json({ error: "workspaceId is required." });
-  }
 
   const userId = req.authUser.sub;
   const membership = workspaceRepo.getMembership(targetId, userId);
@@ -287,17 +324,15 @@ router.get("/current/mfa-compliance", requireRole("admin"), (req, res) => {
  * Invite a user to the current workspace by email.
  * @route POST /api/workspaces/current/members
  */
-router.post("/current/members", requireRole("admin"), (req, res) => {
-  const { email, role } = req.body;
-  if (!email || typeof email !== "string") {
-    return res.status(400).json({ error: "Email is required." });
-  }
-  const memberRole = role || "viewer";
-  if (!VALID_ROLES.has(memberRole)) {
-    return res.status(400).json({ error: `Invalid role. Must be one of: ${[...VALID_ROLES].join(", ")}` });
-  }
+router.post("/current/members", requireRole("admin"), validateBody(InviteMemberSchema), (req, res) => {
+  // After `validateBody`, `req.body` is the parsed `InviteMemberBody`:
+  //   • `email` — trimmed + lowercased (the schema's `.trim().toLowerCase()`
+  //     transforms run before the `.email()` check, so the lookup below
+  //     no longer needs its own normalisation pass)
+  //   • `role` — one of `VALID_ROLES`, defaulting to "viewer"
+  const { email, role: memberRole } = req.body;
 
-  const user = userRepo.getByEmail(email.trim().toLowerCase());
+  const user = userRepo.getByEmail(email);
   if (!user) {
     return res.status(404).json({ error: "No user found with that email. They must register first." });
   }

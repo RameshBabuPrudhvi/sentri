@@ -39,6 +39,20 @@ import { performAutoLogin } from "./autoLogin.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 import { launchBrowser } from "../runner/config.js";
 import { loadRobotsRules, isAllowed, loadSitemapUrls } from "../utils/robotsSitemap.js";
+// Bundle-A fix #19 — bot-detection patterns sourced from the shared module
+// so the crawl-time gate stays in lockstep with `feedbackLoop.js`'s post-run
+// BOT_BLOCK classifier. Pre-fix the two lists drifted: `feedbackLoop.js`
+// carried the `\/blocked(?:[/?#]|$)` boundary fix while this module had a
+// looser `\/blocked/i` pattern that over-matched legitimate `/blocked-users`
+// admin paths. See `utils/botDetection.js` for the full rationale.
+import { EXPLORER_BOT_DETECTION_PATTERNS } from "../utils/botDetection.js";
+import {
+  explorerStatesDiscoveredTotal,
+  explorerActionsAttemptedTotal,
+  explorerBotBlockSkipsTotal,
+  explorerGlobalTimeoutTotal,
+  explorerDurationSeconds,
+} from "../utils/metrics.js";
 
 // Defaults — overridden per-run by tuning values from Test Dials
 const DEFAULT_MAX_STATES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
@@ -46,12 +60,11 @@ const DEFAULT_MAX_DEPTH  = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
 const DEFAULT_MAX_ACTIONS = 8;
 const DEFAULT_ACTION_TIMEOUT = 5000;
 
-// URLs that indicate bot detection, CAPTCHA, or error pages — never valid states
-const BOT_DETECTION_PATTERNS = [
-  /\/sorry\//i, /\/captcha/i, /\/challenge/i, /\/blocked/i,
-  /recaptcha/i, /accounts\.google\.com\/v3\/signin/i,
-  /\/error\/?$/i, /\/403\/?$/i, /\/429\/?$/i,
-];
+// Bundle-A fix #19 — bot-detection pattern list now sourced from the shared
+// module so the crawl-time gate and the post-run failure classifier never
+// drift apart. The explorer-specific HTTP-error patterns (/error, /403, /429)
+// + Google SSO interstitial are included via `EXPLORER_BOT_DETECTION_PATTERNS`.
+const BOT_DETECTION_PATTERNS = EXPLORER_BOT_DETECTION_PATTERNS;
 
 /**
  * Normalise a hostname for origin comparison by stripping the `www.` prefix.
@@ -119,7 +132,11 @@ async function executeAction(page, action, actionTimeout) {
       case "click": case "submit":
         await el.click({ timeout: actionTimeout }); break;
       case "fill":
-        if (action.value) { await el.fill(""); await el.fill(action.value); } else { return false; } break;
+        // Bundle-B fix #17 — `.fill(value)` already clears the field. The
+        // intermediate `el.fill("")` was a no-op that fired an extra
+        // onChange event on React Hook Form / controlled inputs, throwing
+        // off form validation and double-counting field-touch metrics.
+        if (action.value) { await el.fill(action.value); } else { return false; } break;
       case "select":
         await el.selectOption({ index: 1 }).catch(() => {}); break;
       case "check":
@@ -224,7 +241,17 @@ async function captureState(page, ctx) {
   return { snapshot, fp, isNovel };
 }
 
+// Bundle-B fix #18 — throttle DB writes + SSE broadcasts to one per 500ms.
+// On novel-state-heavy explorations we were doing dozens of writes per second
+// and flooding the SSE channel, starving the UI render loop. The throttle
+// state lives on the `run` object so concurrent explorations on different
+// runs don't share a window. Force a final flush at end of exploration via
+// `forceSyncRunPages`.
+const SYNC_RUN_PAGES_THROTTLE_MS = 500;
 function syncRunPages(run, snapshots) {
+  const now = Date.now();
+  if (run.__lastSyncMs && (now - run.__lastSyncMs) < SYNC_RUN_PAGES_THROTTLE_MS) return;
+  run.__lastSyncMs = now;
   run.pagesFound = snapshots.length;
   run.pages = snapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
   // Persist to DB so the site map renders after page reload (not just in-memory)
@@ -233,12 +260,31 @@ function syncRunPages(run, snapshots) {
   emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(run) });
 }
 
+function forceSyncRunPages(run, snapshots) {
+  // Bundle-B fix #18 — final flush. Bypasses the throttle so the last
+  // captured state always reaches the UI even if it landed inside the
+  // throttle window.
+  run.__lastSyncMs = 0;
+  syncRunPages(run, snapshots);
+}
+
+// Bundle-B fix #15 — `restorePage` now returns a boolean indicating whether
+// the page state was actually restored. Callers break out of their inner
+// loop on `false` so the next action doesn't run against an unknown page
+// state (which would corrupt the state graph and waste explorer budget).
 async function restorePage(page, beforeUrl, fallbackUrl, actionTimeout) {
   try {
     await page.goto(beforeUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
     await waitForSettle(page, actionTimeout);
+    return true;
   } catch {
-    await page.goto(fallbackUrl, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    try {
+      await page.goto(fallbackUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+      await waitForSettle(page, actionTimeout);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -249,10 +295,41 @@ function enqueueIfNew(ctx, fp, url, depth) {
   ctx.queue.push({ fp, url, depth });
 }
 
+// Bundle-B fix #16 — per-page link cap. On link-dense pages (e-commerce
+// category lists, sitemaps surfaced as anchors) we'd extract 500+ links
+// and try to visit each one, blowing the per-run budget on a single page.
+const MAX_LINKS_PER_PAGE = 50;
+
 async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run, signal) {
   if (depth >= ctx.limits.maxDepth || ctx.states.size >= ctx.limits.maxStates) return;
-  let links;
-  try { links = await page.$$eval("a[href]", els => els.map(e => e.href)); } catch { return; }
+  let rawLinks;
+  try { rawLinks = await page.$$eval("a[href]", els => els.map(e => e.href)); } catch { return; }
+
+  // Bundle-B fix #16 — dedupe by normalised URL + cap to MAX_LINKS_PER_PAGE.
+  // Prioritise same-path-prefix links when capping so the explorer doesn't
+  // wander off into footer / nav links before exhausting the page's actual
+  // content links.
+  const currentPathPrefix = (() => {
+    try { return new URL(currentUrl).pathname.split("/").slice(0, 2).join("/"); }
+    catch { return ""; }
+  })();
+  const seen = new Set();
+  const samePrefix = [];
+  const otherLinks = [];
+  for (const href of rawLinks) {
+    if (typeof href !== "string" || !href) continue;
+    if (seen.has(href)) continue;
+    seen.add(href);
+    let pathname = "";
+    try { pathname = new URL(href).pathname; } catch { /* ignore parse error */ }
+    if (currentPathPrefix && pathname.startsWith(currentPathPrefix)) {
+      samePrefix.push(href);
+    } else {
+      otherLinks.push(href);
+    }
+  }
+  const links = [...samePrefix, ...otherLinks].slice(0, MAX_LINKS_PER_PAGE);
+
   for (const href of links) {
     throwIfAborted(signal);
     if (ctx.states.size >= ctx.limits.maxStates) break;
@@ -303,18 +380,36 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
     actionTimeout: clamp(tuning?.actionTimeout,  1000, 15000, DEFAULT_ACTION_TIMEOUT),
   };
 
-  const browser = await launchBrowser();
+  // Bundle-B fix #12 — wrap launchBrowser in a structured try so failures
+  // surface with run context (project id, tuning) instead of bubbling raw.
+  // A raw "Failed to launch browser" error is unattributable in production
+  // logs across hundreds of concurrent explorations.
+  let browser;
+  try {
+    browser = await launchBrowser();
+  } catch (launchErr) {
+    logWarn(run, `launchBrowser failed for project=${project?.id} tuning=${JSON.stringify(tuning || {})}: ${launchErr.message}`);
+    throw launchErr;
+  }
   const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [], limits };
   let startState = null;
   let harCapture = null;
 
-  // Global exploration timeout — prevents runaway exploration if the site
-  // triggers infinite loops, slow pages, or Playwright hangs. The budget is
-  // generous (2× worst-case sequential execution) so it only fires as a
-  // circuit breaker, not during normal operation.
-  const GLOBAL_TIMEOUT_MS = limits.maxStates * limits.actionTimeout * 2;
+  // Bundle-B fix #14 — absolute 15-minute cap on the global exploration
+  // timeout. The previous formula (`maxStates × actionTimeout × 2`) could
+  // produce a 50-minute budget at the upper tuning bounds (100 × 15 000 × 2)
+  // — long enough that operators forgot exploration was still running and
+  // hit upper-tier API rate limits. Capping at 15 minutes matches the
+  // documented worst-case in QA.md and surfaces the effective cap in the
+  // log line so operators see when their tuning would have exceeded it.
+  const GLOBAL_TIMEOUT_HARD_CAP_MS = 15 * 60 * 1000;
+  const computedTimeout = limits.maxStates * limits.actionTimeout * 2;
+  const GLOBAL_TIMEOUT_MS = Math.min(computedTimeout, GLOBAL_TIMEOUT_HARD_CAP_MS);
   const explorationStart = Date.now();
   function isTimedOut() { return Date.now() - explorationStart > GLOBAL_TIMEOUT_MS; }
+  if (computedTimeout > GLOBAL_TIMEOUT_HARD_CAP_MS) {
+    log(run, `⏱️ Global timeout capped at ${Math.round(GLOBAL_TIMEOUT_HARD_CAP_MS / 1000)}s (would have been ${Math.round(computedTimeout / 1000)}s from tuning)`);
+  }
 
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
@@ -331,7 +426,10 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
           await loginPage.fill(creds.usernameSelector, creds.username);
           await loginPage.fill(creds.passwordSelector, creds.password);
           await loginPage.click(creds.submitSelector);
-          await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+          // Bundle-B fix #13 — domcontentloaded matches the codebase
+          // convention enforced by `feedbackLoop.js#TIMEOUT`; networkidle
+          // never resolves on SPAs with continuous background polling.
+          await loginPage.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
           log(run, `🔑 Logged in as ${creds.username}`);
         } else {
           const result = await performAutoLogin(loginPage, creds, {
@@ -339,7 +437,8 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
             logger: (m) => log(run, `   ${m}`),
           });
           if (result.ok) {
-            await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+            // Bundle-B fix #13 — same domcontentloaded migration as above.
+            await loginPage.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
             log(run, `🔑 Auto-logged in as ${creds.username}`);
           } else {
             logWarn(run, `Auto-login failed: ${result.reason}`);
@@ -393,6 +492,8 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
       throwIfAborted(signal);
       if (isTimedOut()) {
         log(run, `⏱️ Global exploration timeout reached (${Math.round(GLOBAL_TIMEOUT_MS / 1000)}s) — stopping`);
+        // Bundle-B fix #19 — record global-timeout circuit breaker firing.
+        try { explorerGlobalTimeoutTotal.inc(); } catch { /* best-effort */ }
         break;
       }
       const { fp: currentFp, url: currentUrl, depth } = ctx.queue.shift();
@@ -462,6 +563,14 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         // standard form filler. This lets Sentri complete flows that would
         // otherwise be blocked by an email verification step.
         let executedActions = [];
+        // Bundle-B fix #20 — track mailbox-flow vs standard-flow executed
+        // actions separately so a signup-flow throw partway through fills
+        // doesn't drop the mailbox-flow fills from the audit trail when we
+        // fall back to standard. Pre-fix the reassignment to
+        // `executedActions = await executeFormGroup(...)` in the catch arm
+        // wiped everything the mailbox flow had completed.
+        let mailboxFlowExecutedActions = [];
+        let standardFlowExecutedActions = [];
         const currentSnapshot = ctx.snapshotsByFp.get(activeFp);
         if (detectSignupIntent(currentSnapshot, formActions)) {
           log(run, `   📧 Signup form detected — using disposable email flow`);
@@ -484,14 +593,15 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
             if (result.email) {
               log(run, `   ✉️  Disposable email used: ${result.email}`);
             }
-            // Track fill actions as executed
-            executedActions.push(...formActions.filter(a => a.type === "fill"));
+            // Track fill actions as executed against the mailbox-flow bucket.
+            mailboxFlowExecutedActions.push(...formActions.filter(a => a.type === "fill"));
 
             // Step 2: Submit the form FIRST (verification email is sent after submit)
             const submitActions = formActions.filter(a => a.type === "submit" || a.type === "click");
             for (const act of submitActions) {
+              try { explorerActionsAttemptedTotal.inc({ type: act.type }); } catch { /* best-effort */ }
               if (await executeAction(page, act, limits.actionTimeout)) {
-                executedActions.push(act);
+                mailboxFlowExecutedActions.push(act);
               }
             }
             await waitForSettle(page, limits.actionTimeout);
@@ -503,16 +613,22 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
             }
           } catch (emailErr) {
             log(run, `   ⚠️  Disposable email flow failed: ${emailErr.message} — falling back to standard fill`);
-            // Fall through to standard form execution
-            executedActions = await executeFormGroup(page, formActions, limits.actionTimeout);
+            // Bundle-B fix #20 — fall through to standard form execution,
+            // but PRESERVE the mailbox-flow partial-action audit by writing
+            // standard-flow actions into a separate bucket and concatenating
+            // both into `executedActions` after the if/else block.
+            standardFlowExecutedActions = await executeFormGroup(page, formActions, limits.actionTimeout);
             await waitForSettle(page, limits.actionTimeout);
           } finally {
             if (mailbox) await dispose(mailbox).catch(() => {});
           }
         } else {
-          executedActions = await executeFormGroup(page, formActions, limits.actionTimeout);
+          standardFlowExecutedActions = await executeFormGroup(page, formActions, limits.actionTimeout);
           await waitForSettle(page, limits.actionTimeout);
         }
+        // Bundle-B fix #20 — concatenate so a partial-mailbox flow retains
+        // its fills even after fallback to standard.
+        executedActions = [...mailboxFlowExecutedActions, ...standardFlowExecutedActions];
 
         // Always attempt to capture state after the form interaction,
         // regardless of which code path above was taken.
@@ -520,7 +636,12 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
           // Guard: reject cross-origin navigation or bot detection pages
           if (!isSameOriginAndValid(page.url(), ctx.resolvedOrigin)) {
             log(run, `   ⏭️  Form navigated off-origin → ${page.url()} — restoring`);
-            await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
+            // Bundle-B fix #19 — bot/off-origin counter.
+            try { explorerBotBlockSkipsTotal.inc(); } catch { /* best-effort */ }
+            // Bundle-B fix #15 — break out of the inner form loop when the
+            // page state could not be restored. Continuing would corrupt
+            // the state graph with edges from an unknown page.
+            if (!await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout)) break;
             continue;
           }
           try {
@@ -528,11 +649,20 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
             if (!statesEqual(resultFp, activeFp)) {
               // Record an edge only for actions that were actually executed
               for (const act of executedActions) ctx.edges.push({ fromFp: activeFp, action: act, toFp: resultFp });
-              if (isNovel) { enqueueIfNew(ctx, resultFp, ctx.snapshotsByFp.get(resultFp).url, depth + 1); syncRunPages(run, ctx.snapshots); log(run, `   ✨ New state: ${ctx.snapshotsByFp.get(resultFp).url} [${resultFp.slice(0, 8)}]`); }
+              if (isNovel) {
+                enqueueIfNew(ctx, resultFp, ctx.snapshotsByFp.get(resultFp).url, depth + 1);
+                syncRunPages(run, ctx.snapshots);
+                // Bundle-B fix #19 — state-discovery counter.
+                try { explorerStatesDiscoveredTotal.inc(); } catch { /* best-effort */ }
+                log(run, `   ✨ New state: ${ctx.snapshotsByFp.get(resultFp).url} [${resultFp.slice(0, 8)}]`);
+              }
             }
           } catch (err) { logWarn(run, `   Snapshot failed after form: ${err.message}`); }
         }
-        await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
+        // Bundle-B fix #15 — same break-on-restore-fail rule for the
+        // success path so a failed post-form goto can't poison the next
+        // iteration's beforeUrl baseline.
+        if (!await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout)) break;
       }
 
       let explored = 0;
@@ -541,12 +671,18 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         if (ctx.states.size >= limits.maxStates || explored >= limits.maxActions) break;
         if (action.isDestructive) { log(run, `   ⏭️  Skip destructive: "${action.element.text}"`); continue; }
         const beforeUrl = page.url();
+        // Bundle-B fix #19 — actions-attempted counter (split by action type).
+        try { explorerActionsAttemptedTotal.inc({ type: action.type }); } catch { /* best-effort */ }
         if (!await executeAction(page, action, limits.actionTimeout)) continue;
         await waitForSettle(page, limits.actionTimeout);
         // Guard: reject cross-origin navigation or bot detection pages
         if (!isSameOriginAndValid(page.url(), ctx.resolvedOrigin)) {
           log(run, `   ⏭️  Action navigated off-origin → ${page.url()} — restoring`);
-          await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
+          // Bundle-B fix #19 — bot-block / off-origin counter.
+          try { explorerBotBlockSkipsTotal.inc(); } catch { /* best-effort */ }
+          // Bundle-B fix #15 — break out of the standalone loop on restore
+          // failure (same rationale as the form loop above).
+          if (!await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout)) break;
           continue;
         }
         explored++;
@@ -554,10 +690,15 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
           const { fp: resultFp, isNovel } = await captureState(page, ctx);
           if (!statesEqual(resultFp, activeFp)) {
             ctx.edges.push({ fromFp: activeFp, action, toFp: resultFp });
-            if (isNovel) { enqueueIfNew(ctx, resultFp, ctx.snapshotsByFp.get(resultFp).url, depth + 1); syncRunPages(run, ctx.snapshots); log(run, `   ✨ New state: ${ctx.snapshotsByFp.get(resultFp).url} [${resultFp.slice(0, 8)}]`); }
+            if (isNovel) {
+              enqueueIfNew(ctx, resultFp, ctx.snapshotsByFp.get(resultFp).url, depth + 1);
+              syncRunPages(run, ctx.snapshots);
+              try { explorerStatesDiscoveredTotal.inc(); } catch { /* best-effort */ }
+              log(run, `   ✨ New state: ${ctx.snapshotsByFp.get(resultFp).url} [${resultFp.slice(0, 8)}]`);
+            }
           }
         } catch (err) { logWarn(run, `   Snapshot failed after action: ${err.message}`); }
-        await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
+        if (!await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout)) break;
       }
 
       await crawlLinks(page, activeFp, currentUrl, depth, project, ctx, run, signal);
@@ -566,7 +707,15 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
 
     // Detach HAR capture before browser.close() so listeners complete cleanly
     if (harCapture) harCapture.detach();
-  } finally { await browser.close().catch(() => {}); }
+  } finally {
+    await browser.close().catch(() => {});
+    // Bundle-B fix #18 — force a final sync so the last captured state
+    // always reaches the UI even if it landed inside the 500ms throttle
+    // window. No-op when nothing new was captured.
+    try { forceSyncRunPages(run, ctx.snapshots); } catch { /* best-effort */ }
+    // Bundle-B fix #19 — exploration-duration histogram.
+    try { explorerDurationSeconds.observe((Date.now() - explorationStart) / 1000); } catch { /* best-effort */ }
+  }
 
   // ── Summarise captured API traffic ────────────────────────────────────────
   let apiEndpoints = [];

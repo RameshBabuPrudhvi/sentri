@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { api } from "../../../api.js";
 import usePageTitle from "../../../hooks/usePageTitle.js";
-import { useNotifications } from "../../../context/NotificationContext.jsx";
+import { useToast } from "../../../context/ToastContext.jsx";
 import SidebarShell from "../../shared/components/SidebarShell.jsx";
 import PageSkeleton from "../../../components/layout/PageSkeleton.jsx";
 import { useProjectSettingsSections } from "../hooks/useProjectSettingsSections.js";
@@ -29,7 +29,7 @@ export default function ProjectSettingsLayout() {
   const { id: projectId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { addNotification } = useNotifications();
+  const { showToast } = useToast();
   const { groups, canEdit } = useProjectSettingsSections();
 
   // Hydrate the project. Reuses `api.getProject` (the same endpoint the
@@ -47,48 +47,28 @@ export default function ProjectSettingsLayout() {
 
   usePageTitle(project ? `${project.name} · Settings` : "Project Settings");
 
-  // Toast helper — sections forward this to their panel components. The
-  // callable supports two argument shapes because the panel components
-  // currently call it two different ways:
+  // Toast helper — sections forward this to their panel components.
   //
-  //   1. Object form: `onToast({ type, message })` — used by
-  //      AutoApprovalPanel, CoveragePanel, IterationCapPanel, PiiFirewallPanel,
-  //      VisionHealingPanel (the panels extracted directly into
-  //      `features/project-settings/sections/*`).
+  // Signature is `(message, type)`. Every panel under
+  // `features/project-settings/sections/*` calls it with positional args
+  // (AutoApprovalPanel, CoveragePanel, IterationCapPanel, PiiFirewallPanel,
+  // VisionHealingPanel), matching the signature used by
+  // `ConfigurablePanel` (which backs QualityGatesPanel and
+  // WebVitalsBudgetsPanel) and `EnvironmentsTab`. The pre-UX-001 object
+  // form `onToast({ type, message })` was migrated to positional in the
+  // same PR — see commit history for the shim removal.
   //
-  //   2. Positional form: `onToast(message, type)` — used by
-  //      `ConfigurablePanel` (`components/project/ConfigurablePanel.jsx:105`),
-  //      which backs both `QualityGatesPanel` and `WebVitalsBudgetsPanel`.
-  //
-  // Without the second branch, every save/clear/error from QualityGates +
-  // WebVitals would render as the default "info" type regardless of actual
-  // outcome — a regression the legacy `ProjectQualityCard` didn't have
-  // because it accepted both shapes implicitly.
-  //
-  // Unifying the panel-side contract would be cleaner but touches 7+ files;
-  // accepting both here is the smaller-blast-radius fix.
-  const onToast = useCallback((msg, typeArg) => {
-    if (!msg) return;
-    let type;
-    let message;
-    if (typeof msg === "string") {
-      // Positional form: onToast("Saved", "success") — `typeArg` carries
-      // the level; default to "info" when absent (matches the legacy
-      // `showToast` helper signature in ConfigurablePanel).
-      message = msg;
-      type = typeArg || "info";
-    } else {
-      // Object form: onToast({ type, message }) — destructure with the
-      // same default. `typeArg` is ignored on the object path since the
-      // object already carries the level.
-      type = msg.type || "info";
-      message = msg.message;
-    }
-    addNotification({
-      type: type === "error" ? "error" : type === "success" ? "success" : "info",
-      title: message,
-    });
-  }, [addNotification]);
+  // UX-001: previously this routed every panel toast into `addNotification()`
+  // — i.e. the notification BELL, not a visible toast — so users saving
+  // Auto-Approval / Quality Gates / Web Vitals / Coverage / Iteration Cap /
+  // PII Firewall / Vision Healing in Project Settings saw no confirmation.
+  // Now we forward to the global `useToast()` provider mounted in App.jsx.
+  // The bell stays for durable async events (run-complete, scheduled-trigger
+  // fired).
+  const onToast = useCallback((message, type = "info") => {
+    if (!message) return;
+    showToast(message, type === "error" ? "error" : type === "success" ? "success" : "info");
+  }, [showToast]);
 
   const refresh = useCallback(() => projectQuery.refetch(), [projectQuery]);
 

@@ -21,20 +21,20 @@ export default function IterationCapPanel({ project, canEdit, onToast }) {
     const trimmed = value.trim();
     const cap = trimmed === "" ? null : Number(trimmed);
     if (cap !== null && (!Number.isInteger(cap) || cap < 1 || cap > 100)) {
-      onToast?.({ type: "error", message: "Iteration cap must be empty or an integer between 1 and 100." });
+      onToast?.("Iteration cap must be empty or an integer between 1 and 100.", "error");
       return;
     }
     setSaving(true);
     try {
       await api.updateProject(project.id, { iterationCap: cap });
-      onToast?.({
-        type: "success",
-        message: cap === null
+      onToast?.(
+        cap === null
           ? "Iteration cap cleared — using default (10)."
           : `Iteration cap set to ${cap}.`,
-      });
+        "success",
+      );
     } catch (err) {
-      onToast?.({ type: "error", message: err?.message || "Failed to save iteration cap." });
+      onToast?.(err?.message || "Failed to save iteration cap.", "error");
     } finally {
       setSaving(false);
     }

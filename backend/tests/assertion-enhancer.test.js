@@ -575,6 +575,364 @@ test("fast-path does NOT trigger when toHaveTitle appears only in a string liter
   assert.equal(r._enhancementReason, "added_page_load_assertion");
 });
 
+// ── 11. Bundle-A fix #14 — hasNoAssertions ignores `expect(` in strings/comments ──
+//
+// Pre-fix `hasNoAssertions` used a bare `.includes("expect(")` so any test
+// containing the substring `expect(` anywhere (inside a string literal, a
+// comment, a log line) was classified as HAVING assertions — and the
+// enhancer skipped injection on a test that genuinely had zero coverage.
+
+console.log("\n🧹  hasNoAssertions — string/comment-safe detection (fix #14)");
+
+test("hasNoAssertions: bare console.log('expect(loaded)') with NO real expect() → flagged as no-assertions", () => {
+  // Bugs.md fix #14 fixture. Pre-fix this returned `false` (the substring
+  // `expect(` is present inside the string literal); post-fix it returns
+  // `true` because the string-stripping pass removes the literal's body
+  // before the presence check runs.
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  console.log('expect(loaded)');",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), true, "string-literal `expect(` must not count as a real assertion");
+});
+
+test("hasNoAssertions: `// expect(...)` line comment → flagged as no-assertions", () => {
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  // TODO: add expect(page).toHaveURL(...)",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), true, "line-comment `expect(` mention must not count");
+});
+
+test("hasNoAssertions: `/* expect(...) */` block comment → flagged as no-assertions", () => {
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  /* placeholder for expect(page).toBeVisible() */",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), true, "block-comment `expect(` mention must not count");
+});
+
+test("hasNoAssertions: template-literal `${expect(...)}` (no real call) → flagged as no-assertions", () => {
+  // Template-literal contents are stripped wholesale, so even a fake
+  // `${expect(...)}` in a string template won't fool the detector.
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  const msg = `assertion would be expect(foo)`;",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), true, "template-literal `expect(` mention must not count");
+});
+
+test("hasNoAssertions: REAL expect() call with sibling string mentioning expect → has assertions", () => {
+  // Positive control: a real `expect()` call still registers even when
+  // the file ALSO contains decoy `expect(` mentions inside strings or
+  // comments. We must not over-strip and lose true positives.
+  const code = [
+    "test('x', async ({ page }) => {",
+    "  await page.goto('http://ex.com/page');",
+    "  await expect(page).toHaveURL('/x');",
+    "  console.log('expect(decoy)');",
+    "  // TODO: add another expect()",
+    "});",
+  ].join("\n");
+  assert.equal(hasNoAssertions(code), false, "real expect() call must still register");
+});
+
+test("enhancer injects assertions on a test whose only `expect(` is inside a string literal", () => {
+  // End-to-end: the enhancer must drive the `no_assertions` branch on
+  // this test (pre-fix it incorrectly fast-pathed because the substring
+  // check returned false). The final code MUST contain a real injected
+  // assertion.
+  const stringOnlyTest = {
+    name: "Test with expect inside string only",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  console.log('expect(something)');",
+      "  await safeClick(page, 'Continue');",
+      "});",
+    ].join("\n"),
+    steps: ["s"],
+    type: "functional",
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(stringOnlyTest, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, true, "enhancer must inject because the test genuinely has no assertions");
+  assert.equal(r._enhancementReason, "no_assertions");
+  // Verify a real assertion was injected.
+  assert.match(r.playwrightCode, /\bexpect\s*\(.+\)\.\w+/, "must inject at least one real expect() chain");
+});
+
+test("hasStrongAssertions: `'toHaveURL'` inside a string literal does NOT count", () => {
+  // Companion guard for the symmetric bug — pre-fix `hasStrongAssertions`
+  // ran the regex directly against the raw code, so a string literal
+  // containing `'toHaveURL'` would falsely register as a strong
+  // assertion. Fix #14 strips strings/comments before the check.
+  const code = "const note = 'should add toHaveURL later';";
+  assert.equal(hasStrongAssertions(code), false, "matcher substring inside a string must not count");
+});
+
+// ── 12. Bundle-A fix #15 — injection anchor tolerates trailing content ───────
+//
+// Pre-fix the three `enhanceTest` injection regexes used `(\}\s*\);\s*$)`
+// where `$` defaults to end-of-string. A test ending with `});\n// comment`
+// failed the regex and the assertion injection was silently skipped. The
+// fix uses a new `TEST_WRAPPER_CLOSE_RE` that tolerates trailing whitespace,
+// line comments, and block comments after `});`.
+
+console.log("\n🪢  enhanceTest — injection anchor tolerates trailing newlines/comments (fix #15)");
+
+const TRAILING_CASES = [
+  { label: "trailing newline", trailer: "\n" },
+  { label: "trailing line comment", trailer: "\n// generated by gpt-4o" },
+  { label: "trailing block comment", trailer: "\n/* model: gpt-4o\n   ts: 2025-01-15 */" },
+  { label: "trailing whitespace + line comment", trailer: "\n  \n// note\n  " },
+  { label: "trailing block comment then more whitespace", trailer: " /* end */ \n\n" },
+];
+
+// (a) `no_assertions` branch — injection must fire on every trailer shape.
+for (const { label, trailer } of TRAILING_CASES) {
+  test(`no_assertions branch: injects assertions when test ends with "${label}"`, () => {
+    const t = noAssertTest({
+      playwrightCode: [
+        "test('x', async ({ page }) => {",
+        "  await page.goto('http://ex.com/page');",
+        "  await safeClick(page, 'Continue');",
+        `});${trailer}`,
+      ].join("\n"),
+    });
+    const r = enhanceTest(t, SNAPSHOT, { dominantIntent: "NAVIGATION" });
+    assert.equal(r._assertionEnhanced, true, `must inject for trailer "${label}"`);
+    assert.equal(r._enhancementReason, "no_assertions");
+    // The injected assertion(s) must land BEFORE the closing `});`.
+    const closeIdx = r.playwrightCode.lastIndexOf("});");
+    const injectedExpectIdx = r.playwrightCode.search(/await\s+expect\s*\(/);
+    assert.ok(
+      injectedExpectIdx >= 0 && injectedExpectIdx < closeIdx,
+      `injected expect must precede the closing }); for trailer "${label}"`,
+    );
+  });
+}
+
+// (b) `weak_assertions_replaced` branch — same regex used to splice page-load.
+test("weak_assertions_replaced branch: injects page-load when test ends with `// comment`", () => {
+  const t = {
+    name: "Weak test with trailing comment",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await expect(page).toBeTruthy();",
+      "});",
+      "// trailing model note",
+    ].join("\n"),
+    steps: ["s"],
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, true);
+  assert.equal(r._enhancementReason, "weak_assertions_replaced");
+  assert.match(r.playwrightCode, /toHaveURL|toHaveTitle/, "page-load assertion must be injected");
+});
+
+// (c) `added_page_load_assertion` branch — strong but no URL/title; trailing
+//     block comment must not block injection.
+test("added_page_load_assertion branch: injects page-load when test ends with `/* … */`", () => {
+  const t = {
+    name: "Strong test, no URL, trailing block comment",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await expect(page.getByText('Welcome')).toBeVisible();",
+      "});",
+      "/* generated 2025-01-15 */",
+    ].join("\n"),
+    steps: ["s"],
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, true);
+  assert.equal(r._enhancementReason, "added_page_load_assertion");
+  // The injected toHaveURL must land BEFORE the closing `});`.
+  const code = r.playwrightCode;
+  const urlIdx = code.indexOf("toHaveURL");
+  const closeIdx = code.lastIndexOf("});");
+  assert.ok(urlIdx > 0 && urlIdx < closeIdx, "toHaveURL must precede the closing });");
+});
+
+test("injection still works when `});` is followed by nothing (no-regression baseline)", () => {
+  // The bare-`});` case — exact pre-fix happy path. Post-fix must still
+  // work bit-for-bit so no existing test regresses.
+  const t = noAssertTest({
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await safeClick(page, 'Continue');",
+      "});",
+    ].join("\n"),
+  });
+  const r = enhanceTest(t, SNAPSHOT, { dominantIntent: "NAVIGATION" });
+  assert.equal(r._assertionEnhanced, true);
+  assert.equal(r._enhancementReason, "no_assertions");
+});
+
+// ── 13. Bundle-A fix #16 — AUTH/security templates scope to error regions ───
+//
+// Pre-fix the AUTH and `security` templates asserted
+// `expect(page.locator('body')).not.toContainText('Invalid')` — which
+// false-positives on legitimate body copy like:
+//   • "Invalid email format" hints next to form inputs
+//   • Admin links named "Error Reports"
+//   • Help text like "Sometimes errors happen — try again"
+// Fix #16 scopes the negative assertion to dedicated error-region
+// selectors (`[role="alert"]`, `.error`, `.field-error`, etc.) and adds
+// `.catch(() => {})` so the happy path (no error region present)
+// doesn't fail the test.
+
+console.log("\n🔐  AUTH / security templates — scoped error-region check (fix #16)");
+
+test("AUTH template: scopes negative-text check to error regions, NOT body", () => {
+  const r = enhanceTest(noAssertTest(), SNAPSHOT, { dominantIntent: "AUTH" });
+  assert.equal(r._assertionEnhanced, true);
+  // Must NOT use `page.locator('body')` for the negative-text assertion
+  // — that's the false-positive vector. (The existing positive happy-path
+  // template doesn't otherwise reference `body`, so any presence here
+  // would be the bug.)
+  assert.doesNotMatch(
+    r.playwrightCode,
+    /locator\('body'\)\.not\.toContainText/,
+    "AUTH template must not use page.locator('body') for negative-text check",
+  );
+  // Must reference one of the canonical error-region selectors.
+  assert.match(
+    r.playwrightCode,
+    /role="alert"|\.error|\.field-error/,
+    "AUTH template must scope to a dedicated error region",
+  );
+});
+
+test("AUTH template: appends `.catch(() => {})` so missing error region doesn't fail the test", () => {
+  // `.catch(() => {})` swallows the locator-not-found rejection so a
+  // page WITHOUT any error region (the happy path) passes silently.
+  const r = enhanceTest(noAssertTest(), SNAPSHOT, { dominantIntent: "AUTH" });
+  // Two `.not.toContainText(...)` chains, each followed by `.catch(() => {})`.
+  const matches = r.playwrightCode.match(/\.not\.toContainText\('[^']+'\)\.catch\(\(\) => \{\}\)/g) || [];
+  assert.ok(
+    matches.length >= 2,
+    `AUTH template must emit at least 2 .catch-guarded negative-text assertions, got ${matches.length}`,
+  );
+});
+
+test("security TYPE template: same scoped-region fix applied", () => {
+  // Symmetric guard — the `security` TYPE template had the identical bug
+  // (literal copy of AUTH's body). Fix #16 patches both.
+  const r = enhanceTest(noAssertTest({ type: "security" }), SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, true);
+  assert.doesNotMatch(
+    r.playwrightCode,
+    /locator\('body'\)\.not\.toContainText/,
+    "security template must not use page.locator('body') for negative-text check",
+  );
+  assert.match(
+    r.playwrightCode,
+    /role="alert"|\.error|\.field-error/,
+    "security template must scope to a dedicated error region",
+  );
+});
+
+test("AUTH template: text `Invalid` and `error` keywords still present (no behaviour drop)", () => {
+  // No-regression for the existing AUTH test contract — the template
+  // still asserts on the same two keywords; only the locator scope
+  // changed. A pre-fix consumer doing `assert.match(/not.toContainText\('Invalid'\)/)`
+  // (line 168 above) must still pass.
+  const r = enhanceTest(noAssertTest(), SNAPSHOT, { dominantIntent: "AUTH" });
+  assert.match(r.playwrightCode, /not\.toContainText\('Invalid'\)/);
+  assert.match(r.playwrightCode, /not\.toContainText\('error'\)/);
+});
+
+// ── 14. Bundle-A follow-up #F1/F2 — anchored matcher patterns + bounded RE ──
+//
+// F1: `HAS_PAGE_LOAD_ASSERTION_RE` no longer uses greedy `.+`/`.*` with
+//     `/s` — bounded to `[^;\n]{1,2000}` so it can't catastrophically
+//     backtrack on minified single-line inputs.
+// F2: `STRONG_ASSERTION_PATTERNS` now anchor to `.toHaveURL(` method-call
+//     syntax instead of bare `toHaveURL` substring — defence-in-depth
+//     alongside fix #14's strip pass.
+
+console.log("\n🔍  HAS_PAGE_LOAD_ASSERTION_RE / STRONG_ASSERTION_PATTERNS — anchored (#F1/#F2)");
+
+test("F2: a property assignment `obj.toHaveURL = fn` does NOT count as a strong assertion", () => {
+  // Pre-fix the bare `/toHaveURL/` substring would match the LHS of an
+  // assignment. Post-fix the `\.toHaveURL\s*\(` anchor requires actual
+  // method-call syntax.
+  const code = "const obj = { toHaveURL: () => true }; obj.toHaveURL = () => false;";
+  assert.equal(
+    hasStrongAssertions(code),
+    false,
+    "property assignment must not register as a strong assertion",
+  );
+});
+
+test("F2: real `.toHaveURL(...)` call still counts", () => {
+  // Positive control — the anchored pattern must still match real calls.
+  const code = "await expect(page).toHaveURL('/dash');";
+  assert.equal(hasStrongAssertions(code), true);
+});
+
+test("F1: 5KB single-line `expect(...).toHaveURL(...)` body validates in < 200ms", () => {
+  // Performance budget for the bounded regex. Pre-fix the greedy `.+`
+  // with `/s` walked exponential backtracking trees on this fixture.
+  const chunks = [];
+  for (let i = 0; i < 80; i += 1) {
+    chunks.push(`await expect(page.locator('.item-${i}').nth(${i}).first()).toHaveURL('/page-${i}');`);
+  }
+  const code = chunks.join(" ");
+  assert.ok(code.length > 4000, `precondition: fixture must be > 4 KB, got ${code.length}`);
+
+  // The enhancer's fast-path calls HAS_PAGE_LOAD_ASSERTION_RE — drive it
+  // via enhanceTest with the perf fixture as `playwrightCode`.
+  const t = {
+    name: "Pathological perf fixture",
+    playwrightCode: code,
+    sourceUrl: "http://ex.com/page",
+  };
+  const t0 = Date.now();
+  enhanceTest(t, SNAPSHOT, null);
+  const elapsed = Date.now() - t0;
+  assert.ok(
+    elapsed < 200,
+    `enhanceTest on a 5KB single-line body with toHaveURL chains must finish < 200ms, took ${elapsed}ms`,
+  );
+});
+
+test("F1: nested-parens expect target still validates the page-load regex", () => {
+  // The bounded pattern must still match the canonical
+  // `expect(page.locator('x').first()).toHaveURL(...)` shape.
+  const t = {
+    name: "Nested parens with toHaveURL",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await expect(page.locator('h1').first()).toBeVisible();",
+      "  await expect(page).toHaveURL('/dash');",
+      "});",
+    ].join("\n"),
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  // Has strong assertions + a real toHaveURL → fast-path should fire
+  // (i.e. `_assertionEnhanced: false` because the test is already fully
+  // enhanced).
+  assert.equal(r._assertionEnhanced, false,
+    "fast-path must fire for a test with nested-paren toHaveURL");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

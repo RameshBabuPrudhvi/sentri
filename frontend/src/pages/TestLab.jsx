@@ -14,11 +14,6 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import {
-  StopCircle, Clock,
-  ArrowRight, RotateCcw, Atom, Video,
-  Copy, Check, RefreshCw,
-} from "lucide-react";
 import { api } from "../api.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
 // G9 — parallel runs. Today only mounts the drawer + maintains a parallel
@@ -29,39 +24,13 @@ import { useMultiRunSSE } from "../hooks/useMultiRunSSE.js";
 import RunDrawer from "../components/test-lab/RunDrawer.jsx";
 import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import usePageTitle from "../hooks/usePageTitle.js";
-import { fmtRelativeDate } from "../utils/formatters.js";
-import SiteGraph from "../components/crawl/SiteGraph.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
-// `TestConfig` is consumed internally by `<TestLabConfigPanel>` —
-// no longer imported here directly.
-import EmptyState from "../components/shared/EmptyState.jsx";
-// Task 3 — multi-agent chat transcript replaces the prior single-narrator
-// `NarrativeFeed` (which lived inline in this file). `AgentConversation`
-// owns its own `getStageAgentRoles` import from `frontend/src/config.js`,
-// so step → role attribution stays anchored to the canonical map without
-// prop-drilling through TestLab.
-import AgentConversation from "../components/ai/AgentConversation.jsx";
-// `stageStatus` extracted to a shared util so AgentConversation and any
-// future stage-aware view derive state from the same single source. See
-// `frontend/src/utils/pipelineState.js` for status semantics.
-import { stageStatus } from "../utils/pipelineState.js";
 import { loadSavedConfig } from "../utils/testDialsStorage.js";
-// AGENT.md §40 — `TestLabTabs` extracted from the inline IIFE that
-// previously lived in this file. `RetryButton` is also extracted but
-// consumed only by `RunBanners.jsx` (which imports it directly) and
-// `TestLabLaunchPanel.jsx`'s inline retry CTA — this file no longer
-// references it.
-import TestLabTabs from "../components/test-lab/TestLabTabs.jsx";
-// QueueTab extraction (AGENT.md §40) — the ~96-line inline Queue block
-// previously lived in this file; now owned by its own component. Reads
-// the same `activeQueueRuns` / `recentQueueRuns` / `queueFilter` props
-// the parent already computes, so the swap is a render-time refactor
-// only (no state shape changes).
+// QueueTab extraction — the ~96-line inline Queue block previously
+// lived in this file; now owned by its own component.
 import QueueTab from "../components/test-lab/QueueTab.jsx";
 import { buildRetryPayload, resolveGenerateRetryFields } from "../utils/runRetry.js";
-// Run-center terminal banners (Done / Failed). Extracted so TestLab.jsx
-// stops growing every time we tweak the action-stack copy.
-import { RunDoneBanner, RunFailedBanner } from "../components/test-lab/RunBanners.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 // Test Lab middle-column config body. Default export is the full
 // `tl-config` surface (error banner + Requirement composer + Test
 // Dials); the named `RequirementComposer` export is consumed
@@ -71,32 +40,45 @@ import TestLabConfigPanel from "../components/test-lab/TestLabConfigPanel.jsx";
 // surface. Pure pass-through: every value + handler is owned by this
 // page. See the component's JSDoc for the prop contract.
 import TestLabLaunchPanel from "../components/test-lab/TestLabLaunchPanel.jsx";
+// Audit §3.1 decomposition (second pass) — the three biggest remaining
+// blocks split out into dedicated components. The page now reads as a
+// state machine: topbar + (queue | sidebar + run-center/config + launch).
+//   - `<TestLabTopBar>`: brand + tablist + Record CTA.
+//   - `<TestLabProjectSidebar>`: left rail project list + last-crawl meta.
+//   - `<TestLabRunCenter>`: middle column when a run is attached
+//     (the ~215-line IIFE — banners, inner-tabs, 3 sub-columns).
+import TestLabTopBar from "../components/test-lab/TestLabTopBar.jsx";
+import TestLabProjectSidebar from "../components/test-lab/TestLabProjectSidebar.jsx";
+import TestLabRunCenter from "../components/test-lab/TestLabRunCenter.jsx";
+// Page-local references — `ProjIcon` is forwarded to `<TestLabLaunchPanel>`
+// (which closes over `avatarStyle` via the icon component); `PIPELINE_STAGES`
+// is forwarded for the same panel's pipeline-progress label.
+import ProjIcon from "../components/test-lab/ProjIcon.jsx";
+import { PIPELINE_STAGES } from "../components/test-lab/PipelinePanel.jsx";
+// Pure helpers — sessionStorage mirror + attachment MIME guard.
+// Extracted so the page file stops growing every time we tweak the
+// log cap or the MIME allowlist, and so each helper is unit-testable
+// without a React renderer.
+import {
+  LOG_CAP,
+  loadPersistedRun,
+  persistRun,
+  clearPersistedRun,
+} from "../utils/testLabPersistence.js";
+// `ACCEPTED_EXTENSIONS` is the only attachment constant the page still
+// references directly (it flows into `<TestLabConfigPanel>`'s file-input
+// accept attr). The MIME guard + size caps are consumed inside
+// `useTestLabAttachments`, so the page no longer imports them.
+import { ACCEPTED_EXTENSIONS } from "../utils/testLabAttachments.js";
+// Pass-3 decomposition — attachment state + env fetch + outcome split.
+// Each owns one concern and ships its own JSDoc; the page is now ~140
+// lines lighter and easier to read end-to-end.
+import useTestLabAttachments from "../hooks/useTestLabAttachments.js";
+import useProjectEnvironments from "../hooks/useProjectEnvironments.js";
+import { splitGeneratedOutcome } from "../utils/generatedOutcome.js";
 
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const PIPELINE_STAGES = [
-  { label: "Crawl & snapshot",     step: 1, key: "pagesFound",          unit: "pages" },
-  { label: "Filter elements",      step: 2, key: "elementsKept",         unit: "kept"  },
-  { label: "Classify intents",     step: 3, key: "journeysDetected",     unit: "flows" },
-  { label: "Generate tests",       step: 4, key: "rawTestsGenerated",    unit: "raw"   },
-  { label: "Deduplicate",          step: 5, key: "duplicatesRemoved",    unit: "removed" },
-  { label: "Enhance assertions",   step: 6, key: "assertionsEnhanced",   unit: "enhanced" },
-  { label: "Validate",             step: 7, key: "validationRejected",   unit: "rejected" },
-  { label: "Done",                 step: 8, key: null,                   unit: null },
-];
-
-// GAP-005 (audit, fix) — `STEP_TO_AGENT_ROLE` removed in favour of the
-// shared `getStageAgentRoles` helper imported above. The old map was both
-// incomplete (only `planner` + `author`, missing `explorer` and 3 other
-// configurable roles) and wrong on step 3 (the real call site is
-// `backend/src/pipeline/intentClassifier.js#L158` with `explorer`, plus
-// `journeyGenerator.js#L218` with `planner` — multi-agent stage).
-
-// Coverage / perspective / quality / test-count / profile option lists used to
-// live here; they have moved to the shared <TestConfig /> component which
-// composes them from `frontend/src/config/testDialsConfig.js` (the same
-// canonical source the legacy CrawlProjectModal / GenerateTestModal used).
+// ── Module-scoped helpers ────────────────────────────────────────────────────
 
 const REQ_EXAMPLES = [
   "User login with valid credentials",
@@ -104,43 +86,6 @@ const REQ_EXAMPLES = [
   "Form validation blocks invalid input",
   "Password reset flow end-to-end",
 ];
-
-// ── Attachment limits ────────────────────────────────────────────────────────
-// Mirror the legacy GenerateTestModal contract (40 KB per file, 45 KB total —
-// backend caps `description` at 50 KB so we leave headroom for the prompt
-// scaffold). Same MIME-allowlist + binary-detection guards prevent users from
-// pasting screenshots / PDFs that would blow up token counts.
-const ACCEPTED_EXTENSIONS = ".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,.gherkin";
-const MAX_ATTACHMENT_SIZE  = 40_000;
-const MAX_TOTAL_ATTACHMENT = 45_000;
-const TEXT_MIME_PREFIXES   = ["text/", "application/json", "application/xml", "application/x-yaml", "application/yaml"];
-const TEXT_MIME_EXACT      = new Set([
-  "text/plain", "text/csv", "text/html", "text/markdown", "text/xml", "text/yaml",
-  "application/json", "application/xml", "application/x-yaml", "application/yaml",
-]);
-
-function isTextMime(file) {
-  const mime = (file.type || "").toLowerCase();
-  // No MIME (e.g. .feature, .gherkin) — allow because the OS picker already
-  // filtered by the ACCEPTED_EXTENSIONS list.
-  if (!mime) return true;
-  if (TEXT_MIME_EXACT.has(mime)) return true;
-  return TEXT_MIME_PREFIXES.some(p => mime.startsWith(p));
-}
-
-// ── Persistence ──────────────────────────────────────────────────────────────
-//
-// The pipeline + log views are driven by component-local state (`activeRun`,
-// `runData`, `logLines`). Without persistence, navigating away from Test Lab
-// unmounts the component and wipes the state, so returning mid-run shows an
-// empty idle panel instead of the in-flight pipeline. We mirror the live run
-// to sessionStorage so soft navigation within the app is seamless; on mount
-// we rehydrate and the SSE hook auto-reconnects (its `snapshot` event refills
-// pipeline counters, and new log lines resume streaming from the reconnect
-// point). sessionStorage is scoped per-tab, which matches the UX we want.
-
-const STORAGE_KEY = "sentri.testLab.activeRun";
-const LOG_CAP     = 200; // bound storage size — the LiveLog UI slices at -40
 
 // Test Lab's Queue + Active Runs panels only describe AI generation runs —
 // the pipeline visualisation, "Step N/8" subtitle, and the attach-to-live
@@ -151,283 +96,6 @@ const LOG_CAP     = 200; // bound storage size — the LiveLog UI slices at -40
 // Module-scoped so React's dependency analysis doesn't see a new function
 // reference every render.
 const isGenerationRun = (r) => r.type === "crawl" || r.type === "generate";
-
-function loadPersistedRun() {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.activeRun?.runId) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function persistRun(activeRun, runData, logLines) {
-  try {
-    if (!activeRun?.runId) {
-      sessionStorage.removeItem(STORAGE_KEY);
-      return;
-    }
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-      activeRun,
-      runData,
-      logLines: logLines.slice(-LOG_CAP),
-    }));
-  } catch { /* quota / private mode — non-fatal */ }
-}
-
-function clearPersistedRun() {
-  try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* non-fatal */ }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-// `stageStatus` previously lived inline here; it's now imported from
-// `frontend/src/utils/pipelineState.js` so AgentConversation (and any
-// future stage-aware surface) shares the single source of truth.
-
-/** Build a project avatar colour from its initial letter (deterministic). */
-function avatarStyle(initial) {
-  const hues = {
-    A: 210, B: 280, C: 340, D: 170, E: 50, F: 120, G: 15,
-    H: 255, I: 190, J: 320, K: 90, L: 200, M: 30, N: 160,
-    O: 60, P: 295, Q: 135, R: 0, S: 240, T: 75, U: 215,
-    V: 145, W: 350, X: 180, Y: 45, Z: 270,
-  };
-  const h = hues[(initial || "?").toUpperCase()] ?? 200;
-  return {
-    background: `hsl(${h},60%,90%)`,
-    color: `hsl(${h},60%,30%)`,
-  };
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-// `ChipGroup` was inlined here for the Crawl/Requirement chip rows; chip
-// rendering now lives in `frontend/src/components/test/TestConfig.jsx` and is
-// shared with the rest of the app.
-
-/**
- * Compact project avatar with deterministic colour from the project name initial.
- *
- * @param {{ project: Object }} props
- */
-function ProjIcon({ project }) {
-  const initial = (project?.name || "?")[0].toUpperCase();
-  return (
-    <div className="tl-proj-icon" style={avatarStyle(initial)}>
-      {initial}
-    </div>
-  );
-}
-
-/**
- * Pipeline stage list shown while a crawl run is active.
- *
- * @param {{ run: Object }} props
- */
-function PipelinePanel({ run }) {
-  const cs = run?.currentStep ?? null;
-  const ps = run?.pipelineStats || {};
-  const status = run?.status ?? "running";
-
-  return (
-    <div className="tl-pipeline">
-      {PIPELINE_STAGES.map(stage => {
-        const state = stageStatus(stage.step, cs, status);
-        const statVal = stage.key ? ps[stage.key] : null;
-        return (
-          <div key={stage.step} className={`tl-stage tl-stage--${state}`}>
-            <div className={`tl-stage-dot tl-stage-dot--${state}`} />
-            <span className="tl-stage-name">{stage.label}</span>
-            {statVal != null && (
-              <span className="tl-stage-stat">
-                {statVal} {stage.unit}
-              </span>
-            )}
-            {state === "active" && statVal == null && (
-              <span className="tl-stage-stat tl-stage-stat--running">running…</span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * Live log terminal — scrolls to bottom on each new entry.
- *
- * @param {{ lines: string[] }} props
- */
-function LiveLog({ lines }) {
-  const endRef = useRef(null);
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [lines.length]);
-
-  // Copy the *full* buffer (not just the visible -40 slice) so the user can
-  // share the complete log when triaging an issue. `navigator.clipboard`
-  // requires HTTPS or localhost; the catch keeps the button silent on
-  // unsupported origins instead of throwing into the console.
-  function handleCopy() {
-    const text = lines.join("\n");
-    if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    }).catch(() => { /* clipboard unavailable — non-fatal */ });
-  }
-
-  return (
-    <div className="tl-live-log">
-      {/* Icon-only copy button pinned to the top-right of the log surface.
-          `tl-log-copy` is absolutely positioned against the non-scrolling
-          `.tl-live-log` wrapper so it stays in view as the user scrolls
-          through `.tl-live-log-scroll` below. Disabled when the buffer is
-          empty so users can't no-op-copy a blank log. */}
-      <button
-        type="button"
-        className={`tl-log-copy${copied ? " tl-log-copy--copied" : ""}`}
-        onClick={handleCopy}
-        disabled={lines.length === 0}
-        title={copied ? "Copied to clipboard" : "Copy log to clipboard"}
-        aria-label="Copy log to clipboard"
-      >
-        {copied ? <Check size={13} /> : <Copy size={13} />}
-      </button>
-      {/* Inner scroll surface — the absolutely-positioned copy button above
-          stayed visually pinned only when the scroll happened on a separate
-          element. Co-locating `overflow-y: auto` on the parent caused the
-          button to scroll *with* the log content (absolute children of a
-          scroll container participate in its scroll). */}
-      <div className="tl-live-log-scroll">
-        {lines.slice(-40).map((line, i) => {
-          // Backend emits lines as `[ISO timestamp] <emoji> <message>` (see
-          // `backend/src/utils/runLogger.js` and `backend/src/crawler.js`), so
-          // we can't anchor the classifier at index 0 — the leading bracketed
-          // timestamp pushes the emoji past the start. Scan for the first
-          // recognisable marker anywhere in the line; first match wins.
-          let cls = "tl-log-dim";
-          if (/[✅✓]/.test(line) || /\bPASSED\b/.test(line))           cls = "tl-log-ok";
-          else if (/[❌✗]/.test(line) || /\b(FAILED|ERROR)\b/i.test(line)) cls = "tl-log-error";
-          else if (/[⚠️]/.test(line) || /\bWARN(ING)?\b/i.test(line))     cls = "tl-log-warn";
-          else if (/[🏁🚀🕷️🔍🤖→▶]/.test(line))                          cls = "tl-log-info";
-          return <div key={i} className={cls}>{line}</div>;
-        })}
-        <div ref={endRef} />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Single queue row for the Queue tab.
- *
- * @param {{ run: Object, project: Object, onStop: Function, onAttach: Function }} props
- *   `onAttach` is called for active runs to reattach the live view; it falls
- *   back to navigating to `/runs/:id` for completed runs.
- */
-function QueueRow({ run, project, onStop, onAttach }) {
-  const navigate = useNavigate();
-  const isActive    = run.status === "running";
-  const isCompleted = run.status === "completed" || run.status === "completed_empty";
-  const isFailed    = run.status === "failed";
-  const isAborted   = run.status === "aborted";
-  // Any terminal status dims the row + suppresses the progress bar.
-  const isTerminal  = isCompleted || isFailed || isAborted;
-
-  const pct = run.currentStep != null
-    ? Math.round(((run.currentStep - 1) / 7) * 100)
-    : 0;
-
-  // Subtitle reflects the actual outcome — a failed run must not read as
-  // "Completed · N tests generated", and an aborted run must not fall through
-  // to the "Queued" branch.
-  let subtitle;
-  if (isActive && run.currentStep != null) {
-    subtitle = `Step ${run.currentStep}/8 · ${PIPELINE_STAGES[run.currentStep - 1]?.label ?? ""} · started ${fmtRelativeDate(run.startedAt)}`;
-  } else if (isCompleted) {
-    subtitle = `Completed · ${run.testsGenerated ?? 0} tests generated · ${fmtRelativeDate(run.startedAt)}`;
-  } else if (isFailed) {
-    subtitle = `Failed${run.error ? ` — ${run.error}` : ""} · ${fmtRelativeDate(run.startedAt)}`;
-  } else if (isAborted) {
-    subtitle = `Aborted · ${fmtRelativeDate(run.startedAt)}`;
-  } else {
-    subtitle = `Queued · ${fmtRelativeDate(run.startedAt)}`;
-  }
-
-  return (
-    <div className={`tl-queue-row${isTerminal ? " tl-queue-row--done" : ""}`}>
-      <ProjIcon project={project} />
-      <div className="tl-queue-info">
-        <div className="tl-queue-name">
-          {project?.name ?? "Unknown"} · {run.type === "crawl" ? "Crawl & Generate" : "Requirement"}
-        </div>
-        <div className="tl-queue-sub">{subtitle}</div>
-      </div>
-
-      {isActive && (
-        <div className="tl-queue-progress">
-          <div className="progress-bar">
-            <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
-          </div>
-        </div>
-      )}
-
-      {isCompleted && (
-        <span className="badge badge-green tl-queue-row__pin">done</span>
-      )}
-      {isFailed && (
-        <span className="badge badge-red tl-queue-row__pin">failed</span>
-      )}
-      {isAborted && (
-        <span className="badge badge-amber tl-queue-row__pin">aborted</span>
-      )}
-
-      {isActive ? (
-        <>
-          <button
-            className="btn btn-ghost btn-sm tl-queue-row__pin"
-            onClick={() => onAttach?.(run)}
-            title="Attach the live pipeline view to this run"
-          >
-            View <ArrowRight size={13} />
-          </button>
-          <button
-            className="btn btn-ghost btn-sm tl-queue-row__pin"
-            onClick={() => onStop(run.id)}
-          >
-            <StopCircle size={14} />
-            Stop
-          </button>
-        </>
-      ) : (
-        <button
-          className="btn btn-ghost btn-sm tl-queue-row__pin"
-          onClick={() => navigate(`/runs/${run.id}`)}
-        >
-          View <ArrowRight size={13} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ── (NarrativeFeed removed — see `frontend/src/components/ai/AgentConversation.jsx`)
-//
-// Task 3 replaced the inline single-narrator NarrativeFeed with the
-// multi-agent AgentConversation transcript. The supporting NARRATIVE_STAGES
-// array (per-stage line scripts) + the resolveNarrativeLine helper + the
-// `tl-nf-*` CSS in `pages/test-lab.css` are all dead code now and removed.
-// AgentConversation is imported above and rendered below in place of
-// `<NarrativeFeed>`.
-
-// (NARRATIVE_STAGES + resolveNarrativeLine removed — superseded by
-// AgentConversation's per-agent TURN_TEMPLATES.)
-
-// (NarrativeFeed body removed — replaced by AgentConversation.)
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -447,6 +115,7 @@ export default function TestLab() {
   // testsGenerated sum across historical runs.
   const { projects, allRuns, allTests, loading: loadingProjectData } = useProjectData();
   const loadingProjects = loadingProjectData;
+  const { showToast } = useToast();
   const [selectedId, setSelectedId]       = useState(routeProjectId ?? null);
 
   // ── Config state ──
@@ -461,13 +130,34 @@ export default function TestLab() {
   // at submit time (matches GenerateTestModal's old behaviour, just gives the
   // user a chance to fix a noisy auto-derived name).
   const [testName, setTestName]           = useState("");
-  // Plain-text attachments folded into the AI prompt's `description`. Mirrors
-  // GenerateTestModal — same 40 KB / 45 KB caps, same MIME allowlist.
-  const [attachments, setAttachments]     = useState([]); // [{ name, content }]
-  const [showImportIssue, setShowImportIssue] = useState(false);
-  const [importIssueText, setImportIssueText] = useState("");
-  const fileInputRef    = useRef(null);
   const requirementRef  = useRef(null);
+  // Page-level error banner (composer + launch surface). Declared up
+  // here because `useTestLabAttachments` below needs `setError` for
+  // file-validation failures.
+  const [error, setError]                 = useState(null);
+
+  // Attachment state + handlers (file upload, Jira import, dedup, MIME
+  // guard, binary detection). Owned by `useTestLabAttachments` —
+  // `setError` flows in so the hook can surface validation failures
+  // through the page's existing error banner; `setTestName` /
+  // `setRequirement` / `clearError` are wired so the Import-issue panel
+  // can mutate the launch form on commit.
+  const {
+    attachments,
+    showImportIssue,
+    setShowImportIssue,
+    importIssueText,
+    setImportIssueText,
+    fileInputRef,
+    handleFileSelect,
+    removeAttachment,
+    handleImportIssue,
+  } = useTestLabAttachments({
+    setError,
+    setTestName,
+    setRequirement,
+    clearError: () => setError(null),
+  });
 
   // ── Run state ──
   // Rehydrate from sessionStorage so navigating away and back resumes the live
@@ -481,7 +171,8 @@ export default function TestLab() {
   const [launching, setLaunching]   = useState(false);
   const [innerTab, setInnerTab]     = useState("pipeline");
   const [stopLoading, setStopLoading] = useState(false);
-  const [error, setError]           = useState(null);
+  // `error` is declared up by the config-state block so `useTestLabAttachments`
+  // can wire `setError` for file-validation failures.
 
   // G9 — parallel-runs state. Lives ALONGSIDE the single-run state above
   // during the migration window. Every launch / attach / dismiss handler
@@ -545,21 +236,10 @@ export default function TestLab() {
   // bounce back to the Tests page to start a recording session.
   const [showRecorder, setShowRecorder] = useState(false);
 
-  // ── DIF-012: per-project environments (crawl + generate + recorder) ──
-  // Fetched lazily on project change; viewer roles get a 403 which we swallow
-  // (the picker hides itself when the list is empty). `environmentId === ""`
-  // means "default — use project.url"; the API call omits the field entirely.
-  const [environments, setEnvironments] = useState([]);
-  const [environmentId, setEnvironmentId] = useState("");
-  useEffect(() => {
-    if (!selectedId) { setEnvironments([]); setEnvironmentId(""); return; }
-    let cancelled = false;
-    setEnvironmentId("");
-    api.getProjectEnvironments(selectedId)
-      .then((rows) => { if (!cancelled) setEnvironments(Array.isArray(rows) ? rows : []); })
-      .catch(() => { if (!cancelled) setEnvironments([]); }); // 403 for viewers — clutter-free
-    return () => { cancelled = true; };
-  }, [selectedId]);
+  // DIF-012: per-project environments (crawl + generate + recorder).
+  // Fetch lifecycle + viewer-403 swallow + project-switch reset all live
+  // in `useProjectEnvironments` — the page just consumes the tuple.
+  const [environments, environmentId, setEnvironmentId] = useProjectEnvironments(selectedId);
 
   // ── Seed selected project from route / project list ──
   // `useProjectData` owns the actual fetch; this effect just syncs the
@@ -622,74 +302,11 @@ export default function TestLab() {
     return () => clearTimeout(t);
   }, [tab, activeRun]);
 
-  // ── Attachment helpers ──
-  // Read user-supplied text files into memory so we can fold them into the
-  // requirement when launching. Each file is MIME-checked and binary-scanned
-  // (>5% non-printable bytes in the first 1 KB → reject) before being added,
-  // and we strip common prompt-injection markers (matches the backend
-  // `testDials.js` sanitisation).
-  function handleFileSelect(e) {
-    const files = Array.from(e.target.files || []);
-    e.target.value = ""; // allow re-selecting the same file after removal
-    for (const file of files) {
-      if (!isTextMime(file)) {
-        setError(`"${file.name}" appears to be a binary file (${file.type || "unknown type"}). Only text-based files are supported.`);
-        continue;
-      }
-      if (file.size > MAX_ATTACHMENT_SIZE) {
-        setError(`"${file.name}" is too large (${Math.round(file.size / 1000)} KB). Max is 40 KB per file.`);
-        continue;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const raw = reader.result;
-        const sample = raw.slice(0, 1024);
-        const nonPrintable = [...sample].filter(c => {
-          const code = c.charCodeAt(0);
-          return code < 32 && code !== 9 && code !== 10 && code !== 13;
-        }).length;
-        if (sample.length > 0 && nonPrintable / sample.length > 0.05) {
-          setError(`"${file.name}" contains binary data and cannot be used as a text attachment.`);
-          return;
-        }
-        const content = raw
-          .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
-          .replace(/```/g, "");
-        setAttachments(prev => {
-          if (prev.some(a => a.name === file.name)) return prev;
-          const totalSize = prev.reduce((n, a) => n + a.content.length, 0) + content.length;
-          if (totalSize > MAX_TOTAL_ATTACHMENT) {
-            setError("Total attachment size would exceed 45 KB. Remove an existing file first.");
-            return prev;
-          }
-          return [...prev, { name: file.name, content }];
-        });
-      };
-      reader.onerror = () => setError(`Failed to read "${file.name}".`);
-      reader.readAsText(file);
-    }
-  }
-
-  function removeAttachment(fileName) {
-    setAttachments(prev => prev.filter(a => a.name !== fileName));
-  }
-
-  // Parse pasted Jira issue text into name + description. Accepts:
-  //   "PROJ-123 Login fails for SSO users\nAs a user…"
-  //   "Login fails for SSO users\nAs a user…"
-  function handleImportIssue() {
-    const raw = importIssueText.trim();
-    if (!raw) return;
-    const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
-    const firstLine = lines[0] || "";
-    const parsedName = firstLine.replace(/^[A-Z][A-Z0-9]+-\d+\s*[-:.]?\s*/, "").trim();
-    const parsedDesc = lines.slice(1).join("\n").trim();
-    if (parsedName) setTestName(parsedName);
-    if (parsedDesc) setRequirement(prev => prev ? `${prev}\n\n${parsedDesc}` : parsedDesc);
-    setImportIssueText("");
-    setShowImportIssue(false);
-    if (error) setError(null);
-  }
+  // Attachment helpers — `handleFileSelect`, `removeAttachment`,
+  // `handleImportIssue` are owned by `useTestLabAttachments` (see the
+  // hook call up by the config-state block). Destructured above; the
+  // bodies of those handlers live in
+  // `frontend/src/hooks/useTestLabAttachments.js`.
 
   // ── SSE handler for active run ──
   // G9 — every state write here mirrors into the parallel-runs Maps so the
@@ -1098,7 +715,10 @@ export default function TestLab() {
       // with the server's authoritative status.
       setRunData(prev => ({ ...prev, status: "aborted" }));
       invalidateProjectDataCache();
-    } catch { /* non-fatal */ } finally {
+      showToast("Run stopped", "success");
+    } catch (err) {
+      showToast(err?.message || "Failed to stop run.", "error");
+    } finally {
       setStopLoading(false);
     }
   }
@@ -1109,7 +729,10 @@ export default function TestLab() {
       // Bust the shared project/run cache so the Queue reflects the abort on
       // the next refetch — no ad-hoc local state to keep in sync.
       invalidateProjectDataCache();
-    } catch { /* non-fatal */ }
+      showToast("Run stopped", "success");
+    } catch (err) {
+      showToast(err?.message || "Failed to stop run.", "error");
+    }
   }
 
   function handleReset() {
@@ -1383,38 +1006,15 @@ export default function TestLab() {
   const isRunFailed = runStatus === "failed" || runStatus === "aborted";
   const ps          = runData?.pipelineStats || {};
 
-  // ── Split generated-test outcomes (drafts vs auto-approved) ────────────
-  // The run payload reports `testsGenerated` as a single count and the SSE
-  // `done` event only carries that total — it has no per-outcome breakdown.
-  // Without splitting, the completion banner labels every test a "draft"
-  // even when the project's auto-approval threshold cleared some of them,
-  // contradicting what the user sees the moment they land in Review Queue.
-  //
-  // `runData.tests` is the canonical array of test IDs persisted on the run
-  // row (see `backend/src/database/repositories/runRepo.js#INSERT_COLS`),
-  // and `allTests` (from `useProjectData`) already carries the authoritative
-  // `reviewStatus` + `approvalSource` columns refreshed by the
-  // `invalidateProjectDataCache()` we fire on the SSE done event. So the
-  // split is a pure client-side derivation against data we already have.
-  const generatedOutcome = useMemo(() => {
-    const total = runData?.testsGenerated ?? 0;
-    const ids = Array.isArray(runData?.tests) ? runData.tests : [];
-    if (!ids.length || !allTests.length) {
-      // Fall back to the legacy "treat as drafts" shape until the tests
-      // cache refreshes — this matches pre-fix behaviour and avoids
-      // flashing "0 drafts" while the refetch is in flight.
-      return { total, drafts: total, autoApproved: 0 };
-    }
-    const idSet = new Set(ids);
-    let drafts = 0;
-    let autoApproved = 0;
-    for (const t of allTests) {
-      if (!idSet.has(t.id)) continue;
-      if (t.reviewStatus === "approved" && t.approvalSource === "auto") autoApproved++;
-      else if (!t.reviewStatus || t.reviewStatus === "draft") drafts++;
-    }
-    return { total, drafts, autoApproved };
-  }, [runData?.testsGenerated, runData?.tests, allTests]);
+  // Split generated-test outcomes (drafts vs auto-approved) — derivation
+  // lives in `frontend/src/utils/generatedOutcome.js`. See that file's
+  // module JSDoc for the rationale (run payload only carries a single
+  // total, so banner copy would mislabel auto-approved tests as drafts
+  // without this split).
+  const generatedOutcome = useMemo(
+    () => splitGeneratedOutcome(runData, allTests),
+    [runData?.testsGenerated, runData?.tests, allTests],
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -1422,39 +1022,13 @@ export default function TestLab() {
     <div className="tl-wrap">
 
       {/* ── Tab bar ── */}
-      <div className="tl-topbar">
-        <div className="tl-topbar__brand">
-          <Atom size={16} className="tl-topbar__brand-icon" />
-          <span className="tl-topbar__brand-title">Test Lab</span>
-          <span className="tl-topbar__brand-tagline">AI test generation workspace</span>
-        </div>
-
-        {/* G15 (a11y) — WAI-ARIA APG tablist. Implementation + comments
-            live in `frontend/src/components/test-lab/TestLabTabs.jsx`. */}
-        <TestLabTabs
-          tab={tab}
-          onChange={setTab}
-          activeQueueCount={activeQueueRuns.length}
-        />
-
-        {/* Record action — right-aligned, styled as a primary CTA so it
-            reads as a peer to the tabs rather than disappearing as a ghost
-            button. Recording remains a modal because the live screencast
-            preview needs a focused overlay surface; the Test Lab page only
-            provides the launch point. Disabled until a project is selected
-            so we have a valid `projectId` to seed. */}
-        <button
-          className="btn btn-primary btn-sm tl-record-btn"
-          onClick={() => setShowRecorder(true)}
-          disabled={!selectedProject}
-          title={selectedProject
-            ? `Record a test in ${selectedProject.name}`
-            : "Select a project first"}
-        >
-          <Video size={14} />
-          Record a test
-        </button>
-      </div>
+      <TestLabTopBar
+        tab={tab}
+        onTabChange={setTab}
+        activeQueueCount={activeQueueRuns.length}
+        selectedProject={selectedProject}
+        onRecord={() => setShowRecorder(true)}
+      />
 
       {/* ── Queue tab ── */}
       {/* Extracted to `frontend/src/components/test-lab/QueueTab.jsx`.
@@ -1473,9 +1047,6 @@ export default function TestLab() {
           onStop={handleQueueStop}
           onAttach={handleAttachRun}
           onSwitchToCrawl={() => setTab("crawl")}
-          QueueRow={QueueRow}
-          EmptyState={EmptyState}
-          ClockIcon={Clock}
         />
       )}
 
@@ -1523,75 +1094,13 @@ export default function TestLab() {
         <div className="tl-grid fade-in">
 
           {/* ── Left: Project sidebar ── */}
-          {/* G15 (a11y) — sidebar wrapped as `role="navigation"` with an
-              `aria-label` so screen readers announce "Projects navigation"
-              when the user tabs into the rail. Inner list uses semantic
-              defaults (the per-item `role="button"` already gives screen
-              readers the actionable shape); a literal `role="listbox"`
-              would imply single-select with arrow-key navigation, which
-              we don't yet implement and would mislead AT users. Revisit
-              this once arrow-key list nav lands. */}
-          <nav className="tl-projects" aria-label="Projects">
-            <div className="tl-col-header" id="tl-projects-heading">Projects</div>
-            <div className="tl-proj-list" aria-labelledby="tl-projects-heading">
-              {loadingProjects
-                ? [1, 2].map(i => (
-                    <div key={i} className="skeleton tl-proj-skeleton" />
-                  ))
-                : projects.map(p => (
-                    // G15 (a11y) — project sidebar items were `<div onClick>`
-                    // with no keyboard affordance. WCAG 2.1.1 (Keyboard, Level
-                    // A) requires every interactive element be operable via
-                    // keyboard. Promoted to `role="button"` + `tabIndex={0}`
-                    // + Enter/Space activation. `aria-pressed` reflects the
-                    // selected state so screen-reader users hear "selected"
-                    // / "not selected" alongside the visible active styling.
-                    // Kept as a `<div>` (not a `<button>`) because the inner
-                    // markup is two block-level rows (name + url) and a
-                    // native `<button>` requires `display: flex` overrides
-                    // that fight with the existing `.tl-proj-item` flex rule.
-                    <div
-                      key={p.id}
-                      role="button"
-                      tabIndex={0}
-                      aria-pressed={p.id === selectedId}
-                      aria-label={`Select project ${p.name}`}
-                      className={`tl-proj-item${p.id === selectedId ? " tl-proj-item--active" : ""}`}
-                      onClick={() => handleSelectProject(p.id)}
-                      onKeyDown={(e) => {
-                        // Enter + Space activate, matching native <button>
-                        // behaviour. preventDefault on Space stops the page
-                        // scroll. Other keys pass through (Tab navigates,
-                        // arrow keys reserved for future list-nav follow-up).
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          handleSelectProject(p.id);
-                        }
-                      }}
-                    >
-                      <ProjIcon project={p} />
-                      <div className="tl-proj-info">
-                        <div className="tl-proj-name">{p.name}</div>
-                        <div className="tl-proj-url">{p.url?.replace(/^https?:\/\//, "")}</div>
-                      </div>
-                    </div>
-                  ))
-              }
-            </div>
-
-            {/* Last crawl meta */}
-            {lastCrawlRun && (
-              <div className="tl-proj-meta">
-                <div className="tl-proj-meta-label">Last Crawl</div>
-                <div className="tl-proj-meta-value">
-                  {fmtRelativeDate(lastCrawlRun.startedAt)}
-                </div>
-                <div className="tl-proj-meta-value tl-proj-meta-value--row2">
-                  {lastCrawlRun.pagesFound ?? "?"} pages · {lastCrawlRun.testsGenerated ?? "?"} tests
-                </div>
-              </div>
-            )}
-          </nav>
+          <TestLabProjectSidebar
+            projects={projects}
+            selectedId={selectedId}
+            loadingProjects={loadingProjects}
+            lastCrawlRun={lastCrawlRun}
+            onSelectProject={handleSelectProject}
+          />
 
           {/* ── Middle: Configuration / Running / Completed view ── */}
           {/* Show the run view (pipeline / sitegraph / logs) whenever a run is
@@ -1601,219 +1110,32 @@ export default function TestLab() {
               site graph would vanish. */}
           {activeRun ? (
             // ── Attached run: pipeline + site graph + live log ──
-            <div className="tl-run-center">
-              {/* G10 — the run-center label shows the RUN's project, not
-                  the sidebar's `selectedProject`. After the project-
-                  switch decoupling above, those can diverge: the user
-                  starts a crawl on MYPROJ-A, then clicks MYPROJ-B in
-                  the sidebar to browse its tests. The middle column
-                  must still show "MYPROJ-A · LINK CRAWL" because that's
-                  the run we're monitoring. Resolved by id from the
-                  shared `projects` cache (`useProjectData`) — falls
-                  back to the bare project id when the cache hasn't
-                  populated yet (rare; defence-in-depth). */}
-              <div className="tl-run-label">
-                {(projects.find(p => p.id === activeRun.projectId)?.name
-                  || activeRun.projectId
-                  || "—").toUpperCase()} · {activeRun?.type === "crawl" ? "LINK CRAWL" : "REQUIREMENT"}
-                {isRunDone && <span className="tl-run-status-suffix tl-run-status-suffix--done">· COMPLETED</span>}
-                {isRunFailed && (
-                  <span className="tl-run-status-suffix tl-run-status-suffix--failed">
-                    · {runStatus === "aborted" ? "ABORTED" : "FAILED"}
-                  </span>
-                )}
-              </div>
-
-              {/* SSE reconnection / polling-fallback banners — only shown
-                  while the run is actively running. Mirrors RunDetail.jsx so
-                  users get the same feedback wherever they monitor a run. */}
-              {isRunActive && retryIn != null && !sseDown && (
-                <div className="banner banner-info tl-banner-row">
-                  <RefreshCw size={13} className="tl-banner-row__icon" />
-                  <span>Connection lost — reconnecting in {retryIn}s…</span>
-                </div>
-              )}
-              {isRunActive && sseDown && (
-                <div className="banner banner-warning tl-banner-row">
-                  <RefreshCw size={13} className="spin tl-banner-row__icon" />
-                  <span>Live updates unavailable — refreshing every 5s.</span>
-                </div>
-              )}
-
-              {/* Terminal banners — rendered at the top of the run view so the
-                  pipeline / logs stay visible underneath for review. Both
-                  banner implementations live in `RunBanners.jsx`. */}
-              {isRunDone && (
-                <RunDoneBanner
-                  activeRun={activeRun}
-                  generatedOutcome={generatedOutcome}
-                  onReset={handleReset}
-                />
-              )}
-
-              {isRunFailed && (
-                <RunFailedBanner
-                  activeRun={activeRun}
-                  runData={runData}
-                  runStatus={runStatus}
-                  launching={launching}
-                  onRetry={handleRetry}
-                  onReset={handleReset}
-                />
-              )}
-
-              {(() => {
-                // Site Graph is only meaningful for crawl runs — the
-                // requirement flow doesn't produce a page graph. Same shape as
-                // CrawlView's `graphPages` derivation (`run.pages` or
-                // `run.snapshots`, normalised to an array).
-                const isCrawl = activeRun?.type === "crawl";
-                const rawPages = runData?.pages ?? runData?.snapshots ?? [];
-                const graphPages = Array.isArray(rawPages)
-                  ? rawPages
-                  : (typeof rawPages === "object" ? Object.values(rawPages) : []);
-                // Derive the page currently being crawled from the latest log
-                // line — mirrors CrawlView.jsx:48-54.
-                let activePage = null;
-                for (let i = logLines.length - 1; i >= 0; i--) {
-                  const m = logLines[i].match(/https?:\/\/[^\s)]+/);
-                  if (m) { activePage = m[0]; break; }
-                }
-                // "logs" tab kept for crawl runs only — the narrative feed is
-                // the primary view; raw log is accessible via the Logs tab for
-                // debugging. Requirement runs don't crawl so no sitegraph.
-                const innerTabs = isCrawl
-                  ? ["pipeline", "sitegraph", "logs"]
-                  : ["pipeline", "logs"];
-                const labelFor = (t) => t === "sitegraph" ? "Site graph"
-                  : t.charAt(0).toUpperCase() + t.slice(1);
-                return (
-                  <>
-                    <div className="tl-inner-tabs">
-                      {innerTabs.map(t => (
-                        <button
-                          key={t}
-                          className={`tl-inner-tab${innerTab === t ? " tl-inner-tab--active" : ""}`}
-                          onClick={() => setInnerTab(t)}
-                        >
-                          {labelFor(t)}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* ── Pipeline tab: 3-sub-column — Pipeline | Live Output | So Far ── */}
-                    {innerTab === "pipeline" && (
-                      <div className="tl-pipeline-view">
-                        {/* Sub-col 1: stage list */}
-                        <div className="tl-pipeline-col">
-                          {/* Progress label */}
-                          <div className="tl-pipeline-progress-label">
-                            {runData?.currentStep != null && runData.status === "running"
-                              ? `Step ${runData.currentStep} of 8 · ${PIPELINE_STAGES[runData.currentStep - 1]?.label ?? ""}`
-                              : runData?.status === "completed" || runData?.status === "completed_empty"
-                                ? "Completed"
-                                : runData?.status === "failed" ? "Failed"
-                                : runData?.status === "aborted" ? "Aborted"
-                                : "Starting…"}
-                          </div>
-                          {/* Progress bar */}
-                          <div className="progress-bar tl-pipeline-progress-bar">
-                            <div
-                              className="progress-bar-fill"
-                              style={{
-                                width: isRunDone ? "100%"
-                                  : runData?.currentStep != null
-                                    ? `${Math.round(((runData.currentStep - 1) / 7) * 100)}%`
-                                    : "0%",
-                              }}
-                            />
-                          </div>
-                          <PipelinePanel run={runData} />
-                        </div>
-
-                        {/* Sub-col 2: multi-agent chat transcript.
-                            Task 3 — replaces NarrativeFeed (single narrator)
-                            with `<AgentConversation>` (chat transcript with
-                            per-agent avatars + handoff turns). Reads from the
-                            same `runData` shape; no SSE wiring changes.
-                            Backend Task 2 `agent_event` SSE stream will swap
-                            the client-side synthesizer for real events in a
-                            follow-up PR. */}
-                        <div className="tl-pipeline-log-col">
-                          <div className="tl-pipeline-col-label">What&rsquo;s happening</div>
-                          <AgentConversation
-                            run={runData}
-                            isRunActive={isRunActive}
-                            allTests={allTests}
-                          />
-                        </div>
-
-                        {/* Sub-col 3: so far stats + stop button */}
-                        <div className="tl-pipeline-stats-col">
-                          <div className="tl-pipeline-col-label">So Far</div>
-                          <div className="tl-run-stats">
-                            <div className="tl-run-stat tl-run-stat--accent">
-                              <div className="tl-run-stat-val">{ps.rawTestsGenerated ?? runData?.testsGenerated ?? 0}</div>
-                              <div className="tl-run-stat-lbl">Generated</div>
-                            </div>
-                            <div className="tl-run-stat tl-run-stat--amber">
-                              <div className="tl-run-stat-val">{ps.duplicatesRemoved ?? 0}</div>
-                              <div className="tl-run-stat-lbl">Dupes removed</div>
-                            </div>
-                            <div className="tl-run-stat tl-run-stat--green">
-                              <div className="tl-run-stat-val">
-                                {ps.averageQuality != null ? ps.averageQuality : "—"}
-                              </div>
-                              <div className="tl-run-stat-lbl">Avg quality</div>
-                            </div>
-                            <div className="tl-run-stat">
-                              <div className="tl-run-stat-val tl-pipeline-stat-val--default">
-                                {ps.pagesFound ?? runData?.pagesFound ?? 0}
-                              </div>
-                              <div className="tl-run-stat-lbl">Pages crawled</div>
-                            </div>
-                          </div>
-
-                          {isRunActive ? (
-                            <button
-                              className="btn btn-ghost tl-pipeline-stat-btn"
-                              onClick={handleStop}
-                              disabled={stopLoading}
-                            >
-                              <StopCircle size={15} />
-                              {stopLoading ? "Stopping…" : "Stop run"}
-                            </button>
-                          ) : !isRunDone && !isRunFailed ? null : (
-                            <button
-                              className="btn btn-ghost tl-pipeline-stat-btn"
-                              onClick={handleReset}
-                            >
-                              New run
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {innerTab === "sitegraph" && isCrawl && (
-                      <div className="tl-sitegraph-pane">
-                        <SiteGraph
-                          pages={graphPages}
-                          activePage={activePage}
-                          isRunning={isRunActive}
-                        />
-                      </div>
-                    )}
-
-                    {innerTab === "logs" && (
-                      <div className="tl-logs-pane">
-                        <LiveLog lines={logLines} />
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
+            // The full run-center surface — banners, inner-tabs, the
+            // 3-sub-column pipeline view — lives in
+            // `<TestLabRunCenter>` (audit §3.1, second-pass decomposition).
+            // The page owns every writer; the component is a pure read.
+            <TestLabRunCenter
+              activeRun={activeRun}
+              runData={runData}
+              runStatus={runStatus}
+              isRunActive={isRunActive}
+              isRunDone={isRunDone}
+              isRunFailed={isRunFailed}
+              ps={ps}
+              logLines={logLines}
+              allTests={allTests}
+              generatedOutcome={generatedOutcome}
+              launching={launching}
+              stopLoading={stopLoading}
+              innerTab={innerTab}
+              setInnerTab={setInnerTab}
+              projects={projects}
+              retryIn={retryIn}
+              sseDown={sseDown}
+              onStop={handleStop}
+              onRetry={handleRetry}
+              onReset={handleReset}
+            />
           ) : (
             // ── Idle / Done: configuration ──
             // Full `tl-config` surface (error banner + Requirement

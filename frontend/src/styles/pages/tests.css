@@ -56,6 +56,195 @@
   overflow-x: auto;
 }
 
+/* ── Inline-style sweep (audit §7.5 / DS-001) ──────────────────────────────
+ *
+ * The patterns below collapse the 100+ `style={{}}` blocks that previously
+ * lived on Tests.jsx. Data-driven values (per-filter active colour, badge
+ * count colour, quick-action icon swatch) flow through CSS custom
+ * properties set inline on the element — the rest of the rule lives here
+ * so CSP can drop `style-src 'unsafe-inline'` once every static value is
+ * class-driven. AGENT.md §127 carves out runtime-numeric / runtime-colour
+ * properties; using a custom property keeps that carve-out tight (one
+ * property) instead of a 7-property style block.
+ */
+
+/* Page header right-side controls */
+.t-page-header { margin-bottom: 20px; }
+.t-header-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* Quick-action card grid */
+.t-quick-grid { margin-bottom: 20px; }
+.t-quick-card { padding: 16px; cursor: pointer; transition: box-shadow 0.15s; position: relative; }
+.t-quick-card:hover { box-shadow: var(--shadow); }
+.t-quick-body { display: flex; gap: 12px; align-items: flex-start; }
+.t-quick-icon {
+  width: 34px; height: 34px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+  background: var(--t-card-bg, var(--bg2));
+  color: var(--t-card-fg, var(--text));
+}
+.t-quick-title { font-weight: 600; font-size: 0.88rem; margin-bottom: 2px; }
+.t-quick-desc  { font-size: 0.75rem; color: var(--text2); line-height: 1.5; }
+.t-quick-badge {
+  position: absolute; top: 10px; right: 10px;
+  min-width: 20px; height: 20px; border-radius: 10px;
+  color: #fff; font-size: 0.68rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 5px; line-height: 1;
+  background: var(--t-badge-bg, var(--accent));
+}
+
+/* Toolbar layout */
+.t-toolbar {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+}
+.t-toolbar-title { font-weight: 600; font-size: 0.9rem; flex: 0 0 auto; }
+.t-search-wrap   { width: 220px; flex-shrink: 0; position: relative; }
+.t-search-icon {
+  position: absolute; left: 9px; top: 50%;
+  transform: translateY(-50%); pointer-events: none;
+}
+.t-search-input { padding-left: 28px; padding-right: 12px; height: 32px; font-size: 0.82rem; }
+.t-search-input--has-clear { padding-right: 30px; }
+.t-search-clear {
+  position: absolute; right: 8px; top: 50%;
+  transform: translateY(-50%);
+  background: none; border: none; cursor: pointer;
+  color: var(--text3); padding: 0; display: flex;
+}
+
+/* Filter pill group — shared shell + dividers */
+.t-pill-group {
+  display: flex; align-items: center; gap: 1px;
+  background: var(--bg2); padding: 3px 4px;
+  border-radius: var(--radius); border: 1px solid var(--border);
+}
+.t-pill-group__label {
+  font-size: 0.68rem; color: var(--text3); font-weight: 600;
+  padding: 0 6px 0 2px; user-select: none; letter-spacing: 0.02em;
+}
+.t-pill-divider {
+  width: 1px; height: 16px; background: var(--border);
+  margin: 0 3px; flex-shrink: 0;
+}
+
+/* Icon-only filter pill (status + review filters) */
+.t-pill {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 28px; border-radius: 6px; border: none;
+  cursor: pointer; background: transparent; color: var(--text3);
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+.t-pill--active {
+  background: var(--t-active-bg, transparent);
+  color: var(--t-active-color, var(--text3));
+  box-shadow: 0 0 0 1.5px var(--t-active-shadow, transparent);
+}
+/* Text-label pill (category + stale) — same shell, wider */
+.t-pill-text {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 8px; height: 28px; border-radius: 6px; border: none;
+  cursor: pointer; font-size: 0.68rem; font-weight: 600;
+  white-space: nowrap; gap: 4px;
+  background: transparent; color: var(--text3);
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+.t-pill-text--active {
+  background: var(--t-active-bg, transparent);
+  color: var(--t-active-color, var(--text3));
+  box-shadow: 0 0 0 1.5px var(--t-active-shadow, transparent);
+}
+/* Active-count dot — absolute for icon pills, inline for text pills */
+.t-pill-count {
+  position: absolute; top: 2px; right: 2px;
+  min-width: 14px; height: 14px; border-radius: 7px;
+  color: #fff; font-size: 0.55rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1; padding: 0 2px;
+  background: var(--t-active-color, var(--text3));
+}
+.t-pill-count--inline { position: static; margin-left: 4px; display: inline-flex; }
+
+/* Stale filter — fixed slate-500 palette (not a per-filter colour) */
+.t-pill-stale--active {
+  background: rgba(100, 116, 139, 0.12);
+  color: #64748b;
+  box-shadow: 0 0 0 1.5px rgba(100, 116, 139, 0.33);
+}
+.t-pill-stale--active .t-pill-count { background: #64748b; }
+
+/* Clear-all-filters × button */
+.t-clear-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px; border: none;
+  cursor: pointer;
+  background: rgba(239, 68, 68, 0.08); color: var(--red);
+  transition: background 0.12s;
+}
+
+/* Loading skeleton block */
+.t-loading-block { padding: 24px; }
+.t-loading-row   { height: 44px; margin-bottom: 8px; border-radius: 8px; }
+
+/* Bulk action bar + partial-failure banner */
+.t-bulk-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  background: var(--accent-bg);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.t-bulk-label  { font-size: 0.82rem; color: var(--accent); font-weight: 500; }
+.t-bulk-delete { background: var(--red-bg); color: var(--red); border: 1px solid #fca5a5; }
+.t-bulk-error {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  background: var(--amber-bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem; color: var(--amber);
+}
+.t-bulk-error__dismiss { margin-left: auto; }
+
+/* Table cells + sort headers */
+.t-th-checkbox { width: 36px; padding-right: 0; }
+.t-td-checkbox { padding-right: 0; }
+.t-sort-th     { cursor: pointer; user-select: none; }
+.t-sort-th__inner { display: inline-flex; align-items: center; gap: 4px; }
+.t-sort-icon   { opacity: 0.3; color: var(--text3); }
+.t-sort-icon--active { opacity: 1; color: var(--accent); }
+.t-checkbox    { accent-color: var(--accent); cursor: pointer; }
+.t-row         { cursor: pointer; }
+.t-row--selected { background: var(--accent-bg); }
+
+/* Name cell */
+.t-name-cell  { display: flex; align-items: center; gap: 10px; }
+.t-name-title { font-weight: 500; font-size: 0.875rem; }
+.t-name-desc {
+  font-size: 0.75rem; color: var(--text3); margin-top: 1px;
+  max-width: 400px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.t-name-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.t-project-badge { cursor: pointer; }
+.t-priority-cap  { text-transform: capitalize; }
+.t-type-cell     { display: flex; align-items: center; gap: 4px; }
+
+/* Last-run column + hover actions */
+.t-lastrun-cell    { display: flex; align-items: center; gap: 4px; }
+.t-lastrun-text    { font-size: 0.8rem; color: var(--text2); }
+.t-hover-actions   { display: flex; gap: 4px; margin-left: auto; }
+
+/* Bulk-delete confirmation modal */
+.t-modal-padding   { padding: 28px 32px; }
+.t-modal-body      { font-size: 0.875rem; color: var(--text2); margin-bottom: 20px; line-height: 1.6; }
+.t-modal-actions   { display: flex; gap: 8px; justify-content: flex-end; }
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 /* At 900px: 900 − 56px sidebar − 40px padding = 804px content.                */
 /* The filter toolbar still fits; table drops Priority + Type columns.          */

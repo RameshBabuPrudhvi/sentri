@@ -40,6 +40,7 @@ import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
 import { ReviewBadge, StatusBadge } from "../components/shared/TestBadges.jsx";
 import ModalShell from "../components/shared/ModalShell.jsx";
 import { QualityScoreChip, qualityTierKey } from "../components/shared/QualityScoreChip.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import highlightCode from "../utils/highlightCode.js";
 import "../styles/pages/review-queue.css";
 
@@ -86,7 +87,10 @@ function CodeView({ code }) {
   return (
     <div className="rq-code-wrap">
       <div className="rq-code-toolbar">
-        <span className="rq-code-lang">TypeScript</span>
+        {/* Generated Playwright code is JavaScript — the chip used to read
+            "TypeScript" which was incorrect and misled reviewers about
+            what language the snippet would run as. Audit §6.1. */}
+        <span className="rq-code-lang">JavaScript</span>
         <button
           className="btn btn-ghost btn-xs rq-code-toolbar__copy"
           onClick={handleCopy}
@@ -331,6 +335,7 @@ export default function ReviewQueue() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user: authUser } = useAuth();
   const canEdit = userHasRole(authUser, "qa_lead");
+  const { showToast } = useToast();
 
   // Projects list only — tests now flow through the server-paginated
   // `useReviewQueueQuery` hook, so we no longer fetch every test in the
@@ -528,10 +533,12 @@ export default function ReviewQueue() {
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
       invalidateProjectDataCache();
+      showToast("Test approved → regression suite", "success");
     } catch (err) {
       console.error("Approve failed:", err);
       setBulkError(`Approve failed: ${err.message}`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(err.message || "Approve failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -556,10 +563,12 @@ export default function ReviewQueue() {
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
       invalidateProjectDataCache();
+      showToast("Test rejected", "success");
     } catch (err) {
       console.error("Reject failed:", err);
       setBulkError(`Reject failed: ${err.message}`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(err.message || "Reject failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -577,10 +586,12 @@ export default function ReviewQueue() {
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
       invalidateProjectDataCache();
+      showToast("Test restored to draft", "success");
     } catch (err) {
       console.error("Restore failed:", err);
       setBulkError(`Restore failed: ${err.message}`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(err.message || "Restore failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -602,10 +613,12 @@ export default function ReviewQueue() {
       setActiveTestId(next?.id ?? null);
       invalidateReviewQueueCache();
       invalidateProjectDataCache();
+      showToast("Test moved to recycle bin", "success");
     } catch (err) {
       console.error("Delete failed:", err);
       setBulkError(`Delete failed: ${err.message}`);
       setTimeout(() => setBulkError(null), 5000);
+      showToast(err.message || "Delete failed.", "error");
     } finally {
       setActionLoading(null);
     }
@@ -645,9 +658,66 @@ export default function ReviewQueue() {
     );
 
     const failedCount = results.filter(r => r.status === "rejected").length;
+
+    // Capture the per-project breakdown of ids that DID succeed so the Undo
+    // CTA can address only those (a partial-success Undo for the failed
+    // group would just 404 again). `successByProject` is referenced by
+    // closure inside the toast's `action.onClick` below.
+    const successByProject = {};
+    Object.entries(byProject).forEach(([pid, pIds], i) => {
+      if (results[i].status === "fulfilled") successByProject[pid] = pIds;
+    });
+    // Count actual test IDs that succeeded — NOT `ids.length - failedCount`
+    // which mixes test-ID count with project-group count and inflates
+    // the number when a multi-test project group fails.
+    const successCount = Object.values(successByProject).reduce((n, arr) => n + arr.length, 0);
+
+    // The inline `setBulkError` banner persists for 5s when any project
+    // group fails, so partial-failure detail stays visible in the bulk-
+    // action area regardless of what the toast surface shows.
     if (failedCount > 0) {
       setBulkError(`${failedCount} project group${failedCount !== 1 ? "s" : ""} failed to ${action}. Others updated.`);
       setTimeout(() => setBulkError(null), 5000);
+    }
+    // The global ToastProvider only renders one toast at a time, so a
+    // success toast fired right after an error toast in the same tick
+    // would overwrite the error and the user would see it for 0ms. We
+    // surface a single toast that reflects the dominant outcome:
+    //   - any successes → success toast (with Undo) — the inline banner
+    //     already calls out the partial failure separately.
+    //   - all failed → error toast.
+    if (successCount === 0 && failedCount > 0) {
+      showToast(`Failed to ${action} ${failedCount} project group${failedCount !== 1 ? "s" : ""}.`, "error");
+    }
+    if (successCount > 0) {
+      const verb = action === "approve" ? "approved → regression" : "rejected";
+      // Industry-standard Undo affordance (Gmail / Linear / GitHub) — the
+      // CTA fires `bulkUpdateTests(pid, ids, "restore")` which sends every
+      // affected test back to `draft`. Same `Promise.allSettled` fan-out
+      // pattern as the forward action so a partial Undo failure on one
+      // project doesn't cancel the others. Toast dismisses itself when the
+      // Undo handler completes (wired at the ToastContext layer).
+      showToast(`${successCount} test${successCount !== 1 ? "s" : ""} ${verb}`, "success", {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const undoResults = await Promise.allSettled(
+              Object.entries(successByProject).map(([pid, pIds]) =>
+                api.bulkUpdateTests(pid, pIds, "restore"),
+              ),
+            );
+            const undoFailed = undoResults.filter(r => r.status === "rejected").length;
+            invalidateReviewQueueCache();
+            invalidateProjectDataCache();
+            invalidateAutoApprovalsCache();
+            if (undoFailed > 0) {
+              showToast(`Undo partially failed (${undoFailed} project group${undoFailed !== 1 ? "s" : ""}).`, "error");
+            } else {
+              showToast(`Restored ${successCount} test${successCount !== 1 ? "s" : ""} to draft`, "info");
+            }
+          },
+        },
+      });
     }
 
     invalidateReviewQueueCache();

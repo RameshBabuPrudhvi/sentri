@@ -101,6 +101,49 @@ export function buildUserResponse(user) { … }
 
 Simple record types without optional properties are fine inline: `@returns {{ id: string, name: string }}`.
 
+### Comment discipline
+
+Follow the JSDoc spec (https://jsdoc.app) and TSDoc conventions (https://tsdoc.org) for shape. Beyond shape, comments must earn their place:
+
+- **Document the "why", not the "what".** The code shows what it does. Comments explain intent, invariants, edge cases, and non-obvious decisions.
+- **JSDoc only on exported functions, classes, and public types.** Internal helpers do not need a doc block unless the logic is tricky.
+- **One-line summary first**, then a blank line, then optional details, then tags (`@param`, `@returns`, `@throws`, `@example`). No prose under tags.
+- **No inline step-by-step narration** inside function bodies (`// Step 1: ...`, `// Now we ...`). If a block needs explanation, extract a well-named helper instead.
+- **Do not restate the function name or parameter names** in English. `@param {string} userId - The user id.` adds nothing — omit it or describe the contract (`"Authenticated caller's user id; must match req.userId."`).
+- **No comments on trivial getters, setters, or one-line wrappers.**
+- **Delete stale comments aggressively.** A wrong comment is worse than no comment.
+
+```js
+// ✅ Earns its place — explains a non-obvious contract
+/**
+ * Normalises a reviewer verdict to one of the canonical actions.
+ *
+ * Unknown intents fall through to `accept` to preserve the existing
+ * fail-open behaviour — see AUTO-023 incident notes.
+ *
+ * @param {string} raw
+ * @returns {"accept" | "reject_final" | "request_revision"}
+ */
+
+// ❌ Restates the obvious
+/**
+ * Gets the user id from the request.
+ * @param {Request} req - The request.
+ * @returns {string} The user id.
+ */
+function getUserId(req) { return req.userId; }
+
+// ❌ Step-by-step narration — extract or delete
+function process(run) {
+  // Step 1: validate the run
+  validate(run);
+  // Step 2: enhance assertions
+  enhance(run);
+  // Now we persist
+  persist(run);
+}
+```
+
 ---
 
 ## DRY — No Duplication

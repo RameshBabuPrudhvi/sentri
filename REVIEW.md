@@ -17,6 +17,7 @@
 - [ ] `QA.md` updated if the PR adds, removes, or materially changes a user-facing flow
 - [ ] `backend/src/middleware/permissions.json` updated if the PR adds, removes, or changes a role gate or role-gated endpoint
 - [ ] **No orphan routes (PROC-001)** — every new `router.<method>()` in `backend/src/routes/*.js` must ship its frontend consumer in the same PR (helper in `frontend/src/api.js` + callsite in a page or component). Add `[no-ui]` to the PR title for genuinely UI-less endpoints (healthchecks, machine-only triggers); the `no-orphan-routes.yml` workflow enforces this.
+- [ ] **Comment discipline** — JSDoc/TSDoc only on exported surface; comments explain the "why", not the "what"; no step-by-step narration inside function bodies; no restating function or parameter names in English; no comments on trivial one-line wrappers; stale comments deleted. See STANDARDS.md § "Comment discipline".
 
 ---
 

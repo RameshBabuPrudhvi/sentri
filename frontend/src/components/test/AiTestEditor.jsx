@@ -2,6 +2,7 @@ import React, { useState, Suspense, lazy, useRef, useEffect } from "react";
 import { RefreshCw, Save, Wand2 } from "lucide-react";
 import { api } from "../../api.js";
 import extractCodeBlock from "../../utils/extractCodeBlock.js";
+import { useToast } from "../../context/ToastContext.jsx";
 
 const DiffView = lazy(() => import("../ai/DiffView.jsx"));
 
@@ -11,6 +12,7 @@ export default function AiTestEditor({ test, testId, onApplied }) {
   const [aiEditing, setAiEditing] = useState(false);
   const [aiError, setAiError] = useState("");
   const abortRef = useRef(null);
+  const { showToast } = useToast();
 
   useEffect(() => {
     return () => {
@@ -63,8 +65,10 @@ export default function AiTestEditor({ test, testId, onApplied }) {
       setAiPrompt("");
       setAiCodeProposal("");
       onApplied?.(updated);
+      showToast("AI edit applied", "success");
     } catch (err) {
       setAiError(err.message || "Failed to apply AI edit.");
+      showToast(err.message || "Failed to apply AI edit.", "error");
     } finally {
       setAiEditing(false);
     }

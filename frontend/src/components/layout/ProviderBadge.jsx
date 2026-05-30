@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Brain, ChevronDown, AlertTriangle, Check, RefreshCw, Settings, CircleSlash, Layers } from "lucide-react";
 import { api } from "../../api.js";
+import { useToast } from "../../context/ToastContext.jsx";
 
 // ── Module-level cache ────────────────────────────────────────────────────────
 // `_configCache` keeps `GET /config` for the active-provider name + hasProvider
@@ -90,6 +91,7 @@ export default function ProviderBadge({ style }) {
   const [error,    setError]    = useState(null);
   const navigate = useNavigate();
   const ref = useRef(null);
+  const { showToast } = useToast();
 
   // Load on mount — always re-fetch when any of the three caches is empty.
   // `listAiProviders` is the canonical source of switch targets (Phase 1 of
@@ -182,14 +184,17 @@ export default function ProviderBadge({ style }) {
       setGroups(_groupsCache);
       setSettings(freshSett);
       setOpen(false);
+      showToast(`Switched to ${route.displayLabel || route.name}`, "success");
     } catch (err) {
-      setError(err?.message?.includes("not found")
+      const msg = err?.message?.includes("not found")
         ? "Route no longer exists. Refresh and try again."
-        : "Switch failed. Open Settings to inspect the route.");
+        : "Switch failed. Open Settings to inspect the route.";
+      setError(msg);
+      showToast(msg, "error");
     } finally {
       setSwitching(null);
     }
-  }, []);
+  }, [showToast]);
 
   // ── Render: loading ────────────────────────────────────────────────────────
   if (!config) {

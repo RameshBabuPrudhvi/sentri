@@ -12,6 +12,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { api } from "../../api.js";
+import { useToast } from "../../context/ToastContext.jsx";
 // StepResultsView is 55KB — lazy-loaded since it only renders when a user
 // drills into a specific test result, never on initial run view render.
 const StepResultsView = lazy(() => import("./StepResultsView"));
@@ -343,6 +344,7 @@ export default function TestRunView({ run, frames = [] }) {
   const [selectedCase, setSelectedCase] = useState(0);
   const [drilledCase, setDrilledCase]   = useState(null); // null = suite overview
   const [rerunning, setRerunning]       = useState(false);
+  const { showToast } = useToast();
 
   const listRef = useRef(null);
   const isRunning = run?.status === "running";
@@ -459,8 +461,8 @@ export default function TestRunView({ run, frames = [] }) {
                     </>
                   ) : (
                     <div className="trv-pending-skeleton">
-                      <div className="skeleton" style={{ height: 10, borderRadius: 4, width: "65%" }} />
-                      <div className="skeleton" style={{ height: 8, borderRadius: 4, width: "30%" }} />
+                      <div className="skeleton trv-pending-skeleton__bar1" />
+                      <div className="skeleton trv-pending-skeleton__bar2" />
                     </div>
                   )}
                 </div>
@@ -527,7 +529,7 @@ export default function TestRunView({ run, frames = [] }) {
           subtitle={failed > 0
             ? "Review failing tests, fix the issues, then re-run to verify."
             : "Your regression suite is green. No action needed."}
-          style={{ gridColumn: "1 / -1" }}
+          className="trv-outcome-full"
         >
           {failed > 0 && run?.projectId && (
             <button
@@ -545,9 +547,11 @@ export default function TestRunView({ run, frames = [] }) {
                 setRerunning(true);
                 try {
                   const { runId } = await api.runTests(run.projectId);
+                  showToast("Re-run started", "success");
                   navigate(`/runs/${runId}`);
                 } catch (err) {
                   console.error("Re-run failed:", err);
+                  showToast(err.message || "Re-run failed.", "error");
                   setRerunning(false);
                 }
               }}
