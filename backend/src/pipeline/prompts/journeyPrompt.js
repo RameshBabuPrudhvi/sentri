@@ -79,6 +79,11 @@ export function buildJourneyPrompt(journey, allSnapshots, { testCount = "ai_deci
       ? rawElems.map(e => ({
           tag: e.tag, text: (e.text || "").slice(0, 30), type: e.type,
           role: e.role, name: e.name, testId: e.testId,
+          // AUDIT-ROADMAP B2 — preserve iframe provenance in the compact
+          // local-model projection. Without these two fields the LLM
+          // can't tell which elements live inside an iframe and would
+          // produce plain `page.locator(...)` calls that miss the frame.
+          ...(e._fromIframe ? { _fromIframe: true, _iframeSrc: e._iframeSrc } : {}),
         }))
       : rawElems;
     return `
@@ -90,6 +95,29 @@ export function buildJourneyPrompt(journey, allSnapshots, { testCount = "ai_deci
 
   const firstUrl = journey.pages[0]?.url || "";
 
+  // AUDIT-ROADMAP B2 — detect whether this journey crosses any iframes so
+  // the prompt only ships the `safeSelectFrame` rule when it's relevant.
+  // Keeps the prompt lean for the common (no-iframe) case — adding the
+  // rule unconditionally would bloat every cloud prompt by ~150 tokens
+  // and every local-model prompt by ~5% of its 8K context window.
+  const hasIframeElements = journey.pages.some((page) => {
+    const snap = (page._stateFingerprint && allSnapshots[page._stateFingerprint])
+      || allSnapshots[page.url];
+    return (snap?.elements || []).some((e) => e?._fromIframe);
+  });
+  const iframeRule = hasIframeElements ? `
+
+IFRAME ELEMENTS (AUDIT-ROADMAP B2):
+Some elements in the PAGE data above carry \`_fromIframe: true\` + \`_iframeSrc: "<url>"\`.
+For those elements you MUST scope locators through the frame:
+  const frame = safeSelectFrame(page, '<iframe-src-or-substring>');
+  await safeClick(frame, 'Submit');         // pass frame, not page
+  await safeFill(frame, 'Card number', '4242 4242 4242 4242');
+NEVER use \`safeClick(page, …)\` / \`safeFill(page, …)\` for iframe elements — Playwright's
+auto-frame-resolution works for trivial cases but breaks on payment frames (Stripe Elements),
+chat widgets (Intercom), and any frame where the selector matches more than one descendant.
+Use the iframe's URL as the frame identifier; \`safeSelectFrame\` accepts a substring match.` : "";
+
   // Include observed actions when available (state explorer mode)
   const observedBlock = buildObservedActionsBlock(journey._observedActions);
 
@@ -99,6 +127,7 @@ DESCRIPTION: ${journey.description}
 
 PAGES IN THIS JOURNEY:
 ${pageContexts}
+${iframeRule}
 ${observedBlock}
 
 ${resolveTestCountInstruction(testCount, local)} end-to-end Playwright tests covering this journey from multiple angles.

@@ -3,6 +3,10 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createTestContext } from "./helpers/test-base.js";
+
+const t = createTestContext();
+const runner = t.createTestRunner();
 
 function runScript(env, code) {
   const res = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
@@ -13,64 +17,73 @@ function runScript(env, code) {
   return res.stdout.trim();
 }
 
-try {
-  const localOut = runScript({}, `
+async function main() {
+  await runner.test("isS3Storage() returns 'local' when STORAGE_BACKEND is unset", () => {
+    const localOut = runScript({}, `
     import { isS3Storage } from './src/utils/objectStorage.js';
     console.log(isS3Storage() ? 's3' : 'local');
   `);
-  assert.equal(localOut, "local");
+    assert.equal(localOut, "local");
+  });
 
-  const s3Url = runScript({
-    STORAGE_BACKEND: "s3",
-    S3_BUCKET: "demo-bucket",
-    S3_REGION: "us-east-1",
-    S3_ACCESS_KEY_ID: "AKIDEXAMPLE",
-    S3_SECRET_ACCESS_KEY: "SECRETEXAMPLE",
-  }, `
+  await runner.test("signS3ArtifactUrl produces RFC-3986 encoded, sorted pre-signed URL", () => {
+    const s3Url = runScript({
+      STORAGE_BACKEND: "s3",
+      S3_BUCKET: "demo-bucket",
+      S3_REGION: "us-east-1",
+      S3_ACCESS_KEY_ID: "AKIDEXAMPLE",
+      S3_SECRET_ACCESS_KEY: "SECRETEXAMPLE",
+    }, `
     import { signS3ArtifactUrl } from './src/utils/objectStorage.js';
     console.log(signS3ArtifactUrl('/artifacts/screenshots/test.png', 60000));
   `);
-  assert.ok(s3Url.startsWith("https://demo-bucket.s3.us-east-1.amazonaws.com/screenshots/test.png?"));
-  assert.ok(s3Url.includes("X-Amz-Signature="));
-  // Pre-signed URL must use RFC 3986 encoding (no `+` for space) and sorted params.
-  assert.ok(!s3Url.includes("+"), "query string must not contain form-encoded `+`");
-  const qIdx = s3Url.indexOf("?");
-  const qs = s3Url.slice(qIdx + 1).split("&").map(p => p.split("=")[0]);
-  const sorted = [...qs].sort();
-  assert.deepEqual(qs, sorted, "query parameters must be sorted lexicographically");
+    assert.ok(s3Url.startsWith("https://demo-bucket.s3.us-east-1.amazonaws.com/screenshots/test.png?"));
+    assert.ok(s3Url.includes("X-Amz-Signature="));
+    // Pre-signed URL must use RFC 3986 encoding (no `+` for space) and sorted params.
+    assert.ok(!s3Url.includes("+"), "query string must not contain form-encoded `+`");
+    const qIdx = s3Url.indexOf("?");
+    const qs = s3Url.slice(qIdx + 1).split("&").map(p => p.split("=")[0]);
+    const sorted = [...qs].sort();
+    assert.deepEqual(qs, sorted, "query parameters must be sorted lexicographically");
+  });
 
-  // Regression: custom S3_ENDPOINT (R2/MinIO) must include bucket in path.
-  const r2Url = runScript({
-    STORAGE_BACKEND: "s3",
-    S3_BUCKET: "demo-bucket",
-    S3_REGION: "auto",
-    S3_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
-    S3_ACCESS_KEY_ID: "AKIDEXAMPLE",
-    S3_SECRET_ACCESS_KEY: "SECRETEXAMPLE",
-  }, `
+  await runner.test("custom S3_ENDPOINT (R2/MinIO) includes bucket in path", () => {
+    // Regression: custom S3_ENDPOINT (R2/MinIO) must include bucket in path.
+    const r2Url = runScript({
+      STORAGE_BACKEND: "s3",
+      S3_BUCKET: "demo-bucket",
+      S3_REGION: "auto",
+      S3_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
+      S3_ACCESS_KEY_ID: "AKIDEXAMPLE",
+      S3_SECRET_ACCESS_KEY: "SECRETEXAMPLE",
+    }, `
     import { signS3ArtifactUrl } from './src/utils/objectStorage.js';
     console.log(signS3ArtifactUrl('/artifacts/screenshots/test.png', 60000));
   `);
-  assert.ok(
-    r2Url.startsWith("https://acct.r2.cloudflarestorage.com/demo-bucket/screenshots/test.png?"),
-    `custom-endpoint URL missing bucket: ${r2Url}`
-  );
+    assert.ok(
+      r2Url.startsWith("https://acct.r2.cloudflarestorage.com/demo-bucket/screenshots/test.png?"),
+      `custom-endpoint URL missing bucket: ${r2Url}`
+    );
+  });
 
-  // Keys with special characters must be RFC 3986 encoded per segment.
-  const specialUrl = runScript({
-    STORAGE_BACKEND: "s3",
-    S3_BUCKET: "demo-bucket",
-    S3_REGION: "us-east-1",
-    S3_ACCESS_KEY_ID: "AKIDEXAMPLE",
-    S3_SECRET_ACCESS_KEY: "SECRETEXAMPLE",
-  }, `
+  await runner.test("keys with special characters are RFC-3986 encoded per segment", () => {
+    // Keys with special characters must be RFC 3986 encoded per segment.
+    const specialUrl = runScript({
+      STORAGE_BACKEND: "s3",
+      S3_BUCKET: "demo-bucket",
+      S3_REGION: "us-east-1",
+      S3_ACCESS_KEY_ID: "AKIDEXAMPLE",
+      S3_SECRET_ACCESS_KEY: "SECRETEXAMPLE",
+    }, `
     import { signS3ArtifactUrl } from './src/utils/objectStorage.js';
     console.log(signS3ArtifactUrl('/artifacts/screenshots/has space&q=1.png', 60000));
   `);
-  assert.ok(specialUrl.includes("has%20space%26q%3D1.png"), `special chars not encoded: ${specialUrl}`);
+    assert.ok(specialUrl.includes("has%20space%26q%3D1.png"), `special chars not encoded: ${specialUrl}`);
+  });
 
-  // writeArtifactBuffer: local dual-write + S3 upload via mock server + error path.
-  const mockOut = runScript({}, `
+  await runner.test("writeArtifactBuffer dual-writes locally + uploads to S3 (success + error paths)", () => {
+    // writeArtifactBuffer: local dual-write + S3 upload via mock server + error path.
+    const mockOut = runScript({}, `
     import http from 'node:http';
     import fs from 'node:fs';
     import os from 'node:os';
@@ -119,10 +132,13 @@ try {
     fs.rmSync(tmp, { recursive: true, force: true });
     console.log('mock-ok');
   `);
-  assert.equal(mockOut, "mock-ok");
+    assert.equal(mockOut, "mock-ok");
+  });
 
-  console.log("✅ object-storage: all checks passed");
-} catch (err) {
+  runner.summary("object-storage");
+}
+
+main().catch((err) => {
   console.error("❌ object-storage failed:", err);
   process.exit(1);
-}
+});

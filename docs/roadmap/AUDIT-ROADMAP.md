@@ -294,7 +294,7 @@ pool drain before queue drain, already in place)
 **Covers sub-items:** RLY-006 (iframe enumeration), RLY-009 (SPA hydration +
 adaptive timeouts)
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Audit §B.1 · §B.2 · §E.2
+**Status:** ✅ Complete (this PR) | **Effort:** L | **Source:** Audit §B.1 · §B.2 · §E.2
 
 **Problem:**
 
@@ -675,7 +675,7 @@ persisted immediately)
 
 ### Bundle 5 (B5) — Test dependency ordering (AUTO-014 — current PR) 🟡 P1
 
-**Status:** 🔲 Planned (current PR per NEXT.md) | **Effort:** M |
+**Status:** ✅ Complete | **Effort:** M |
 **Source:** ROADMAP.md Phase 4 (AUTO-014)
 
 > **This is the item already specified in NEXT.md as the current sprint
@@ -869,7 +869,14 @@ uses `browserPool.acquire()`), AUTO-003b ✅ (auto-approval gate must check
 
 **Covers sub-items:** QAL-006 (heal confidence scoring), QAL-007 (context
 window chunking), QAL-008 (bot-detection content guard), QAL-009 (circuit
-breaker persistence)
+breaker persistence), QAL-011 (vision-heal inside iframes — surfaced by
+B2's iframe enumeration; vision-heal currently only operates against the
+parent-page screenshot, so frame-scoped DOM failures fall through with no
+pixelmatch / LLM-vision fallback. Effort: M. Add a `frame.screenshot()`
+capture step to `tryVisionHeal`'s pre-flight so stages 7-8 receive the
+correct screenshot when `evt._fromIframe` is set; baseline crops need to
+be keyed by `${parentSnapshotFp}::${iframeSrc}::${evt.key}` so a frame
+moving between pages doesn't share baselines with an unrelated parent.)
 
 **Status:** 🔲 Planned | **Effort:** L | **Source:** Audit §F.2 · §B.2 ·
 §J Scenario 4
@@ -1213,15 +1220,15 @@ collapsed), AUTO-023 ✅ (oracle agent role + tool registry), AUTO-009 ✅
 | Bundle | Items | Priority | Effort | Status |
 |--------|-------|----------|--------|--------|
 | B1 — Run persistence + crash recovery | RLY-001, RLY-008, RLY-005 | 🔴 P0 | L | ✅ Complete (PR #2) |
-| B2 — iframe + adaptive timeouts + SPA | RLY-006, RLY-009 | 🔴 P0 | L | 🔲 Planned |
+| B2 — iframe + adaptive timeouts + SPA | RLY-006, RLY-009 | 🔴 P0 | L | ✅ Complete (this PR) |
 | B3 — Reviewer independence + escalation | RLY-003, QAL-004 | 🔴 P0 | M | 🔲 Planned |
 | B4 — Auth recovery + target-app TOTP | RLY-004, SCL-001 | 🔴 P0 | M | 🔲 Planned |
-| B5 — Test dependency ordering | AUTO-014 | 🟡 P1 | M | 🔲 Current PR |
+| B5 — Test dependency ordering | AUTO-014 | 🟡 P1 | M | ✅ Complete |
 | B6 — Test quality gates | QAL-001, QAL-005, QAL-002, QAL-010 | 🟡 P1 | XL | 🔲 Planned |
-| B7 — Healing safety + context robustness | QAL-006, QAL-007, QAL-008, QAL-009 | 🟡 P1 | L | 🔲 Planned |
+| B7 — Healing safety + context robustness | QAL-006, QAL-007, QAL-008, QAL-009, QAL-011 | 🟡 P1 | L | 🔲 Planned |
 | B8 — Goal-based autonomy + coverage | GOL-001, SCL-004, AUTO-011, AUTO-021 | 🟢 Strategic | XL | 🔲 Planned |
 
-**Totals — Phase 6:** ✅ Done: 1 (B1 — 3 sub-items) · 🔲 Pending: 7 bundles (24 sub-items)
+**Totals — Phase 6:** ✅ Done: 3 (B1 — 3 sub-items, B2 — 2 sub-items, B5 — 1 sub-item) · 🔲 Pending: 5 bundles (22 sub-items, includes QAL-011 added under B7 by B2)
 
 ---
 

@@ -279,7 +279,7 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
   // injection still falls through to the full `validateProjectPayload` +
   // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride"]);
   const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
@@ -479,6 +479,75 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
       return res.status(400).json({ error: "coverageRegressionThresholdPct must be null, 0 (disable), or a number between 0 and 100." });
     } else {
       fields.coverageRegressionThresholdPct = v;
+    }
+  }
+
+  // AUDIT-ROADMAP B2 — iframe enumeration strategy. Enum validation; the
+  // crawler degrades gracefully on cross-origin frames under 'same-origin'
+  // (DOM access throws SecurityError per browser policy and is silently
+  // skipped). See `pipeline/crawlBrowser.js#enumerateFrameSnapshots`.
+  if (Object.hasOwn(req.body, "iframeStrategy")) {
+    const mode = req.body.iframeStrategy;
+    const allowed = new Set(["same-origin", "allowlist", "all", "none"]);
+    if (!allowed.has(mode)) {
+      return res.status(400).json({ error: "iframeStrategy must be one of: same-origin, allowlist, all, none." });
+    }
+    fields.iframeStrategy = mode;
+  }
+
+  // AUDIT-ROADMAP B2 — iframe allowlist. Accepts null (clear → '[]') or an
+  // array of non-empty URL-prefix strings. Bounded to 100 entries: each is
+  // checked as a startsWith() prefix against the resolved frame URL on
+  // every crawl, so unbounded lists turn the per-page filter into O(N).
+  if (Object.hasOwn(req.body, "iframeAllowlist")) {
+    const v = req.body.iframeAllowlist;
+    if (v === null) {
+      fields.iframeAllowlist = [];
+    } else if (Array.isArray(v) && v.every((s) => typeof s === "string") && v.length <= 100) {
+      fields.iframeAllowlist = v.map((s) => s.trim()).filter(Boolean);
+    } else {
+      return res.status(400).json({ error: "iframeAllowlist must be null or an array of up to 100 strings." });
+    }
+  }
+
+  // AUDIT-ROADMAP B2 — SPA hydration policy. `'custom'` requires a paired
+  // `hydrationSelector`; we don't enforce that requirement at PATCH time
+  // because callers may set the two fields in either order across multiple
+  // requests. The crawler treats a `'custom'` mode with a null selector as
+  // a no-op wait (best-effort — matches the rest of the hydration path).
+  if (Object.hasOwn(req.body, "hydrationType")) {
+    const mode = req.body.hydrationType;
+    const allowed = new Set(["auto", "domcontentloaded", "custom"]);
+    if (!allowed.has(mode)) {
+      return res.status(400).json({ error: "hydrationType must be one of: auto, domcontentloaded, custom." });
+    }
+    fields.hydrationType = mode;
+  }
+
+  if (Object.hasOwn(req.body, "hydrationSelector")) {
+    const v = req.body.hydrationSelector;
+    if (v === null || v === "") {
+      fields.hydrationSelector = null;
+    } else if (typeof v !== "string" || v.length > 500) {
+      return res.status(400).json({ error: "hydrationSelector must be null or a string of up to 500 characters." });
+    } else {
+      fields.hydrationSelector = v.trim();
+    }
+  }
+
+  // AUDIT-ROADMAP B2 — per-project override for the adaptive element
+  // timeout. `null` re-enables the runner's `2 * p95LoadMs` adaptive
+  // calculation. Bounded to [500, 300000] (0.5 s – 5 min): the lower bound
+  // keeps a typo from making every action fail-fast, the upper matches
+  // the same ceiling enforced by `runner/config.js#MAX_ELEMENT_TIMEOUT`.
+  if (Object.hasOwn(req.body, "elementTimeoutOverride")) {
+    const v = req.body.elementTimeoutOverride;
+    if (v === null) {
+      fields.elementTimeoutOverride = null;
+    } else if (!Number.isInteger(v) || v < 500 || v > 300000) {
+      return res.status(400).json({ error: "elementTimeoutOverride must be null or an integer between 500 and 300000 (ms)." });
+    } else {
+      fields.elementTimeoutOverride = v;
     }
   }
 

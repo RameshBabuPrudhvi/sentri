@@ -25,7 +25,15 @@
  */
 
 import { throwIfAborted } from "../utils/abortHelper.js";
-import { takeSnapshot } from "./pageSnapshot.js";
+import { takeSnapshot, waitForSpaHydration } from "./pageSnapshot.js";
+// AUDIT-ROADMAP B2 — shared iframe-enumeration helper (same module used by
+// `crawlBrowser.js`). Treats iframes as element-scope (locator wrapping)
+// rather than state-scope (new state-graph nodes), per the design note in
+// `iframeEnumeration.js`. Iframe elements merge onto the parent state's
+// `.elements[]` with `_fromIframe: true` so they reach test generation
+// without inflating the state graph 5–10× on apps with persistent
+// embedded widgets.
+import { enumerateFrameSnapshots } from "./iframeEnumeration.js";
 import { fingerprintState, statesEqual } from "./stateFingerprint.js";
 import { discoverActions, detectSignupIntent } from "./actionDiscovery.js";
 import { fillEmailVerificationFlow, waitForVerification, dispose } from "../utils/disposableEmail.js";
@@ -217,7 +225,41 @@ function effectiveUrlCap(existingSnapshots) {
 }
 
 async function captureState(page, ctx) {
+  // AUDIT-ROADMAP B2 — framework-aware hydration wait. `ctx.project` is
+  // forwarded by `exploreStates` so the snapshot captures the post-
+  // hydration DOM rather than the skeleton. Best-effort: a missing
+  // project (defensive) falls through to legacy networkidle-only wait
+  // inside `takeSnapshot`.
+  if (ctx.project) {
+    await waitForSpaHydration(page, ctx.project);
+  }
   const snapshot = await takeSnapshot(page);
+
+  // AUDIT-ROADMAP B2 — enumerate same-origin (or allowlisted) iframes
+  // BEFORE fingerprinting so two states differing only in iframe content
+  // (e.g. Stripe Elements before/after card entry) are tracked as distinct
+  // state-graph nodes. Mirrors the merge pattern in `crawlBrowser.js` —
+  // iframe elements append to `snapshot.elements` with `_fromIframe: true`.
+  //
+  // Industry-standard semantics: element-scope, not state-scope (see
+  // `iframeEnumeration.js` module doc). The state-graph still keys on the
+  // parent URL; iframe contents enrich the fingerprint via the element
+  // list but never spawn a new graph node by themselves.
+  //
+  // Strictly best-effort. `ctx.project` may be undefined on legacy
+  // callsites (defensive) — the helper short-circuits when project is
+  // absent, so no try/catch is required here beyond the inner one.
+  if (ctx.project && ctx.run?.id) {
+    try {
+      const frameEnum = await enumerateFrameSnapshots(page, snapshot.url, ctx.project, ctx.run);
+      if (frameEnum.frameElements.length > 0) {
+        snapshot.elements = [...(snapshot.elements || []), ...frameEnum.frameElements];
+      }
+    } catch (frameErr) {
+      logWarn(ctx.run, `iframe enumeration failed for ${snapshot.url}: ${frameErr.message}`);
+    }
+  }
+
   const fp = fingerprintState(snapshot);
   const isNovel = !ctx.states.has(fp);
   if (isNovel) {
@@ -419,7 +461,9 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
   // B1.3 (AUDIT-ROADMAP) — `ctx.run` lets `captureState` persist each novel
   // snapshot to `crawl_snapshots` without rippling a new arg through every
   // helper callsite.
-  const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [], limits, run };
+  // AUDIT-ROADMAP B2 — `ctx.project` lets `captureState` run the SPA
+  // hydration wait under the project's `hydrationType` before snapshotting.
+  const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [], limits, run, project };
   let startState = null;
   let harCapture = null;
 

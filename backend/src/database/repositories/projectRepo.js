@@ -42,6 +42,16 @@ function rowToProject(row) {
     sourcemapBaseUrl: row.sourcemapBaseUrl || null,
     serverCoverageEndpoint: row.serverCoverageEndpoint || null,
     coverageRegressionThresholdPct: row.coverageRegressionThresholdPct ?? null, // AUTO-009i
+    // AUDIT-ROADMAP B2 — iframe enumeration + SPA hydration + adaptive
+    // element timeout (migration 069). Defaults mirror the column
+    // defaults so callers reading projects created before B2 see the
+    // canonical shape instead of `undefined`. `iframeAllowlist` is JSON-
+    // encoded in the column and parsed here.
+    iframeStrategy: row.iframeStrategy || "same-origin",
+    iframeAllowlist: row.iframeAllowlist ? JSON.parse(row.iframeAllowlist) : [],
+    hydrationType: row.hydrationType || "auto",
+    hydrationSelector: row.hydrationSelector || null,
+    elementTimeoutOverride: row.elementTimeoutOverride ?? null,
   };
 }
 
@@ -79,6 +89,18 @@ function projectToRow(p) {
     sourcemapBaseUrl: p.sourcemapBaseUrl || null,
     serverCoverageEndpoint: p.serverCoverageEndpoint || null,
     coverageRegressionThresholdPct: p.coverageRegressionThresholdPct ?? null, // AUTO-009i
+    // AUDIT-ROADMAP B2 — see rowToProject comment. `iframeAllowlist` is
+    // JSON-encoded; null / non-array inputs collapse to '[]' so the
+    // NOT NULL column constraint never trips. Enum-typed strings
+    // (`iframeStrategy`, `hydrationType`) fall back to the canonical
+    // default; routes/projects.js already validates the allowed values
+    // on the PATCH path, so direct calls (tests, migrations) passing a
+    // bad value land the safe default rather than a NOT NULL violation.
+    iframeStrategy: p.iframeStrategy || "same-origin",
+    iframeAllowlist: Array.isArray(p.iframeAllowlist) ? JSON.stringify(p.iframeAllowlist) : "[]",
+    hydrationType: p.hydrationType || "auto",
+    hydrationSelector: p.hydrationSelector || null,
+    elementTimeoutOverride: Number.isInteger(p.elementTimeoutOverride) ? p.elementTimeoutOverride : null,
   };
 }
 
@@ -140,8 +162,8 @@ export function create(project) {
   const row = projectToRow(project);
   row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, oracleEnabled, reviewerEnabled, oracleMaxCostUsdPerRun, reviewerMaxCostUsdPerRun, coverageEnabled, sourcemapBaseUrl, serverCoverageEndpoint, coverageRegressionThresholdPct)
-    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @oracleEnabled, @reviewerEnabled, @oracleMaxCostUsdPerRun, @reviewerMaxCostUsdPerRun, @coverageEnabled, @sourcemapBaseUrl, @serverCoverageEndpoint, @coverageRegressionThresholdPct)
+    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, oracleEnabled, reviewerEnabled, oracleMaxCostUsdPerRun, reviewerMaxCostUsdPerRun, coverageEnabled, sourcemapBaseUrl, serverCoverageEndpoint, coverageRegressionThresholdPct, iframeStrategy, iframeAllowlist, hydrationType, hydrationSelector, elementTimeoutOverride)
+    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @oracleEnabled, @reviewerEnabled, @oracleMaxCostUsdPerRun, @reviewerMaxCostUsdPerRun, @coverageEnabled, @sourcemapBaseUrl, @serverCoverageEndpoint, @coverageRegressionThresholdPct, @iframeStrategy, @iframeAllowlist, @hydrationType, @hydrationSelector, @elementTimeoutOverride)
   `).run(row);
 }
 
@@ -152,12 +174,12 @@ export function create(project) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "oracleEnabled", "reviewerEnabled", "oracleMaxCostUsdPerRun", "reviewerMaxCostUsdPerRun", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct"];
+  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "oracleEnabled", "reviewerEnabled", "oracleMaxCostUsdPerRun", "reviewerMaxCostUsdPerRun", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {
     if (key in fields) {
-      let val = (key === "credentials" || key === "qualityGates" || key === "webVitalsBudgets" || key === "piiAllowlist") && fields[key]
+      let val = (key === "credentials" || key === "qualityGates" || key === "webVitalsBudgets" || key === "piiAllowlist" || key === "iframeAllowlist") && fields[key]
         ? JSON.stringify(fields[key])
         : fields[key];
       // `strictPiiFirewall` is a JS boolean at the route layer but the column

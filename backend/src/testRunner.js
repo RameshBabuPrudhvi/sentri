@@ -35,7 +35,7 @@ import { detectCoverageRegression, fireCoverageRegressionAlert } from "./pipelin
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { clusterFailures } from "./pipeline/failureClusterer.js";
-import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
+import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, MAX_ELEMENT_TIMEOUT, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
 import { browserPool } from "./runner/browserPool.js";
 import { executeWithRetries } from "./runner/retry.js";
 import { computeUpstreamSkips, topologicalSortTests } from "./runner/dependencyOrder.js";
@@ -47,6 +47,7 @@ import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import * as runTestResultRepo from "./database/repositories/runTestResultRepo.js";
+import * as crawlSnapshotRepo from "./database/repositories/crawlSnapshotRepo.js";
 import * as testFixtureRepo from "./database/repositories/testFixtureRepo.js";
 import { enqueue as enqueueDbWrite } from "./utils/dbWriteQueue.js";
 import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
@@ -54,7 +55,7 @@ import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 import { recordMetric } from "./utils/recordMetric.js";
 import { isNonExecutedSkip } from "./utils/skipReasons.js";
-import { testsExecutedTotal, testDurationSeconds, recordRunOutcome } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry.
+import { testsExecutedTotal, testDurationSeconds, recordRunOutcome, runP95LoadMs as runP95LoadMsGauge, runAdaptiveTimeoutMs as runAdaptiveTimeoutMsGauge } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry; B2 adds p95 + adaptive-timeout gauges. Imported with `…Gauge` suffix so the gauge identifier doesn't shadow the local `runP95LoadMs` variable used in the adaptive-timeout calc.
 
 
 /**
@@ -355,6 +356,75 @@ export function shardTraceArtifactPath(runId, shardIndex) {
   return `/artifacts/traces/${runId}/shard-${shardIndex}.zip`;
 }
 
+/**
+ * AUDIT-ROADMAP B2 — compute the 95th-percentile value of a numeric array
+ * using linear interpolation between adjacent ranks (R-7 / NumPy default /
+ * Excel `PERCENTILE.INC` / Postgres `percentile_cont`). Industry-standard
+ * for SLO / latency-bucket math and matches what Grafana / Datadog /
+ * Prometheus `histogram_quantile()` consumers expect when comparing the
+ * Sentri run's `p95LoadMs` against externally-tracked load-time SLOs.
+ *
+ * Empty / non-finite-only input returns `null` so callers can fall back to
+ * the env-default timeout without computing `NaN * 2`.
+ *
+ * Pure function — exported for `backend/tests/b2-adaptive-timeout.test.js`.
+ *
+ * @param {number[]} values
+ * @returns {number|null}
+ */
+export function p95(values) {
+  const finite = (Array.isArray(values) ? values : [])
+    .map(Number)
+    .filter((n) => Number.isFinite(n) && n >= 0)
+    .sort((a, b) => a - b);
+  if (finite.length === 0) return null;
+  if (finite.length === 1) return finite[0];
+  // Linear interpolation between adjacent ranks (R-7).
+  const rank = 0.95 * (finite.length - 1);
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  if (lo === hi) return finite[lo];
+  const frac = rank - lo;
+  return finite[lo] + (finite[hi] - finite[lo]) * frac;
+}
+
+/**
+ * AUDIT-ROADMAP B2 — derive the per-run adaptive element timeout from the
+ * crawl's measured p95 page-load time. Returns a value clamped to
+ * `[floor, MAX_ELEMENT_TIMEOUT]`:
+ *
+ *   adaptive = clamp(2 * p95LoadMs, floor, ceiling)
+ *
+ * The 2× multiplier provides headroom for the per-action interaction
+ * (Playwright waits for visible + stable + enabled before acting, each
+ * comparable in cost to the original navigation). The floor is the env
+ * default `HEALING_ELEMENT_TIMEOUT` (5 000 ms) so a fast crawl never
+ * undershoots the pre-B2 baseline. The ceiling guards against a single
+ * outlier slow page bloating the per-action wait into the multi-minute
+ * range. Per-project `elementTimeoutOverride` short-circuits the
+ * calculation entirely (caller checks before invoking this helper).
+ *
+ * @param {number|null} p95LoadMs - The p95 of `crawl_snapshots.loadMs` for
+ *   this run, or `null` when no load timings were recorded (e.g. all-API
+ *   runs, B1.3 persistence failure, explorer-only runs).
+ * @param {Object} [opts]
+ * @param {number} [opts.floor=5000]   - Lower bound; defaults to
+ *   `HEALING_ELEMENT_TIMEOUT`'s env-default (5 000 ms).
+ * @param {number} [opts.ceiling=MAX_ELEMENT_TIMEOUT] - Upper bound.
+ * @returns {number} ms — always finite, always within `[floor, ceiling]`.
+ */
+export function computeAdaptiveElementTimeout(p95LoadMs, opts = {}) {
+  // Floor tracks the runtime `HEALING_ELEMENT_TIMEOUT` env var (default 5000)
+  // so an operator who raises it to e.g. 8000 for a slow enterprise app sees
+  // the adaptive floor honour that setting rather than undershooting it.
+  const envFloor = parseInt(process.env.HEALING_ELEMENT_TIMEOUT, 10) || 5000;
+  const floor = Number.isFinite(opts.floor) ? opts.floor : envFloor;
+  const ceiling = Number.isFinite(opts.ceiling) ? opts.ceiling : MAX_ELEMENT_TIMEOUT;
+  if (!Number.isFinite(p95LoadMs) || p95LoadMs <= 0) return floor;
+  const candidate = Math.round(p95LoadMs * 2);
+  return Math.max(floor, Math.min(ceiling, candidate));
+}
+
 async function poolMap(items, concurrency, fn, signal) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -616,6 +686,90 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     : `Browser: ${resolvedBrowser} (${BROWSER_HEADLESS ? "headless" : "headed"})`);
 
   const runStart = Date.now();
+
+  // AUDIT-ROADMAP B2 — derive the per-run adaptive element timeout from the
+  // crawl's measured p95 page-load time. Precedence (highest → lowest):
+  //   1. `project.elementTimeoutOverride` — operator escape hatch when the
+  //      adaptive math doesn't suit a known-flaky staging environment.
+  //   2. `2 * p95(crawl_snapshots.loadMs)` clamped to
+  //      `[HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT]` — the default path.
+  //   3. Floor (env default) — when no load timings were recorded (API-only
+  //      run, B1.3 persistence failure, explorer-only state-graph run).
+  //
+  // Persisted on `runs.p95LoadMs` (migration 069) so RunDetail / dashboards
+  // / CI consumers can audit the value the runner actually used. The
+  // adaptive timeout itself is NOT stored — it's a pure function of the
+  // p95 + override, derivable on read. Best-effort: any repo failure
+  // degrades to the env-default floor (matches pre-B2 behaviour bit-for-bit).
+  let runP95LoadMs = null;
+  let adaptiveTimeout;
+  if (Number.isInteger(project.elementTimeoutOverride)) {
+    adaptiveTimeout = project.elementTimeoutOverride;
+    structuredLog("run.adaptive_timeout", {
+      runId, source: "project_override", elementTimeout: adaptiveTimeout,
+    });
+  } else {
+    // Precedence inside the adaptive branch:
+    //   (a) `crawl_snapshots.loadMs` rows under THIS runId — populated when
+    //       the current run is itself a crawl, OR when an upstream stage of
+    //       a generate/recorder pipeline streamed snapshots under the same
+    //       runId.
+    //   (b) `crawl_snapshots.loadMs` rows from the project's most recent
+    //       crawl run — the regression-run path. A regression run gets a
+    //       brand-new `runId` (`routes/runs.js:225`) distinct from any
+    //       previous crawl's runId, so (a) returns `[]` for every test_run.
+    //       Without this fallback the adaptive math would be inert on the
+    //       most common runtime path: someone clicking Run Regression on a
+    //       project that already has a crawl history.
+    //
+    // The fallback's data freshness is bounded by "most recent crawl that
+    // actually recorded loadMs"; an operator who configures
+    // `iframeStrategy: 'none'` and never crawls again will see stale p95
+    // values until they re-crawl. That's the correct behaviour — `loadMs`
+    // is a property of the SUT's navigation timing, not of the test run.
+    try {
+      let loadTimes = crawlSnapshotRepo.getLoadTimesByRunId(runId);
+      if (loadTimes.length === 0 && project?.id) {
+        loadTimes = crawlSnapshotRepo.getLoadTimesByProjectId(project.id);
+      }
+      runP95LoadMs = p95(loadTimes);
+      if (runP95LoadMs != null) {
+        run.p95LoadMs = Math.round(runP95LoadMs);
+        // Persist immediately so RunDetail surfaces the value even if the
+        // run crashes before finalize.
+        runRepo.update(run.id, { p95LoadMs: run.p95LoadMs });
+      }
+    } catch (err) {
+      logWarn(run, `Failed to compute p95LoadMs from crawl_snapshots: ${err.message}`);
+    }
+    adaptiveTimeout = computeAdaptiveElementTimeout(runP95LoadMs);
+    structuredLog("run.adaptive_timeout", {
+      runId,
+      source: runP95LoadMs != null ? "adaptive" : "default",
+      p95LoadMs: runP95LoadMs != null ? Math.round(runP95LoadMs) : null,
+      elementTimeout: adaptiveTimeout,
+    });
+  }
+  log(run, `⏱  Element timeout: ${adaptiveTimeout}ms${runP95LoadMs != null ? ` (p95LoadMs=${Math.round(runP95LoadMs)}ms × 2, clamped to [5000, ${MAX_ELEMENT_TIMEOUT}])` : ""}${Number.isInteger(project.elementTimeoutOverride) ? " (project override)" : ""}`);
+
+  // AUDIT-ROADMAP B2 — record per-project gauges so the operator dashboard
+  // can plot "p95 page-load time vs derived element timeout" over time and
+  // catch a sustained app-regression (rising p95) before the clamp ceiling
+  // saturates and tests start TIMEOUT-ing. Best-effort: metric-registry
+  // hiccups must never block the test loop. `source` label mirrors the
+  // structured log above so dashboards can split operator-override from
+  // adaptive vs default. `projectId` cardinality is bounded by the project
+  // count — same convention as `app_vision_heal_budget_exhausted_total`.
+  try {
+    if (runP95LoadMs != null) {
+      runP95LoadMsGauge.set({ projectId: project.id }, Math.round(runP95LoadMs));
+    }
+    const source = Number.isInteger(project.elementTimeoutOverride)
+      ? "project_override"
+      : (runP95LoadMs != null ? "adaptive" : "default");
+    runAdaptiveTimeoutMsGauge.set({ projectId: project.id, source }, adaptiveTimeout);
+  } catch { /* best-effort */ }
+
   const allVideoSegments = [];
   // CAP-002 Phase 2 — per-shard stat accumulators. The worker composes the
   // parent `runs` row's totals from each shard's returned delta via
@@ -939,7 +1093,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           const attemptResults = await executeTestIterations(
             test,
             fixtureRows,
-            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition, coverageEnabled: !!project.coverageEnabled, serverCoverageEndpoint: project.serverCoverageEndpoint || null }),
+            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition, coverageEnabled: !!project.coverageEnabled, serverCoverageEndpoint: project.serverCoverageEndpoint || null, adaptiveTimeout }),
           );
           const lastResult = attemptResults[attemptResults.length - 1] || null;
           // Retry semantics:

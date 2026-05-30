@@ -74,29 +74,18 @@ function resetDb() {
   db.exec("DELETE FROM projects        WHERE id    LIKE 'PRJ-CSS-%'");
 }
 
-let passed = 0;
-let failed = 0;
+import { createTestContext } from "./helpers/test-base.js";
 
-async function test(name, fn) {
-  try {
-    await fn();
-    console.log(`  \u2713 ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  \u2717 ${name}`);
-    console.error(`     ${err?.stack || err?.message || err}`);
-    failed++;
-  }
-}
+const t = createTestContext();
+const runner = t.createTestRunner();
 
 async function main() {
-  console.log(`\n\u2500\u2500 crawl-snapshot-streaming (dialect: ${getDatabaseDialect()}) \u2500\u2500`);
   resetDb();
   const project = makeProject();
   projectRepo.create(project);
 
   // ── save + getByRunId round-trip ───────────────────────────────────────
-  await test("save + getByRunId: snapshot JSON + loadMs round-trip cleanly", () => {
+  await runner.test("save + getByRunId: snapshot JSON + loadMs round-trip cleanly", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     const snap = makeSnapshot("https://example.com/page-a");
@@ -114,7 +103,7 @@ async function main() {
   });
 
   // ── INSERT OR IGNORE: re-saving same (runId, url) is a no-op ───────────
-  await test("save: idempotent on (runId, url) — re-crawl is a no-op", () => {
+  await runner.test("save: idempotent on (runId, url) — re-crawl is a no-op", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     const snap = makeSnapshot("https://example.com/dup");
@@ -131,7 +120,7 @@ async function main() {
   });
 
   // ── save is best-effort on invalid input ───────────────────────────────
-  await test("save: invalid input (missing runId / url / snapshot) is silently ignored", () => {
+  await runner.test("save: invalid input (missing runId / url / snapshot) is silently ignored", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     // Each missing-arg call must early-return without throwing.
@@ -144,7 +133,7 @@ async function main() {
   });
 
   // ── getUrlsByRunId is the cheap projection ─────────────────────────────
-  await test("getUrlsByRunId: returns URLs in insertion order without deserialising JSON", () => {
+  await runner.test("getUrlsByRunId: returns URLs in insertion order without deserialising JSON", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     const urls = [
@@ -161,7 +150,7 @@ async function main() {
   });
 
   // ── getLoadTimesByRunId feeds B2's adaptive timeout ────────────────────
-  await test("getLoadTimesByRunId: excludes NULL loadMs rows for percentile math", () => {
+  await runner.test("getLoadTimesByRunId: excludes NULL loadMs rows for percentile math", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     crawlSnapshotRepo.save(run.id, "https://example.com/fast",  makeSnapshot("https://example.com/fast"),  { loadMs: 100 });
@@ -176,7 +165,7 @@ async function main() {
   });
 
   // ── iframe metadata round-trip ─────────────────────────────────────────
-  await test("save: iframe metadata (fromIframe + iframeSrc) round-trips", () => {
+  await runner.test("save: iframe metadata (fromIframe + iframeSrc) round-trips", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     crawlSnapshotRepo.save(
@@ -192,7 +181,7 @@ async function main() {
   });
 
   // ── deleteByRunId on the purge path ────────────────────────────────────
-  await test("deleteByRunId: removes every row for a run", () => {
+  await runner.test("deleteByRunId: removes every row for a run", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     for (let i = 0; i < 5; i++) {
@@ -207,7 +196,7 @@ async function main() {
   });
 
   // ── deleteByRunIds: batch purge across multiple runs ───────────────────
-  await test("deleteByRunIds: batch delete across multiple runs", () => {
+  await runner.test("deleteByRunIds: batch delete across multiple runs", () => {
     // Each run needs its own project — `idx_runs_one_active_per_project`
     // (partial UNIQUE index from migration 002) enforces at most one
     // status='running' run per projectId, so two `running` runs against
@@ -233,11 +222,10 @@ async function main() {
   });
 
   resetDb();
-  console.log(`\n  ${passed} passed, ${failed} failed\n`);
-  if (failed > 0) process.exit(1);
+  runner.summary("crawl-snapshot-streaming");
 }
 
 main().catch((err) => {
-  console.error("\u2717 crawl-snapshot-streaming failed:", err);
+  console.error("❌ crawl-snapshot-streaming failed:", err);
   process.exit(1);
 });

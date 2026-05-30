@@ -447,9 +447,17 @@ export async function tryVisionHeal(ctx, deps = {}) {
  * `safeFill`, `safeExpect`, and retry logic.
  *
  * @param {Object<string, number>} [healingHints] - Map of `"action::label"` → strategy index from previous runs.
+ * @param {Object} [opts]
+ * @param {number} [opts.elementTimeout] - AUDIT-ROADMAP B2: adaptive element
+ *   timeout (ms) derived from `2 * run.p95LoadMs`, clamped to
+ *   `[HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT]` by the runner. Replaces
+ *   the hardcoded `HEALING_ELEMENT_TIMEOUT` constant inside the emitted
+ *   helper string when present. Falls back to the env default when omitted
+ *   so callers that bypass the runner (eval harness, recorder, direct unit
+ *   tests) keep the pre-B2 behaviour bit-for-bit.
  * @returns {string} JavaScript code string to be prepended to test execution.
  */
-export function getSelfHealingHelperCode(healingHints) {
+export function getSelfHealingHelperCode(healingHints, opts = {}) {
   // healingHints is an optional map of "<action>::<label>" → strategyIndex.
   // Guard: if the caller passes null, a number, or an array, coerce to {}
   // so the injected `const __healingHints = ...` is always a valid object literal.
@@ -457,8 +465,15 @@ export function getSelfHealingHelperCode(healingHints) {
     ? healingHints
     : {};
   const hintsJSON = JSON.stringify(safeHints);
+  // AUDIT-ROADMAP B2 — bake the adaptive timeout into the helper string.
+  // `Number.isInteger` guards against accidental floats / NaN / negative
+  // values from a misconfigured `elementTimeoutOverride` reaching the
+  // runtime helper (where they'd produce confusing Playwright errors).
+  const effectiveTimeout = Number.isInteger(opts.elementTimeout) && opts.elementTimeout > 0
+    ? opts.elementTimeout
+    : HEALING_ELEMENT_TIMEOUT;
   return `
-    const DEFAULT_TIMEOUT = ${HEALING_ELEMENT_TIMEOUT};
+    const DEFAULT_TIMEOUT = ${effectiveTimeout};
     const RETRY_COUNT = ${HEALING_RETRY_COUNT};
     const RETRY_DELAY = ${HEALING_RETRY_DELAY};
     const FIRST_VISIBLE_WAIT_CAP = ${HEALING_VISIBLE_WAIT_CAP};

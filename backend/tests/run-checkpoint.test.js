@@ -62,29 +62,18 @@ async function getDuplicateCount(reason) {
   return row?.value || 0;
 }
 
-let passed = 0;
-let failed = 0;
+import { createTestContext } from "./helpers/test-base.js";
 
-async function test(name, fn) {
-  try {
-    await fn();
-    console.log(`  \u2713 ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  \u2717 ${name}`);
-    console.error(`     ${err?.stack || err?.message || err}`);
-    failed++;
-  }
-}
+const t = createTestContext();
+const runner = t.createTestRunner();
 
 async function main() {
-  console.log(`\n\u2500\u2500 run-checkpoint (dialect: ${getDatabaseDialect()}) \u2500\u2500`);
   resetDb();
   const project = makeProject();
   projectRepo.create(project);
 
   // ── append + getByRunId round-trip ─────────────────────────────────────
-  await test("append + getByRunId: result round-trips with parsed artifacts", () => {
+  await runner.test("append + getByRunId: result round-trips with parsed artifacts", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     const out = runTestResultRepo.append(run.id, {
@@ -109,7 +98,7 @@ async function main() {
   });
 
   // ── INSERT OR IGNORE: runner duplicate bumps duplicate_dispatch ─────────
-  await test("append: runner duplicate increments duplicates counter under 'duplicate_dispatch'", async () => {
+  await runner.test("append: runner duplicate increments duplicates counter under 'duplicate_dispatch'", async () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     const before = await getDuplicateCount("duplicate_dispatch");
@@ -128,7 +117,7 @@ async function main() {
   });
 
   // ── INSERT OR IGNORE: resume duplicate bumps resume_replay ──────────────
-  await test("append: opts.reason='resume_replay' uses the expected counter label", async () => {
+  await runner.test("append: opts.reason='resume_replay' uses the expected counter label", async () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     runTestResultRepo.append(run.id, { testId: "TC-3", status: "passed" });
@@ -146,7 +135,7 @@ async function main() {
   });
 
   // ── getCompletedTestIds is the resume checkpoint source ────────────────
-  await test("getCompletedTestIds: returns the exact set of testIds with any row", () => {
+  await runner.test("getCompletedTestIds: returns the exact set of testIds with any row", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     runTestResultRepo.append(run.id, { testId: "TC-A", status: "passed" });
@@ -162,7 +151,7 @@ async function main() {
   });
 
   // ── data-driven iterations are distinct rows ────────────────────────────
-  await test("append: iterationIndex makes data-driven iterations distinct rows", () => {
+  await runner.test("append: iterationIndex makes data-driven iterations distinct rows", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     runTestResultRepo.append(run.id, { testId: "TC-FX", status: "passed", iterationIndex: 0 });
@@ -174,7 +163,7 @@ async function main() {
   });
 
   // ── deleteByRunId on the purge path ─────────────────────────────────────
-  await test("deleteByRunId: removes every row for a run", () => {
+  await runner.test("deleteByRunId: removes every row for a run", () => {
     const run = makeRun(project.id);
     runRepo.create(run);
     for (let i = 0; i < 5; i++) {
@@ -192,7 +181,7 @@ async function main() {
   // byte-for-byte AND stamps the new `failureReason='process_crash'` column.
   // Return shape changed from `number` → `{ count, ids }` so the boot-time
   // hook can correlate recovered runs with subsequent resume requests.
-  await test("markOrphansInterrupted: stamps failureReason and returns recovered IDs", () => {
+  await runner.test("markOrphansInterrupted: stamps failureReason and returns recovered IDs", () => {
     // Each orphan needs its own project because the partial unique index
     // `idx_runs_one_active_per_project` (migration 002) enforces at most one
     // status='running' run per projectId.
@@ -253,11 +242,10 @@ async function main() {
   });
 
   resetDb();
-  console.log(`\n  ${passed} passed, ${failed} failed\n`);
-  if (failed > 0) process.exit(1);
+  runner.summary("run-checkpoint");
 }
 
 main().catch((err) => {
-  console.error("\u2717 run-checkpoint failed:", err);
+  console.error("❌ run-checkpoint failed:", err);
   process.exit(1);
 });

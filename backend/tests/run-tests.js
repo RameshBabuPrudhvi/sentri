@@ -313,6 +313,23 @@ const files = [
   // Pins the (runId, url) UNIQUE idempotency, load-ms percentile feed for
   // Bundle 2's adaptive timeout, and the purge-path delete primitives.
   "tests/crawl-snapshot-streaming.test.js",
+  // B2 (AUDIT-ROADMAP Bundle 2) — iframe enumeration + SPA hydration +
+  // adaptive element timeout. Pure-function contracts: p95 (R-7 linear
+  // interpolation), computeAdaptiveElementTimeout (clamp to [floor, ceiling]),
+  // shouldEnumerateFrame (iframe strategy gate), and
+  // getSelfHealingHelperCode's adaptive-timeout injection into the vm
+  // sandbox helper string. Browser-level enumeration + hydration are
+  // covered by `b2-iframe-crawl.test.js` (E2E against a local fixture
+  // server) and the operator runbook at `QA.md § "iframe + SPA hydration
+  // + adaptive timeout (AUDIT-ROADMAP B2)"`.
+  "tests/b2-adaptive-timeout.test.js",
+  // B2 — E2E iframe enumeration against a real Chromium browser pointed
+  // at a local same-origin HTTP fixture (the only way to exercise the
+  // browser's same-origin policy: `data:` URLs each have their own
+  // opaque origin). Pinned the 5 acceptance criteria from the spec at
+  // `docs/roadmap/AUDIT-ROADMAP.md:425-441`. Degrades gracefully when
+  // Chromium binaries aren't installed (CI cross-browser job only).
+  "tests/b2-iframe-crawl.test.js",
   "tests/run-worker-shard-retry.test.js",
   "tests/run-abort-pubsub.test.js",
   "tests/run-shard-crash.test.js",
@@ -349,6 +366,7 @@ const files = [
 
 let passed = 0;
 let failed = 0;
+const failedFiles = [];
 
 for (const file of files) {
   const result = spawnSync(process.execPath, [file], {
@@ -360,6 +378,8 @@ for (const file of files) {
     passed += 1;
   } else {
     failed += 1;
+    failedFiles.push({ file, exitCode: result.status, signal: result.signal || null });
+    console.error(`\n❌ FAILED: ${file} (exit code ${result.status}${result.signal ? `, signal ${result.signal}` : ""})\n`);
   }
 }
 
@@ -368,6 +388,10 @@ console.log(`Results: ${passed} passed, ${failed} failed out of ${files.length} 
 
 if (failed > 0) {
   console.log("\n⚠️  Backend test run failed");
+  console.log("\nFailed test files:");
+  for (const { file, exitCode, signal } of failedFiles) {
+    console.log(`  ❌ ${file} — exit ${exitCode}${signal ? ` (${signal})` : ""}`);
+  }
   process.exit(1);
 }
 

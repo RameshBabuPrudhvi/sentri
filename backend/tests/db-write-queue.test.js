@@ -44,38 +44,29 @@ function insertOne(id, label) {
   };
 }
 
-let passed = 0;
-let failed = 0;
+import { createTestContext } from "./helpers/test-base.js";
 
-async function test(name, fn) {
-  try {
-    // Each test gets a fresh table + drained queue so prior state can't bleed.
-    resetTable();
-    drain();
-    await fn();
-    console.log(`  \u2713 ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  \u2717 ${name}`);
-    console.error(`     ${err?.stack || err?.message || err}`);
-    failed++;
-  }
-}
+const t = createTestContext();
+const runner = t.createTestRunner();
 
 async function main() {
-  console.log(`\n\u2500\u2500 db-write-queue (dialect: ${getDatabaseDialect()}) \u2500\u2500`);
   const isPostgres = getDatabaseDialect() === "postgres";
+
+  // Each test gets a fresh table + drained queue so prior state can't bleed.
+  function setup() { resetTable(); drain(); }
 
   // ── durable mode is always synchronous ─────────────────────────────────
   // The durable contract is dialect-independent: callers passing
   // `priority: "durable"` (or the legacy `"high"` alias) must observe the
   // row before the call returns, on both SQLite and Postgres.
-  await test("durable: write is visible synchronously before the next statement", () => {
+  await runner.test("durable: write is visible synchronously before the next statement", () => {
+    setup();
     enqueue(insertOne("dbwq-1", "durable-row"), { priority: "durable" });
     assert.equal(rowCount(), 1, "durable enqueue did not commit synchronously");
   });
 
-  await test("priority='high' is a back-compat alias for 'durable'", () => {
+  await runner.test("priority='high' is a back-compat alias for 'durable'", () => {
+    setup();
     enqueue(insertOne("dbwq-2", "high-row"), { priority: "high" });
     assert.equal(rowCount(), 1, "'high' priority did not commit synchronously");
   });
@@ -86,7 +77,8 @@ async function main() {
   // there — the test would assert "row not yet visible" against a backend
   // that is documented to short-circuit batching.
   if (!isPostgres) {
-    await test("batched: writes accumulate in the queue until drain() (SQLite)", () => {
+    await runner.test("batched: writes accumulate in the queue until drain() (SQLite)", () => {
+      setup();
       enqueue(insertOne("dbwq-3", "batched-row"));
       // The row is in the queue but not yet committed — depth() reflects this.
       assert.ok(depth() >= 1, `expected queue depth >= 1, got ${depth()}`);
@@ -98,12 +90,14 @@ async function main() {
       assert.equal(depth(), 0, "queue depth not zeroed after drain");
     });
 
-    await test("batched: drain() handles an empty queue cleanly (no-op)", () => {
+    await runner.test("batched: drain() handles an empty queue cleanly (no-op)", () => {
+      setup();
       assert.equal(drain(), 0, "empty drain should report 0 ops");
       assert.equal(rowCount(), 0);
     });
 
-    await test("batched: 25 enqueues + drain() commits all 25 rows", () => {
+    await runner.test("batched: 25 enqueues + drain() commits all 25 rows", () => {
+      setup();
       for (let i = 0; i < 25; i++) {
         enqueue(insertOne(`dbwq-bulk-${i}`, `bulk-${i}`));
       }
@@ -119,7 +113,8 @@ async function main() {
   // individually so they still land. Industry-standard "one bad row never
   // silently drops 49 others" semantics — same shape as PgBouncer's
   // `server_reset_query` flow and Sidekiq's `Sidekiq::Limiter` retry.
-  await test("poison pill: a throwing closure does not drop sibling survivors", () => {
+  await runner.test("poison pill: a throwing closure does not drop sibling survivors", () => {
+    setup();
     enqueue(insertOne("dbwq-survivor-1", "ok"));
     // Closure that throws — the inner exception will roll back the batch
     // transaction; the queue's `flushNow` should then replay the survivors
@@ -133,7 +128,8 @@ async function main() {
   });
 
   // ── enqueue() ignores non-function input ───────────────────────────────
-  await test("enqueue: non-function input is silently ignored (no throw)", () => {
+  await runner.test("enqueue: non-function input is silently ignored (no throw)", () => {
+    setup();
     enqueue(null);
     enqueue(undefined);
     enqueue(42);
@@ -144,7 +140,8 @@ async function main() {
   });
 
   // ── drain idempotency ──────────────────────────────────────────────────
-  await test("drain: idempotent — second call is a no-op", () => {
+  await runner.test("drain: idempotent — second call is a no-op", () => {
+    setup();
     enqueue(insertOne("dbwq-idem", "idempotent"), { priority: "durable" });
     assert.equal(drain(), 0, "first drain after durable write should be a no-op");
     assert.equal(drain(), 0, "second drain should also be a no-op");
@@ -154,11 +151,10 @@ async function main() {
   // ── cleanup ────────────────────────────────────────────────────────────
   getDatabase().exec(`DROP TABLE IF EXISTS ${TABLE}`);
 
-  console.log(`\n  ${passed} passed, ${failed} failed\n`);
-  if (failed > 0) process.exit(1);
+  runner.summary("db-write-queue");
 }
 
 main().catch((err) => {
-  console.error("\u2717 db-write-queue failed:", err);
+  console.error("❌ db-write-queue failed:", err);
   process.exit(1);
 });

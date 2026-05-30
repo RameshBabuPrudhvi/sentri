@@ -122,6 +122,16 @@ export const DEFAULT_PARALLEL_WORKERS = Math.max(1, Math.min(10,
   parseInt(process.env.PARALLEL_WORKERS, 10) || 1
 ));
 
+// ── AUDIT-ROADMAP B2: adaptive element timeout ceiling ────────────────────────
+// Upper bound on the per-run `adaptiveTimeout` computed by `testRunner.js`
+// from the crawl's p95 page-load time. Without a ceiling, a single slow
+// outlier page would bloat the per-action wait into the multi-minute range
+// and let runaway tests sit blocked on a single locator. 30 s matches the
+// `BROWSER_TEST_TIMEOUT / 4` rule of thumb (a test's slowest action should
+// be at most a quarter of the test budget) and the operator-facing max for
+// `project.elementTimeoutOverride` (`routes/projects.js` rejects >300 000).
+export const MAX_ELEMENT_TIMEOUT = parseInt(process.env.MAX_ELEMENT_TIMEOUT, 10) || 30000;
+
 // Automatic test retry budget (AUTO-005).
 // Value is the number of retries after the first attempt.
 // Parse explicitly so `MAX_TEST_RETRIES=0` (disable retries) is honoured —

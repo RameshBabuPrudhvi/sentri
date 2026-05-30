@@ -778,6 +778,68 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🪟 iframe + SPA hydration + adaptive timeout (AUDIT-ROADMAP B2)
+
+**Preconditions:** Project exists with `qa_lead` or `admin` access. Settings panels live at `/projects/:id/settings/execution`. Backend behaviour is gated by five per-project columns from migration 069 (`iframeStrategy`, `iframeAllowlist`, `hydrationType`, `hydrationSelector`, `elementTimeoutOverride`) plus one per-run column (`runs.p95LoadMs`). End-to-end coverage is automated at `backend/tests/b2-iframe-crawl.test.js`; this section is the operator-facing manual smoke.
+
+**Surfaces covered:** Settings → Execution section (3 panels), RunDetail element-timeout log line, Prometheus metrics. Backend endpoints validated under the existing `PATCH /api/v1/projects/:id` handler — no new route surface.
+
+**A. iframe enumeration**
+
+1. As User A (admin), open `/projects/:id/settings/execution` → scroll to **iframe enumeration** panel → default radio = **Same-origin (default)**, allowlist textarea disabled and empty.
+2. Pick **Allowlist** → textarea enables → paste two prefixes on separate lines:
+   ```
+   https://js.stripe.com/
+   https://widget.intercom.io/
+   ```
+   Click **Save** → green toast `iframe strategy: allowlist (2 entries).`
+3. Run a crawl against a target with a same-origin `<iframe>` (e.g. a local fixture page or staging deploy that embeds an iframe). Watch the run log → `🪟 iframes: N captured (M elements), K skipped (allowlist)` appears once per visited page that contains a matching frame.
+4. Open the generated tests for the iframe-hosting page → at least one test for an iframe-scoped element wraps the locator: `const frame = safeSelectFrame(page, 'https://js.stripe.com/'); await safeClick(frame, 'Submit');` — the prompt rule at `backend/src/pipeline/prompts/intentPrompt.js` + `journeyPrompt.js` injects this rule **only** when iframe elements are present.
+5. Switch strategy to **None** → save → next crawl emits NO `🪟 iframes:` log line; iframe content is invisible to test generation (deliberate opt-out for environments where iframe noise drowns out the main app).
+6. Switch to **All** → save → cross-origin frames (e.g. `https://www.youtube.com/embed/...`) still get attempted but fail with `⚠ Skipping cross-origin iframe: <url>` (browser SecurityError on DOM access; degraded gracefully).
+
+**B. SPA hydration wait**
+
+7. Open the **SPA hydration wait** panel → default radio = **Auto (default)**, selector input disabled.
+8. Crawl a React/Vue/Angular/Next.js target → run log includes a hydration wait between `📄 Visiting` and the snapshot capture. Generated tests target real interactive elements, not skeleton placeholders.
+9. Switch to **Custom** → enter `.app-loading-overlay, [data-app-loading]` in the selector input → save → next crawl waits up to `HYDRATION_WAIT_MS` (env, default 5 000 ms) for that selector to reach `state: "hidden"` before snapshotting. Verify by watching the log for the delay.
+10. Switch to **DOMContentLoaded** → save → snapshots fire at DCL, no hydration wait. Useful when an app has no loading indicator and the auto-mode 5 s timeout was adding latency to every page.
+11. **Negative — selector too tight:** under Custom, enter a selector that never matches (e.g. `.never-exists`) → crawl proceeds normally; the wait times out silently after `HYDRATION_WAIT_MS` and the snapshot is taken regardless (best-effort by design — never blocks the crawl).
+
+**C. Adaptive element timeout**
+
+12. Open the **Element timeout override** panel → default = empty (adaptive mode active).
+13. Trigger a regression run → in the run log find `⏱  Element timeout: <N>ms (p95LoadMs=<P>ms × 2, clamped to [5000, 30000])`. The displayed `p95LoadMs` matches `runs.p95LoadMs` in the DB. The element timeout = `clamp(2 × p95LoadMs, HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT)`.
+14. **Fast crawl** (p95 < 2500 ms) → element timeout = 5000 ms (clamps up to the floor).
+15. **Slow crawl** (p95 > 15000 ms) → element timeout = 30000 ms (clamps down to the ceiling).
+16. Set the **Override** to `15000` → save → green toast `Element timeout override set to 15000 ms — adaptive calculation bypassed.` Next run log shows `⏱  Element timeout: 15000ms (project override)`.
+17. Clear the override (empty input) → save → toast `Element timeout override cleared — adaptive calculation re-engaged.` Next run reverts to the `2 × p95LoadMs` formula.
+18. **Negative validation:** enter `100` (below 500 ms floor) → red toast "Element timeout override must be empty or an integer between 500 and 300000 (ms)." No PATCH fires.
+
+**D. Prometheus metrics**
+
+19. Hit `GET /metrics` (with `Authorization: Bearer $METRICS_SCRAPE_KEY`) → verify the four B2 series are present and reflect recent activity:
+    - `app_run_p95_load_ms{projectId="..."}` — last-computed p95 per project (gauge).
+    - `app_run_adaptive_timeout_ms{projectId="...", source="adaptive|project_override|default"}` — last-derived element timeout per project (gauge).
+    - `app_iframe_enumerated_total{strategy, outcome}` — per-strategy / per-outcome iframe enumeration counter. `outcome ∈ {captured, skipped_strategy, skipped_cross_origin, error}`.
+    - `app_spa_hydration_wait_seconds{mode}` — histogram of hydration wall-clock per mode. `mode ∈ {auto, custom, domcontentloaded}`.
+20. Run multiple crawls with different `hydrationType` values across projects → each value appears as its own `mode` label distribution in the histogram.
+
+**E. Permissions + cross-workspace isolation**
+
+21. As User C (`viewer`), open `/projects/:id/settings/execution` → the three B2 panels render in read-only mode (inputs + Save buttons disabled). Direct `PATCH /api/v1/projects/:id` with `{ iframeStrategy: "all" }` from DevTools → **403** (`requireRole("qa_lead")`).
+22. As User D (outsider, no membership in this workspace) → all three panels return **404** (`getByIdInWorkspace` blocks cross-workspace reads).
+
+**Negative / edge:**
+
+- iframe allowlist over 100 entries → red toast "iframe allowlist is capped at 100 entries." No PATCH fires.
+- Hydration selector > 500 chars → red toast "Hydration selector must be ≤ 500 characters."
+- `iframeStrategy` set to an unknown value via raw API call → **400** "iframeStrategy must be one of: same-origin, allowlist, all, none."
+- Run with no crawl history (description-mode generate) → `runs.p95LoadMs` stays NULL, element timeout falls back to `HEALING_ELEMENT_TIMEOUT` (5 000 ms) — the `source` label on the metric reads `default`.
+- Reviewing the iframe-prompt rule: open a generated test for a non-iframe page → the `IFRAME ELEMENTS (AUDIT-ROADMAP B2)` block does NOT appear in the prompt (the rule is conditional on `hasIframeElements`, keeping prompt size lean for the common case). Verified by inspecting `pipelineStats.promptAudit` on a no-iframe run.
+
+---
+
 ### 🪄 AI Fix (failed test recovery)
 
 **Preconditions:** A test exists with `playwrightCode` and `lastResult === "failed"` (or its latest run result is failed). AI provider configured. Role: `qa_lead` or `admin` (`backend/src/routes/testFix.js:152` — `requireRole("qa_lead")`).

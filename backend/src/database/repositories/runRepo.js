@@ -137,6 +137,7 @@ const INSERT_COLS = [
   "failureReason", // B1 (AUDIT-ROADMAP, migration 067): distinguishes ordinary failures from process-crash recoveries surfaced by `markOrphansInterrupted`.
   "reviewRejectedTests", // B1 (AUDIT-ROADMAP, migration 067): JSON column declared here; populated by B3.
   "reviewerCollapsed", // B1 (AUDIT-ROADMAP, migration 067): boolean (0/1) forward-declared for B3 — populated when author/reviewer routes resolve to the same routeId (spec at `docs/roadmap/AUDIT-ROADMAP.md:481`).
+  "p95LoadMs", // B2 (AUDIT-ROADMAP, migration 069): crawl-derived p95 of `crawl_snapshots.loadMs`, persisted at run-start so RunDetail / dashboards / CI consumers can audit the value the adaptive element-timeout calculation actually used. Pure integer ms; null when no load timings were recorded (API-only / explorer-only runs).
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

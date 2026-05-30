@@ -586,3 +586,49 @@ export const runTestResultDuplicatesTotal = new client.Counter({
   labelNames: ["reason"],
   registers: [register],
 });
+
+// ─── B2 — iframe + SPA hydration + adaptive timeout (AUDIT-ROADMAP Bundle 2) ──
+// Five metrics mirroring B1's "four named metrics" bar so operators can answer
+// "is the adaptive-timeout math actually helping?" and "is iframe enumeration
+// recovering content for embedded widgets?" without re-reading run logs.
+//
+// Histogram bucket choices:
+//   • p95 page-load + adaptive timeout share `AI_BUCKETS` (0.1 s – 2 min):
+//     covers fast pages (<500 ms) through enterprise SPAs with multi-second
+//     hydration. Same bucket set as `app_ai_provider_latency_seconds` so
+//     dashboards can co-plot "AI latency vs page-load latency" without
+//     re-tuning percentile widgets.
+//   • Hydration wait shares `HTTP_BUCKETS` (10 ms – 10 s): the wait is
+//     bounded by `HYDRATION_WAIT_MS` (env, default 5 000), and the histogram
+//     must surface both "near-zero" (no indicators present, fast fallthrough)
+//     and "near-bound" (operator should raise the env) without log-binning
+//     loss at the bound.
+
+export const runP95LoadMs = new client.Gauge({
+  name: "app_run_p95_load_ms",
+  help: "B2 — last-computed `runs.p95LoadMs` per project. Set at run-start from `crawlSnapshotRepo.getLoadTimesByRunId()` via the R-7 percentile in `testRunner.js#p95`. Operators alert on a sustained increase (latent app regression) and compare against `app_run_adaptive_timeout_ms` to verify the adaptive-clamp math.",
+  labelNames: ["projectId"],
+  registers: [register],
+});
+
+export const runAdaptiveTimeoutMs = new client.Gauge({
+  name: "app_run_adaptive_timeout_ms",
+  help: "B2 — last-derived per-run element timeout. `source` ∈ {project_override, adaptive, default} mirrors the precedence chain in `testRunner.js`: operator override beats `2 * p95LoadMs` beats env floor. Compare against `app_run_p95_load_ms` to verify the clamp math and against `HEALING_ELEMENT_TIMEOUT` / `MAX_ELEMENT_TIMEOUT` env bounds.",
+  labelNames: ["projectId", "source"],
+  registers: [register],
+});
+
+export const iframeEnumeratedTotal = new client.Counter({
+  name: "app_iframe_enumerated_total",
+  help: "B2 — iframes processed by `crawlBrowser.js#enumerateFrameSnapshots`. `outcome` ∈ {captured, skipped_cross_origin, skipped_strategy, error}: `captured` = snapshot persisted + elements merged; `skipped_cross_origin` = SecurityError on DOM access (Stripe / Intercom / etc.); `skipped_strategy` = `shouldEnumerateFrame` rejected before snapshot attempt; `error` = unexpected throw inside the snapshot path. `strategy` ∈ {same-origin, allowlist, all, none} matches `project.iframeStrategy`.",
+  labelNames: ["strategy", "outcome"],
+  registers: [register],
+});
+
+export const spaHydrationWaitSeconds = new client.Histogram({
+  name: "app_spa_hydration_wait_seconds",
+  help: "B2 — wall-clock duration of the SPA hydration wait in `pageSnapshot.js#waitForSpaHydration`. `mode` ∈ {auto, custom, domcontentloaded} mirrors `project.hydrationType`. `domcontentloaded` observations are always 0 (the function early-returns); included for symmetry so dashboards can split mode prevalence without an extra label query. Near-bound values (within ~10% of `HYDRATION_WAIT_MS`) signal the env default is too tight for the SPA in question.",
+  labelNames: ["mode"],
+  buckets: HTTP_BUCKETS,
+  registers: [register],
+});

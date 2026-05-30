@@ -22,27 +22,11 @@ import {
   VISION_STRATEGY_INDICES,
 } from "../src/selfHealing.js";
 import { getDatabase } from "../src/database/sqlite.js";
+import { createTestContext } from "./helpers/test-base.js";
 
-function test(name, fn) {
-  try {
-    const r = fn();
-    if (r && typeof r.then === "function") {
-      return r.then(
-        () => console.log(`  PASS  ${name}`),
-        (err) => {
-          console.log(`  FAIL  ${name}`);
-          console.log(`        ${err.message}`);
-          process.exitCode = 1;
-        },
-      );
-    }
-    console.log(`  PASS  ${name}`);
-  } catch (err) {
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err.message}`);
-    process.exitCode = 1;
-  }
-}
+const t = createTestContext();
+const runner = t.createTestRunner();
+const test = (name, fn) => runner.test(name, fn);
 
 console.log("\n[MNT-001] host-side vision healing (stages 7-8)");
 
@@ -537,5 +521,4 @@ await test("envelope: pixelmatch_and_llm with both stages declining emits BOTH f
   assert.equal(rows[1].artifact?.kind, "vision_llm_failed");
 });
 
-if (process.exitCode) process.exit(1);
-console.log("\n[MNT-001] vision healing tests passed");
+runner.summary("self-healing-vision");

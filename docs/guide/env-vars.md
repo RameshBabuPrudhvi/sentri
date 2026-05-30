@@ -318,7 +318,9 @@ S3_ENDPOINT=https://minio.internal:9000
 
 | Variable | Default | Description |
 |---|---|---|
-| `HEALING_ELEMENT_TIMEOUT` | `5000` | Element finding timeout per strategy (ms) |
+| `HEALING_ELEMENT_TIMEOUT` | `5000` | Element finding timeout per strategy (ms). **Floor** for the AUDIT-ROADMAP B2 adaptive timeout — the runner computes `2 × p95(crawl page-load ms)` per run and clamps the result to `[HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT]`. Raise this when your environment's fastest pages still need >5 s budget per locator. |
+| `MAX_ELEMENT_TIMEOUT` | `30000` | **Ceiling** for the AUDIT-ROADMAP B2 adaptive element timeout. Without a ceiling, a single slow outlier page would bloat the per-action wait into the multi-minute range and let runaway tests sit blocked on a single locator. Matches `BROWSER_TEST_TIMEOUT / 4` (a test's slowest action should be at most a quarter of the test budget). Per-project escape hatch: `project.elementTimeoutOverride` bypasses the adaptive calculation entirely; route validation clamps the override to `[500, 300000]` (0.5 s – 5 min). |
+| `HYDRATION_WAIT_MS` | `5000` | AUDIT-ROADMAP B2 — max wait (ms) for SPA loading indicators to clear before snapshotting. React / Vue / Angular / Next.js apps populate the interactive DOM 200–2 000 ms after `domcontentloaded` fires; without this wait the snapshot captures skeleton state and generated tests target elements that don't exist at execution time. Best-effort: apps without recognisable loading indicators fall through after the bound and the crawl proceeds unchanged. Per-project override via `project.hydrationType = 'custom'` + `hydrationSelector` (operator-supplied selector to wait for) or `'domcontentloaded'` (opt out). |
 | `HEALING_RETRY_COUNT` | `3` | Retries per interaction before giving up |
 | `HEALING_RETRY_DELAY` | `400` | Pause between retries (ms) |
 | `HEALING_HINT_MAX_FAILS` | `3` | Skip healing hints that have failed this many consecutive times |

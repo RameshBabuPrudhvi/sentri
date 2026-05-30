@@ -142,6 +142,55 @@ export function getLoadTimesByRunId(runId) {
 }
 
 /**
+ * AUDIT-ROADMAP B2 — load-time array sourced from the project's most recent
+ * crawl run that actually recorded `loadMs` rows. This is the path the
+ * regression-run adaptive-timeout calculation uses, because a regression
+ * run gets a brand-new `runId` (`routes/runs.js:225`) distinct from the
+ * crawl's runId — so `getLoadTimesByRunId(testRunId)` would return `[]`
+ * and the adaptive math would silently fall back to the env floor.
+ *
+ * Strategy:
+ *   1. Find the latest `runs` row for this project that has at least one
+ *      `crawl_snapshots.loadMs IS NOT NULL` row (a real crawl run, not an
+ *      explorer or API-only run).
+ *   2. Return that run's load times.
+ *
+ * Single SELECT with a correlated subquery so the database does the
+ * "latest crawl with load times" lookup in one round-trip rather than
+ * the route layer iterating runs. Compatible with both SQLite and
+ * Postgres (`MAX(startedAt)` + grouped subquery is portable).
+ *
+ * Returns `[]` when no crawl run has recorded `loadMs` for this project
+ * yet (first-ever run, API-only crawls, partial-failure crawls). The
+ * caller (`testRunner.js#runTests`) treats `[]` as "no signal" and falls
+ * back to the env floor — matches pre-B2 behaviour bit-for-bit.
+ *
+ * @param {string} projectId
+ * @returns {number[]}
+ */
+export function getLoadTimesByProjectId(projectId) {
+  if (!projectId) return [];
+  const db = getDatabase();
+  const rows = db.prepare(
+    `SELECT cs.loadMs FROM crawl_snapshots cs
+       JOIN runs r ON r.id = cs.runId
+      WHERE r.projectId = ?
+        AND r.deletedAt IS NULL
+        AND cs.loadMs IS NOT NULL
+        AND cs.runId = (
+          SELECT cs2.runId FROM crawl_snapshots cs2
+            JOIN runs r2 ON r2.id = cs2.runId
+           WHERE r2.projectId = ?
+             AND r2.deletedAt IS NULL
+             AND cs2.loadMs IS NOT NULL
+           ORDER BY r2.startedAt DESC, cs2.createdAt DESC
+           LIMIT 1
+        )`
+  ).all(projectId, projectId);
+  return rows.map((r) => r.loadMs);
+}
+
+/**
  * Row count for a run (used by tests and the lean run response shape).
  *
  * @param {string} runId

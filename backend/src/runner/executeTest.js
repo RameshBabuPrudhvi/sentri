@@ -456,6 +456,13 @@ function formatTestError(err) {
  * @param {string}  [opts.serverCoverageEndpoint] - AUTO-009h: per-project
  *   endpoint for server-side coverage capture, same forwarding pattern as
  *   `coverageEnabled`. Only consumed by `executeApiTest`.
+ * @param {number}  [opts.adaptiveTimeout] - AUDIT-ROADMAP B2: adaptive element
+ *   timeout (ms) computed once per run by `testRunner.js` from the crawl's
+ *   p95 page-load time, clamped to `[HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT]`.
+ *   Forwarded into the vm sandbox via `runGeneratedCode` so every self-
+ *   healing helper (`safeClick`, `safeFill`, etc.) uses this timeout
+ *   instead of the env default. When omitted, the runtime helper falls
+ *   back to the env default and pre-B2 behaviour is preserved.
  */
 export async function executeTest(test, browser, runId, stepIndex, runStart, opts = {}) {
   // ── API-only test path: no browser context needed ──────────────────────
@@ -709,6 +716,10 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
         const healingHints = getHealingHistoryForTest(healingScopeId);
         const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints, {
+          // AUDIT-ROADMAP B2 — forward the adaptive element timeout into the
+          // sandboxed helper string so safe* verbs respect the per-run value
+          // instead of the env default.
+          elementTimeout: opts.adaptiveTimeout,
           onStepCapture: async (stepNumber, _page) => {
             try {
               const shot = await captureScreenshot(_page, runId, stepIndex, { stepNumber });

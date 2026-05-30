@@ -13,21 +13,11 @@
  */
 import assert from "node:assert/strict";
 import { performVisionHealReaction } from "../src/runner/executeTest.js";
+import { createTestContext } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-async function test(name, fn) {
-  try {
-    await fn();
-    console.log(`  ✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.stack || err.message}`);
-    failed++;
-  }
-}
+const t = createTestContext();
+const runner = t.createTestRunner();
+const test = (name, fn) => runner.test(name, fn);
 
 /**
  * Build a fake page object that records every mouse call. The test then
@@ -252,5 +242,4 @@ await test("bbox center math handles odd dimensions via Math.round", async () =>
   assert.deepEqual(page.calls[0].args, [141, 217]);
 });
 
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+runner.summary("vision-heal-reaction");

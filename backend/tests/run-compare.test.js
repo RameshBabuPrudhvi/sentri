@@ -6,6 +6,7 @@ import * as runRepo from "../src/database/repositories/runRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
+const runner = t.createTestRunner();
 const { app, req, workspaceScope } = t;
 
 app.use("/api/auth", authRouter);
@@ -37,31 +38,35 @@ async function main() {
       { testId: "T4", testName: "D", status: "failed" },
     ] });
 
-    // ── Happy path: flipped / added / removed / unchanged counts ──────────────
-    out = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD", { token });
-    assert.equal(out.res.status, 200);
-    assert.equal(out.json.summary.flipped, 1);
-    assert.equal(out.json.summary.added, 1);
-    assert.equal(out.json.summary.removed, 1);
-    assert.equal(out.json.summary.unchanged, 1);
-    assert.equal(out.json.summary.total, 4);
-
-    // ── 404: unknown run ID ───────────────────────────────────────────────────
-    out = await req(base, "/api/runs/RUN_NEW/compare/NOPE", { token });
-    assert.equal(out.res.status, 404);
-
-    // ── 401: unauthenticated caller ───────────────────────────────────────────
-    out = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD");
-    assert.equal(out.res.status, 401);
-
-    // ── 404: cross-workspace ACL (second user cannot see another workspace's runs)
-    const { token: otherToken } = await t.registerAndLogin(base, {
-      name: "U2", email: `u2-${Date.now()}@x.local`, password: "Password123!",
+    await runner.test("happy path: flipped / added / removed / unchanged counts", async () => {
+      const r = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD", { token });
+      assert.equal(r.res.status, 200);
+      assert.equal(r.json.summary.flipped, 1);
+      assert.equal(r.json.summary.added, 1);
+      assert.equal(r.json.summary.removed, 1);
+      assert.equal(r.json.summary.unchanged, 1);
+      assert.equal(r.json.summary.total, 4);
     });
-    out = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD", { token: otherToken });
-    assert.equal(out.res.status, 404);
 
-    console.log("✅ run-compare: all checks passed");
+    await runner.test("404: unknown run ID", async () => {
+      const r = await req(base, "/api/runs/RUN_NEW/compare/NOPE", { token });
+      assert.equal(r.res.status, 404);
+    });
+
+    await runner.test("401: unauthenticated caller", async () => {
+      const r = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD");
+      assert.equal(r.res.status, 401);
+    });
+
+    await runner.test("404: cross-workspace ACL (second user cannot see another workspace's runs)", async () => {
+      const { token: otherToken } = await t.registerAndLogin(base, {
+        name: "U2", email: `u2-${Date.now()}@x.local`, password: "Password123!",
+      });
+      const r = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD", { token: otherToken });
+      assert.equal(r.res.status, 404);
+    });
+
+    runner.summary("run-compare");
   } finally {
     env.restore();
     await new Promise((resolve) => server.close(resolve));
