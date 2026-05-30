@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] — 2026-05-30
+
 ### Security
 
 - **CR-003 / TD-003** — Helm chart now refuses to render with the bundled `change-me` placeholder for `JWT_SECRET` or `ENCRYPTION_KEY`. `helm install` / `helm upgrade` aborts with a human-readable error pointing operators at the override syntax, so a default `helm install sentri ./helm/sentri` can no longer silently ship predictable JWTs and a known AES key to a cluster.
