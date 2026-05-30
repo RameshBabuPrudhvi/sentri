@@ -15,6 +15,7 @@ const files = [
   "tests/query-client.test.js",
   "tests/extractCodeBlock.test.js",
   "tests/automation-status.test.js",
+  "tests/dependency-graph.test.js",
   "tests/approval-provenance.test.js",
   // AUTO-022 — score-format helpers powering the EvalPanel ScoreBadge.
   "tests/eval-score-format.test.js",

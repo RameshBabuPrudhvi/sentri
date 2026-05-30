@@ -61,6 +61,7 @@ import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared h
 // `__testables` below keeps `tests/fixture-iteration.test.js` working
 // unchanged; new consumers should import directly from `utils/csv.js`.
 import { parseCsvRows, clampIterationCap } from "../utils/csv.js";
+import { findDependencyCycle } from "../runner/dependencyOrder.js";
 
 const router = Router();
 
@@ -80,6 +81,42 @@ const parseTags = (raw) => {
   const cleaned = arr.map((s) => String(s).trim()).filter(Boolean);
   return cleaned.length ? cleaned : undefined;
 };
+
+function dependencyError(status, payload) {
+  return { status, payload: { error: payload.message || payload.code, ...payload } };
+}
+
+function validateDependsOnForSave(projectId, testId, rawDependsOn) {
+  if (rawDependsOn === undefined) return null;
+  if (!Array.isArray(rawDependsOn)) {
+    return dependencyError(400, { code: "INVALID_DEPENDS_ON", message: "dependsOn must be an array" });
+  }
+  const invalidIndex = rawDependsOn.findIndex((id) => typeof id !== "string" || !id.trim());
+  if (invalidIndex !== -1) {
+    return dependencyError(400, { code: "INVALID_DEPENDS_ON", index: invalidIndex, message: "dependsOn entries must be non-empty test ID strings" });
+  }
+  const dependsOn = [...new Set(rawDependsOn.map((id) => id.trim()))];
+  const projectTests = testRepo.getByProjectId(projectId);
+  const byId = new Map(projectTests.map((t) => [t.id, t]));
+
+  if (dependsOn.includes(testId)) {
+    return dependencyError(400, { code: "CYCLE_DETECTED", path: [testId, testId], message: "Dependency cycle detected" });
+  }
+  for (const depId of dependsOn) {
+    if (!byId.has(depId)) {
+      return dependencyError(400, { code: "MISSING_UPSTREAM", testId: depId, message: "dependsOn contains a test that does not exist in this project" });
+    }
+  }
+
+  const graph = byId.has(testId)
+    ? projectTests.map((t) => t.id === testId ? { ...t, dependsOn } : t)
+    : [...projectTests, { id: testId, dependsOn }];
+  const path = findDependencyCycle(graph);
+  if (path) {
+    return dependencyError(400, { code: "CYCLE_DETECTED", path, message: "Dependency cycle detected" });
+  }
+  return { dependsOn };
+}
 
 // ─── Test CRUD ────────────────────────────────────────────────────────────────
 
@@ -226,7 +263,7 @@ router.patch("/tests/:testId", requireRole("qa_lead"), async (req, res) => {
   const ownerProject = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
   if (!ownerProject) return res.status(404).json({ error: "not found" });
 
-  const { steps, name, description, priority, regenerateCode, previewCode, playwrightCode, linkedIssueKey, tags } = req.body;
+  const { steps, name, description, priority, regenerateCode, previewCode, playwrightCode, linkedIssueKey, tags, dependsOn } = req.body;
 
   const updates = {};
 
@@ -235,6 +272,9 @@ router.patch("/tests/:testId", requireRole("qa_lead"), async (req, res) => {
   if (typeof priority === "string")    updates.priority    = priority;
   if (typeof linkedIssueKey === "string") updates.linkedIssueKey = linkedIssueKey.trim() || null;
   if (Array.isArray(tags)) updates.tags = tags.map(t => String(t).trim()).filter(Boolean);
+  const dependencyValidation = validateDependsOnForSave(test.projectId, test.id, dependsOn);
+  if (dependencyValidation?.status) return res.status(dependencyValidation.status).json(dependencyValidation.payload);
+  if (dependencyValidation) updates.dependsOn = dependencyValidation.dependsOn;
   if (typeof playwrightCode === "string") {
     if (test.playwrightCode && test.playwrightCode !== playwrightCode) {
       updates.playwrightCodePrev = test.playwrightCode;
@@ -444,9 +484,11 @@ router.post("/projects/:id/tests", requireRole("qa_lead"), (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const { name, description, steps, playwrightCode, priority, type } = req.body;
+  const { name, description, steps, playwrightCode, priority, type, dependsOn } = req.body;
 
   const testId = generateTestId();
+  const dependencyValidation = validateDependsOnForSave(project.id, testId, dependsOn);
+  if (dependencyValidation?.status) return res.status(dependencyValidation.status).json(dependencyValidation.payload);
   const test = {
     id: testId,
     projectId: project.id,
@@ -469,6 +511,13 @@ router.post("/projects/:id/tests", requireRole("qa_lead"), (req, res) => {
     modelUsed: null,
     linkedIssueKey: null,
     tags: [],
+    // AUTO-014: legacy rows store `null` when no dependencies are declared
+    // (`docs/api/tests.md` documents `null` for "tests with no dependency
+    // declaration"). New tests created without a `dependsOn` body field
+    // must match that contract — passing `undefined` here would let the
+    // repo's `fillDefaults` coerce it to `[]`, drifting the persisted shape
+    // for new vs. legacy rows.
+    dependsOn: dependencyValidation?.dependsOn ?? null,
     workspaceId: project.workspaceId || null,
   };
 

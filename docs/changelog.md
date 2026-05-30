@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **AUTO-014** — Tests can declare dependencies so prerequisite tests run first and downstream tests are skipped with clear upstream-failure badges.
 - **B1** — Test results survive a server crash or OOM kill mid-run, so a 500-test suite that dies at test 490 no longer loses everything.
 - **B1** — Crash-recovered runs surface in the UI with an Interrupted badge and an admin-only Resume button that re-runs only the tests that didn't finish.
 - **B1** — Large crawls now use far less memory, so operators can crawl significantly larger sites on the same container without OOM kills.

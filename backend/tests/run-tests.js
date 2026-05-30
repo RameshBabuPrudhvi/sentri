@@ -290,6 +290,12 @@ const files = [
   "tests/deployment-triggers.test.js",
   "tests/pr11-fixes.test.js",
   "tests/risk-scorer.test.js",
+  "tests/dependency-order.test.js",
+  "tests/test-routes-depends-on.test.js",
+  // AUTO-014 — NEXT.md acceptance-criteria pins (smoke-pin invariant,
+  // pass-rate denominator excludes upstream_failed + missing_upstream,
+  // dispatch-guard contract via computeUpstreamSkips).
+  "tests/dependency-acceptance.test.js",
   "tests/impact-analysis.test.js",
   "tests/github-checks.test.js",
   "tests/github-install-callback.test.js",

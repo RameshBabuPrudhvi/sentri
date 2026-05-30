@@ -2178,3 +2178,11 @@ Once-per-release smoke. Pass all 8 sections before tagging.
 - [ ] Repeat the same request from a sibling workspace and verify it is not blocked by the first workspace's AI bucket.
 - [ ] Send `SIGTERM` to the backend or worker process during an idle period and confirm shutdown logs include browser-pool draining before queue / Redis teardown and no Chromium processes remain.
 - [ ] Verify auth, SSE, `/health`, and regular GET routes are not throttled by the AI-specific limiter.
+
+## Test dependency ordering (AUTO-014)
+- [ ] Create three tests in one project: login, checkout depending on login, and receipt depending on checkout.
+- [ ] Approve all three tests, run the suite, and verify Run Detail shows login before checkout before receipt even if the Tests page order differs.
+- [ ] Force the login test to fail and re-run; checkout and receipt should appear as skipped with `upstream_failed` and a 🔗 badge linking to login.
+- [ ] Edit checkout to depend on receipt and verify the save is rejected with `CYCLE_DETECTED` and the previous dependency remains unchanged.
+- [ ] Run a suite where a test depends on a test outside the dispatched set and verify it is skipped with `missing_upstream` and excluded from pass-rate math.
+- [ ] Mark an unrelated smoke test and verify it still dispatches before the non-smoke dependency chain.

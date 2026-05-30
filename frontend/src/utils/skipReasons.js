@@ -16,7 +16,7 @@
  */
 
 /** @type {Set<string>} */
-export const NON_EXECUTED_SKIP_REASONS = new Set(["over_budget", "skipped_no_impact"]);
+export const NON_EXECUTED_SKIP_REASONS = new Set(["over_budget", "skipped_no_impact", "upstream_failed", "missing_upstream"]);
 
 /**
  * Count result rows that represent a dispatch-time skip (never executed).

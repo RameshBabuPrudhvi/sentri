@@ -435,6 +435,8 @@ export default function RunDetail() {
   // (never silently dropped).
   const skippedOverBudget = results.filter((r) => r.status === "skipped" && r.skipReason === "over_budget").length;
   const skippedNoImpact = results.filter((r) => r.status === "skipped" && r.skipReason === "skipped_no_impact").length;
+  const skippedUpstreamFailed = results.filter((r) => r.status === "skipped" && r.skipReason === "upstream_failed").length;
+  const skippedMissingUpstream = results.filter((r) => r.status === "skipped" && r.skipReason === "missing_upstream").length;
   const changedFiles = Array.isArray(run.changedFiles) ? run.changedFiles : [];
   const impactAnalysis = run.impactAnalysis && typeof run.impactAnalysis === "object" ? run.impactAnalysis : null;
   const impactedCount = Array.isArray(impactAnalysis?.impactedTestIds) ? impactAnalysis.impactedTestIds.length : null;
@@ -731,6 +733,22 @@ export default function RunDetail() {
               title="Tests skipped because the git diff did not map to their captured routes."
             >
               {skippedNoImpact} skipped (no impact)
+            </span>
+          )}
+          {!isCrawl && skippedUpstreamFailed > 0 && (
+            <span
+              className="badge badge-blue rd-meta-badge-xs"
+              title="Tests skipped because a prerequisite test failed."
+            >
+              🔗 {skippedUpstreamFailed} skipped (upstream failed)
+            </span>
+          )}
+          {!isCrawl && skippedMissingUpstream > 0 && (
+            <span
+              className="badge badge-gray rd-meta-badge-xs"
+              title="Tests skipped because a declared dependency was outside this dispatch set."
+            >
+              🔗 {skippedMissingUpstream} skipped (missing upstream)
             </span>
           )}
           {!isCrawl && run.budgetMinutes != null && (

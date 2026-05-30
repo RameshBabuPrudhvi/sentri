@@ -19,10 +19,12 @@
  * Current members:
  *  - `over_budget`        — AUTO-001 (runs.js + trigger.js budget truncation)
  *  - `skipped_no_impact`  — AUTO-004 (trigger.js impact-analysis filter)
+ *  - `upstream_failed`    — AUTO-014 (dependency cascade skip)
+ *  - `missing_upstream`   — AUTO-014 (dependency outside dispatch set)
  */
 
 /** @type {Set<string>} */
-export const NON_EXECUTED_SKIP_REASONS = new Set(["over_budget", "skipped_no_impact"]);
+export const NON_EXECUTED_SKIP_REASONS = new Set(["over_budget", "skipped_no_impact", "upstream_failed", "missing_upstream"]);
 
 /**
  * Predicate — true when a result row represents a dispatch-time skip
