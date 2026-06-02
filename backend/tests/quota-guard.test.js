@@ -180,8 +180,16 @@ test("checkSpendCap: alert does NOT fire below threshold", () => {
 test("checkSpendCap: monthly cap enforced — month-to-date sum", () => {
   const wsId = seedWorkspace({ monthlyCap: 50.0 });
   // Two rows totalling exactly the cap — exceeded by the >= semantics.
+  //
+  // Both rows must land inside the current calendar month so the MTD
+  // sum reaches the cap regardless of the wall-clock date. Pre-fix the
+  // second row used `ageHours: 24 * 5` (5 days ago), which on the
+  // first ~5 days of any calendar month rolls into the PREVIOUS month
+  // and gets excluded from MTD — leaving the visible sum at $25 < $50
+  // and silently flipping the assertion. CI on June 1 caught this.
+  // Both rows now at `ageHours: 1` so the test is calendar-stable.
   insertCostRow(wsId, { costUsd: 25.0, ageHours: 1 });
-  insertCostRow(wsId, { costUsd: 25.0, ageHours: 24 * 5 });
+  insertCostRow(wsId, { costUsd: 25.0, ageHours: 1 });
   const r = checkSpendCap(wsId);
   assert.equal(r.ok, false);
   assert.equal(r.exceeded, "month");

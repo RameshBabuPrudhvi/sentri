@@ -447,7 +447,7 @@ lands)
 **Covers sub-items:** RLY-003 (reviewer collapse detection), QAL-004
 (human escalation on agent failure)
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit §C.2 · §D.1 · §D.2
+**Status:** ✅ Complete (this PR) | **Effort:** M | **Source:** Audit §C.2 · §D.1 · §D.2
 
 **Problem:**
 
@@ -1221,7 +1221,7 @@ collapsed), AUTO-023 ✅ (oracle agent role + tool registry), AUTO-009 ✅
 |--------|-------|----------|--------|--------|
 | B1 — Run persistence + crash recovery | RLY-001, RLY-008, RLY-005 | 🔴 P0 | L | ✅ Complete (PR #2) |
 | B2 — iframe + adaptive timeouts + SPA | RLY-006, RLY-009 | 🔴 P0 | L | ✅ Complete (this PR) |
-| B3 — Reviewer independence + escalation | RLY-003, QAL-004 | 🔴 P0 | M | 🔲 Planned |
+| B3 — Reviewer independence + escalation | RLY-003, QAL-004 | 🔴 P0 | M | ✅ Complete (this PR) |
 | B4 — Auth recovery + target-app TOTP | RLY-004, SCL-001 | 🔴 P0 | M | 🔲 Planned |
 | B5 — Test dependency ordering | AUTO-014 | 🟡 P1 | M | ✅ Complete |
 | B6 — Test quality gates | QAL-001, QAL-005, QAL-002, QAL-010 | 🟡 P1 | XL | 🔲 Planned |

@@ -279,7 +279,7 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
   // injection still falls through to the full `validateProjectPayload` +
   // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride", "reviewRejectionAlertThreshold"]);
   const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
@@ -532,6 +532,27 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
       return res.status(400).json({ error: "hydrationSelector must be null or a string of up to 500 characters." });
     } else {
       fields.hydrationSelector = v.trim();
+    }
+  }
+
+  // AUDIT-ROADMAP B3 — per-project escalation threshold for FEA-001
+  // review-rejection notifications. Accepts:
+  //   • `null` / `0` → notify on any rejection (column default).
+  //   • positive integer ≤ 1000 → notify only when the run's discarded
+  //     test count is at least this large (operator-tuned noise floor).
+  //   • `-1` → opt-out, never notify.
+  // Bounded at 1000 (any larger value is functionally equivalent to
+  // opt-out — the loop hard cap on tests-per-run is well below this).
+  // Mirrors GitHub Actions `failure-notification-threshold: -1` and
+  // Datadog monitor mute semantics.
+  if (Object.hasOwn(req.body, "reviewRejectionAlertThreshold")) {
+    const v = req.body.reviewRejectionAlertThreshold;
+    if (v === null) {
+      fields.reviewRejectionAlertThreshold = 0;
+    } else if (!Number.isInteger(v) || v < -1 || v > 1000) {
+      return res.status(400).json({ error: "reviewRejectionAlertThreshold must be null, -1 (opt-out), 0 (always notify), or a positive integer up to 1000." });
+    } else {
+      fields.reviewRejectionAlertThreshold = v;
     }
   }
 

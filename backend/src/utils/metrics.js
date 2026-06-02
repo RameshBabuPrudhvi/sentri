@@ -68,8 +68,8 @@ export const runsTotal = new client.Counter({
 
 export const runOutcomeTotal = new client.Counter({
   name: "app_run_outcome_total",
-  help: "Total runs that reached a terminal status. Combined with app_runs_total gives the per-type success rate via PromQL: sum(rate(app_run_outcome_total{status='completed'}[5m])) / sum(rate(app_runs_total[5m])).",
-  labelNames: ["type", "status"],
+  help: "Total runs that reached a terminal status. Combined with app_runs_total gives the per-type success rate via PromQL: sum(rate(app_run_outcome_total{status='completed'}[5m])) / sum(rate(app_runs_total[5m])). B3: `projectId` label added so per-project rejection-rate alerts can use this as the denominator.",
+  labelNames: ["type", "status", "projectId"],
   registers: [register],
 });
 
@@ -296,10 +296,15 @@ export const agentReviewRounds = new client.Histogram({
  */
 export function recordRunOutcome(run, defaultType = "unknown") {
   try {
-    const labels = { type: run?.type || defaultType, status: run?.status || "completed" };
+    const labels = { type: run?.type || defaultType, status: run?.status || "completed", projectId: run?.projectId || "" };
     runOutcomeTotal.inc(labels);
+    // Duration histogram keeps the original (type, status) label set —
+    // adding projectId to a histogram would explode bucket cardinality
+    // (projects × types × statuses × buckets). Operators who need
+    // per-project duration use the `app_run_p95_load_ms{projectId}` gauge.
+    const durationLabels = { type: run?.type || defaultType, status: run?.status || "completed" };
     const seconds = Number(run?.duration || 0) / 1000;
-    if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
+    if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(durationLabels, seconds);
   } catch { /* best-effort */ }
 }
 
@@ -381,6 +386,89 @@ export const agentToolCallsTotal = new client.Counter({
   name: "app_agent_tool_calls_total",
   help: "AUTO-023 B5 — total tool calls by tool and outcome.",
   labelNames: ["tool", "outcome"],
+  registers: [register],
+});
+
+// B3 (AUDIT-ROADMAP Bundle 3) — reviewer-collapse counter. Increments
+// once per run when the pre-run gate in `crawler.js` detects that the
+// `author` and `reviewer` agent roles resolve to the SAME provider
+// route id. In that configuration the "two-agent" review loop cannot
+// produce independent signal — the reviewer is the author talking to
+// itself at the same temperature against the same prompt vocabulary,
+// so `runReviewerAuthorLoop`'s LLM reviewer pass is skipped in favour
+// of the heuristic `validateTest` path.
+//
+// `projectId` label gives operators per-project attribution from
+// Prometheus alone (no need to cross-reference with the activity
+// log). Mirrors `app_vision_heal_budget_exhausted_total{projectId,
+// reason}` and `app_run_p95_load_ms{projectId}` — the same pattern
+// for "the gauge is interesting on its own but the per-tenant slice
+// is where operators alert". Cardinality concern: self-hosted Sentri
+// runs single-digit-to-low-hundreds projects per workspace; very
+// large multi-tenant deployments can `relabel_configs`-drop the label
+// at scrape time (documented at `monitoring/prometheus/alerts.yml`
+// alongside the equivalent escape hatch for vision-heal). The
+// equivalent "drop label on scrape" pattern is the industry default
+// (AWS, GCP, Datadog all document this for high-cardinality
+// per-tenant labels).
+//
+// Industry parallel: AWS Config "non-compliant resource" counter +
+// Datadog monitor `notify_audit_log` count — surface the policy
+// violation as a metric, not just a UI badge.
+export const agentReviewerCollapsedTotal = new client.Counter({
+  name: "app_agent_reviewer_collapsed_total",
+  help: "B3 (AUDIT-ROADMAP) — runs where the author/reviewer route collapse gate fired, so the LLM reviewer pass was skipped in favour of heuristic-only validation. Sustained non-zero rate means operators should configure a distinct reviewer route in Settings → Agent Roles. Labelled by projectId for per-project attribution; multi-tenant operators can drop the label via `relabel_configs` at scrape time.",
+  labelNames: ["projectId"],
+  registers: [register],
+});
+
+// B3 (AUDIT-ROADMAP Bundle 3) — review-rejection counter. Increments
+// per individual test (not per run) every time the reviewer↔author
+// loop terminates with `ReviewRejection` inside the post-run feedback
+// loop. Pair with `app_runs_total` to compute the per-run rejection
+// rate; sustained spikes are a leading signal of reviewer-prompt
+// drift, brittle generation, or a regressed author model.
+//
+// `projectId` label — same rationale as `agentReviewerCollapsedTotal`
+// above. Operators alerting on "which project's reviewer drifted?"
+// need the per-tenant slice; the cross-reference to `activities` is
+// possible but adds 1-3 seconds to every alert investigation. The
+// label closes that gap.
+export const reviewRejectionsTotal = new client.Counter({
+  name: "app_review_rejections_total",
+  help: "B3 (AUDIT-ROADMAP) — individual tests discarded by ReviewRejection inside the post-run feedback loop. Labelled by projectId for per-project attribution. Pair with app_runs_total for per-run rejection rate.",
+  labelNames: ["projectId"],
+  registers: [register],
+});
+
+// B3 (AUDIT-ROADMAP Bundle 3) — review-rejection notification delivery
+// counter. One increment per (channel, outcome) tuple on every
+// `fireReviewRejectionNotifications` dispatch. Closes the visibility
+// gap industry-standard SaaS QA platforms ship with: operators can
+// see "is the Teams webhook actually delivering?" from Prometheus
+// alone, without grepping worker logs.
+//
+// Labels:
+//   • channel  ∈ {teams, email, webhook} — which transport.
+//   • outcome  ∈ {sent, failed, cooldown_skipped, threshold_skipped,
+//                 disabled, no_settings} — the dispatch's terminal
+//                 disposition. `sent` is the success path; everything
+//                 else is a documented skip / failure reason so ops
+//                 can alert on `outcome="failed"` rate per channel.
+//
+// Bounded cardinality: 3 channels × 6 outcomes = 18 series per
+// deployment (no projectId — channel-level signal is global; per-project
+// attribution lives in the audit log + DLQ). Mirrors
+// `app_ai_provider_errors_total{reason}` shape.
+//
+// Industry parallel: Datadog `Monitor.notification.sent`, PagerDuty
+// `incidents.notifications.delivered` — every alerting platform
+// exposes per-channel delivery counters so operators can SLO against
+// the integration itself, not just the source signal.
+export const reviewRejectionNotificationsTotal = new client.Counter({
+  name: "app_review_rejection_notifications_total",
+  help: "B3 (AUDIT-ROADMAP) — review-rejection notification dispatches. `channel` ∈ {teams, email, webhook}; `outcome` ∈ {sent, failed, cooldown_skipped, threshold_skipped, disabled, no_settings}. Alert on `outcome=\"failed\"` rate per channel to detect broken webhooks before customers do.",
+  labelNames: ["channel", "outcome"],
   registers: [register],
 });
 

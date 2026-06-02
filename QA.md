@@ -840,6 +840,72 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🛡️ Reviewer independence + review-rejection escalation (AUDIT-ROADMAP B3)
+
+**Preconditions:** Workspace with ≥ 2 distinct `provider_routes` rows (e.g. Anthropic + OpenAI). One project with `qa_lead` or `admin` access. Notification settings on the project (Settings → Notifications) with at least one channel — Teams webhook via [webhook.site](https://webhook.site) is the easiest local loop. Backend behaviour gated by migrations 067 (`runs.reviewerCollapsed`, `runs.reviewRejectedTests`) + 070 (`projects.reviewRejectionAlertThreshold`). Automated coverage: `backend/tests/agent-loop-collapse.test.js`, `backend/tests/review-rejection-notification.test.js`, `backend/tests/review-rejection-threshold-routes.test.js`.
+
+**Surfaces covered:** Settings → Agent Roles collapse banner; RunDetail chip + "Tests discarded by review" section; Project Settings → Review escalation threshold panel; FEA-001 notification channels; Prometheus counters + alerts; SOC-2 audit log (`test.review_rejected`).
+
+**A. Reviewer-collapse gate (RLY-003)**
+
+1. As User A (admin), open **Settings → Agent Roles**. Assign DISTINCT routes to `author` and `reviewer`. No warning banner appears.
+2. Re-assign `reviewer` to the SAME route as `author`. Page renders an amber `role="alert"` banner explaining the collapse + fix path.
+3. Trigger a crawl. Run log shows `⚠ Reviewer collapsed — author + reviewer share provider route <routeId>; this run will use heuristic-only review.` RunDetail header renders amber chip `⚠ Reviewer collapsed — heuristic-only review`.
+4. **DB persistence** — `SELECT reviewerCollapsed FROM runs WHERE id = ?` returns `1`. `agent_events` contains `kind: "reviewer_collapsed"` row.
+5. **Prometheus** — `app_agent_reviewer_collapsed_total{projectId="<id>"}` increments.
+6. **Restore independent review** — set distinct routes → next run has `reviewerCollapsed = 0`, chip suppressed.
+
+**B. Per-test review-rejection escalation (QAL-004)**
+
+7. Open **Project Settings → Review**. Threshold input (default `0`) + summary `Currently: alert on any review rejection.`
+8. Drive a regression that triggers `ReviewRejection` (e.g. test with `expect(page.locator('#NEVER-EXISTS')).toBeVisible()`).
+9. **RunDetail** — **Tests discarded by review (N)** card lists each rejected test with failure category, rounds completed, TestDetail deep link.
+10. **Audit Log** filtered to `test.review_rejected` shows one row per discarded test, each carrying `meta.failureCategory`, `meta.roundsCompleted`, `meta.reviewerCollapsed`.
+11. **FEA-001 notifications fire** within ~1 min on Teams (Adaptive Card with FactSet + first 10 rejected tests), email (HTML with first 20 + TestDetail deep links), and webhook (`event: "test.review_rejected"`, full rejection list).
+12. **Prometheus** — `app_review_rejections_total{projectId="<id>"}` increments per discarded test.
+
+**C. Threshold gate**
+
+13. Set threshold to `5` → run that rejects 3 tests → audit/RunDetail/Prometheus populate, **no notification** (below threshold).
+14. Run that rejects 5+ tests → notification fires.
+15. Threshold `-1` → opt-out, no notification regardless of count.
+
+**D. Validation (HTTP 400)**
+
+16. PATCH `-2`, `1001`, `0.5`, `"five"`, `true` → 400.
+17. PATCH `null` → 200 + coerced to `0`.
+18. PATCH `{ reviewRejectionAlertThreshold: 7 }` alone → succeeds (single-field bypass).
+
+**E. Prometheus alerts (`monitoring/prometheus/alerts.yml#sentri-saas-review-quality`)**
+
+19. **`ReviewerCollapseSpike`** — 6+ collapsed runs/hour fires `severity: warning`, runbook → `docs/guide/observability.md#reviewercollapsespike`.
+20. **`ReviewRejectionRateHigh`** — >20% rejection rate over 10 min fires `severity: warning`, runbook → `docs/guide/observability.md#reviewrejectionratehigh`.
+
+**F. Permissions + cross-workspace isolation**
+
+21. `viewer` PATCH threshold → 403.
+22. Outsider PATCH another workspace's threshold → 404; original NOT mutated. Pinned by `backend/tests/review-rejection-threshold-routes.test.js`.
+
+**G. Heuristic reviewer still runs when collapsed**
+
+23. **Contract:** LLM reviewer is short-circuited (saves tokens), heuristic reviewer (`validateTest` + `playwright.dryRun`) is NOT. Quality gates remain enforced even on collapsed runs. Reviewer envelopes are suppressed from the audit trail per spec ("audit trail must reflect that no independent review occurred").
+
+**H. Accessibility (WCAG 2.1)**
+
+24. Threshold `<input>`: `id` + `<label htmlFor>` + `aria-label` + `aria-describedby` + `aria-invalid` on out-of-range.
+25. Summary `<div role="status">` — saves announce without stealing focus (SC 4.1.3).
+26. Collapse banner `role="alert"` — screen readers interrupt to announce (SC 4.1.3).
+
+**Negative / edge:**
+
+- No AI provider → run completes; collapse detection skipped (no workspaceId); `reviewerCollapsed = 0`.
+- Workspace-default-on-both roles → NOT a collapse (both roles fall through to env default).
+- Heuristic reviewer accepts on round 0 → no `test.review_rejected` row.
+- Notification settings disabled → no FEA-001 fires.
+- Webhook unreachable → `Promise.allSettled` swallows the rejection; other channels still receive.
+
+---
+
 ### 🪄 AI Fix (failed test recovery)
 
 **Preconditions:** A test exists with `playwrightCode` and `lastResult === "failed"` (or its latest run result is failed). AI provider configured. Role: `qa_lead` or `admin` (`backend/src/routes/testFix.js:152` — `requireRole("qa_lead")`).

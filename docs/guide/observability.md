@@ -167,6 +167,38 @@ Triage:
 1. **Check the route's configured limits.** Settings → AI Providers → click the row's **Edit** → expand **Advanced** → RPM / TPM fields. Common cause: an admin set `rpmLimit: 60` (1/sec) on a high-throughput route.
 2. **Distribute load.** If the limit is correctly conservative for one vendor account, configure a sibling route (different key, same model) and chain them via `fallbackRouteId`. The dispatcher will automatically fail-over when the first route's bucket is exhausted.
 3. **Verify estimate vs. actual drift.** The pre-call gate uses `maxTokens` as an upper-bound estimate. If most calls return far fewer tokens than `maxTokens`, the bucket is being pessimistically over-charged — `reportActual` corrects post-call but the rejection still happened. Lowering `maxTokens` on hot call sites can reduce false positives.
+### ReviewerCollapseSpike
+Severity: warning.
+Means: a project triggered the reviewer-collapse gate on more than 5 runs in the past hour. The workspace's `author` and `reviewer` `agent_configs` rows resolve to the same `provider_routes.id`, so the LLM reviewer pass cannot produce independent signal — runs are degrading to heuristic-only review.
+Triage:
+1. Identify the project from the alert's `projectId` label. Cross-reference with the `agent_event` rows for `kind: "reviewer_collapsed"` in the workspace audit log to see the shared route id.
+2. **The operator-facing surfaces already fire.** The amber chip "Reviewer collapsed — heuristic-only review" renders on every affected RunDetail, and Settings → Agent Roles shows a warning banner. This alert pages SRE/ops when the operator hasn't acted on those surfaces within the hour.
+3. **Fix path is operator-side.** Navigate to Settings → Agent Roles for the affected workspace. Either:
+   - Point `reviewer` at a distinct `provider_routes` row (different vendor / key / model), or
+   - Leave it collapsed intentionally (single-agent demo) and configure `reviewRejectionAlertThreshold = -1` on the project so the noise floor stops paging.
+4. If the operator is unresponsive after 24h, this alert auto-resolves once the per-hour rate drops below the threshold. No code-side action is required from SRE.
+
+### ReviewRejectionRateHigh
+Severity: warning.
+Means: more than 20% of regenerated tests for a project are being discarded by `ReviewRejection` over the last 10 minutes. The reviewer↔author loop is rejecting most candidates as fundamentally broken.
+Triage:
+1. Identify the project from the alert's `projectId` label. Open the workspace Audit Log filtered to `test.review_rejected` (`/audit-log?type=test.review_rejected&projectId=<id>`) to see the per-test rejection reasons.
+2. **Categorise the rejections.** Each `test.review_rejected` row carries `meta.failureCategory` from the feedback-loop classifier — `SELECTOR_ISSUE`, `URL_MISMATCH`, `TIMEOUT`, etc. If one category dominates (more than 60%):
+   - **`SELECTOR_ISSUE` / `URL_MISMATCH`** — reviewer-prompt drift; `validateTest` is rejecting all author outputs because the project's pages have selectors / URLs that look brittle by the heuristic. Either relax the heuristic for this project's domain (deferred — see the next bundle in `docs/roadmap/AUDIT-ROADMAP.md`) or override at the project level by setting `reviewRejectionAlertThreshold = -1` on this project to mute the noise.
+   - **`BOT_BLOCK`** — the SUT is rejecting automation. Switch to a test-friendly mirror or configure browser fingerprinting; see [self-healing.md](self-healing.md).
+   - **Mixed** — likely a regressed author model. Cross-reference with the project's recent Settings → AI Providers history to see if the route changed recently. Roll back via the audit log if so.
+3. **Cross-reference with `meta.reviewerCollapsed`.** If `true`, the run also tripped the collapse gate; the rejection rate is on heuristic-only review. Fix the collapse first (see `ReviewerCollapseSpike` above) — collapsed runs disproportionately produce rejections because the author has no LLM reviewer feedback to learn from across rounds.
+
+### ReviewRejectionNotificationFailureRate
+Severity: warning.
+Means: more than 10% of review-rejection notification dispatches on a given channel are failing over the last 15 minutes. The B3 notification dispatcher writes to `audit_dlq` on every failure so no audit trail is lost, but operators need to act — the customer-facing rejection signal isn't reaching the channel.
+Triage:
+1. Identify the failing channel from the alert's `channel` label (`teams`, `email`, or `webhook`).
+2. **`teams`** — Teams incoming webhook URLs are tenant-rotatable. Operators commonly rotate the URL without updating Settings → Notifications. Fix: have the workspace admin paste the current Teams webhook URL into the project's notification settings, then admin-replay the `audit_dlq` rows from the SIEM DLQ inspector in the workspace settings.
+3. **`email`** — SMTP credentials expired or the configured `Resend` API key got revoked. Verify via the `[notifications] email review-rejection notification failed for <runId>: <error>` log lines. Rotate via env vars (`RESEND_API_KEY` / SMTP config) and restart the worker.
+4. **`webhook`** — generic webhook endpoint returning 5xx (operator's downstream integration is down) or SSRF rejection (the URL changed to point at a private IP / metadata endpoint). Check the worker log for the exact failure reason; rotate the URL in Settings → Notifications.
+5. **DLQ replay** — once the channel is healthy, replay failed dispatches via the existing SEC-007 DLQ inspector at Settings → Audit → DLQ. The B3 dispatcher uses `auditDlqRepo.enqueue` with the same row shape as SIEM forwarder failures, so the existing replay UI handles both classes transparently.
+
 ### EventLoopLagHigh
 Severity: warning.
 Means: Node event-loop lag above 100ms for 10 min. Process CPU-saturated or running sync work on the main thread.

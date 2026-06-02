@@ -585,6 +585,23 @@ export default function RunDetail() {
             </span>
           )}
 
+          {/* B3 (AUDIT-ROADMAP) — reviewer-collapse chip. The pre-run
+              gate in `crawler.js` flags the run when the workspace's
+              author + reviewer agent_configs resolve to the same
+              provider route id; this chip surfaces that policy decision
+              inline with the run header so operators auditing "did this
+              run get an independent review?" don't have to dig into
+              the agent_event timeline. Boolean-coerced because the
+              column ships INTEGER NOT NULL DEFAULT 0. */}
+          {(run.reviewerCollapsed === 1 || run.reviewerCollapsed === true) && (
+            <span
+              className="badge badge-amber rd-badge-amber-inline"
+              title="Author and reviewer share the same provider route — this run used heuristic-only review. Configure a distinct reviewer route in Settings → Agent Roles to enable independent review."
+            >
+              <AlertTriangle size={10} /> Reviewer collapsed — heuristic-only review
+            </span>
+          )}
+
           {/* Browser engine (DIF-002b) — only meaningful for test runs.
               Crawl and generate runs are pinned to chromium. */}
 
@@ -990,6 +1007,38 @@ export default function RunDetail() {
           and generate runs (test_run doesn't make AI calls). */}
       {(isCrawl || isGenerate) && !isRunning && (
         <AgentCallTimeline runId={runId} />
+      )}
+
+      {/* ── B3 (AUDIT-ROADMAP) — Tests discarded by review ─────────────── */}
+      {Array.isArray(run.reviewRejectedTests) && run.reviewRejectedTests.length > 0 && (
+        <div className="card rd-rootcause-card">
+          <h2 className="rd-analytics-title">
+            Tests discarded by review ({run.reviewRejectedTests.length})
+          </h2>
+          <p className="rd-analytics-section-label" style={{ marginBottom: 8 }}>
+            The reviewer↔author loop terminated with <code>ReviewRejection</code> on
+            {" "}{run.reviewRejectedTests.length === 1 ? "this test" : "these tests"};
+            they were not promoted to draft. Inspect each test's agent conversation
+            thread to see the reviewer's verdict.
+          </p>
+          <div className="rd-flaky-wrap">
+            {run.reviewRejectedTests.map((rej) => (
+              <div key={rej.testId || rej.testName} className="rd-flaky-row">
+                <span className="rd-flaky-row__name">
+                  {rej.testId ? (
+                    <a href={`/projects/${run.projectId}/tests/${encodeURIComponent(rej.testId)}`}>
+                      {rej.testName || rej.testId}
+                    </a>
+                  ) : (rej.testName || "Unknown test")}
+                </span>
+                <span className="rd-flaky-row__stats">
+                  {rej.failureCategory || "UNKNOWN"} · {rej.roundsCompleted ?? 0} round
+                  {rej.roundsCompleted === 1 ? "" : "s"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* ── Quality Analytics (shown when run has analytics data) ──────── */}
