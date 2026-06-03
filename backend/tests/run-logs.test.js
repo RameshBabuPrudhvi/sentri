@@ -55,9 +55,16 @@ function resetDb() {
 }
 
 // ─── Test runner ──────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. This file has an extra
+// concern over the standard template: every test body needs `drainDbWriteQueue()`
+// called AFTER it runs so the cleanup `deleteByRunId` / `hardDeleteById` calls
+// don't race a still-pending queued append. We preserve that behaviour by
+// wrapping `test` in a thin shim that drains AFTER the body resolves —
+// whether it succeeded or threw. The shared runner still owns pass/fail
+// counting + stack-trace reporting.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test: baseTest, summary } = createTestRunner();
 
 // B1.2 — `runLogRepo.appendLog` is now queued by default (spec
 // `:176-179`), so any read-after-write in this file must flush the
@@ -73,19 +80,15 @@ const countByRunId = (runId) => { drainDbWriteQueue(); return runLogRepo.countBy
 // internally; a stale queue would surface as empty `run.logs`.
 const getRunById = (id) => { drainDbWriteQueue(); return runRepo.getById(id); };
 
+/**
+ * Drop-in replacement for `test()` that drains the DB write queue after the
+ * body resolves (success or failure). Mirrors the post-body drain the
+ * pre-migration runner ran inline.
+ */
 function test(name, fn) {
-  try {
-    fn();
-    // Drain at end too so cleanup (`deleteByRunId` / `hardDeleteById`)
-    // doesn't race a still-pending append from the test body.
-    drainDbWriteQueue();
-    console.log(`  ✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
+  return baseTest(name, async () => {
+    try { await fn(); } finally { drainDbWriteQueue(); }
+  });
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -352,7 +355,4 @@ test("runRepo.save() does not write logs column back to runs table", () => {
 
 resetDb();
 
-// ─── Results ──────────────────────────────────────────────────────────────────
-
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+summary("run-logs");

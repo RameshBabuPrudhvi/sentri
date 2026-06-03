@@ -249,9 +249,21 @@ export function registerInFlight(cacheKey, promise) {
   // Auto-clear on settle so a long-running call doesn't pin memory
   // after completion. `.finally` is universally supported in
   // Node 16+ (the project's minimum).
+  //
+  // Bug-fix: the `.finally(...)` chain returns a NEW promise that
+  // rebroadcasts the original rejection. If the caller's only
+  // consumer of `promise` is `coalesceInFlight()` followed by an
+  // `await` (the canonical pattern), the original rejection is
+  // handled — but the .finally-returned promise is NOT, and Node
+  // 20's strict-by-default unhandledRejection tracker flags it.
+  // The chained `.catch(() => {})` is a no-op handler that exists
+  // purely to acknowledge the rebroadcast rejection. The cleanup
+  // semantics are unchanged because the cleanup ran inside the
+  // .finally itself; the chained .catch only swallows the
+  // re-thrown error from the .finally rebroadcast.
   promise.finally(() => {
     if (inFlight.get(cacheKey) === promise) inFlight.delete(cacheKey);
-  });
+  }).catch(() => { /* see comment above — swallow rebroadcast */ });
 }
 
 /**

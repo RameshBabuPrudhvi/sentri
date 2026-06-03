@@ -5,17 +5,12 @@
 
 import assert from "node:assert/strict";
 import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES, CORE_RULES, getPromptRules, STRATEGY_VERSION } from "../src/selfHealing.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-    process.exitCode = 1;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 console.log("\n🩹 self-healing runtime checks");
 
@@ -260,5 +255,4 @@ test("SELF_HEALING_PROMPT_RULES (full) still includes all content", () => {
   assert.match(SELF_HEALING_PROMPT_RULES, /page\.getByRole\(\.\.\.\)\.click\(\)/);
 });
 
-if (process.exitCode) process.exit(1);
-console.log("\n🎉 self-healing tests passed");
+summary("self-healing");

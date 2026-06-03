@@ -12,21 +12,12 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 /**
  * Run a small inline ESM snippet in an isolated cwd with the given env.
@@ -157,12 +148,4 @@ test("legacy daily-dedup keys are pruned from telemetry-cache.json", () => {
   fs.rmSync(cwd, { recursive: true, force: true });
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  Telemetry tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 Telemetry tests passed");
+summary("telemetry");

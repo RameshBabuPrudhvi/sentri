@@ -561,7 +561,7 @@ ALTER TABLE projects ADD COLUMN reviewRejectionAlertThreshold INTEGER DEFAULT 0;
 **Covers sub-items:** RLY-004 (session recovery mid-run), SCL-001 (TOTP on
 target app)
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit §J Scenario 2 · §B.1
+**Status:** ✅ Complete (this PR) | **Effort:** M | **Source:** Audit §J Scenario 2 · §B.1
 
 > **Note:** SEC-004 ✅ (PR #10) shipped Sentri's *own* MFA (TOTP + WebAuthn).
 > This bundle targets MFA on the **application under test** — a completely
@@ -1222,7 +1222,7 @@ collapsed), AUTO-023 ✅ (oracle agent role + tool registry), AUTO-009 ✅
 | B1 — Run persistence + crash recovery | RLY-001, RLY-008, RLY-005 | 🔴 P0 | L | ✅ Complete (PR #2) |
 | B2 — iframe + adaptive timeouts + SPA | RLY-006, RLY-009 | 🔴 P0 | L | ✅ Complete (this PR) |
 | B3 — Reviewer independence + escalation | RLY-003, QAL-004 | 🔴 P0 | M | ✅ Complete (this PR) |
-| B4 — Auth recovery + target-app TOTP | RLY-004, SCL-001 | 🔴 P0 | M | 🔲 Planned |
+| B4 — Auth recovery + target-app TOTP | RLY-004, SCL-001 | 🔴 P0 | M | ✅ Complete (this PR) |
 | B5 — Test dependency ordering | AUTO-014 | 🟡 P1 | M | ✅ Complete |
 | B6 — Test quality gates | QAL-001, QAL-005, QAL-002, QAL-010 | 🟡 P1 | XL | 🔲 Planned |
 | B7 — Healing safety + context robustness | QAL-006, QAL-007, QAL-008, QAL-009, QAL-011 | 🟡 P1 | L | 🔲 Planned |

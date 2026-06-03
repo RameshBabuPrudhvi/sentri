@@ -61,6 +61,15 @@ function rowToProject(row) {
     // fired yet. Read by `fireReviewRejectionNotifications` to debounce
     // bursts; mirrors `workspaces.spendAlertLastFiredAt` semantics.
     reviewRejectionAlertLastFiredAt: row.reviewRejectionAlertLastFiredAt || null,
+    // AUDIT-ROADMAP B4 / RLY-004 — proactive session keep-alive interval
+    // (migration 072). `null` (default) disables the ping entirely so
+    // every legacy project stays bit-for-bit identical. When set, the
+    // testRunner registers a per-page `setInterval` ticker that
+    // navigates to `project.url` every N ms to keep server-side
+    // sessions alive on long runs. Bounded at the route layer to
+    // [60_000, 86_400_000] (1 min ≤ interval ≤ 24 h). Consumer:
+    // `backend/src/runner/executeTest.js#startSessionRefreshTicker`.
+    sessionRefreshIntervalMs: row.sessionRefreshIntervalMs ?? null,
   };
 }
 
@@ -114,6 +123,10 @@ function projectToRow(p) {
     // explicit `null`/undefined collapses to 0 so create() never trips the
     // column default with a NULL bind from a caller that omits the field.
     reviewRejectionAlertThreshold: Number.isInteger(p.reviewRejectionAlertThreshold) ? p.reviewRejectionAlertThreshold : 0,
+    // AUDIT-ROADMAP B4 — nullable INTEGER column. Non-integer / non-finite
+    // values collapse to NULL so the route layer can pass `null` to opt
+    // out without a special-case bind.
+    sessionRefreshIntervalMs: Number.isInteger(p.sessionRefreshIntervalMs) ? p.sessionRefreshIntervalMs : null,
   };
 }
 
@@ -175,8 +188,8 @@ export function create(project) {
   const row = projectToRow(project);
   row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, oracleEnabled, reviewerEnabled, oracleMaxCostUsdPerRun, reviewerMaxCostUsdPerRun, coverageEnabled, sourcemapBaseUrl, serverCoverageEndpoint, coverageRegressionThresholdPct, iframeStrategy, iframeAllowlist, hydrationType, hydrationSelector, elementTimeoutOverride, reviewRejectionAlertThreshold)
-    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @oracleEnabled, @reviewerEnabled, @oracleMaxCostUsdPerRun, @reviewerMaxCostUsdPerRun, @coverageEnabled, @sourcemapBaseUrl, @serverCoverageEndpoint, @coverageRegressionThresholdPct, @iframeStrategy, @iframeAllowlist, @hydrationType, @hydrationSelector, @elementTimeoutOverride, @reviewRejectionAlertThreshold)
+    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, oracleEnabled, reviewerEnabled, oracleMaxCostUsdPerRun, reviewerMaxCostUsdPerRun, coverageEnabled, sourcemapBaseUrl, serverCoverageEndpoint, coverageRegressionThresholdPct, iframeStrategy, iframeAllowlist, hydrationType, hydrationSelector, elementTimeoutOverride, reviewRejectionAlertThreshold, sessionRefreshIntervalMs)
+    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @oracleEnabled, @reviewerEnabled, @oracleMaxCostUsdPerRun, @reviewerMaxCostUsdPerRun, @coverageEnabled, @sourcemapBaseUrl, @serverCoverageEndpoint, @coverageRegressionThresholdPct, @iframeStrategy, @iframeAllowlist, @hydrationType, @hydrationSelector, @elementTimeoutOverride, @reviewRejectionAlertThreshold, @sessionRefreshIntervalMs)
   `).run(row);
 }
 
@@ -187,7 +200,7 @@ export function create(project) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "oracleEnabled", "reviewerEnabled", "oracleMaxCostUsdPerRun", "reviewerMaxCostUsdPerRun", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride", "reviewRejectionAlertThreshold", "reviewRejectionAlertLastFiredAt"];
+  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "oracleEnabled", "reviewerEnabled", "oracleMaxCostUsdPerRun", "reviewerMaxCostUsdPerRun", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride", "reviewRejectionAlertThreshold", "reviewRejectionAlertLastFiredAt", "sessionRefreshIntervalMs"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {

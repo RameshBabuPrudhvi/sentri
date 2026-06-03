@@ -897,6 +897,70 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       if (!isShardMode) run.passed++;
       shardPassed++;
       logWarn(run, `WARNING: ${result.error}`);
+    } else if (result.status === "skipped") {
+      // B4 (AUDIT-ROADMAP) / RLY-004 — auth-session-expiry path. The test
+      // never executed against the real application, so it must NOT
+      // increment `run.failed` (which would inflate the failure rate and
+      // trigger maxFailures gate violations on what is environmental
+      // noise). `isNonExecutedSkip` already excludes `auth_expired` from
+      // the pass-rate denominator (`utils/skipReasons.js`); leaving
+      // counters untouched keeps the math consistent with the gate
+      // evaluator. Other in-flight skip reasons (`upstream_failed` from
+      // AUTO-014) flow through `recordSkipResult` which writes directly
+      // to `run.results` and never reaches `processResult` — so this
+      // branch fires only for `executeTest`-emitted skips (today: just
+      // `auth_expired`; future skip kinds emitted at execution time
+      // share the same accounting contract).
+      //
+      // Lifeguard bug-fix: skipped results MUST NOT fall through to the
+      // `testsExecutedTotal` / `testDurationSeconds` metric block below —
+      // the counter is documented to count tests that actually executed
+      // in a browser. Auth-expired tests started navigating but the test
+      // body never ran against the real application; counting them would
+      // inflate "executed" dashboards and pollute the per-test duration
+      // histogram with recovery-attempt timings. Early-return here so
+      // only passed/warning/failed branches reach the metric increment.
+      logWarn(run, `SKIPPED (${result.skipReason || "unknown"}): ${result.error || ""}`);
+      // Still emit the per-result SSE + persist the row + write the
+      // checkpoint so the UI and resume endpoint see the skip — but
+      // bypass the execution-counter telemetry. Mirrors the
+      // `recordSkipResult` path the route layer uses for pre-seeded
+      // `upstream_failed` / `missing_upstream` skips (line 822-843).
+      const { screenshot: _ss, ...resultLean } = result;
+      const signedResult = { ...resultLean };
+      if (signedResult.screenshotPath) signedResult.screenshotPath = signArtifactUrl(signedResult.screenshotPath);
+      if (signedResult.videoPath) signedResult.videoPath = signArtifactUrl(signedResult.videoPath);
+      emitRunEvent(run.id, "result", { result: signedResult });
+      testRepo.update(test.id, {
+        lastResult: result.status,
+        lastRunAt: new Date().toISOString(),
+      });
+      if (isShardMode) {
+        runRepo.appendRunResults(run.id, [result]);
+      } else {
+        runRepo.save(run);
+      }
+      enqueueDbWrite(
+        () => {
+          runTestResultRepo.append(run.id, {
+            testId: test.id,
+            status: result.status,
+            error: result.error || null,
+            errorCategory: result.errorCategory || null,
+            duration: Number.isFinite(result.durationMs) ? result.durationMs : null,
+            retryCount: result.retryCount || 0,
+            iterationIndex: Number.isInteger(result.iterationIndex) ? result.iterationIndex : 0,
+            artifacts: { screenshotPath: result.screenshotPath || null, videoPath: result.videoPath || null, tracePath: result.tracePath || null },
+            healingEvents: Array.isArray(result.healingEvents) ? result.healingEvents : null,
+          });
+        },
+        { priority: "durable" },
+      );
+      if (!isRunAborted(run, signal)) {
+        const snapshotRun = isShardMode ? (runRepo.getById(run.id) || run) : run;
+        emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(snapshotRun) });
+      }
+      return;
     } else {
       if (!isShardMode) run.failed++;
       shardFailed++;

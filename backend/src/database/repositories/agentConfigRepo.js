@@ -122,7 +122,23 @@ export function upsert(config) {
       maxReviewRounds=excluded.maxReviewRounds,
       allowedTools=excluded.allowedTools,
       updatedAt=excluded.updatedAt
-  `).run({ ...config, routeId: config.routeId ?? null, maxReviewRounds: mrr, allowedTools: Array.isArray(config.allowedTools) ? JSON.stringify(config.allowedTools) : null });
+  `).run({
+    ...config,
+    // Default every optional column to `null` so callers that omit
+    // them don't trip better-sqlite3's `RangeError: Missing named
+    // parameter`. `routeId`, `maxReviewRounds`, and `allowedTools`
+    // were already defaulted below; `systemPromptOverride` + `maxTokens`
+    // are added here for parity. (Bug-fix: B4.4 contract test
+    // `no-code-edits-contract.test.js` calls `upsert({ ... temperature: 0, ... })`
+    // without the two prompt/token fields — the runner's stricter
+    // sequential ordering surfaces this as a test failure that the
+    // old async-soup masked.)
+    systemPromptOverride: config.systemPromptOverride ?? null,
+    maxTokens: config.maxTokens ?? null,
+    routeId: config.routeId ?? null,
+    maxReviewRounds: mrr,
+    allowedTools: Array.isArray(config.allowedTools) ? JSON.stringify(config.allowedTools) : null,
+  });
   return getByRole(config.workspaceId, config.role);
 }
 

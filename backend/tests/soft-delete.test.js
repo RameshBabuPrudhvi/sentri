@@ -56,33 +56,13 @@ function resetDb() {
 }
 
 // ─── Test runner ──────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
-
-async function asyncTest(name, fn) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced inline `function test(name, fn)`
+// + `async function asyncTest(name, fn)` with the shared runner from
+// `helpers/test-base.js`. The shared `test()` accepts both sync and async
+// bodies so `asyncTest` collapses to the same identifier.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
+const asyncTest = test;
 
 resetDb();
 
@@ -448,7 +428,4 @@ test("restoreByProjectIdAfter skips runs deleted before the given timestamp", ()
   assert.equal(runRepo.getById(rEarly.id), undefined, "rEarly should still be deleted");
 });
 
-// ─── Summary ──────────────────────────────────────────────────────────────────
-
-console.log(`\n  ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+summary("soft-delete");

@@ -27,7 +27,14 @@ base = `http://127.0.0.1:${server.address().port}`;
 const auth = await t.registerAndLogin(base, { name: "Admin", email: `admin-${Date.now()}@test.local`, password: "Password123!" });
 cookie = `access_token=${auth.token}`;
 // ── CRUD ──────────────────────────────────────────────────────────────────────
-test("POST /settings/provider-routes creates a route", async () => {
+// Stage-2 follow-up: every `test(...)` call is `await`-ed below because the
+// cleanup at the bottom (`server.close()` + `env.restore()`) must NOT run
+// while a test's `fetch()` is still in flight. With the shared runner's
+// queued-promise model (helpers/test-base.js:438), bare top-level
+// `test(...)` without `await` lets the cleanup close the listen socket
+// mid-request — every assertion then fails with `TypeError: fetch failed`.
+// Awaiting each registration restores deterministic ordering.
+await test("POST /settings/provider-routes creates a route", async () => {
   const { res, json } = await t.req(base, "/api/settings/provider-routes", {
     method: "POST", cookie,
     body: { name: "test-route-1", family: "openai", protocol: "openai", model: "gpt-4o-mini", apiKey: "sk-test-create-key-1234567890" },
@@ -41,14 +48,14 @@ test("POST /settings/provider-routes creates a route", async () => {
   assert.equal(json.apiKeyEncrypted, undefined);
   assert.equal(json.apiKeyNonce, undefined);
 });
-test("GET /settings/provider-routes lists routes", async () => {
+await test("GET /settings/provider-routes lists routes", async () => {
   const { res, json } = await t.req(base, "/api/settings/provider-routes", { cookie });
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(json.routes));
   assert.ok(json.routes.length >= 1);
   assert.equal(json.routes[0].apiKeyEncrypted, undefined, "secret blob must not leak in list");
 });
-test("PATCH /settings/provider-routes/:id updates a route", async () => {
+await test("PATCH /settings/provider-routes/:id updates a route", async () => {
   const list = await t.req(base, "/api/settings/provider-routes", { cookie });
   const routeId = list.json.routes[0].id;
   const { res, json } = await t.req(base, `/api/settings/provider-routes/${routeId}`, {
@@ -58,7 +65,7 @@ test("PATCH /settings/provider-routes/:id updates a route", async () => {
   assert.equal(res.status, 200);
   assert.equal(json.name, "renamed-route");
 });
-test("PATCH rejects apiKey field (must use rotate-key)", async () => {
+await test("PATCH rejects apiKey field (must use rotate-key)", async () => {
   const list = await t.req(base, "/api/settings/provider-routes", { cookie });
   const routeId = list.json.routes[0].id;
   const { res } = await t.req(base, `/api/settings/provider-routes/${routeId}`, {
@@ -67,7 +74,7 @@ test("PATCH rejects apiKey field (must use rotate-key)", async () => {
   });
   assert.equal(res.status, 400);
 });
-test("DELETE /settings/provider-routes/:id deletes a route", async () => {
+await test("DELETE /settings/provider-routes/:id deletes a route", async () => {
   // Create a throwaway route to delete
   const create = await t.req(base, "/api/settings/provider-routes", {
     method: "POST", cookie,
@@ -78,7 +85,7 @@ test("DELETE /settings/provider-routes/:id deletes a route", async () => {
   });
   assert.equal(res.status, 200);
 });
-test("DELETE refuses when agent_configs references the route", async () => {
+await test("DELETE refuses when agent_configs references the route", async () => {
   const create = await t.req(base, "/api/settings/provider-routes", {
     method: "POST", cookie,
     body: { name: `pinned-${Date.now()}`, family: "anthropic", protocol: "anthropic", model: "claude-3-5-sonnet" },
@@ -93,7 +100,7 @@ test("DELETE refuses when agent_configs references the route", async () => {
   });
   assert.equal(res.status, 409, "should refuse deletion when route is in use");
 });
-test("POST with invalid family returns 400", async () => {
+await test("POST with invalid family returns 400", async () => {
   const { res } = await t.req(base, "/api/settings/provider-routes", {
     method: "POST", cookie,
     body: { name: "bad-family", family: "invalid", protocol: "openai", model: "m" },
@@ -101,7 +108,7 @@ test("POST with invalid family returns 400", async () => {
   assert.equal(res.status, 400);
 });
 // ── Audit log ─────────────────────────────────────────────────────────────────
-test("GET /settings/provider-routes/audit returns audit entries", async () => {
+await test("GET /settings/provider-routes/audit returns audit entries", async () => {
   const { res, json } = await t.req(base, "/api/settings/provider-routes/audit", { cookie });
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(json.items));

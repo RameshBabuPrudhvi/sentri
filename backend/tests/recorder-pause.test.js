@@ -10,32 +10,13 @@ import {
   _testSeedSession,
 } from "../src/runner/recorder.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ok  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err.message}`);
-  }
-}
-
-async function asyncTest(name, fn) {
-  try {
-    await fn();
-    passed += 1;
-    console.log(`  ok  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced inline `function test(name, fn)`
+// + `async function asyncTest(name, fn)` with the shared runner from
+// `helpers/test-base.js`. The shared `test()` accepts both sync and async
+// bodies so `asyncTest` collapses to the same identifier.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
+const asyncTest = test;
 
 function makeFakeCdp() {
   const calls = [];
@@ -458,12 +439,4 @@ await asyncTest("RECORDER_SCRIPT installs window.__sentriProbeAtPoint with selec
   assert.match(src, /bestLabel\(target\)/, "probe must call the existing bestLabel");
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\nrecorder-pause tests failed");
-  process.exit(1);
-}
-
-console.log("\nAll recorder-pause tests passed!");
+summary("recorder-pause");

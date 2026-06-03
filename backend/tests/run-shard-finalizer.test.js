@@ -75,19 +75,11 @@ function resetDb() {
   db.exec("DELETE FROM runs     WHERE id LIKE 'RUN-RSF-%'");
   db.exec("DELETE FROM projects WHERE id LIKE 'PRJ-RSF-%'");
 }
-let passed = 0;
-let failed = 0;
-async function test(name, fn) {
-  try {
-    await fn();
-    console.log(`  \u2713 ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  \u2717 ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `async function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
 async function main() {
   console.log(`\n\u2500\u2500 run-shard-finalizer (dialect: ${getDatabaseDialect()}) \u2500\u2500`);
   resetDb();
@@ -225,10 +217,12 @@ async function main() {
     runRepo.hardDeleteById(run.id);
   });
   resetDb();
-  console.log(`\n  ${passed} passed, ${failed} failed\n`);
-  if (failed > 0) process.exit(1);
 }
-main().catch((err) => {
-  console.error("\u2717 run-shard-finalizer failed:", err);
-  process.exit(1);
-});
+// Run main() then summary() — main() registers all `await test(...)` calls
+// in sequence, summary() drains the pending promises and exits.
+main()
+  .then(() => summary("run-shard-finalizer"))
+  .catch((err) => {
+    console.error("\u2717 run-shard-finalizer failed:", err);
+    process.exit(1);
+  });

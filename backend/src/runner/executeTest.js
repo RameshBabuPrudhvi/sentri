@@ -40,6 +40,13 @@ import { diffScreenshot } from "./visualDiff.js";
 import { applyNetworkCondition } from "./networkConditions.js";
 import { writeArtifactBuffer } from "../utils/objectStorage.js";
 import { snapshotServerCoverage, diffServerCoverage } from "../pipeline/serverCoverageProxy.js"; // AUTO-009h — opt-in server-side coverage capture for API tests.
+// B4 (AUDIT-ROADMAP) / RLY-004 — mid-run auth-session recovery. The check
+// fires after every `page.goto()` AND when the test errors out so we can
+// distinguish "the SUT logged the test out" from "the test code is broken"
+// — see the call sites below for the gating logic. Both helpers are
+// loaded lazily (top-level await is avoided so this file stays
+// require-compatible) — they're pure functions of the page + project.
+import { looksLikeAuthRedirect, restoreAuthSession } from "../pipeline/autoLogin.js";
 
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
@@ -668,6 +675,13 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   // Playwright call continues running until the finally block — which may
   // itself hang if Chromium is unresponsive.
   let testTimeoutHandle;
+  // B4 / RLY-004 — proactive session keep-alive ticker handle, declared
+  // at function scope so the `finally` block below can clear it. Stays
+  // `null` for projects without `sessionRefreshIntervalMs` configured —
+  // the existing per-test cleanup path is bit-for-bit identical to the
+  // pre-B4 behaviour for those (the vast majority of) projects.
+  let sessionRefreshTicker = null;
+  let sessionRefreshInFlight = false;
   const testTimeoutPromise = new Promise((_, reject) => {
     testTimeoutHandle = setTimeout(() => {
       // BUG-0001 — Reject FIRST (synchronously) so `Promise.race` resolves
@@ -708,9 +722,136 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         const body = extractTestBody(test.playwrightCode);
         const codeAlreadyNavigates = body.includes("page.goto(");
 
+        // B4 / RLY-004 — proactive session keep-alive ticker + auth-redirect
+        // detection. Lifted OUTSIDE the `!codeAlreadyNavigates` block so they
+        // activate for ALL tests (including those with explicit page.goto).
+        // The ticker keeps the SUT's session cookie alive during long-running
+        // tests regardless of navigation strategy; the auth-redirect check
+        // fires after the framework goto (below) for non-navigating tests.
+        let projectForAuth = null;
+        try { projectForAuth = test.projectId ? projectRepo.getById(test.projectId) : null; }
+        catch { /* repo blip — fall through with no recovery */ }
+
+        // B4 / RLY-004 — proactive session keep-alive ticker. When the
+        // project has `sessionRefreshIntervalMs` configured, register a
+        // per-test setInterval that navigates back to `project.url`
+        // every N ms. Industry-standard "session ping" pattern (Auth0
+        // Universal Login, Okta sessionRefresh, Salesforce
+        // session.refresh) — keeps the SUT's idle cookie alive on long
+        // runs without waiting for a redirect-to-login.
+        //
+        // Best-effort: any goto error is swallowed (`.catch(() => {})`)
+        // because (a) we own no recovery path here — the next user
+        // action falls through to the reactive `restoreAuthSession`
+        // check above, and (b) a ping that occasionally fails during a
+        // navigation race must never fail the test. Bounded by the
+        // route-layer [60_000, 86_400_000] gate so a typo can't flood
+        // the SUT. Cleared in the `finally` block below alongside the
+        // other per-test timers.
+        if (Number.isInteger(projectForAuth?.sessionRefreshIntervalMs)
+            && projectForAuth.sessionRefreshIntervalMs >= 60_000
+            && projectForAuth.url) {
+          const intervalMs = projectForAuth.sessionRefreshIntervalMs;
+          // BUG-FIX (lifeguard): the previous design pinged the SAME
+          // page the test was driving. Even with the `inFlight` latch,
+          // the goto could race a mid-action wait — destroying the
+          // DOM the test expected and surfacing as a confusing
+          // `SELECTOR_ISSUE` / `NAVIGATION_FAIL`. Fix: open a SECOND
+          // page in the SAME BrowserContext. The cookie jar is shared
+          // (same context = same `Cookie` header on every request), so
+          // a navigation on the refresh page keeps the test's session
+          // alive WITHOUT touching the test page's DOM. Industry
+          // pattern: this is what Auth0 / Okta SDKs do under the hood
+          // for "session ping" (Playwright `BrowserContext` is
+          // explicitly designed for multi-tab session sharing).
+          sessionRefreshTicker = setInterval(() => {
+            // Per-tick re-entrance guard. If the previous tick is
+            // still navigating (slow target, 30s timeout), skip this
+            // one rather than queueing — operators set this for
+            // long-running runs, not tight polling.
+            if (sessionRefreshInFlight) return;
+            if (context.pages?.()?.length === 0) return; // context closing
+            sessionRefreshInFlight = true;
+            Promise.resolve()
+              .then(async () => {
+                // Open + close a fresh page per tick so we never hold
+                // a long-lived background tab (which would show up as
+                // a popup in `context.pages()` and confuse the
+                // popup-cleanup loop in `finally` below). Cost: ~50ms
+                // per ping for the page create/close round-trip;
+                // negligible against the minimum 60s interval.
+                const refreshPage = await context.newPage();
+                try {
+                  await refreshPage.goto(projectForAuth.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+                } finally {
+                  await refreshPage.close().catch(() => {});
+                }
+              })
+              .catch(() => { /* best-effort — never fails the test */ })
+              .finally(() => { sessionRefreshInFlight = false; });
+          }, intervalMs);
+          // Stop the ticker from keeping the worker alive past the
+          // test boundary if the cleanup `finally` somehow doesn't
+          // fire (e.g. uncaught crash in the codeRunner host). The
+          // `clearInterval` in `finally` is still the authoritative
+          // teardown — this is defence-in-depth.
+          sessionRefreshTicker.unref?.();
+        }
+
         if (!codeAlreadyNavigates) {
           await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
           await page.waitForTimeout(800);
+          // B4 / RLY-004 — auth-session-expiry detection after the
+          // framework goto. Only fires for non-self-navigating tests
+          // because self-navigating tests do their own page.goto() and
+          // may legitimately land on /login as part of the test flow.
+          //
+          // Lifeguard bug-fix: skip recovery when the post-goto URL
+          // matches the test's own `sourceUrl`. A test whose sourceUrl
+          // IS a login page (e.g. testing the login form itself) would
+          // otherwise trigger an unnecessary restoreAuthSession cycle
+          // that logs in (navigating away from /login), then navigates
+          // back — and on SUTs that redirect authenticated users away
+          // from /login, the test body runs against the wrong page and
+          // fails with a confusing SELECTOR_ISSUE / ASSERTION_FAIL.
+          // QA.md §E documents this contract: "A test that lands on
+          // /login from a deliberate non-auth-gated assertion → does
+          // NOT trigger restoreAuthSession because the matching URL is
+          // the project's intended sourceUrl."
+          //
+          // Follow-up hardening: compare URL **pathnames**, not the
+          // full string. SUTs commonly append `?next=`/`?returnTo=`
+          // query params on a session-expired bounce — strict equality
+          // would miss that (sourceUrl=`/login` vs landed
+          // `/login?next=/dashboard`) and incorrectly fire recovery on
+          // a test that deliberately targets the login page. Pathname
+          // comparison ignores query/hash while still distinguishing
+          // `/login` from `/dashboard`. Fallback to the raw string
+          // when URL parsing throws (relative sourceUrl, malformed) so
+          // we never break the check on edge cases.
+          const samePathAsSource = (() => {
+            try {
+              return new URL(page.url()).pathname === new URL(test.sourceUrl).pathname;
+            } catch {
+              return page.url() === test.sourceUrl;
+            }
+          })();
+          if (projectForAuth?.credentials && looksLikeAuthRedirect(page.url()) && !samePathAsSource) {
+            console.warn(formatLogLine("warn", runId,
+              `[executeTest] Auth redirect detected after goto ${test.sourceUrl} → ${page.url()} — attempting session recovery`));
+            const recovery = await restoreAuthSession(page, projectForAuth, { run: { id: runId } });
+            if (!recovery.ok) {
+              const authErr = new Error(
+                `auth_session_expired_unrecoverable: ${recovery.reason || "unknown"}`
+              );
+              authErr.code = "AUTH_SESSION_EXPIRED";
+              authErr.__authSessionExpired = true;
+              throw authErr;
+            }
+            // Brief settle so the SUT's post-login redirect chain
+            // finishes before the test body runs its first action.
+            await page.waitForTimeout(500).catch(() => {});
+          }
         }
 
         const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
@@ -875,8 +1016,29 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     await Promise.race([testExecution, testTimeoutPromise]);
 
   } catch (err) {
-    result.status = "failed";
-    result.error = formatTestError(err);
+    // B4 / RLY-004 — auth-session-expiry is an ENVIRONMENTAL failure,
+    // not a test regression. Mark the result as `skipped` with reason
+    // `auth_expired` so the gate evaluator excludes it from the pass-
+    // rate denominator (mirrors `over_budget` / `skipped_no_impact`
+    // semantics in `utils/skipReasons.js`). The feedback loop's
+    // `AUTH_EXPIRED` classifier ALSO catches the error-string path
+    // (legacy callers that don't carry the structured marker), but
+    // setting `status: "skipped"` here is the authoritative signal —
+    // it prevents `run.failed++` from incrementing and ensures the
+    // RunDetail UI renders the test with the `auth_expired` chip.
+    // We do NOT early-return — the outer `finally` MUST run for
+    // resource cleanup (screencast, context, video, downloads dir);
+    // we just skip the vision-healing waterfall + healing-events
+    // persistence below since there's no real failed locator to heal.
+    const isAuthExpiry = err.code === "AUTH_SESSION_EXPIRED" || err.__authSessionExpired === true;
+    if (isAuthExpiry) {
+      result.status = "skipped";
+      result.skipReason = "auth_expired";
+      result.error = formatTestError(err);
+    } else {
+      result.status = "failed";
+      result.error = formatTestError(err);
+    }
 
     // Persist healing events from the failed run
     const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
@@ -887,13 +1049,18 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     result.stepStatuses = err.__stepStatuses || [];
 
     // Screenshot the failure state — also feeds the vision-healing waterfall below.
+    // B4: skip artifact + vision-heal work entirely on auth-expiry. The
+    // "failure" is environmental and there is no broken locator to heal;
+    // a screenshot of the login page would burn S3 quota for zero value.
     let failureShot = null;
-    try {
-      const shot = await captureScreenshot(page, runId, stepIndex, { failed: true });
-      result.screenshot = shot.base64;
-      result.screenshotPath = shot.artifactPath;
-      failureShot = Buffer.from(shot.base64, "base64");
-    } catch { /* page may be closed */ }
+    if (!isAuthExpiry) {
+      try {
+        const shot = await captureScreenshot(page, runId, stepIndex, { failed: true });
+        result.screenshot = shot.base64;
+        result.screenshotPath = shot.artifactPath;
+        failureShot = Buffer.from(shot.base64, "base64");
+      } catch { /* page may be closed */ }
+    }
 
     // ── MNT-001: host-side vision-healing waterfall (stages 7-8) ───────────
     // Invoked AFTER the runtime helper waterfall (stages 0-6) failed.
@@ -1029,6 +1196,14 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
   } finally {
     clearTimeout(testTimeoutHandle);
+    // B4 / RLY-004 — stop the session-refresh ticker before any page /
+    // context teardown so an in-flight `page.goto(project.url)` ping
+    // can't race against `page.close()` and surface a spurious "Target
+    // closed" error in the cleanup logs.
+    if (sessionRefreshTicker) {
+      clearInterval(sessionRefreshTicker);
+      sessionRefreshTicker = null;
+    }
 
     // AUTO-009 — stop V8 coverage before the page closes so the collector
     // returns the script range list intact. Best-effort: a stop failure

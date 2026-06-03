@@ -25,21 +25,12 @@ import * as healingRepo from "../src/database/repositories/healingRepo.js";
 // `:176-179`). Tests that follow "write → read" drain the queue between
 // the two so the read sees the inserted rows.
 import { drain as drainDbWriteQueue } from "../src/utils/dbWriteQueue.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log("  ✅  " + name);
-  } catch (err) {
-    failed++;
-    console.log("  ❌  " + name);
-    console.log("      " + err.message);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 function resetHealing() {
   const db = getDatabase();
@@ -157,12 +148,4 @@ test("all-whitespace input → undefined (treated as no filter)", () => {
   assert.equal(parseTags(["   ", ""]), undefined);
 });
 
-// ── Summary ─────────────────────────────────────────────────────────────────
-
-console.log(`\n${"─".repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log("\n⚠️  pr11-fixes test run failed");
-  process.exit(1);
-}
-console.log("\n🎉 All pr11-fixes tests passed!");
+summary("pr11-fixes");

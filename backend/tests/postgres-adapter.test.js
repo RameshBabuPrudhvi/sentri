@@ -25,21 +25,12 @@ import assert from "node:assert/strict";
 // are exercised indirectly through translateSql and through the adapter's
 // prepare().run/get/all methods.
 import { translateSql } from "../src/database/adapters/postgres-adapter.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 // ─── LIKE → ILIKE ─────────────────────────────────────────────────────────────
 
@@ -184,14 +175,4 @@ test("handles multiple LIKE in one statement", () => {
   assert.equal(count, 2, `Should have 2 ILIKEs, got ${count}`);
 });
 
-// ─── Summary ─────────────────────────────────────────────────────────────────
-
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);
-
-if (failed > 0) {
-  console.log("\n⚠️  postgres-adapter tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 All postgres-adapter tests passed!");
+summary("postgres-adapter");

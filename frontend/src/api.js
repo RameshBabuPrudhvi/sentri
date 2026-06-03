@@ -382,6 +382,17 @@ export const api = {
    * @returns {Promise<{urls: string[]}>}
    */
   getProjectPages: (id) => req("GET", `/projects/${id}/pages`),
+  /**
+   * B4 (AUDIT-ROADMAP) / SCL-001 — preview the live RFC 6238 TOTP code for a
+   * project's stored target-app TOTP seed. Admin-only on the backend.
+   * Returns `{ code, expiresInSeconds }` so the operator can verify their
+   * seed matches the target app's enrollment without ever exposing the
+   * seed itself over the wire.
+   *
+   * @param {string} id - Project ID.
+   * @returns {Promise<{code: string, expiresInSeconds: number}>}
+   */
+  testProjectTotp: (id) => req("POST", `/projects/${id}/credentials/test-totp`),
 
   // ── Crawl & Run ─────────────────────────────────────────────────────────────
   /**

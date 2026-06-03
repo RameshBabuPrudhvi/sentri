@@ -61,21 +61,12 @@ function countViolations(runId) {
 }
 
 // ─── Test runner ──────────────────────────────────────────────────────────────
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
-}
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -220,7 +211,4 @@ test("violations cascade-delete when parent run is removed", () => {
 
 resetDb();
 
-// ─── Results ──────────────────────────────────────────────────────────────────
-
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+summary("accessibility-repo");

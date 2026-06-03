@@ -13,23 +13,12 @@
  */
 
 import assert from "node:assert/strict";
+import { createTestRunner } from "./helpers/test-base.js";
 
-// ─── Test runner ──────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 // ─── Simulate the abort handler's controller-lookup logic ─────────────────────
 
@@ -149,7 +138,4 @@ test("aborting one run does not affect another run's controller", () => {
   assert.equal(workerAbortControllers.has("RUN-B"), true);
 });
 
-// ─── Results ──────────────────────────────────────────────────────────────────
-
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+summary("abort-worker");

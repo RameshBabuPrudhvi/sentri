@@ -9,21 +9,12 @@ import * as testRepo from "../src/database/repositories/testRepo.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import * as runRepo from "../src/database/repositories/runRepo.js";
 import { computeAndPersistFlakyScores, getTopFlakyTests } from "../src/utils/flakyDetector.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -112,14 +103,4 @@ db.exec("DELETE FROM runs");
 db.exec("DELETE FROM run_logs");
 db.exec("DELETE FROM projects");
 
-// ─── Summary ──────────────────────────────────────────────────────────────────
-
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  flaky-detector tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 flaky-detector tests passed");
+summary("flaky-detector");

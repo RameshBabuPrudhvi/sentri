@@ -84,6 +84,28 @@ import { BOT_DETECTION_PATTERNS } from "../utils/botDetection.js";
 //      not already classified as a selector or navigation issue.
 
 const FAILURE_PATTERNS = [
+  // AUTH_EXPIRED — checked BEFORE BOT_BLOCK / SELECTOR_ISSUE because a
+  // mid-run session expiry produces SECONDARY symptoms (locator timeout
+  // on a "Sign in" heading, navigation timeout against a 302→login). The
+  // `restoreAuthSession` path in `executeTest.js` already surfaced an
+  // explicit `auth_session_expired_unrecoverable` error string when the
+  // recovery loop couldn't re-establish the session — that string is
+  // the canonical signal. The `_authSessionExpired` marker is the
+  // structured-error path (`err.code === "AUTH_SESSION_EXPIRED"`) used
+  // when the runner tags the error object directly. See
+  // `backend/src/runner/executeTest.js`'s auth-redirect check for the
+  // emission site, and `backend/src/utils/skipReasons.js` for the
+  // matching `auth_expired` non-executed-skip semantics. This category
+  // is intentionally EXCLUDED from `HIGH_PRIORITY_CATEGORIES` below so
+  // we never auto-regenerate a test for an environmental failure —
+  // regenerating the test code can't fix an expired cookie.
+  ["AUTH_EXPIRED", [
+    /auth[_ ]session[_ ]expired[_ ]unrecoverable/i,
+    /auth_session_expired/i,
+    /_authSessionExpired/i,
+    /session expired.*sign in again/i,
+    /relogin_failed/i,
+  ]],
   // BOT_BLOCK — checked FIRST because anti-bot interstitials produce SECONDARY
   // symptoms (locator timeout, navigation timeout) that would otherwise be
   // misclassified as SELECTOR_ISSUE / TIMEOUT and trigger the misleading

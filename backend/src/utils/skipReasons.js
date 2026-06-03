@@ -21,10 +21,14 @@
  *  - `skipped_no_impact`  — AUTO-004 (trigger.js impact-analysis filter)
  *  - `upstream_failed`    — AUTO-014 (dependency cascade skip)
  *  - `missing_upstream`   — AUTO-014 (dependency outside dispatch set)
+ *  - `auth_expired`       — B4 / RLY-004 (session expiry mid-run, recovery
+ *                            attempted but unrecoverable — the test never
+ *                            executed against the real application; the
+ *                            failure is environmental, not a regression)
  */
 
 /** @type {Set<string>} */
-export const NON_EXECUTED_SKIP_REASONS = new Set(["over_budget", "skipped_no_impact", "upstream_failed", "missing_upstream"]);
+export const NON_EXECUTED_SKIP_REASONS = new Set(["over_budget", "skipped_no_impact", "upstream_failed", "missing_upstream", "auth_expired"]);
 
 /**
  * Predicate — true when a result row represents a dispatch-time skip

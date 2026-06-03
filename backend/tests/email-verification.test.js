@@ -15,21 +15,12 @@ import assert from "node:assert/strict";
 import { getDatabase } from "../src/database/sqlite.js";
 import * as verificationTokenRepo from "../src/database/repositories/verificationTokenRepo.js";
 import * as userRepo from "../src/database/repositories/userRepo.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 /** All test user IDs used below — must exist in `users` to satisfy the FK constraint. */
 const TEST_USERS = ["VT-U1", "VT-U2", "VT-U3", "VT-U4", "VT-U5", "VT-U6", "VT-U7", "VT-U8"];
@@ -223,14 +214,4 @@ test("deletes only expired tokens regardless of usedAt status", () => {
   assert.ok(db.prepare("SELECT * FROM verification_tokens WHERE token = ?").get("vtok-valid"), "Non-expired token should survive");
 });
 
-// ─── Summary ─────────────────────────────────────────────────────────────────
-
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);
-
-if (failed > 0) {
-  console.log("\n⚠️  email-verification tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 All email-verification tests passed!");
+summary("email-verification");

@@ -906,6 +906,88 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🔐 Auth session recovery + target-app TOTP (AUDIT-ROADMAP B4)
+
+**Preconditions:** Project with `qa_lead` or `admin` access. A staging SUT you control that (a) has a `/login` page, (b) sets a short-lived session cookie (≤ 5 min idle), and (c) optionally supports TOTP-style 6-digit one-time-codes on a post-password screen. Project credentials are encrypted at rest via `credentialEncryption.js`; the seed never round-trips through the client. Automated coverage at `backend/tests/b4-totp.test.js` (RFC 6238 vectors + AES round-trip) and `backend/tests/b4-auth-recovery.test.js` (redirect detection + skip-reason + classifier).
+
+**Surfaces covered:** `pipeline/autoLogin.js` TOTP auto-fill + `restoreAuthSession`; `runner/executeTest.js` post-goto redirect detection; `routes/projects.js` `POST /:id/credentials/test-totp` preview endpoint; `feedbackLoop.js` `AUTH_EXPIRED` category; `frontend/src/pages/NewProject.jsx` TOTP input + Test button.
+
+**A. Storing a TOTP seed (creation path)**
+
+1. As User A, create a new project. Tick **Authentication** → enter `username` + `password`. The **TOTP secret (optional)** field renders below the password block.
+2. Paste the base32 seed from your target app's authenticator-app QR (`JBSWY3DPEHPK3PXP` is a known-good fixture). Click **Create Project**. Toast `Project created`.
+3. **Verify the seed never round-trips** — DevTools → Network → `GET /api/v1/projects/<id>` after create → response shows `credentials: { _hasAuth: true, _hasTotp: true, usernameSelector: "", … }`. The `totpSecret` field is NOT in the payload.
+4. **Verify AES at rest** — direct DB read (`sqlite3 data/sentri.db "SELECT credentials FROM projects WHERE id = '<id>'"`) → the `totpSecret` field inside the encrypted JSON blob is a long hex/AES-GCM string, NOT the base32 seed.
+
+**B. Editing a project preserves the seed (blank-equals-keep)**
+
+5. Open the project for edit (`/projects/new?edit=<id>`). The TOTP field placeholder reads `•••••• (TOTP configured — leave blank to keep)`.
+6. Rename the project, leave TOTP blank, click **Save Changes** → toast `Project updated`. Re-open edit → `_hasTotp: true` still reflected in the placeholder.
+7. To rotate the seed: paste a new base32 value → save → re-open → placeholder still `••••••` (seed updated; the new value never echoes back).
+8. To clear the seed: send `PATCH /projects/<id>` with body `{ credentials: { totpSecret: null } }` from DevTools → `_hasTotp: false` on the next GET. (UI does not yet expose a "clear TOTP" button — direct API call only.)
+
+**C. Live TOTP preview endpoint (admin-only)**
+
+9. As User A (admin), reopen the project in edit mode → the **Test TOTP** button is visible (only renders when `isEdit && hasExistingTotp`).
+10. Click **Test TOTP** → button flips to `Generating…` → response renders a 6-digit code in monospace + `(30s left)` countdown that decrements once per second.
+11. Open Google Authenticator (or `oathtool --totp -b -d 6 <SEED>`) against the same seed → the code matches Sentri's preview within the ±1 window (60 s of clock skew tolerance).
+12. Let the countdown reach 0 → preview clears automatically. Click **Test TOTP** again → fresh code.
+13. **Audit log** — Audit Log filtered to type `project.credentials.test_totp` shows one row per preview with `actor`, `projectId`, `meta.codeExpiresInSeconds`. The seed itself is NOT in the meta payload.
+14. **Permissions** — as User B (`qa_lead`), the **Test TOTP** button is hidden in the UI; direct `POST /projects/<id>/credentials/test-totp` from DevTools → **403** (admin-gated per `permissions.json`).
+15. **Negative — no seed configured** — call the endpoint against a project with `_hasTotp: false` → **400** `{ code: "TOTP_NOT_CONFIGURED" }`.
+
+**D. Auto-fill at crawl + run time**
+
+16. Configure your staging SUT to challenge with a 6-digit code field after username + password. The field must carry one of: `autocomplete="one-time-code"`, `aria-label*="code"|"otp"|"verification"`, `placeholder*="code"|"otp"|"verification"`, or `name*="otp"|"code"`.
+17. Trigger a crawl on the project → Sentri auto-logs in: fills username, fills password, submits, then **waits up to 3 s for the OTP field**, computes the live code from the stored seed, fills it, submits.
+18. Run log shows the password-submit → OTP-fill sequence implicitly via the page transitions. (No explicit log line per code-fill — by design; the seed and code are never written to logs.)
+19. **Negative — wrong seed** — paste a deliberately-wrong base32 into the TOTP field, save, re-crawl → the target app rejects the code → autoLogin's retry path waits 1.5 s, generates a fresh code (will also be wrong), then returns `{ ok: false, reason: "TOTP rejected after retry — verify the seed matches the target app's enrollment" }`. The crawl marks the project as auth-failed but does NOT crash.
+
+**E. Mid-run session recovery (RLY-004)**
+
+20. With a configured + working SUT, kick off a regression run that takes longer than the SUT's idle-session window. Wait for at least one test to land on a `/login` or `/session-expired` redirect mid-run.
+21. Run log shows `[executeTest] Auth redirect detected after goto <originalUrl> → <loginUrl> — attempting session recovery`. Within ~10 s the run resumes against the original URL.
+22. The affected test result records `status: "passed"` (or `"failed"` on its own merits) — **not** `"failed"` with a misleading `NAVIGATION_FAIL` error.
+23. **Unrecoverable case** — corrupt the project's encryption key mid-run (rotate `CREDENTIAL_SECRET` or `JWT_SECRET` without re-encrypting) → next mid-run expiry triggers `restoreAuthSession()` → returns `{ ok: false, reason: "credentials_decryption_failed" }` → test result records `status: "skipped"`, `skipReason: "auth_expired"`, `error: "auth_session_expired_unrecoverable: …"`.
+24. **Pass-rate denominator** — verify `run.passed / (run.total - skipped-auth-expired)` matches what RunDetail's pass-rate badge displays. The `auth_expired` skip is excluded from the denominator (same accounting as `over_budget` / `upstream_failed`).
+25. **Feedback loop excluded** — open the run's Quality Insights panel → the `auth_session_expired_unrecoverable` rows are NOT in the auto-regenerated-test list. The honest message "session expired" surfaces; the misleading "AI is generating CSS selectors" insight does NOT fire.
+
+**F. Custom auth-redirect patterns (env)**
+
+26. Set `AUTH_REDIRECT_PATTERNS='["/auth/expired","/sso/relogin"]'` in `backend/.env` → restart backend. The two extra regex patterns compile at module load (verify via the absence of a `[autoLogin] Invalid AUTH_REDIRECT_PATTERNS entry` warning).
+27. Crawl a SUT whose expiry redirect lands on `/auth/expired?reason=idle` → recovery fires the same way as the built-in `/login` pattern.
+28. **Negative — malformed env** — set `AUTH_REDIRECT_PATTERNS='not-json'` → restart → backend logs `[autoLogin] AUTH_REDIRECT_PATTERNS is not valid JSON: …` once at startup. Default patterns continue to work; bad env doesn't crash boot.
+
+**G. Proactive session keep-alive ticker (`sessionRefreshIntervalMs`)**
+
+29. As User A, PATCH `/projects/<id>` with body `{ sessionRefreshIntervalMs: 60000 }` (1 min, the minimum) → 200, persisted. Re-read → field round-trips.
+30. **Bounds validation** — `30000` (too low) → **400** `must be null, 0 (disable), or an integer between 60000 (1 min) and 86400000 (24 h).`. `100000000` (too high) → **400**. `null` / `0` → persists as `null` (opt-out — no ticker registered for that project).
+31. **Ticker fires** — kick off a regression run on the project. The ping is dispatched on a **second page in the same BrowserContext** (cookies are shared, but the test page's DOM is untouched), so SUT access logs show one `GET <project.url>` per interval per active test. The cookie's `lastSeenAt` advances even when the test body is otherwise idle (between assertions / waitForTimeouts).
+32. **Ticker does NOT interfere with test actions** — by design, the refresh page is a separate Playwright `Page` opened via `context.newPage()`; the test body's `page` is never navigated by the ticker. Verify by running a chatty test that fills/clicks rapidly during a ticker window — no `SELECTOR_ISSUE` / `NAVIGATION_FAIL` failures appear, and `context.pages().length` returns to 1 between ticks (the refresh page is closed in a `finally` per tick so background tabs don't accumulate). Re-entrance protection: an in-flight refresh (slow target, full 30s timeout) causes the next tick to skip rather than overlap.
+33. **Cleanup on test end** — the ticker is `clearInterval`'d in the per-test `finally` block BEFORE the page closes, so no orphan timer survives across tests. Trigger a 200-test run with the ticker enabled → `process.memoryUsage().heapUsed` should not grow unboundedly across tests.
+34. **`null` (default) preserves pre-B4 behaviour** — projects without `sessionRefreshIntervalMs` configured register NO ticker; the per-test cleanup path is bit-for-bit identical to pre-B4. Verify by comparing a baseline run (no field) against a configured run — `clearInterval` line only fires on the configured run.
+
+**Negative / edge:**
+
+- TOTP secret too short (< 16 chars) → PATCH returns **400** `credentials.totpSecret must be a base32 string (16–128 chars, A-Z + 2-7) or null.`
+- TOTP seed length policy (industry-standard, consumer-side):
+  - **16–25 chars (80–125 bits)** → accepted but flagged. The `project.create` / `project.update` audit row carries `meta.weakTotpSeed = { length, reason: "below_rfc4226_minimum" }`. SIEM / SOC dashboards can flag tenants with sub-RFC 4226 seeds without blocking automation. Matches the 1Password / Authy / `oathtool` consumer behaviour — Sentri can't unilaterally force the SUT to re-issue, so rejecting these seeds would make MFA automation impossible against many legacy SUTs.
+  - **26–31 chars (≥ 128 bits)** → accepted silently. Clears RFC 4226 §4 R6 MUST.
+  - **32 chars (160 bits)** → accepted silently. Matches RFC 6238 §5.1 RECOMMENDED and what Sentri's own SEC-004 MFA flow generates.
+  - **128 chars** → upper bound. Larger pastes are almost always full QR-code URIs (`otpauth://...`) rather than the seed itself.
+- TOTP secret with lowercase / spaces / padding (`jbswy3 dpehpk 3pxp===`) → normalised server-side to uppercase, whitespace + padding stripped. PATCH succeeds.
+- TOTP secret containing non-base32 chars (`0`, `1`, `8`, `9`) → PATCH returns **400**.
+- Pre-B4 project rows (no `totpSecret` in the encrypted blob) → still round-trip through `decryptCredentials` cleanly; `_hasTotp: false`; no TOTP field auto-fill at crawl time.
+- Cross-workspace ACL — outsider hitting `/projects/<id>/credentials/test-totp` → **404** (not 403; existence not leaked).
+- Network → DevTools → response from `POST /credentials/test-totp` contains ONLY `{ code: "123456", expiresInSeconds: 27 }`. No seed, no salt, no username.
+- `auth_expired` skip rows are explicitly excluded from:
+  - The pass-rate denominator (`backend/src/utils/skipReasons.js#NON_EXECUTED_SKIP_REASONS`).
+  - The auto-regeneration `HIGH_PRIORITY_CATEGORIES` set (`backend/src/pipeline/feedbackLoop.js`).
+  - `maxFailures` quality-gate violations (`run.failed` never increments for these).
+- A test that lands on `/login` from a deliberate non-auth-gated assertion (e.g. testing the login page itself) → does NOT trigger `restoreAuthSession` because the matching URL is the project's intended target. Recovery is gated on (a) `project.credentials` being present AND (b) the post-goto URL matching one of the redirect patterns.
+
+---
+
 ### 🪄 AI Fix (failed test recovery)
 
 **Preconditions:** A test exists with `playwrightCode` and `lastResult === "failed"` (or its latest run result is failed). AI provider configured. Role: `qa_lead` or `admin` (`backend/src/routes/testFix.js:152` — `requireRole("qa_lead")`).

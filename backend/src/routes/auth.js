@@ -47,6 +47,18 @@ import { formatLogLine } from "../utils/logFormatter.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { evaluateMfaEnforcement } from "../utils/mfaEnforcement.js";
 import { encryptString, decryptString } from "../utils/credentialEncryption.js";
+// SEC-004 + B4 (AUDIT-ROADMAP) — TOTP primitives are shared with the
+// target-app login helper (`pipeline/autoLogin.js`) so the SEC-004 MFA
+// flow and SCL-001's auto-fill share ONE algorithm. See `utils/totp.js`
+// for the rationale (single source of truth, no new dependency, RFC 6238
+// defaults). Imported under their canonical names so the rest of this
+// file reads unchanged.
+import {
+  base32Decode,
+  computeTotpAtStep,
+  generateTotpSecret,
+  verifyTotp,
+} from "../utils/totp.js";
 import { stopSchedule } from "../scheduler.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
@@ -348,67 +360,14 @@ const _mfaPurgeInterval = setInterval(() => {
 }, 5 * 60 * 1000);
 _mfaPurgeInterval.unref();
 
-/**
- * Decode a base32-encoded TOTP secret to its raw byte buffer (RFC 4648).
- * Tolerant of whitespace, lowercase, and trailing `=` padding.
- * @param {string} input
- * @returns {Buffer}
- * @private
- */
-function base32Decode(input) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const clean = String(input || "").toUpperCase().replace(/=+$/g, "").replace(/[^A-Z2-7]/g, "");
-  let bits = "";
-  for (const c of clean) {
-    const v = alphabet.indexOf(c);
-    if (v < 0) continue;
-    bits += v.toString(2).padStart(5, "0");
-  }
-  const out = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2));
-  return Buffer.from(out);
-}
-/**
- * Generate a fresh 160-bit (32-char base32) TOTP secret. Matches RFC 6238 /
- * Google Authenticator defaults so any standard authenticator app interops.
- * @returns {string}
- * @private
- */
-function generateTotpSecret() {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const bytes = crypto.randomBytes(20);
-  let out = "";
-  let bits = 0; let value = 0;
-  for (const b of bytes) {
-    value = (value << 8) | b;
-    bits += 8;
-    while (bits >= 5) { out += alphabet[(value >>> (bits - 5)) & 31]; bits -= 5; }
-  }
-  if (bits > 0) out += alphabet[(value << (5 - bits)) & 31];
-  return out;
-}
-
-/**
- * Compute the RFC 6238 TOTP code for a given base32 secret at a given step
- * counter. Single source of truth for both the production `verifyTotp` loop
- * and the test helper `generateTotpCode` — so any algorithm change
- * (SHA-256, different digit count, different period) breaks tests
- * immediately rather than silently letting production drift.
- *
- * @param {string} secret      - Base32 TOTP secret.
- * @param {number} stepCounter - 30-second step counter (`floor(unixSeconds / 30)`).
- * @returns {string} Zero-padded 6-digit code.
- * @private
- */
-function computeTotpAtStep(secret, stepCounter) {
-  const key = base32Decode(secret);
-  const counter = Buffer.alloc(8);
-  counter.writeBigUInt64BE(BigInt(stepCounter));
-  const hmac = crypto.createHmac("sha1", key).update(counter).digest();
-  const off = hmac[hmac.length - 1] & 0xf;
-  const code = ((hmac[off] & 0x7f) << 24) | ((hmac[off + 1] & 0xff) << 16) | ((hmac[off + 2] & 0xff) << 8) | (hmac[off + 3] & 0xff);
-  return String(code % 1_000_000).padStart(6, "0");
-}
+// B4 (AUDIT-ROADMAP) — `base32Decode`, `generateTotpSecret`, and
+// `computeTotpAtStep` previously lived here. They're now imported from
+// `utils/totp.js` at the top of this file so the SEC-004 MFA flow and
+// the target-app login helper (`pipeline/autoLogin.js`) share ONE
+// implementation. Deleting the local definitions closes the algorithm-
+// drift risk called out in `utils/totp.js`'s docblock — a future change
+// to the digit count / period / digest would otherwise need to touch
+// two copies.
 
 /**
  * Internal cross-module helper — exposes the TOTP code generator so the test
@@ -428,37 +387,9 @@ export function _internalGenerateTotpCode(secret, offsetSteps = 0) {
   return computeTotpAtStep(secret, now + offsetSteps);
 }
 
-/**
- * Verify a 6-digit TOTP code against a base32 secret. Allows ±`window` steps
- * (default 30s each) of clock skew either side of `now`. Configurable via the
- * `MFA_TOTP_WINDOW` env var (default 1 = ±30s tolerance).
- *
- * Constant-time: iterates every candidate window even after a match and uses
- * `crypto.timingSafeEqual` for the digit comparison so total runtime does not
- * leak which window (or whether any) matched.
- *
- * @param {string} token  - User-supplied 6-digit code.
- * @param {string} secret - Base32 TOTP secret.
- * @param {number} [window]
- * @returns {boolean}
- * @private
- */
-function verifyTotp(token, secret, window) {
-  const w = Number.isFinite(window) ? window : (parseInt(process.env.MFA_TOTP_WINDOW ?? "1", 10) || 1);
-  const t = String(token || "").replace(/\s+/g, "");
-  if (!/^\d{6}$/.test(t)) return false;
-  const step = 30;
-  const now = Math.floor(Date.now() / 1000 / step);
-  const tBuf = Buffer.from(t);
-  let matched = false;
-  for (let i = -w; i <= w; i++) {
-    const computed = computeTotpAtStep(secret, now + i);
-    try {
-      if (crypto.timingSafeEqual(Buffer.from(computed), tBuf)) matched = true;
-    } catch { /* length mismatch — t validated as /^\d{6}$/ above so unreachable */ }
-  }
-  return matched;
-}
+// B4 (AUDIT-ROADMAP) — `verifyTotp` moved to `utils/totp.js`. See the
+// import block at the top of this file + the explainer above the now-
+// deleted `computeTotpAtStep` for the rationale.
 
 /**
  * SHA-256 hash a recovery code for storage. Recovery codes are user-facing

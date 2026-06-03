@@ -339,6 +339,15 @@ const files = [
   // server) and the operator runbook at `QA.md § "iframe + SPA hydration
   // + adaptive timeout (AUDIT-ROADMAP B2)"`.
   "tests/b2-adaptive-timeout.test.js",
+  // B4 (AUDIT-ROADMAP Bundle 4) — RLY-004 auth-session recovery +
+  // SCL-001 target-app TOTP. Pure-function contracts: TOTP code +
+  // verify round-trip, base32-decode edge cases, auth-redirect URL
+  // pattern matching, credential encryption round-trip with totpSecret,
+  // and feedback-loop AUTH_EXPIRED classification. Browser-level
+  // restoreAuthSession integration is covered by the existing
+  // `auto-login.test.js` fixtures.
+  "tests/b4-totp.test.js",
+  "tests/b4-auth-recovery.test.js",
   // B2 — E2E iframe enumeration against a real Chromium browser pointed
   // at a local same-origin HTTP fixture (the only way to exercise the
   // browser's same-origin policy: `data:` URLs each have their own
@@ -380,35 +389,106 @@ const files = [
   "tests/concurrent-dispatch.test.js",
 ];
 
+// ── Debug knobs (propagate to children via inherited env) ────────────────────
+//
+// - `TEST_FILE_FILTER=<substring>` — only run test FILES whose path contains
+//   the substring (case-insensitive). Lets a developer iterate on one file
+//   without commenting out the rest of the array.
+// - `TEST_FILTER=<substring>` — already honoured by `createTestRunner()` per
+//   test name. Inherited by child processes via `stdio: "inherit"` + the
+//   default env merge — documented here so the knob is discoverable.
+// - `TEST_BAIL=1` — stop the WHOLE suite on the first failing file (mirrors
+//   per-file BAIL inside `createTestRunner`). Combined: a single failing
+//   assertion terminates the suite immediately, surfacing one root cause
+//   instead of cascade noise.
+// - `TEST_FAIL_FAST=1` — alias for TEST_BAIL=1 at the suite level (some
+//   industry tools spell it differently; accept both).
+const FILE_FILTER = (process.env.TEST_FILE_FILTER || "").toLowerCase();
+const BAIL = process.env.TEST_BAIL === "1"
+  || process.env.TEST_BAIL === "true"
+  || process.env.TEST_FAIL_FAST === "1"
+  || process.env.TEST_FAIL_FAST === "true";
+
+const selected = FILE_FILTER
+  ? files.filter((f) => f.toLowerCase().includes(FILE_FILTER))
+  : files;
+
+if (FILE_FILTER && selected.length === 0) {
+  console.error(`\n⚠️  TEST_FILE_FILTER="${process.env.TEST_FILE_FILTER}" matched 0 files. Aborting.\n`);
+  process.exit(2);
+}
+if (FILE_FILTER) {
+  console.log(`\n🔎 TEST_FILE_FILTER="${process.env.TEST_FILE_FILTER}" → ${selected.length} of ${files.length} files\n`);
+}
+
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 const failedFiles = [];
+const slowFiles = [];
+// Mirrors `createTestRunner`'s 500 ms slow-test threshold but applied at the
+// file level — a file that takes > 5 s overall is a candidate for either
+// splitting or moving to a tagged "slow" suite.
+const SLOW_FILE_THRESHOLD_MS = 5_000;
+const suiteStartedAt = Date.now();
 
-for (const file of files) {
+for (const file of selected) {
+  const fileStartedAt = Date.now();
   const result = spawnSync(process.execPath, [file], {
     stdio: "inherit",
     cwd: process.cwd(),
   });
+  const elapsedMs = Date.now() - fileStartedAt;
 
   if (result.status === 0) {
     passed += 1;
+    if (elapsedMs >= SLOW_FILE_THRESHOLD_MS) slowFiles.push({ file, elapsedMs });
   } else {
     failed += 1;
-    failedFiles.push({ file, exitCode: result.status, signal: result.signal || null });
-    console.error(`\n❌ FAILED: ${file} (exit code ${result.status}${result.signal ? `, signal ${result.signal}` : ""})\n`);
+    failedFiles.push({ file, exitCode: result.status, signal: result.signal || null, elapsedMs });
+    console.error(`\n❌ FAILED: ${file} (exit ${result.status}${result.signal ? `, signal ${result.signal}` : ""}, ${elapsedMs}ms)\n`);
+    if (BAIL) {
+      // Mark the rest as skipped so the summary line is honest about what
+      // actually ran. Surface why we stopped so the next dev doesn't think
+      // half the suite silently disappeared.
+      skipped = selected.length - (passed + failed);
+      console.error(`\n⛔ Bailing on first failing file (TEST_BAIL/TEST_FAIL_FAST=1). Skipped ${skipped} subsequent files.\n`);
+      break;
+    }
   }
 }
 
+const totalElapsedMs = Date.now() - suiteStartedAt;
+const totalSec = (totalElapsedMs / 1000).toFixed(1);
+
 console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed out of ${files.length} test files`);
+const skipTail = skipped > 0 ? `, ${skipped} skipped` : "";
+console.log(`Results: ${passed} passed, ${failed} failed${skipTail} out of ${selected.length} test files  (${totalSec}s)`);
+
+if (slowFiles.length > 0) {
+  // Sort slowest-first so the offender is at the top of the list.
+  slowFiles.sort((a, b) => b.elapsedMs - a.elapsedMs);
+  console.log(`\n⏱  Slow files (≥ ${SLOW_FILE_THRESHOLD_MS}ms):`);
+  for (const { file, elapsedMs } of slowFiles.slice(0, 10)) {
+    console.log(`    ${(elapsedMs / 1000).toFixed(1)}s  ${file}`);
+  }
+}
 
 if (failed > 0) {
   console.log("\n⚠️  Backend test run failed");
   console.log("\nFailed test files:");
-  for (const { file, exitCode, signal } of failedFiles) {
-    console.log(`  ❌ ${file} — exit ${exitCode}${signal ? ` (${signal})` : ""}`);
+  for (const { file, exitCode, signal, elapsedMs } of failedFiles) {
+    console.log(`  ❌ ${file} — exit ${exitCode}${signal ? ` (${signal})` : ""}  (${elapsedMs}ms)`);
   }
+  // Re-run hint: copy-paste-able command to iterate locally without scrolling.
+  console.log(`\n💡 Re-run only the failing file(s):`);
+  for (const { file } of failedFiles) {
+    console.log(`    node ${file}`);
+  }
+  console.log(`\n💡 Iterate with debug knobs:`);
+  console.log(`    TEST_BAIL=1 TEST_VERBOSE=1 node ${failedFiles[0].file}`);
+  console.log(`    TEST_FILTER="<substring>" node ${failedFiles[0].file}`);
   process.exit(1);
 }
 
-console.log("\n🎉 All backend tests passed!");
+console.log(`\n🎉 All backend tests passed!  (${totalSec}s)`);

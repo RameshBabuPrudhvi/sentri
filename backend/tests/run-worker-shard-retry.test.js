@@ -43,20 +43,11 @@ function shardScopedRetryReset(results, shardIndex) {
   return { results: survivors, passed, failed };
 }
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  \u2713 ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  \u2717 ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
 
 console.log("\n\u2500\u2500 runWorker shard-scoped retry reset \u2500\u2500");
 
@@ -142,5 +133,4 @@ test("empty / nullish results array is a clean no-op", () => {
   assert.deepEqual(shardScopedRetryReset(undefined, null).results, []);
 });
 
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+summary("run-worker-shard-retry");

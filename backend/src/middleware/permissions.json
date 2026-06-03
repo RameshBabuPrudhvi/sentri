@@ -77,6 +77,11 @@
       "source": "backend/src/routes/runs.js",
       "$comment": "B1 (AUDIT-ROADMAP) — resume a crash-recovered run (status='interrupted', failureReason='process_crash'). Admin-gated because resume replays against the original environment + credentials; mirrors GitHub Actions 're-run failed jobs' / CircleCI 'rerun-from-failed' / Buildkite 'retry job'. Skips tests with a row in `run_test_results` so the dispatch slice is exactly the missing tail."
     },
+    "POST /api/v1/projects/:id/credentials/test-totp": {
+      "role": "admin",
+      "source": "backend/src/routes/projects.js",
+      "$comment": "B4 (AUDIT-ROADMAP) / SCL-001 — operator-facing preview of the live RFC 6238 TOTP code for the project's stored target-app seed. Admin-only because exposing the live code is equivalent to granting one-shot login as the test user. Seed is AES-256-GCM encrypted at rest via credentialEncryption; never returned over the wire. Mirrors Auth0/Okta operator-console 'Test connection' previews. Audit-logged as project.credentials.test_totp so admins can answer 'who previewed the live MFA code, when?'."
+    },
     "POST /api/v1/projects/:id/trigger-tokens": {
       "role": "admin",
       "source": "backend/src/routes/runs.js:379"

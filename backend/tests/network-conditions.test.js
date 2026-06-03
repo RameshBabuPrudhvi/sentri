@@ -9,21 +9,12 @@
 
 import assert from "node:assert/strict";
 import { applyNetworkCondition } from "../src/runner/networkConditions.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-async function test(name, fn) {
-  try {
-    await fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 /** Build a fake Chromium-like context+page that records all API calls. */
 function makeFakes({ cdpThrows = false } = {}) {
@@ -129,12 +120,4 @@ await test("teardown() is idempotent / safe when unroute throws", async () => {
   await handle.teardown();
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  Network-condition tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 Network-condition tests passed");
+summary("network-conditions");

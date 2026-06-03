@@ -65,19 +65,11 @@ async function jwtReq(base, path, { method = "GET", cookie, body } = {}) {
   return { res, json };
 }
 
-let passed = 0;
-let failed = 0;
-
-async function test(name, fn) {
-  try {
-    await fn();
-    passed++;
-    console.log("  \u2713 " + name);
-  } catch (err) {
-    failed++;
-    console.error("  \u2717 " + name + ": " + err.message);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `async function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
 
 async function main() {
   mountRoutesOnce();
@@ -295,9 +287,6 @@ async function main() {
       assert.equal(row2.shardCount, 1);
     });
 
-    console.log(`\n  ${passed} passed, ${failed} failed\n`);
-    if (failed > 0) process.exit(1);
-    console.log("\uD83C\uDF89 All run-sharding tests passed!");
   } finally {
     if (prevMaxWorkers === undefined) delete process.env.MAX_WORKERS;
     else process.env.MAX_WORKERS = prevMaxWorkers;
@@ -305,7 +294,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("\u2717 run-sharding failed:", err);
-  process.exit(1);
-});
+// Run main() then summary() — main() registers all tests, summary() drains
+// the pending promises and exits with the right status code.
+main()
+  .then(() => summary("run-sharding"))
+  .catch((err) => {
+    console.error("\u2717 run-sharding failed:", err);
+    process.exit(1);
+  });

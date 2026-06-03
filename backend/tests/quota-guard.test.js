@@ -64,14 +64,22 @@ function insertCostRow(workspaceId, { costUsd, ageHours = 0 }) {
 
 // ─── 1. checkAndReserve ───────────────────────────────────────────────────────
 
-test("checkAndReserve: routes with no limits pass through unconditionally", async () => {
+// Stage-2 follow-up: every `test(...)` call below is `await`-ed because these
+// tests share module-global state in `quotaGuard.js` (the in-memory token
+// bucket reset by `_resetForTests()`). With the shared runner's async-by-
+// default model, bare top-level `test(...)` registrations let test 2's
+// `_resetForTests()` interleave with test 1's reservation loop — wiping
+// the bucket mid-test and flipping the rejection-after-N-calls assertion.
+// Awaiting each registration restores the sequential isolation the
+// pre-migration synchronous runner provided.
+await test("checkAndReserve: routes with no limits pass through unconditionally", async () => {
   _resetForTests();
   const result = await checkAndReserve("pr-no-limits", 10_000, {});
   assert.equal(result.ok, true);
   assert.equal(result.retryAfterMs, 0);
 });
 
-test("checkAndReserve: RPM-only limit allows up to N calls/min", async () => {
+await test("checkAndReserve: RPM-only limit allows up to N calls/min", async () => {
   _resetForTests();
   // rpmLimit=3 → 3 successful reserves, 4th rejected.
   for (let i = 0; i < 3; i += 1) {
@@ -84,7 +92,7 @@ test("checkAndReserve: RPM-only limit allows up to N calls/min", async () => {
   assert.ok(denied.retryAfterMs > 0, "retryAfterMs must be positive");
 });
 
-test("checkAndReserve: TPM-only limit gates on cumulative token count", async () => {
+await test("checkAndReserve: TPM-only limit gates on cumulative token count", async () => {
   _resetForTests();
   // tpmLimit=100 → first call reserves 60, second reserves remaining 40,
   // third (even for 1 token) must reject.
@@ -97,7 +105,7 @@ test("checkAndReserve: TPM-only limit gates on cumulative token count", async ()
   assert.equal(r3.reason, "tpm");
 });
 
-test("checkAndReserve: missing routeId returns ok (defensive)", async () => {
+await test("checkAndReserve: missing routeId returns ok (defensive)", async () => {
   _resetForTests();
   const r = await checkAndReserve(null, 100, { rpmLimit: 1 });
   assert.equal(r.ok, true);
@@ -105,7 +113,7 @@ test("checkAndReserve: missing routeId returns ok (defensive)", async () => {
 
 // ─── 2. reportActual ──────────────────────────────────────────────────────────
 
-test("reportActual: over-estimate correction frees tokens back to bucket", async () => {
+await test("reportActual: over-estimate correction frees tokens back to bucket", async () => {
   _resetForTests();
   // Reserve 100 estimated against a 200-token budget → 100 remaining.
   const before = await checkAndReserve("pr-drift", 100, { tpmLimit: 200 });
@@ -118,7 +126,7 @@ test("reportActual: over-estimate correction frees tokens back to bucket", async
   assert.equal(after.ok, true, "over-estimate correction should free up tokens");
 });
 
-test("reportActual: no-op when delta is zero or routeId missing", async () => {
+await test("reportActual: no-op when delta is zero or routeId missing", async () => {
   _resetForTests();
   await reportActual(null, 100, 100);    // null routeId — no-op
   await reportActual("pr-x", 100, 100);  // delta=0 — no-op
@@ -128,19 +136,19 @@ test("reportActual: no-op when delta is zero or routeId missing", async () => {
 
 // ─── 3. checkSpendCap ─────────────────────────────────────────────────────────
 
-test("checkSpendCap: no caps configured → ok=true, remainingUsd=null", () => {
+await test("checkSpendCap: no caps configured → ok=true, remainingUsd=null", () => {
   const wsId = seedWorkspace(); // no caps
   const r = checkSpendCap(wsId);
   assert.equal(r.ok, true);
   assert.equal(r.remainingUsd, null);
 });
 
-test("checkSpendCap: missing workspaceId → defensive ok=true", () => {
+await test("checkSpendCap: missing workspaceId → defensive ok=true", () => {
   const r = checkSpendCap(null);
   assert.equal(r.ok, true);
 });
 
-test("checkSpendCap: daily cap respected, rolling 24h window", () => {
+await test("checkSpendCap: daily cap respected, rolling 24h window", () => {
   const wsId = seedWorkspace({ dailyCap: 1.0 });
   // 23h ago — counts (within rolling 24h window).
   insertCostRow(wsId, { costUsd: 0.4, ageHours: 23 });
@@ -152,7 +160,7 @@ test("checkSpendCap: daily cap respected, rolling 24h window", () => {
   assert.ok(Math.abs(r.remainingUsd - 0.6) < 1e-6);
 });
 
-test("checkSpendCap: daily cap exceeded → ok=false, exceeded='day'", () => {
+await test("checkSpendCap: daily cap exceeded → ok=false, exceeded='day'", () => {
   const wsId = seedWorkspace({ dailyCap: 1.0 });
   insertCostRow(wsId, { costUsd: 1.5, ageHours: 1 });
   const r = checkSpendCap(wsId);
@@ -161,7 +169,7 @@ test("checkSpendCap: daily cap exceeded → ok=false, exceeded='day'", () => {
   assert.ok(r.remainingUsd <= 0);
 });
 
-test("checkSpendCap: alert fires at >= threshold percentage", () => {
+await test("checkSpendCap: alert fires at >= threshold percentage", () => {
   const wsId = seedWorkspace({ dailyCap: 10.0, thresholdPct: 80 });
   insertCostRow(wsId, { costUsd: 8.5, ageHours: 1 });
   const r = checkSpendCap(wsId);
@@ -169,7 +177,7 @@ test("checkSpendCap: alert fires at >= threshold percentage", () => {
   assert.equal(r.alertTriggered, true, "8.5 >= 10 * 0.80, alert should fire");
 });
 
-test("checkSpendCap: alert does NOT fire below threshold", () => {
+await test("checkSpendCap: alert does NOT fire below threshold", () => {
   const wsId = seedWorkspace({ dailyCap: 10.0, thresholdPct: 80 });
   insertCostRow(wsId, { costUsd: 5.0, ageHours: 1 });
   const r = checkSpendCap(wsId);
@@ -177,7 +185,7 @@ test("checkSpendCap: alert does NOT fire below threshold", () => {
   assert.equal(r.alertTriggered, false, "5.0 < 10 * 0.80");
 });
 
-test("checkSpendCap: monthly cap enforced — month-to-date sum", () => {
+await test("checkSpendCap: monthly cap enforced — month-to-date sum", () => {
   const wsId = seedWorkspace({ monthlyCap: 50.0 });
   // Two rows totalling exactly the cap — exceeded by the >= semantics.
   //

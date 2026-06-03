@@ -17,21 +17,12 @@ import assert from "node:assert/strict";
 import { getDatabase } from "../src/database/sqlite.js";
 import * as resetTokenRepo from "../src/database/repositories/passwordResetTokenRepo.js";
 import { actor } from "../src/utils/actor.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 /** All test user IDs used below — must exist in `users` to satisfy the FK constraint. */
 const TEST_USERS = ["U-1", "U-2", "U-3", "U-4", "U-5", "U-6", "U-7", "U-8", "U-A", "U-B"];
@@ -238,14 +229,4 @@ test("falls back to email when name is empty string", () => {
   assert.equal(result.userName, "e@f.com");
 });
 
-// ─── Summary ─────────────────────────────────────────────────────────────────
-
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);
-
-if (failed > 0) {
-  console.log("\n⚠️  password-reset-token tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 All password-reset-token tests passed!");
+summary("password-reset-token");
