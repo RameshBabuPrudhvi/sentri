@@ -701,7 +701,85 @@ error codes); RunDetail 🔗 badge; TestDetail "Depends on" multi-select.
 **Covers sub-items:** QAL-001 (dry-run gate), QAL-005 (semantic reviewer),
 QAL-002 (fixture/state isolation), QAL-010 (unique test data / faker)
 
-**Status:** 🔲 Planned | **Effort:** XL | **Source:** Audit §D.2 · §E.3
+**Status:** ✅ Complete (this PR) | **Effort:** XL | **Source:** Audit §D.2 · §E.3
+
+**Shipped artefacts (this PR):**
+
+- Migrations `073_test_dry_run.sql` (`dryRunStatus` / `dryRunError` /
+  `dryRunDurationMs`), `074_test_semantic_review.sql`
+  (`semanticReviewScore` / `semanticReviewIssues`),
+  `075_test_fixtures_v2.sql` (`setupCode` / `teardownCode`),
+  `076_project_b6_quality_gates.sql` (`dryRunGate` / `semanticReview` /
+  `testDataLocale`). All seven test columns + three project toggles
+  default safe-off so a disabled project's pipeline is byte-identical to
+  pre-B6 (acceptance criterion below).
+- `pipeline/dryRunGate.js` (QAL-001) — `dryRunTest` runs one validated
+  test once in a bounded `browserPool` lease before persistence;
+  `dryRunBatch` serialises the batch (pool bounds concurrency) and is
+  abort-aware. Three terminal outcomes (`passed` / `failed` / `trivial`)
+  with a configurable `DRY_RUN_TIMEOUT_MS` (60 s) + `DRY_RUN_TRIVIAL_THRESHOLD_MS`
+  (200 ms) and 2 KB error truncation.
+- `pipeline/prompts/semanticReviewPrompt.js` (QAL-005) —
+  `buildSemanticReviewPrompt` (four contract questions, 32 KB code cap) +
+  `normalizeSemanticReviewResponse` (score clamp to [0,100], verdict
+  derive-from-score fallback, ≤5 issues each ≤200 chars). The full
+  `{ system, user }` envelope is dispatched via `agentRole: 'reviewer'`.
+- `utils/fakeDataGenerator.js` (QAL-010) — 15-token seeded faker wrapper
+  (`createFaker` / `seedForTest`); seed is `SHA-256(runId:testId) >> 11`
+  (deterministic per retry, distinct per run); `@faker-js/faker` optional
+  with a deterministic SHA-256 fallback so CI without the dep still runs.
+  `SUPPORTED_LOCALES` (15 entries) validated at the route layer.
+- `pipeline/testPersistence.js` — `persistGeneratedTests` is now async:
+  runs the opt-in dry-run gate before INSERT and gates AUTO-003b
+  auto-approval on `dryRunStatus === 'passed'`. New `applySemanticReview`
+  exported function applies the second-pass LLM verdict post-persist;
+  short-circuits when `semanticReview` is off, the B3 reviewer-collapse
+  gate fired, or the batch is empty. Both crawler call sites `await` and
+  forward the abort signal.
+- `runner/executeTest.js` — `applyB6PreExecutionTransforms` applies faker
+  substitution + setup/teardown injection once at function entry; the
+  test body is spliced via `indexOf`+`slice` (literal — no `$&`/`$'`/`` $` ``
+  replacement-pattern corruption). Teardown wraps the body in
+  `try/finally` with swallowed+logged errors.
+- `prompts/outputSchema.js` — schema gains optional `setupCode` /
+  `teardownCode` fields + the `__FAKE_*__` token convention;
+  `PROMPT_VERSION` bumped 2.4.0 → 2.5.0.
+- `routes/projects.js` — PATCH validates `dryRunGate` / `semanticReview`
+  (boolean) + `testDataLocale` (against `SUPPORTED_LOCALES`; typo → 400);
+  all three added to `SINGLE_FIELD_BYPASS`. `testRunner.js` forwards
+  `project.testDataLocale` once per run to avoid an N+1 repo read.
+- `frontend/src/pages/ReviewQueue.jsx` — four inline gate chips
+  (`⚠ Dry run failed` / `⚠ Trivial` / `⚠ Semantic reject` /
+  `⚠ Semantic revise`); render only when the gate columns are populated.
+- Tests: `dry-run-gate.test.js` (8 cases, stub pool lease contract),
+  `semantic-reviewer.test.js` (12 cases, prompt + normaliser),
+  `test-fixture-management.test.js` (10 cases, repo round-trips),
+  `fake-data-generation.test.js` (12 cases, seed determinism + fallback)
+  — all registered in `backend/tests/run-tests.js`.
+- `backend/.env.example`: `DRY_RUN_TIMEOUT_MS`, `DRY_RUN_TRIVIAL_THRESHOLD_MS`.
+  `backend/package.json`: `@faker-js/faker` as an optional dependency.
+
+**Scope deviations from the original spec (intentional):**
+
+- Migration numbers landed as `073–076` (not the `NNN` placeholders in
+  the write-up below) following the `065–072` sequence B1–B4 already
+  consumed.
+- B6-2's `revise` verdict does NOT re-enter the author loop. The spec
+  proposed injecting semantic issues back into `runReviewerAuthorLoop`,
+  but that loop runs at generation time (pre-persist) while the semantic
+  pass runs post-persist (it reads the persisted row by id). Re-entering
+  the loop would require a second generation round per test — deferred as
+  a follow-up. `revise` persists the score + issues and leaves the test
+  in `draft` so the Review Queue chips surface them; only `reject` mutates
+  `reviewStatus`.
+- Faker substitution runs in `executeTest.js` against ALL tokens; the
+  spec's "skip columns covered by a `testFixtureRepo` fixture" carve-out
+  is supported by `createFaker`'s `skipTokens` option but not yet wired to
+  the fixture column set (the runner has no per-token fixture map at
+  execution time). Follow-up when fixture-column metadata is threaded
+  through.
+
+
 
 **Problem:**
 
@@ -1224,11 +1302,11 @@ collapsed), AUTO-023 ✅ (oracle agent role + tool registry), AUTO-009 ✅
 | B3 — Reviewer independence + escalation | RLY-003, QAL-004 | 🔴 P0 | M | ✅ Complete (this PR) |
 | B4 — Auth recovery + target-app TOTP | RLY-004, SCL-001 | 🔴 P0 | M | ✅ Complete (this PR) |
 | B5 — Test dependency ordering | AUTO-014 | 🟡 P1 | M | ✅ Complete |
-| B6 — Test quality gates | QAL-001, QAL-005, QAL-002, QAL-010 | 🟡 P1 | XL | 🔲 Planned |
+| B6 — Test quality gates | QAL-001, QAL-005, QAL-002, QAL-010 | 🟡 P1 | XL | ✅ Complete (this PR) |
 | B7 — Healing safety + context robustness | QAL-006, QAL-007, QAL-008, QAL-009, QAL-011 | 🟡 P1 | L | 🔲 Planned |
 | B8 — Goal-based autonomy + coverage | GOL-001, SCL-004, AUTO-011, AUTO-021 | 🟢 Strategic | XL | 🔲 Planned |
 
-**Totals — Phase 6:** ✅ Done: 3 (B1 — 3 sub-items, B2 — 2 sub-items, B5 — 1 sub-item) · 🔲 Pending: 5 bundles (22 sub-items, includes QAL-011 added under B7 by B2)
+**Totals — Phase 6:** ✅ Done: 6 bundles (B1 — 3 sub-items, B2 — 2, B3 — 2, B4 — 2, B5 — 1, B6 — 4) · 🔲 Pending: 2 bundles (B7 — 5 sub-items incl. QAL-011 added by B2, B8 — 4 sub-items)
 
 ---
 

@@ -70,6 +70,13 @@ function rowToProject(row) {
     // [60_000, 86_400_000] (1 min ≤ interval ≤ 24 h). Consumer:
     // `backend/src/runner/executeTest.js#startSessionRefreshTicker`.
     sessionRefreshIntervalMs: row.sessionRefreshIntervalMs ?? null,
+    // AUDIT-ROADMAP B6 — quality gate toggles (migration 076). All
+    // three default safe-off so post-migration behaviour is byte-
+    // identical to pre-B6 (acceptance criterion at
+    // `docs/roadmap/AUDIT-ROADMAP.md:858-859`).
+    dryRunGate:     row.dryRunGate === 1,
+    semanticReview: row.semanticReview === 1,
+    testDataLocale: row.testDataLocale || "en",
   };
 }
 
@@ -127,6 +134,12 @@ function projectToRow(p) {
     // values collapse to NULL so the route layer can pass `null` to opt
     // out without a special-case bind.
     sessionRefreshIntervalMs: Number.isInteger(p.sessionRefreshIntervalMs) ? p.sessionRefreshIntervalMs : null,
+    // AUDIT-ROADMAP B6 — boolean → INTEGER coercion for the two flag
+    // columns; `testDataLocale` is TEXT NOT NULL so we collapse
+    // nullish to "en" (the column default) to keep the bind safe.
+    dryRunGate:     p.dryRunGate ? 1 : 0,
+    semanticReview: p.semanticReview ? 1 : 0,
+    testDataLocale: typeof p.testDataLocale === "string" && p.testDataLocale.length > 0 ? p.testDataLocale : "en",
   };
 }
 
@@ -188,8 +201,8 @@ export function create(project) {
   const row = projectToRow(project);
   row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, oracleEnabled, reviewerEnabled, oracleMaxCostUsdPerRun, reviewerMaxCostUsdPerRun, coverageEnabled, sourcemapBaseUrl, serverCoverageEndpoint, coverageRegressionThresholdPct, iframeStrategy, iframeAllowlist, hydrationType, hydrationSelector, elementTimeoutOverride, reviewRejectionAlertThreshold, sessionRefreshIntervalMs)
-    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @oracleEnabled, @reviewerEnabled, @oracleMaxCostUsdPerRun, @reviewerMaxCostUsdPerRun, @coverageEnabled, @sourcemapBaseUrl, @serverCoverageEndpoint, @coverageRegressionThresholdPct, @iframeStrategy, @iframeAllowlist, @hydrationType, @hydrationSelector, @elementTimeoutOverride, @reviewRejectionAlertThreshold, @sessionRefreshIntervalMs)
+    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist, visionHealing, visionHealMaxCallsPerDay, visionHealMaxCostUsdPerMonth, oracleEnabled, reviewerEnabled, oracleMaxCostUsdPerRun, reviewerMaxCostUsdPerRun, coverageEnabled, sourcemapBaseUrl, serverCoverageEndpoint, coverageRegressionThresholdPct, iframeStrategy, iframeAllowlist, hydrationType, hydrationSelector, elementTimeoutOverride, reviewRejectionAlertThreshold, sessionRefreshIntervalMs, dryRunGate, semanticReview, testDataLocale)
+    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist, @visionHealing, @visionHealMaxCallsPerDay, @visionHealMaxCostUsdPerMonth, @oracleEnabled, @reviewerEnabled, @oracleMaxCostUsdPerRun, @reviewerMaxCostUsdPerRun, @coverageEnabled, @sourcemapBaseUrl, @serverCoverageEndpoint, @coverageRegressionThresholdPct, @iframeStrategy, @iframeAllowlist, @hydrationType, @hydrationSelector, @elementTimeoutOverride, @reviewRejectionAlertThreshold, @sessionRefreshIntervalMs, @dryRunGate, @semanticReview, @testDataLocale)
   `).run(row);
 }
 
@@ -200,7 +213,7 @@ export function create(project) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "oracleEnabled", "reviewerEnabled", "oracleMaxCostUsdPerRun", "reviewerMaxCostUsdPerRun", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride", "reviewRejectionAlertThreshold", "reviewRejectionAlertLastFiredAt", "sessionRefreshIntervalMs"];
+  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "oracleEnabled", "reviewerEnabled", "oracleMaxCostUsdPerRun", "reviewerMaxCostUsdPerRun", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride", "reviewRejectionAlertThreshold", "reviewRejectionAlertLastFiredAt", "sessionRefreshIntervalMs", "dryRunGate", "semanticReview", "testDataLocale"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {
@@ -223,6 +236,17 @@ export function update(id, fields) {
       // Cost-cap columns are REAL, so they pass through unchanged.
       if ((key === "oracleEnabled" || key === "reviewerEnabled") && typeof val === "boolean") {
         val = val ? 1 : 0;
+      }
+      // AUDIT-ROADMAP B6 — `dryRunGate` + `semanticReview` are INTEGER
+      // NOT NULL flag columns; same boolean → INTEGER coercion
+      // contract as the surrounding flags. `testDataLocale` is TEXT
+      // NOT NULL DEFAULT 'en', so an explicit nullish PATCH collapses
+      // to "en" rather than emitting a NOT NULL violation.
+      if ((key === "dryRunGate" || key === "semanticReview") && typeof val === "boolean") {
+        val = val ? 1 : 0;
+      }
+      if (key === "testDataLocale" && (val == null || val === "")) {
+        val = "en";
       }
       sets.push(`${key} = @${key}`);
       params[key] = val;

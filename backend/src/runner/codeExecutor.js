@@ -55,7 +55,7 @@ import playwright from "playwright";
  * @param {Object} exposed — caller-provided objects to inject
  * @returns {Object} A vm context object
  */
-function buildSandboxContext(exposed) {
+export function buildSandboxContext(exposed) {
   const safeConsole = Object.freeze({
     log:   (...args) => console.log(...args),
     warn:  (...args) => console.warn(...args),
@@ -160,7 +160,7 @@ let _savedAbort = null;
  * @param {Function} fn — async function to execute with process guards
  * @returns {Promise<*>} return value of fn
  */
-async function runWithStrippedEnv(fn) {
+export async function runWithStrippedEnv(fn) {
   if (_envGuardCount === 0) {
     _savedExit = process.exit;
     _savedKill = process.kill;

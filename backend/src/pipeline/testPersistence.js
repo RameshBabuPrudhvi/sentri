@@ -17,6 +17,19 @@ import { logActivity } from "../utils/activityLogger.js";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 import { APPROVAL_SOURCE } from "../services/approvalService.js";
 import { normalizeQualityToConfidence } from "./deduplicator.js";
+// AUDIT-ROADMAP Bundle 6 (QAL-001) — opt-in dry-run gate. Imported lazily
+// inside `persistGeneratedTests` so projects with `dryRunGate === false`
+// (the default + every legacy project) pay zero startup cost for
+// `browserPool` warm-up and `@playwright/test` resolution.
+import { dryRunBatch } from "./dryRunGate.js";
+// AUDIT-ROADMAP Bundle 6 (QAL-005) — second-pass LLM semantic review.
+// Same lazy-eligibility model as the dry-run gate: the function is
+// exported and the caller invokes it post-persist; default-off projects
+// never pay an LLM call.
+import { generateText, parseJSON } from "../aiProvider.js";
+import { buildSemanticReviewPrompt, normalizeSemanticReviewResponse } from "./prompts/semanticReviewPrompt.js";
+import { throwIfAborted } from "../utils/abortHelper.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 /**
  * Pseudo-user attributed to machine-made approvals in `tests.approvedBy` and
@@ -63,7 +76,7 @@ export function isAutoApprovalDisabled() {
   return v === "1" || v === "true" || v === "yes";
 }
 
-export function persistGeneratedTests(validatedTests, project, run, defaults = {}) {
+export async function persistGeneratedTests(validatedTests, project, run, defaults = {}) {
   const createdTestIds = [];
   // Global kill-switch (DISABLE_AUTO_APPROVAL) overrides every per-project
   // threshold — setting the env var pins `threshold = null`, which pins
@@ -73,7 +86,47 @@ export function persistGeneratedTests(validatedTests, project, run, defaults = {
   const threshold = isAutoApprovalDisabled()
     ? null
     : (Number.isFinite(project?.autoApproveThreshold) ? project.autoApproveThreshold : null);
-  for (const t of validatedTests) {
+
+  // AUDIT-ROADMAP Bundle 6 (QAL-001) — opt-in dry-run gate. When
+  // `project.dryRunGate` is set, execute each validated test once via
+  // `browserPool.acquire()` BEFORE persisting. Results merge onto the
+  // test row alongside the existing fields below. Auto-approval is
+  // additionally gated on `dryRunStatus === 'passed'` so a dry-run
+  // failure is NEVER auto-approved (spec at
+  // `docs/roadmap/AUDIT-ROADMAP.md:743-744`).
+  //
+  // The default is `dryRunGate = false`, in which case the result array
+  // stays empty and the path below is byte-identical to pre-B6
+  // (acceptance criterion at `docs/roadmap/AUDIT-ROADMAP.md:858-859`).
+  let dryRunResults = [];
+  if (project?.dryRunGate && validatedTests.length > 0) {
+    try {
+      // Forward `runId` + `testDataLocale` so the dry-run applies the SAME
+      // B6 faker-substitution + setup/teardown transforms the real runner
+      // does (`executeTest.js#applyB6PreExecutionTransforms`). Without this
+      // the gate would execute raw `__FAKE_*__` tokens and false-fail every
+      // token-using test. `run.id` seeds faker deterministically; the
+      // persisted tests don't carry an id yet (assigned in the loop below),
+      // so the dry-run faker seed uses the AI-set id or "dry-run" fallback.
+      dryRunResults = await dryRunBatch(validatedTests, project, {
+        signal: defaults.signal,
+        runId: run?.id || null,
+        testDataLocale: project.testDataLocale || "en",
+      });
+    } catch (err) {
+      // Defensive: a gate failure must never block persistence. The
+      // operator-facing signal is the structured warn line below; the
+      // tests still ship to the review queue with `dryRunStatus = null`
+      // so the gate visibly degrades rather than silently dropping
+      // results.
+      console.warn(formatLogLine("warn", run?.id || null, `[testPersistence] dry-run gate failed: ${err?.message || err}`));
+      dryRunResults = [];
+    }
+  }
+
+  for (let i = 0; i < validatedTests.length; i++) {
+    const t = validatedTests[i];
+    const dryRun = dryRunResults[i] || null;
     const testId = generateTestId();
     // `confidenceScore` is 0–1 (normalized by `deduplicateTests` and the
     // orchestrator's re-score step); `_quality` is 0–100. Normalize the
@@ -84,7 +137,19 @@ export function persistGeneratedTests(validatedTests, project, run, defaults = {
     const confidenceScore = Number.isFinite(t?.confidenceScore)
       ? t.confidenceScore
       : normalizeQualityToConfidence(t?._quality);
-    const autoApproved = threshold !== null && confidenceScore >= threshold;
+    // AUDIT-ROADMAP B6 (QAL-001) — auto-approval is gated on the dry-run
+    // outcome WHEN the gate ran. Three states:
+    //   • Gate disabled (default)     → `dryRun === null` → no extra gate;
+    //                                    legacy threshold path applies.
+    //   • Gate enabled, status passed → auto-approval eligible.
+    //   • Gate enabled, status failed/trivial → auto-approval blocked
+    //                                    regardless of confidence score.
+    // Spec at `docs/roadmap/AUDIT-ROADMAP.md:743-744` is unambiguous:
+    // "a dry-run failure is never auto-approved".
+    const dryRunBlocksApproval = dryRun !== null && dryRun.status !== "passed";
+    const autoApproved = threshold !== null
+      && confidenceScore >= threshold
+      && !dryRunBlocksApproval;
     // approvedAt is epoch ms (INTEGER per migration 017 + NEXT.md spec) so the
     // approvals timeline can do straight arithmetic ranges; reviewedAt stays
     // ISO-string to match the rest of the codebase's review timestamp convention.
@@ -134,6 +199,26 @@ export function persistGeneratedTests(validatedTests, project, run, defaults = {
       generatedFrom: t._generatedFrom || null,
       // ACL-001: Workspace scope — inherit from the project
       workspaceId: project.workspaceId || null,
+      // AUDIT-ROADMAP B6 — quality-gate columns.
+      // QAL-001 dry-run: NULL when the gate didn't run (legacy + opted-out
+      // projects). 'passed' / 'failed' / 'trivial' otherwise — see
+      // migration 073's docblock for the trivial-threshold semantics.
+      dryRunStatus:     dryRun ? dryRun.status : null,
+      dryRunError:      dryRun && dryRun.error ? dryRun.error : null,
+      dryRunDurationMs: dryRun && Number.isFinite(dryRun.durationMs) ? dryRun.durationMs : null,
+      // QAL-002 setup/teardown: persisted untouched from the LLM emission.
+      // The runner (executeTest.js) handles the safe-execute contract;
+      // we just round-trip the strings. Nullish collapses to NULL so the
+      // column matches the migration's nullable shape.
+      setupCode:    typeof t.setupCode === "string" && t.setupCode.length > 0 ? t.setupCode : null,
+      teardownCode: typeof t.teardownCode === "string" && t.teardownCode.length > 0 ? t.teardownCode : null,
+      // QAL-005 semantic review: populated by `feedbackLoop.js` AFTER
+      // persistence (the loop reads the persisted test row by id, so
+      // these columns are NULL at INSERT time and updated in place
+      // once the second-pass LLM verdict lands). Pinned here so the
+      // initial INSERT matches the column allowlist contract.
+      semanticReviewScore:  null,
+      semanticReviewIssues: [],
     };
     testRepo.create(test);
     if (autoApproved) {
@@ -163,6 +248,118 @@ export function persistGeneratedTests(validatedTests, project, run, defaults = {
  * @param {object} params
  * @returns {object}
  */
+/**
+ * AUDIT-ROADMAP Bundle 6 (QAL-005) — apply the second-pass LLM semantic
+ * reviewer to a batch of just-persisted tests.
+ *
+ * Three gates short-circuit the pass without an LLM call:
+ *
+ *   1. `project.semanticReview !== true` — opt-in feature; default off.
+ *   2. `run.reviewerCollapsed === 1` — when the upstream B3 collapse gate
+ *      fired, the same provider route serves both author and reviewer.
+ *      A second pass on the same model has no independent signal, so we
+ *      silently skip per the spec at
+ *      `docs/roadmap/AUDIT-ROADMAP.md:852-853`.
+ *   3. Empty `testIds` — nothing to review.
+ *
+ * Per surviving test, dispatch `generateText` with `agentRole: 'reviewer'`
+ * (the existing AUTO-023 agent role; cost caps + spend gates apply
+ * unchanged), parse the JSON verdict, and update the row's
+ * `semanticReviewScore` + `semanticReviewIssues` columns.
+ *
+ * Verdicts:
+ *   - `accept`  → row updated with score/issues; status untouched.
+ *   - `revise`  → score + issues persist; the test stays in `draft`
+ *                 (the route layer's existing review flow surfaces
+ *                 the issues as chips on the queue card).
+ *   - `reject`  → row's `reviewStatus` flips to `rejected` so the
+ *                 test never executes.
+ *
+ * Best-effort throughout: any single test's LLM throw / parse error
+ * leaves that row's columns NULL (treated identically to "the gate
+ * was disabled"). The batch never aborts on a single failure — same
+ * resilience contract as the dry-run gate.
+ *
+ * @param {string[]} testIds — IDs returned by `persistGeneratedTests`.
+ * @param {Object} project
+ * @param {Object} run
+ * @param {Object} [opts]
+ * @param {AbortSignal} [opts.signal]
+ * @returns {Promise<{ reviewed: number, rejected: number, skipped: string }>}
+ */
+export async function applySemanticReview(testIds, project, run, opts = {}) {
+  if (!project?.semanticReview) return { reviewed: 0, rejected: 0, skipped: "disabled" };
+  // run.reviewerCollapsed is INTEGER NOT NULL DEFAULT 0 — coerce both 1 and `true`.
+  if (run?.reviewerCollapsed === 1 || run?.reviewerCollapsed === true) {
+    return { reviewed: 0, rejected: 0, skipped: "reviewer_collapsed" };
+  }
+  if (!Array.isArray(testIds) || testIds.length === 0) {
+    return { reviewed: 0, rejected: 0, skipped: "empty" };
+  }
+
+  let reviewed = 0;
+  let rejected = 0;
+  for (const id of testIds) {
+    if (opts.signal?.aborted) break;
+    let test;
+    try { test = testRepo.getById(id); } catch { test = null; }
+    if (!test) continue;
+    try {
+      throwIfAborted(opts.signal);
+      // Pass the full `{ system, user }` envelope — `generateText`
+      // forwards `system` as a separate high-priority message so the
+      // QA-engineer persona + assertion-quality rules from
+      // `buildSystemPrompt()` reach the reviewer. Passing only `user`
+      // would silently drop the persona, degrading the four-question
+      // semantic verdict that is the core of QAL-005.
+      const prompt = buildSemanticReviewPrompt(test);
+      const text = await generateText(prompt, {
+        signal: opts.signal,
+        agentRole: "reviewer",
+        workspaceId: project.workspaceId || null,
+        runId: run.id || null,
+      });
+      const parsed = parseJSON(text);
+      const verdict = normalizeSemanticReviewResponse(parsed);
+      const fields = {
+        semanticReviewScore: verdict.score,
+        semanticReviewIssues: verdict.issues,
+      };
+      // `reject` is the only verdict that mutates `reviewStatus`. `revise`
+      // leaves the row in its prior state (typically `draft`) so the
+      // existing review-queue chip surface picks up the issues.
+      if (verdict.verdict === "reject") {
+        fields.reviewStatus = "rejected";
+        fields.reviewedAt = new Date().toISOString();
+        // Clear the four AUTO-003b provenance columns. A test can be
+        // auto-approved by `persistGeneratedTests` (dry-run gate off /
+        // passed + above threshold) and THEN rejected here when the
+        // semantic pass runs post-persist. Leaving `approvalSource:'auto'`
+        // / `approvedBy:'auto-approver'` on a `rejected` row is the exact
+        // "confusing audit-trail lie" the suite flags at
+        // `backend/tests/auto-approval.test.js:147-152`; every other
+        // rejection path (routes/tests.js, revoke) clears all four
+        // alongside the status flip.
+        fields.approvalSource = null;
+        fields.approvalThreshold = null;
+        fields.approvedAt = null;
+        fields.approvedBy = null;
+        rejected += 1;
+      }
+      testRepo.update(id, fields);
+      reviewed += 1;
+    } catch (err) {
+      if (err?.name === "AbortError") break;
+      // Single-test failure must never abort the batch. Operators get
+      // the warn line; the row's `semanticReviewScore` stays NULL,
+      // identical to "the gate was disabled" — defensible degrade.
+      // eslint-disable-next-line no-console
+      console.warn(formatLogLine("warn", run?.id || null, `[testPersistence] semantic review failed for ${id}: ${err?.message || err}`));
+    }
+  }
+  return { reviewed, rejected, skipped: null };
+}
+
 export function buildPipelineStats({ pagesFound = 0, rawTests = [], removed = 0, enhancedCount = 0, rejected = 0, journeys = [], dedupStats = {}, apiEndpointsDiscovered = 0 }) {
   const apiTestCount = rawTests.filter(t => t._generatedFrom === "api_har_capture" || t._generatedFrom === "api_user_described").length;
   return {

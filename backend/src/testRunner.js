@@ -1157,7 +1157,13 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           const attemptResults = await executeTestIterations(
             test,
             fixtureRows,
-            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition, coverageEnabled: !!project.coverageEnabled, serverCoverageEndpoint: project.serverCoverageEndpoint || null, adaptiveTimeout }),
+            // AUDIT-ROADMAP B6 (QAL-010) — `testDataLocale` forwarded once
+            // per run so `executeTest`'s pre-execution faker substitution
+            // doesn't pay an N+1 `projectRepo.getById()` round-trip on
+            // parallel runs. Defaults to "en" so tests on legacy projects
+            // (no `testDataLocale` column populated) get the same faker
+            // pack the seeded fallback's deterministic-token path uses.
+            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition, coverageEnabled: !!project.coverageEnabled, serverCoverageEndpoint: project.serverCoverageEndpoint || null, adaptiveTimeout, testDataLocale: project.testDataLocale || "en" }),
           );
           const lastResult = attemptResults[attemptResults.length - 1] || null;
           // Retry semantics:

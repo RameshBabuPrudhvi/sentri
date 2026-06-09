@@ -386,7 +386,7 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
   // injection still falls through to the full `validateProjectPayload` +
   // field-whitelist path below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride", "reviewRejectionAlertThreshold", "sessionRefreshIntervalMs"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist", "visionHealing", "visionHealMaxCallsPerDay", "visionHealMaxCostUsdPerMonth", "coverageEnabled", "sourcemapBaseUrl", "serverCoverageEndpoint", "coverageRegressionThresholdPct", "iframeStrategy", "iframeAllowlist", "hydrationType", "hydrationSelector", "elementTimeoutOverride", "reviewRejectionAlertThreshold", "sessionRefreshIntervalMs", "dryRunGate", "semanticReview", "testDataLocale"]);
   const isSingleFieldPatch = bodyKeys.length > 0 && bodyKeys.every((k) => SINGLE_FIELD_BYPASS.has(k));
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
@@ -696,6 +696,44 @@ router.patch("/:id", requireRole("qa_lead"), async (req, res) => {
       return res.status(400).json({ error: "elementTimeoutOverride must be null or an integer between 500 and 300000 (ms)." });
     } else {
       fields.elementTimeoutOverride = v;
+    }
+  }
+
+  // AUDIT-ROADMAP B6 (QAL-001) — opt-in dry-run gate. Boolean only.
+  if (Object.hasOwn(req.body, "dryRunGate")) {
+    if (typeof req.body.dryRunGate !== "boolean") {
+      return res.status(400).json({ error: "dryRunGate must be a boolean." });
+    }
+    fields.dryRunGate = req.body.dryRunGate;
+  }
+
+  // AUDIT-ROADMAP B6 (QAL-005) — opt-in semantic LLM review. Boolean only.
+  if (Object.hasOwn(req.body, "semanticReview")) {
+    if (typeof req.body.semanticReview !== "boolean") {
+      return res.status(400).json({ error: "semanticReview must be a boolean." });
+    }
+    fields.semanticReview = req.body.semanticReview;
+  }
+
+  // AUDIT-ROADMAP B6 (QAL-010) — faker locale. Validated against the
+  // closed `SUPPORTED_LOCALES` set so a typo lands a 400 instead of
+  // silently falling through to "en" at the consumer (which would mask
+  // an operator-side mistake). Lazy-imported to keep the route entry
+  // path off the critical import graph.
+  if (Object.hasOwn(req.body, "testDataLocale")) {
+    const v = req.body.testDataLocale;
+    if (v === null || v === "") {
+      fields.testDataLocale = "en";
+    } else if (typeof v !== "string") {
+      return res.status(400).json({ error: "testDataLocale must be a string or null." });
+    } else {
+      const { SUPPORTED_LOCALES } = await import("../utils/fakeDataGenerator.js");
+      if (!SUPPORTED_LOCALES.has(v)) {
+        return res.status(400).json({
+          error: `testDataLocale must be one of: ${[...SUPPORTED_LOCALES].join(", ")}.`,
+        });
+      }
+      fields.testDataLocale = v;
     }
   }
 

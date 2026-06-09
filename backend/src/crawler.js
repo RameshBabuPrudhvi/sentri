@@ -61,7 +61,7 @@ import { generateAllTests, generateFromDescription, generateApiTests } from "./p
 import { crawlPages } from "./pipeline/crawlBrowser.js";
 import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline, sanitizeRunInputs } from "./pipeline/pipelineOrchestrator.js";
-import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
+import { persistGeneratedTests, applySemanticReview, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
 import { emitAgentEvent } from "./aiProvider/agentEventEmitter.js";
 import { setStep, PIPELINE_STEPS } from "./utils/pipelineState.js";
@@ -495,9 +495,21 @@ export async function generateFromUserDescription(project, run, { name, descript
     await runPostGenerationPipeline(rawTests, project, run, { signal });
 
   // ── Step 8: Store & Done ────────────────────────────────────────────────
-  const createdTestIds = persistGeneratedTests(validatedTests, project, run, {
-    name, description, sourceUrl: project.url, pageTitle: project.name,
+  // AUDIT-ROADMAP B6 — `persistGeneratedTests` is async (opt-in dry-run
+  // gate per QAL-001). Forward the abort signal so a user-cancelled run
+  // doesn't burn the gate's `browserPool` lease budget on tests the
+  // operator no longer wants.
+  const createdTestIds = await persistGeneratedTests(validatedTests, project, run, {
+    name, description, sourceUrl: project.url, pageTitle: project.name, signal,
   });
+
+  // AUDIT-ROADMAP B6 (QAL-005) — second-pass semantic LLM review. No-op
+  // when `project.semanticReview` is false (default) or when the upstream
+  // B3 reviewer-collapse gate fired. Results land on each test row's
+  // `semanticReviewScore` / `semanticReviewIssues` columns; a `reject`
+  // verdict flips `reviewStatus` to `rejected`. Best-effort: per-test
+  // failures don't abort the batch.
+  await applySemanticReview(createdTestIds, project, run, { signal });
 
   run.testsGenerated = run.tests.length;
   run.pipelineStats = buildPipelineStats({ rawTests, removed, enhancedCount, rejected, dedupStats });
@@ -1045,7 +1057,16 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     await runPostGenerationPipeline(rawTests, project, run, { snapshotsByUrl: effectiveSnapshotsByUrl, classifiedPagesByUrl, signal });
 
   // ── Step 8: Store & Done ────────────────────────────────────────────────
-  persistGeneratedTests(validatedTests, project, run);
+  // AUDIT-ROADMAP B6 (QAL-001) — `persistGeneratedTests` is async because
+  // the optional dry-run gate launches `browserPool` leases per test.
+  // Forward the abort signal so a cancelled run releases its leases.
+  // The fn returns the array of created test IDs which feeds the
+  // semantic-review pass below.
+  const createdTestIds = await persistGeneratedTests(validatedTests, project, run, { signal });
+
+  // AUDIT-ROADMAP B6 (QAL-005) — second-pass semantic LLM review.
+  // Same default-off + collapse-gated contract as `generateFromUserDescription`.
+  await applySemanticReview(createdTestIds, project, run, { signal });
 
   run.snapshots = filteredSnapshots;
   run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));

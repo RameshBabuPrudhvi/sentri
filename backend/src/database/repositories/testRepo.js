@@ -21,7 +21,7 @@ export { parsePagination };
 
 // ─── Row ↔ Object helpers ─────────────────────────────────────────────────────
 
-const JSON_FIELDS = ["steps", "tags", "qualityScoreFactors", "dependsOn"];
+const JSON_FIELDS = ["steps", "tags", "qualityScoreFactors", "dependsOn", "semanticReviewIssues"];
 const BOOL_FIELDS = ["isJourneyTest", "assertionEnhanced", "isApiTest", "isStale"];
 
 function rowToTest(row) {
@@ -29,7 +29,7 @@ function rowToTest(row) {
   const obj = { ...row };
   for (const f of JSON_FIELDS) {
     if (typeof obj[f] === "string" && obj[f]) obj[f] = JSON.parse(obj[f]);
-    else if (!obj[f]) obj[f] = (f === "steps" || f === "tags" || f === "qualityScoreFactors" ? [] : null);
+    else if (!obj[f]) obj[f] = (f === "steps" || f === "tags" || f === "qualityScoreFactors" || f === "semanticReviewIssues" ? [] : null);
   }
   for (const f of BOOL_FIELDS) {
     obj[f] = obj[f] === 1 ? true : obj[f] === 0 ? false : obj[f];
@@ -63,6 +63,14 @@ const INSERT_COLS = [
   "confidenceScore", "approvalSource", "approvalThreshold", "approvedAt", "approvedBy",
   "reviewComment", // migration 054 — free-text "why is this draft?" explainer
   "dependsOn", // migration 068 — upstream test IDs that must pass first (AUTO-014)
+  // AUDIT-ROADMAP Bundle 6 — quality gates.
+  "dryRunStatus",         // migration 073 — 'passed' | 'failed' | 'trivial' | NULL (QAL-001)
+  "dryRunError",          // migration 073 — truncated Playwright error on dry-run failure
+  "dryRunDurationMs",     // migration 073 — wall-clock of the dry-run lease (ms)
+  "semanticReviewScore",  // migration 074 — 0–100 LLM semantic review score (QAL-005)
+  "semanticReviewIssues", // migration 074 — JSON string[]; ≤ 5 entries
+  "setupCode",            // migration 075 — pre-test JS block (QAL-002)
+  "teardownCode",         // migration 075 — post-test best-effort cleanup block
 ];
 
 const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})

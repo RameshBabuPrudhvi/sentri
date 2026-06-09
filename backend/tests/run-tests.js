@@ -348,6 +348,15 @@ const files = [
   // `auto-login.test.js` fixtures.
   "tests/b4-totp.test.js",
   "tests/b4-auth-recovery.test.js",
+  // B6 (AUDIT-ROADMAP Bundle 6) — quality gates: dry-run, semantic
+  // review, setup/teardown, seeded faker. Each file pins one slice of
+  // the QAL-001 / QAL-005 / QAL-002 / QAL-010 contract so a regression
+  // in one column / one prompt / one substitution path surfaces in
+  // isolation rather than as a cascade across files.
+  "tests/dry-run-gate.test.js",              // QAL-001 — opt-in dry-run lease lifecycle + status branches
+  "tests/semantic-reviewer.test.js",         // QAL-005 — semantic prompt builder + response normaliser
+  "tests/test-fixture-management.test.js",   // QAL-002 — setup/teardown + B6 project + test column round-trips
+  "tests/fake-data-generation.test.js",      // QAL-010 — seeded faker substitution determinism + fallback
   // B2 — E2E iframe enumeration against a real Chromium browser pointed
   // at a local same-origin HTTP fixture (the only way to exercise the
   // browser's same-origin policy: `data:` URLs each have their own

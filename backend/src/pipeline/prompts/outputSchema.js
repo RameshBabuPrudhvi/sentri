@@ -62,7 +62,9 @@ Return ONLY valid JSON (no markdown, no code fences):
         "User fills in Name with 'Jane Doe', Email with 'jane@test.com', Password with 'Secure123!'",
         "User clicks 'Create Account' and a success message 'Account created successfully' appears"
       ],
-      "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // complete test code\\n});"
+      "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // complete test code\\n});",
+      "setupCode": "",
+      "teardownCode": ""
     }
   ]
 }
@@ -71,6 +73,9 @@ FIELD RULES:
 - "type" must be one of: ${VALID_TEST_TYPES.map(t => `"${t}"`).join(", ")}. Pick the best match. If unsure, use "functional".
 - "preconditions" — state any required setup (user role, data state, browser context). Omit or set to "" if the test starts from a clean state.
 - "testData" — provide concrete sample values (emails, IDs, search terms, amounts) for documentation only. CRITICAL: ALL values in testData MUST be inlined as string or number literals directly inside playwrightCode — NEVER declare a variable (const query = ...) and NEVER reference a testData key by name inside the code. BAD: safeFill(page, 'Username', emailVar) — emailVar is not defined at runtime. GOOD: safeFill(page, 'Username', 'testuser@example.com') — literal value inline. Use the ACTUAL field labels from PAGE DATA. Omit testData or set to {} if no test data is needed.
+- "setupCode" (optional, AUDIT-ROADMAP B6 / QAL-002) — JS code executed BEFORE the test body. Use ONLY when the test needs PRECONDITION STATE that isn't already encoded in the test steps (e.g. seeding a row, signing in a secondary user, clearing localStorage). The runner exposes the same \`page\` / \`safeClick\` / \`safeFill\` / \`safeExpect\` globals as the main test body. Leave as "" when no setup is needed.
+- "teardownCode" (optional, AUDIT-ROADMAP B6 / QAL-002) — JS code executed in the test's \`finally\` block to RESET STATE the test created. CRITICAL: if the test CREATES any resource (user account, order, file upload, ...), include a teardown step that DELETES or RESETS it via the same UI flow. Errors in teardown are swallowed + logged — never let cleanup mask a real test failure. Leave as "" when the test creates no persistent resource.
+- "playwrightCode" + "setupCode" + "teardownCode" — when the SUT requires UNIQUE TEST DATA (signup forms, email-based registration, anything with a UNIQUE constraint), use one of these placeholder tokens INSTEAD of hardcoded values; the runner substitutes them with deterministic seeded faker values: \`__FAKE_EMAIL__\`, \`__FAKE_NAME__\`, \`__FAKE_FIRST_NAME__\`, \`__FAKE_LAST_NAME__\`, \`__FAKE_PHONE__\`, \`__FAKE_USERNAME__\`, \`__FAKE_PASSWORD__\`, \`__FAKE_COMPANY__\`, \`__FAKE_STREET__\`, \`__FAKE_CITY__\`, \`__FAKE_ZIP__\`, \`__FAKE_UUID__\`, \`__FAKE_NUMBER__\`, \`__FAKE_WORD__\`, \`__TIMESTAMP__\`. Multiple occurrences of the SAME token in one test resolve to the SAME value (so "fill email with __FAKE_EMAIL__" and "expect text __FAKE_EMAIL__" stay coherent). Different tokens get different values.
 - "steps" — SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
   Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result.
   BAD steps (too vague):  ["The page loads successfully", "The URL reflects the section", "Verify the expected content is displayed"]
@@ -91,7 +96,11 @@ ${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 // produced which tests, A/B test prompt changes, and roll back if quality
 // regresses.
 
-export const PROMPT_VERSION = "2.4.0";
+// AUDIT-ROADMAP B6 bumped 2.4.0 → 2.5.0 because the schema gained two
+// optional fields (setupCode, teardownCode) and a new placeholder-token
+// convention. The version stamp on `tests.promptVersion` lets operators
+// A/B-test pre-B6 vs post-B6 generation quality on a single project.
+export const PROMPT_VERSION = "2.5.0";
 
 export function buildSystemPrompt() {
   const tier = getTier();

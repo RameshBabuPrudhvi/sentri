@@ -42,6 +42,7 @@
     "zod": "^3.23.8"
   },
   "optionalDependencies": {
+    "@faker-js/faker": "^9.3.0",
     "@simplewebauthn/server": "^11.0.0",
     "bullmq": "^5.34.0",
     "ioredis": "^5.4.0",
