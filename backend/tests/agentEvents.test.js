@@ -41,20 +41,11 @@ function resetDb() {
   db.exec("DELETE FROM projects         WHERE id    LIKE 'PRJ-AE-%'");
 }
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.stack || err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
 
 resetDb();
 const proj = makeProject();
@@ -258,8 +249,7 @@ test("emitAgentEvent is a no-op when runId is null/empty", () => {
 });
 
 // ─── results ──────────────────────────────────────────────────────────────────
-
-process.on("beforeExit", () => {
-  console.log(`\n  ${passed} passed, ${failed} failed\n`);
-  if (failed > 0) process.exit(1);
-});
+// summary() drains pending tests then exits — replaces the previous
+// `beforeExit` hook (which was needed because the inline runner had no
+// way to await async tests before reporting).
+summary("agentEvents");

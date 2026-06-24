@@ -40,6 +40,18 @@ import { diffScreenshot } from "./visualDiff.js";
 import { applyNetworkCondition } from "./networkConditions.js";
 import { writeArtifactBuffer } from "../utils/objectStorage.js";
 import { snapshotServerCoverage, diffServerCoverage } from "../pipeline/serverCoverageProxy.js"; // AUTO-009h — opt-in server-side coverage capture for API tests.
+// B4 (AUDIT-ROADMAP) / RLY-004 — mid-run auth-session recovery. The check
+// fires after every `page.goto()` AND when the test errors out so we can
+// distinguish "the SUT logged the test out" from "the test code is broken"
+// — see the call sites below for the gating logic. Both helpers are
+// loaded lazily (top-level await is avoided so this file stays
+// require-compatible) — they're pure functions of the page + project.
+import { looksLikeAuthRedirect, restoreAuthSession } from "../pipeline/autoLogin.js";
+// AUDIT-ROADMAP Bundle 6 — seeded faker substitution (QAL-010) +
+// setup/teardown hooks (QAL-002). Loaded at import time because both are
+// pure modules with no heavy side-effects; `createFaker` itself
+// dynamically imports `@faker-js/faker` only when first called.
+import { createFaker } from "../utils/fakeDataGenerator.js";
 
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
@@ -456,8 +468,172 @@ function formatTestError(err) {
  * @param {string}  [opts.serverCoverageEndpoint] - AUTO-009h: per-project
  *   endpoint for server-side coverage capture, same forwarding pattern as
  *   `coverageEnabled`. Only consumed by `executeApiTest`.
+ * @param {number}  [opts.adaptiveTimeout] - AUDIT-ROADMAP B2: adaptive element
+ *   timeout (ms) computed once per run by `testRunner.js` from the crawl's
+ *   p95 page-load time, clamped to `[HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT]`.
+ *   Forwarded into the vm sandbox via `runGeneratedCode` so every self-
+ *   healing helper (`safeClick`, `safeFill`, etc.) uses this timeout
+ *   instead of the env default. When omitted, the runtime helper falls
+ *   back to the env default and pre-B2 behaviour is preserved.
  */
+/**
+ * AUDIT-ROADMAP Bundle 6 — pre-execution transforms.
+ *
+ * Three transforms applied in order:
+ *
+ *  1. **Faker token substitution (QAL-010)** — replace every `__FAKE_*__` /
+ *     `__TIMESTAMP__` token in `playwrightCode` + `setupCode` +
+ *     `teardownCode` with a deterministic seeded value via
+ *     `utils/fakeDataGenerator.createFaker`. Same `(runId, testId)` seed
+ *     produces the same values across retries within a run; different
+ *     runs see different values so re-running on the same DB doesn't trip
+ *     UNIQUE constraints from a prior pass.
+ *
+ *  2. **Setup-code injection (QAL-002)** — prepend `setupCode` inside
+ *     the test body so it runs BEFORE the first assertion. The runtime
+ *     helper wrapper that `runGeneratedCode` builds already wraps the
+ *     code in an async IIFE, so a non-empty setup block becomes the
+ *     first statement of the body. Errors in setup propagate normally —
+ *     a failed precondition fails the test.
+ *
+ *  3. **Teardown-code injection (QAL-002)** — wrap the test body in a
+ *     `try { … } finally { … }` so teardown ALWAYS runs (test passed,
+ *     test failed, test threw). Errors in teardown are swallowed and
+ *     logged — cleanup MUST NOT mask a real test failure (per the spec
+ *     at `docs/roadmap/AUDIT-ROADMAP.md:854-855`).
+ *
+ * The returned test object is a shallow copy — never mutates the caller's
+ * row. When all three transforms are no-ops (no tokens, no setup, no
+ * teardown) the original test is returned unchanged.
+ *
+ * @param {Object} test
+ * @param {string} runId
+ * @param {Object} opts
+ * @param {string} [opts.testDataLocale]
+ * @returns {Promise<Object>}
+ */
+export async function applyB6PreExecutionTransforms(test, runId, opts = {}) {
+  if (!test || typeof test.playwrightCode !== "string") return test;
+  const hasSetup    = typeof test.setupCode === "string" && test.setupCode.trim().length > 0;
+  const hasTeardown = typeof test.teardownCode === "string" && test.teardownCode.trim().length > 0;
+  // Cheap early-out: avoid the dynamic faker import + clone for the
+  // common case (no tokens, no setup, no teardown). The token check is a
+  // bare substring scan — much cheaper than the full split/join loop
+  // inside `createFaker#substitute`.
+  const hasFakerToken = test.playwrightCode.indexOf("__FAKE_") !== -1
+    || test.playwrightCode.indexOf("__TIMESTAMP__") !== -1
+    || (hasSetup    && (test.setupCode.indexOf("__FAKE_") !== -1    || test.setupCode.indexOf("__TIMESTAMP__") !== -1))
+    || (hasTeardown && (test.teardownCode.indexOf("__FAKE_") !== -1 || test.teardownCode.indexOf("__TIMESTAMP__") !== -1));
+  if (!hasSetup && !hasTeardown && !hasFakerToken) return test;
+
+  const next = { ...test };
+  if (hasFakerToken) {
+    try {
+      const faker = await createFaker({
+        runId,
+        testId: opts.testId || test.id || "unknown",
+        locale: opts.testDataLocale || "en",
+      });
+      // Substitute ALL three code blocks in a single `substitute()` call
+      // by concatenating with a unique separator, then splitting back.
+      // This ensures the SAME token (e.g. `__FAKE_EMAIL__`) resolves to
+      // the SAME value across setupCode, playwrightCode, and teardownCode
+      // — the faker PRNG advances once per token type per call, so
+      // calling `substitute()` three times independently would produce
+      // different values for the same token across blocks (the PRNG
+      // state advances between calls). Industry expectation: "fill email
+      // with __FAKE_EMAIL__" in setup and "expect text __FAKE_EMAIL__"
+      // in the main body must resolve to the same address.
+      const SEP = "\n/* __B6_CODE_BOUNDARY__ */\n";
+      const combined = [
+        next.playwrightCode,
+        hasSetup ? next.setupCode : "",
+        hasTeardown ? next.teardownCode : "",
+      ].join(SEP);
+      const substituted = faker.substitute(combined);
+      const parts = substituted.split(SEP);
+      next.playwrightCode = parts[0];
+      if (hasSetup)    next.setupCode    = parts[1];
+      if (hasTeardown) next.teardownCode = parts[2];
+    } catch (err) {
+      // Best-effort: a faker substitution failure must never block the
+      // test. Operators get the warn line; the test runs with raw
+      // tokens (which will fail the first assertion that compares
+      // against literal placeholder text — a clear signal that
+      // substitution didn't happen, easier to debug than silently
+      // succeeding on a token-as-data run).
+      console.warn(formatLogLine("warn", runId,
+        `[executeTest] B6 faker substitution failed for ${test.id || "?"}: ${err?.message || err}`));
+    }
+  }
+
+  // Setup / teardown injection — wrap the existing test body so:
+  //   await page.goto(...)         <- original body line 1
+  //   await safeClick(...)         <- original body line 2
+  // becomes:
+  //   await (async () => { <setupCode> })();
+  //   try {
+  //     await page.goto(...)
+  //     await safeClick(...)
+  //   } finally {
+  //     try { await (async () => { <teardownCode> })(); }
+  //     catch (e) { console.warn('⚠ Teardown error (swallowed): ' + e?.message); }
+  //   }
+  //
+  // The injection happens INSIDE the test's async function body via a
+  // string-level transform on `playwrightCode`. We locate the body via
+  // `extractTestBody` (which already handles `test('name', async ({ page }) => { ... })`
+  // and the bare-IIFE shapes); if extraction fails (unusual codegen
+  // output, raw script), fall through and let the runner handle it
+  // without injection — better to ship a test without B6 hooks than to
+  // corrupt syntactically novel code.
+  if (hasSetup || hasTeardown) {
+    const originalBody = extractTestBody(next.playwrightCode);
+    if (originalBody) {
+      const setupPrefix = hasSetup
+        ? `await (async () => {\n${next.setupCode}\n})();\n`
+        : "";
+      const teardownSuffix = hasTeardown
+        ? `try { await (async () => {\n${next.teardownCode}\n})(); } catch (__teardownErr) { try { console.warn('⚠ Teardown error (swallowed): ' + (__teardownErr && __teardownErr.message || __teardownErr)); } catch {} }`
+        : "";
+      const newBody = hasTeardown
+        ? `${setupPrefix}try {\n${originalBody}\n} finally {\n${teardownSuffix}\n}`
+        : `${setupPrefix}${originalBody}`;
+      // Splice via indexOf + slice (NOT String.prototype.replace) — the
+      // replacement string `newBody` embeds `originalBody`, which is
+      // LLM-generated Playwright code that can contain `$&` / `$'` /
+      // `` $` `` sequences (common in `str.replace(/pat/, "$&-suffix")`
+      // regex-replacement expressions). `replace()` would expand those
+      // `$`-patterns in the replacement, silently producing broken test
+      // code. Position-based slicing is literal — no `$` interpretation.
+      const bodyIdx = next.playwrightCode.indexOf(originalBody);
+      if (bodyIdx !== -1) {
+        next.playwrightCode = next.playwrightCode.slice(0, bodyIdx)
+          + newBody
+          + next.playwrightCode.slice(bodyIdx + originalBody.length);
+      }
+    }
+  }
+
+  return next;
+}
+
 export async function executeTest(test, browser, runId, stepIndex, runStart, opts = {}) {
+  // ── AUDIT-ROADMAP B6 — pre-execution test transforms ─────────────────────
+  // QAL-010 faker substitution + QAL-002 setup/teardown injection happen
+  // ONCE at the function entry so every downstream path (API tests, browser
+  // tests, the fallback smoke path, `runApiTestCode`) sees the same
+  // resolved code. The transforms are idempotent: tests with no faker
+  // tokens and no setup/teardown carry through bit-for-bit, so legacy
+  // (pre-B6) tests stay byte-identical (acceptance criterion at
+  // `docs/roadmap/AUDIT-ROADMAP.md:858-859`).
+  //
+  // Locale: prefer `opts.testDataLocale` (forwarded once per run by
+  // `testRunner.js`) over a per-test `projectRepo.getById()` round-trip;
+  // matches the same pattern `coverageEnabled` / `serverCoverageEndpoint`
+  // already use to avoid N+1 SQLite reads on parallel runs.
+  test = await applyB6PreExecutionTransforms(test, runId, opts);
+
   // ── API-only test path: no browser context needed ──────────────────────
   // Use the cached _isApi flag set by testRunner.js (avoids re-parsing).
   // Fall back to isApiTest() for callers that bypass the runner (e.g. tests).
@@ -551,6 +727,16 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
       throw ctxErr;
     }
   }
+
+  // Outer guard: if ANY setup between context creation (above) and the inner
+  // try-block at line ~684 throws, the pool slot must be released. Without
+  // this, a crash in registerWebVitalsInitScript / newPage /
+  // applyNetworkCondition / injectCursorOverlay / startScreencast would
+  // permanently leak a slot (`bucket.inUse` stays incremented, context stays
+  // in `bucket.contexts`) until the pool drains at process shutdown.
+  // The inner try-finally at ~684 handles the normal + test-failure paths;
+  // this outer wrapper catches the setup-failure gap.
+  try {
 
   // AUTO-017.1: Install web-vitals observers via addInitScript *before* the
   // first page is created, so the observers fire from the first byte of the
@@ -651,6 +837,13 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   // Playwright call continues running until the finally block — which may
   // itself hang if Chromium is unresponsive.
   let testTimeoutHandle;
+  // B4 / RLY-004 — proactive session keep-alive ticker handle, declared
+  // at function scope so the `finally` block below can clear it. Stays
+  // `null` for projects without `sessionRefreshIntervalMs` configured —
+  // the existing per-test cleanup path is bit-for-bit identical to the
+  // pre-B4 behaviour for those (the vast majority of) projects.
+  let sessionRefreshTicker = null;
+  let sessionRefreshInFlight = false;
   const testTimeoutPromise = new Promise((_, reject) => {
     testTimeoutHandle = setTimeout(() => {
       // BUG-0001 — Reject FIRST (synchronously) so `Promise.race` resolves
@@ -691,14 +884,145 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         const body = extractTestBody(test.playwrightCode);
         const codeAlreadyNavigates = body.includes("page.goto(");
 
+        // B4 / RLY-004 — proactive session keep-alive ticker + auth-redirect
+        // detection. Lifted OUTSIDE the `!codeAlreadyNavigates` block so they
+        // activate for ALL tests (including those with explicit page.goto).
+        // The ticker keeps the SUT's session cookie alive during long-running
+        // tests regardless of navigation strategy; the auth-redirect check
+        // fires after the framework goto (below) for non-navigating tests.
+        let projectForAuth = null;
+        try { projectForAuth = test.projectId ? projectRepo.getById(test.projectId) : null; }
+        catch { /* repo blip — fall through with no recovery */ }
+
+        // B4 / RLY-004 — proactive session keep-alive ticker. When the
+        // project has `sessionRefreshIntervalMs` configured, register a
+        // per-test setInterval that navigates back to `project.url`
+        // every N ms. Industry-standard "session ping" pattern (Auth0
+        // Universal Login, Okta sessionRefresh, Salesforce
+        // session.refresh) — keeps the SUT's idle cookie alive on long
+        // runs without waiting for a redirect-to-login.
+        //
+        // Best-effort: any goto error is swallowed (`.catch(() => {})`)
+        // because (a) we own no recovery path here — the next user
+        // action falls through to the reactive `restoreAuthSession`
+        // check above, and (b) a ping that occasionally fails during a
+        // navigation race must never fail the test. Bounded by the
+        // route-layer [60_000, 86_400_000] gate so a typo can't flood
+        // the SUT. Cleared in the `finally` block below alongside the
+        // other per-test timers.
+        if (Number.isInteger(projectForAuth?.sessionRefreshIntervalMs)
+            && projectForAuth.sessionRefreshIntervalMs >= 60_000
+            && projectForAuth.url) {
+          const intervalMs = projectForAuth.sessionRefreshIntervalMs;
+          // BUG-FIX (lifeguard): the previous design pinged the SAME
+          // page the test was driving. Even with the `inFlight` latch,
+          // the goto could race a mid-action wait — destroying the
+          // DOM the test expected and surfacing as a confusing
+          // `SELECTOR_ISSUE` / `NAVIGATION_FAIL`. Fix: open a SECOND
+          // page in the SAME BrowserContext. The cookie jar is shared
+          // (same context = same `Cookie` header on every request), so
+          // a navigation on the refresh page keeps the test's session
+          // alive WITHOUT touching the test page's DOM. Industry
+          // pattern: this is what Auth0 / Okta SDKs do under the hood
+          // for "session ping" (Playwright `BrowserContext` is
+          // explicitly designed for multi-tab session sharing).
+          sessionRefreshTicker = setInterval(() => {
+            // Per-tick re-entrance guard. If the previous tick is
+            // still navigating (slow target, 30s timeout), skip this
+            // one rather than queueing — operators set this for
+            // long-running runs, not tight polling.
+            if (sessionRefreshInFlight) return;
+            if (context.pages?.()?.length === 0) return; // context closing
+            sessionRefreshInFlight = true;
+            Promise.resolve()
+              .then(async () => {
+                // Open + close a fresh page per tick so we never hold
+                // a long-lived background tab (which would show up as
+                // a popup in `context.pages()` and confuse the
+                // popup-cleanup loop in `finally` below). Cost: ~50ms
+                // per ping for the page create/close round-trip;
+                // negligible against the minimum 60s interval.
+                const refreshPage = await context.newPage();
+                try {
+                  await refreshPage.goto(projectForAuth.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+                } finally {
+                  await refreshPage.close().catch(() => {});
+                }
+              })
+              .catch(() => { /* best-effort — never fails the test */ })
+              .finally(() => { sessionRefreshInFlight = false; });
+          }, intervalMs);
+          // Stop the ticker from keeping the worker alive past the
+          // test boundary if the cleanup `finally` somehow doesn't
+          // fire (e.g. uncaught crash in the codeRunner host). The
+          // `clearInterval` in `finally` is still the authoritative
+          // teardown — this is defence-in-depth.
+          sessionRefreshTicker.unref?.();
+        }
+
         if (!codeAlreadyNavigates) {
           await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
           await page.waitForTimeout(800);
+          // B4 / RLY-004 — auth-session-expiry detection after the
+          // framework goto. Only fires for non-self-navigating tests
+          // because self-navigating tests do their own page.goto() and
+          // may legitimately land on /login as part of the test flow.
+          //
+          // Lifeguard bug-fix: skip recovery when the post-goto URL
+          // matches the test's own `sourceUrl`. A test whose sourceUrl
+          // IS a login page (e.g. testing the login form itself) would
+          // otherwise trigger an unnecessary restoreAuthSession cycle
+          // that logs in (navigating away from /login), then navigates
+          // back — and on SUTs that redirect authenticated users away
+          // from /login, the test body runs against the wrong page and
+          // fails with a confusing SELECTOR_ISSUE / ASSERTION_FAIL.
+          // QA.md §E documents this contract: "A test that lands on
+          // /login from a deliberate non-auth-gated assertion → does
+          // NOT trigger restoreAuthSession because the matching URL is
+          // the project's intended sourceUrl."
+          //
+          // Follow-up hardening: compare URL **pathnames**, not the
+          // full string. SUTs commonly append `?next=`/`?returnTo=`
+          // query params on a session-expired bounce — strict equality
+          // would miss that (sourceUrl=`/login` vs landed
+          // `/login?next=/dashboard`) and incorrectly fire recovery on
+          // a test that deliberately targets the login page. Pathname
+          // comparison ignores query/hash while still distinguishing
+          // `/login` from `/dashboard`. Fallback to the raw string
+          // when URL parsing throws (relative sourceUrl, malformed) so
+          // we never break the check on edge cases.
+          const samePathAsSource = (() => {
+            try {
+              return new URL(page.url()).pathname === new URL(test.sourceUrl).pathname;
+            } catch {
+              return page.url() === test.sourceUrl;
+            }
+          })();
+          if (projectForAuth?.credentials && looksLikeAuthRedirect(page.url()) && !samePathAsSource) {
+            console.warn(formatLogLine("warn", runId,
+              `[executeTest] Auth redirect detected after goto ${test.sourceUrl} → ${page.url()} — attempting session recovery`));
+            const recovery = await restoreAuthSession(page, projectForAuth, { run: { id: runId } });
+            if (!recovery.ok) {
+              const authErr = new Error(
+                `auth_session_expired_unrecoverable: ${recovery.reason || "unknown"}`
+              );
+              authErr.code = "AUTH_SESSION_EXPIRED";
+              authErr.__authSessionExpired = true;
+              throw authErr;
+            }
+            // Brief settle so the SUT's post-login redirect chain
+            // finishes before the test body runs its first action.
+            await page.waitForTimeout(500).catch(() => {});
+          }
         }
 
         const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
         const healingHints = getHealingHistoryForTest(healingScopeId);
         const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints, {
+          // AUDIT-ROADMAP B2 — forward the adaptive element timeout into the
+          // sandboxed helper string so safe* verbs respect the per-run value
+          // instead of the env default.
+          elementTimeout: opts.adaptiveTimeout,
           onStepCapture: async (stepNumber, _page) => {
             try {
               const shot = await captureScreenshot(_page, runId, stepIndex, { stepNumber });
@@ -854,8 +1178,29 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     await Promise.race([testExecution, testTimeoutPromise]);
 
   } catch (err) {
-    result.status = "failed";
-    result.error = formatTestError(err);
+    // B4 / RLY-004 — auth-session-expiry is an ENVIRONMENTAL failure,
+    // not a test regression. Mark the result as `skipped` with reason
+    // `auth_expired` so the gate evaluator excludes it from the pass-
+    // rate denominator (mirrors `over_budget` / `skipped_no_impact`
+    // semantics in `utils/skipReasons.js`). The feedback loop's
+    // `AUTH_EXPIRED` classifier ALSO catches the error-string path
+    // (legacy callers that don't carry the structured marker), but
+    // setting `status: "skipped"` here is the authoritative signal —
+    // it prevents `run.failed++` from incrementing and ensures the
+    // RunDetail UI renders the test with the `auth_expired` chip.
+    // We do NOT early-return — the outer `finally` MUST run for
+    // resource cleanup (screencast, context, video, downloads dir);
+    // we just skip the vision-healing waterfall + healing-events
+    // persistence below since there's no real failed locator to heal.
+    const isAuthExpiry = err.code === "AUTH_SESSION_EXPIRED" || err.__authSessionExpired === true;
+    if (isAuthExpiry) {
+      result.status = "skipped";
+      result.skipReason = "auth_expired";
+      result.error = formatTestError(err);
+    } else {
+      result.status = "failed";
+      result.error = formatTestError(err);
+    }
 
     // Persist healing events from the failed run
     const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
@@ -866,13 +1211,18 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     result.stepStatuses = err.__stepStatuses || [];
 
     // Screenshot the failure state — also feeds the vision-healing waterfall below.
+    // B4: skip artifact + vision-heal work entirely on auth-expiry. The
+    // "failure" is environmental and there is no broken locator to heal;
+    // a screenshot of the login page would burn S3 quota for zero value.
     let failureShot = null;
-    try {
-      const shot = await captureScreenshot(page, runId, stepIndex, { failed: true });
-      result.screenshot = shot.base64;
-      result.screenshotPath = shot.artifactPath;
-      failureShot = Buffer.from(shot.base64, "base64");
-    } catch { /* page may be closed */ }
+    if (!isAuthExpiry) {
+      try {
+        const shot = await captureScreenshot(page, runId, stepIndex, { failed: true });
+        result.screenshot = shot.base64;
+        result.screenshotPath = shot.artifactPath;
+        failureShot = Buffer.from(shot.base64, "base64");
+      } catch { /* page may be closed */ }
+    }
 
     // ── MNT-001: host-side vision-healing waterfall (stages 7-8) ───────────
     // Invoked AFTER the runtime helper waterfall (stages 0-6) failed.
@@ -1008,6 +1358,14 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
   } finally {
     clearTimeout(testTimeoutHandle);
+    // B4 / RLY-004 — stop the session-refresh ticker before any page /
+    // context teardown so an in-flight `page.goto(project.url)` ping
+    // can't race against `page.close()` and surface a spurious "Target
+    // closed" error in the cleanup logs.
+    if (sessionRefreshTicker) {
+      clearInterval(sessionRefreshTicker);
+      sessionRefreshTicker = null;
+    }
 
     // AUTO-009 — stop V8 coverage before the page closes so the collector
     // returns the script range list intact. Best-effort: a stop failure
@@ -1048,7 +1406,11 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
     // Close page first then context — this flushes video to disk
     await page.close().catch(() => {});
-    await context.close().catch(() => {});
+    if (context.__sentriPoolRelease) {
+      await context.__sentriPoolRelease().catch(() => {});
+    } else {
+      await context.close().catch(() => {});
+    }
 
     // Bundle-B fix #3 — Move the video to a stable named path using async
     // fs/promises. Sync FS calls in this hot cleanup path were blocking the
@@ -1108,6 +1470,18 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   }
 
   return result;
+
+  } catch (setupErr) {
+    // Outer guard catch: release the pool slot if setup code between context
+    // creation and the inner try-block threw. Re-throw so the caller sees
+    // the original error.
+    if (context?.__sentriPoolRelease) {
+      await context.__sentriPoolRelease().catch(() => {});
+    } else if (context) {
+      await context.close().catch(() => {});
+    }
+    throw setupErr;
+  }
 }
 
 /**

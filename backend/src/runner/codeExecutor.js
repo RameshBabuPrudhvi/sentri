@@ -55,7 +55,7 @@ import playwright from "playwright";
  * @param {Object} exposed — caller-provided objects to inject
  * @returns {Object} A vm context object
  */
-function buildSandboxContext(exposed) {
+export function buildSandboxContext(exposed) {
   const safeConsole = Object.freeze({
     log:   (...args) => console.log(...args),
     warn:  (...args) => console.warn(...args),
@@ -160,7 +160,7 @@ let _savedAbort = null;
  * @param {Function} fn — async function to execute with process guards
  * @returns {Promise<*>} return value of fn
  */
-async function runWithStrippedEnv(fn) {
+export async function runWithStrippedEnv(fn) {
   if (_envGuardCount === 0) {
     _savedExit = process.exit;
     _savedKill = process.kill;
@@ -275,6 +275,10 @@ function injectStepCaptures(code) {
  * @param {Function} [opts.onStepCapture] — async (stepNumber, page) => captureData.
  *   Called after each `// Step N:` block completes. Should return a serialisable
  *   object (e.g. { screenshot, artifactPath }) or null. Errors are swallowed.
+ * @param {number}   [opts.elementTimeout] - AUDIT-ROADMAP B2: forwarded to
+ *   `getSelfHealingHelperCode` so the injected runtime helper uses the
+ *   adaptive (per-run, p95-derived) element timeout instead of the env
+ *   default. Falls through to the env default when omitted.
  */
 export async function runGeneratedCode(page, context, playwrightCode, expect, healingHints, opts = {}) {
   const body = extractTestBody(playwrightCode);
@@ -291,7 +295,7 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   // Inject per-step screenshot capture points
   const instrumented = injectStepCaptures(cleaned);
 
-  const helpers = getSelfHealingHelperCode(healingHints);
+  const helpers = getSelfHealingHelperCode(healingHints, { elementTimeout: opts.elementTimeout });
   const browserRequestContexts = [];
   let defaultRequestContext = null;
 

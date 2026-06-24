@@ -785,7 +785,7 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     // only fetch + parse the `.map` file once per merge. When no resolver
     // is configured the per-source line set still gets the original bundle
     // URL as its key — same degradation as the single-process path.
-    // BUG-0001 fix (AGENT.md §148 "default: fix it" — no follow-up entry).
+    // BUG-0001 fix (AGENTS.md §148 "default: fix it" — no follow-up entry).
     // Decoupled from `run.changedFileRanges` so the resolver probe ALWAYS
     // runs when `sourcemapBaseUrl` is configured. The pre-fix guard tied
     // `sourceMapStatus` accuracy to PR context, so non-PR sharded runs

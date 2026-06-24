@@ -913,7 +913,7 @@
 .rq-kbd-hints__group { margin-right: 10px; }
 
 /* ── Misc utilities used by ReviewQueue.jsx — kept here so the page stays
-   class-driven per AGENT.md ("do not write equivalent inline styles"). ── */
+   class-driven per AGENTS.md ("do not write equivalent inline styles"). ── */
 
 /* Header project filter — undersized variant of `.input` to fit the
    compact header row alongside `.rq-header__title`. */

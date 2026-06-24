@@ -382,6 +382,17 @@ export const api = {
    * @returns {Promise<{urls: string[]}>}
    */
   getProjectPages: (id) => req("GET", `/projects/${id}/pages`),
+  /**
+   * B4 (AUDIT-ROADMAP) / SCL-001 — preview the live RFC 6238 TOTP code for a
+   * project's stored target-app TOTP seed. Admin-only on the backend.
+   * Returns `{ code, expiresInSeconds }` so the operator can verify their
+   * seed matches the target app's enrollment without ever exposing the
+   * seed itself over the wire.
+   *
+   * @param {string} id - Project ID.
+   * @returns {Promise<{code: string, expiresInSeconds: number}>}
+   */
+  testProjectTotp: (id) => req("POST", `/projects/${id}/credentials/test-totp`),
 
   // ── Crawl & Run ─────────────────────────────────────────────────────────────
   /**
@@ -724,6 +735,21 @@ export const api = {
   getRunCompare: (runId, otherRunId) => req("GET", `/runs/${runId}/compare/${otherRunId}`),
   /** @param {string} runId - Abort a running crawl or test run. */
   abortRun:  (runId) => req("POST", `/runs/${runId}/abort`),
+  /**
+   * B1 (AUDIT-ROADMAP) — Resume a crash-recovered run. Only succeeds when
+   * the run is `status='interrupted'` and `failureReason='process_crash'`
+   * (i.e. the orphan-recovery sweep marked it on the last server
+   * restart). Re-dispatches only the tests that never landed a row in
+   * `run_test_results`, preserving partial progress. Admin-only on the
+   * backend; mirrors GitHub Actions `re-run failed jobs` semantics.
+   *
+   * @param   {string} runId - The interrupted run to resume.
+   * @returns {Promise<{runId: string, resumedFromRunId: string, completed: number, remaining: number, total: number}>}
+   *   The new run ID, the source run it was resumed from, and the
+   *   completed / remaining / total test counts so the UI can render a
+   *   "resumed N of M tests" confirmation.
+   */
+  resumeRun: (runId) => req("POST", `/runs/${runId}/resume`),
 
   // ── CI/CD Trigger tokens ─────────────────────────────────────────────────
   /**

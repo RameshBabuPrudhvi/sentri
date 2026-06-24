@@ -31,23 +31,12 @@ import {
   enhanceTest,
   enhanceTests,
 } from "../src/pipeline/assertionEnhancer.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-// ── Test runner ───────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅  ${name}`);
-    passed++;
-  } catch (err) {
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -933,13 +922,4 @@ test("F1: nested-parens expect target still validates the page-load regex", () =
     "fast-path must fire for a test with nested-paren toHaveURL");
 });
 
-// ── Results ───────────────────────────────────────────────────────────────────
-
-console.log(`\n${"─".repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);
-if (failed > 0) {
-  console.log(`\n⚠️  ${failed} test(s) failed`);
-  process.exit(1);
-} else {
-  console.log(`\n🎉 All assertion-enhancer-deep tests passed!`);
-}
+summary("assertion-enhancer-deep");

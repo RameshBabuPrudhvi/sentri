@@ -12,27 +12,12 @@
 
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-const failures = [];
-
-function test(name, fn) {
-  try {
-    const result = fn();
-    if (result && typeof result.then === "function") {
-      return result
-        .then(() => { passed++; console.log("  \u2713 " + name); })
-        .catch(err => { failed++; failures.push({ name, err }); console.error("  \u2717 " + name + ": " + err.message); });
-    }
-    passed++;
-    console.log("  \u2713 " + name);
-  } catch (err) {
-    failed++;
-    failures.push({ name, err });
-    console.error("  \u2717 " + name + ": " + err.message);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 // ── Section 1: getNextRunAt (pure JS) ─────────────────────────────────────────
 
@@ -437,17 +422,10 @@ if (dbAvailable) {
   server.close();
 }
 
-// ── Summary ───────────────────────────────────────────────────────────────────
-
+// Small grace period for any DB-bound async cleanup before summary fires.
+// The shared runner's `summary()` already drains pending test promises,
+// so this 150ms is only here to let `server.close()` finish without a
+// EADDRINUSE warning in CI logs.
 await new Promise(r => setTimeout(r, 150));
 
-console.log("\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-console.log("Results: " + passed + " passed, " + failed + " failed");
-if (failed > 0) {
-  for (const { name, err } of failures) {
-    console.error("\n  FAILED: " + name);
-    console.error("  " + (err.stack || err.message));
-  }
-  process.exit(1);
-}
-console.log("\uD83C\uDF89 All scheduler tests passed!");
+summary("scheduler");

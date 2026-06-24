@@ -32,6 +32,16 @@ import { getProviderName } from "./aiProvider.js";
 // AI-005 tripwire #4: pre-flight probe so a misconfigured agent role fails
 // at minute 0 instead of minute 9 after planner + codegen already burned spend.
 import { assertAgentConfigsHealthy } from "./aiProvider/agentHealthCheck.js";
+// B3 (AUDIT-ROADMAP Bundle 3) — pre-run reviewer-collapse gate. When
+// `author` and `reviewer` agent roles resolve to the same provider
+// route id, the LLM reviewer pass cannot produce independent signal;
+// we flip `run.reviewerCollapsed = true` so downstream callers
+// (feedbackLoop, RunDetail chip, FEA-001 notifications) can route
+// through the heuristic-only path and operators get the structured
+// audit signal that "no independent review happened on this run".
+// Spec: `docs/roadmap/AUDIT-ROADMAP.md:471-486`.
+import { detectReviewerCollapse } from "./aiProvider/reviewerCollapse.js";
+import { agentReviewerCollapsedTotal } from "./utils/metrics.js";
 // AUTO-023 Bundle 4 — autonomous-mode dispatch. `agentMode` resolves
 // per-workspace ('pipeline' | 'envelope' | 'autonomous'); when
 // `'autonomous'` is set, the orchestrator drives role selection
@@ -51,10 +61,10 @@ import { generateAllTests, generateFromDescription, generateApiTests } from "./p
 import { crawlPages } from "./pipeline/crawlBrowser.js";
 import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline, sanitizeRunInputs } from "./pipeline/pipelineOrchestrator.js";
-import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
+import { persistGeneratedTests, applySemanticReview, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
 import { emitAgentEvent } from "./aiProvider/agentEventEmitter.js";
-import { setStep } from "./utils/pipelineState.js";
+import { setStep, PIPELINE_STEPS } from "./utils/pipelineState.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog } from "./utils/logFormatter.js";
 import * as runRepo from "./database/repositories/runRepo.js";
@@ -65,6 +75,73 @@ import { crawlPagesTotal, recordRunOutcome } from "./utils/metrics.js"; // INF-0
 /**
  * setStep is imported from utils/pipelineState.js — shared with pipelineOrchestrator.js.
  */
+
+/**
+ * B3 (AUDIT-ROADMAP Bundle 3) — pre-run reviewer-collapse gate.
+ * Runs once at pipeline entry (after `assertAgentConfigsHealthy`) so
+ * any collapse is detected BEFORE the crawl + AI work starts. The
+ * gate is non-blocking — collapsed workspaces still run, but they
+ * run with heuristic-only review; the structured signal lives on
+ * `run.reviewerCollapsed`, the `app_agent_reviewer_collapsed_total`
+ * counter, and the `agent_event` finding emitted here.
+ *
+ * Emits ONE `agent_event{kind:"reviewer_collapsed"}` row keyed to
+ * `step: REVIEW` so the RunDetail NarrativeFeed surfaces it inline
+ * with the rest of the agent activity (matches the
+ * `single_agent_collapse` advisory shape that `agentLoop.js`
+ * previously emitted per-loop). The chip surface on RunDetail
+ * + the warning banner in Settings → Agent Roles are downstream
+ * consumers of the persisted `run.reviewerCollapsed` flag.
+ *
+ * Idempotent + best-effort: any failure path (missing workspace,
+ * resolveRoute throw, emit hiccup) defaults to `collapsed: false`.
+ *
+ * @param {Object} project - must carry `workspaceId`.
+ * @param {Object} run - mutable; receives `reviewerCollapsed` flag.
+ */
+function applyReviewerCollapseGate(project, run) {
+  // Default the column-typed value to 0 (INTEGER NOT NULL DEFAULT 0)
+  // regardless of branch. Booleans would crash better-sqlite3 the next
+  // time `runRepo.save(run)` binds this field — same coercion contract
+  // the column docblock on `runRepo.js#INSERT_COLS` documents.
+  run.reviewerCollapsed = 0;
+  if (!project?.workspaceId) return;
+  // Best-effort by contract: a counter / log / emit hiccup must never
+  // crash the crawl-mode pipeline. The structural mutation above (the
+  // `reviewerCollapsed = 0/1` stamp) is the only load-bearing line; the
+  // observability writes below are all advisory.
+  try {
+    const info = detectReviewerCollapse(project.workspaceId);
+    if (!info.collapsed) return;
+    run.reviewerCollapsed = 1;
+    // B3 — `project.id` is the operator-set project identifier (string,
+    // bounded per-workspace cardinality); fall back to empty string on
+    // the rare path where the gate fires without a project context so
+    // the counter still bumps without polluting the series with
+    // `undefined`. Same defensive fallback the run counter uses at
+    // `runRepo.create#metricsRunsTotal.inc({ type: run?.type || "unknown" })`.
+    try { agentReviewerCollapsedTotal.inc({ projectId: project?.id || "" }); } catch { /* best-effort */ }
+    logWarn(run, `⚠ Reviewer collapsed — author + reviewer share provider route ${info.routeId}; this run will use heuristic-only review.`);
+    structuredLog("agent.reviewer_collapsed", {
+      runId: run.id,
+      workspaceId: project.workspaceId,
+      routeId: info.routeId,
+      model: info.model,
+    });
+    emitAgentEvent(run.id, {
+      step: PIPELINE_STEPS.REVIEW,
+      agent: "reviewer",
+      phase: "finding",
+      message: "Reviewer collapsed — author and reviewer share the same provider route. This run will use heuristic-only review.",
+      data: {
+        kind: "reviewer_collapsed",
+        routeId: info.routeId,
+        model: info.model,
+      },
+      workspaceId: project.workspaceId,
+    });
+  } catch { /* best-effort */ }
+}
 
 /**
  * AUTO-002 / AUTO-002b: shared diff-aware baseline runner. Compares the
@@ -317,6 +394,10 @@ export async function generateFromUserDescription(project, run, { name, descript
     }
   }
 
+  // B3 (AUDIT-ROADMAP) — reviewer-collapse gate. Non-blocking; stamps
+  // `run.reviewerCollapsed` + emits the structured agent_event finding.
+  applyReviewerCollapseGate(project, run);
+
   // Skip steps 1-3 — user provides the intent directly via name + description
   setStep(run, 1);
   log(run, `⏭️  Step 1 (Crawl) — skipped (user-provided title & description)`);
@@ -414,9 +495,21 @@ export async function generateFromUserDescription(project, run, { name, descript
     await runPostGenerationPipeline(rawTests, project, run, { signal });
 
   // ── Step 8: Store & Done ────────────────────────────────────────────────
-  const createdTestIds = persistGeneratedTests(validatedTests, project, run, {
-    name, description, sourceUrl: project.url, pageTitle: project.name,
+  // AUDIT-ROADMAP B6 — `persistGeneratedTests` is async (opt-in dry-run
+  // gate per QAL-001). Forward the abort signal so a user-cancelled run
+  // doesn't burn the gate's `browserPool` lease budget on tests the
+  // operator no longer wants.
+  const createdTestIds = await persistGeneratedTests(validatedTests, project, run, {
+    name, description, sourceUrl: project.url, pageTitle: project.name, signal,
   });
+
+  // AUDIT-ROADMAP B6 (QAL-005) — second-pass semantic LLM review. No-op
+  // when `project.semanticReview` is false (default) or when the upstream
+  // B3 reviewer-collapse gate fired. Results land on each test row's
+  // `semanticReviewScore` / `semanticReviewIssues` columns; a `reject`
+  // verdict flips `reviewStatus` to `rejected`. Best-effort: per-test
+  // failures don't abort the batch.
+  await applySemanticReview(createdTestIds, project, run, { signal });
 
   run.testsGenerated = run.tests.length;
   run.pipelineStats = buildPipelineStats({ rawTests, removed, enhancedCount, rejected, dedupStats });
@@ -518,6 +611,10 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
       throw err;
     }
   }
+
+  // B3 (AUDIT-ROADMAP) — reviewer-collapse gate. Non-blocking; stamps
+  // `run.reviewerCollapsed` + emits the structured agent_event finding.
+  applyReviewerCollapseGate(project, run);
 
   let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl, filteredSnapshots;
   let apiEndpoints = [];
@@ -960,7 +1057,16 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     await runPostGenerationPipeline(rawTests, project, run, { snapshotsByUrl: effectiveSnapshotsByUrl, classifiedPagesByUrl, signal });
 
   // ── Step 8: Store & Done ────────────────────────────────────────────────
-  persistGeneratedTests(validatedTests, project, run);
+  // AUDIT-ROADMAP B6 (QAL-001) — `persistGeneratedTests` is async because
+  // the optional dry-run gate launches `browserPool` leases per test.
+  // Forward the abort signal so a cancelled run releases its leases.
+  // The fn returns the array of created test IDs which feeds the
+  // semantic-review pass below.
+  const createdTestIds = await persistGeneratedTests(validatedTests, project, run, { signal });
+
+  // AUDIT-ROADMAP B6 (QAL-005) — second-pass semantic LLM review.
+  // Same default-off + collapse-gated contract as `generateFromUserDescription`.
+  await applySemanticReview(createdTestIds, project, run, { signal });
 
   run.snapshots = filteredSnapshots;
   run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));

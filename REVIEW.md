@@ -1,6 +1,6 @@
 # Sentri — PR Review Checklist
 
-> Also read [AGENT.md](./AGENT.md) (always-on rules), [STANDARDS.md](./STANDARDS.md) (coding conventions), [REFERENCE.md](./REFERENCE.md) (utils/env/auth tables), and [QA.md](./QA.md) (end-to-end validation) before submitting a PR.
+> Also read [AGENTS.md](./AGENTS.md) (always-on rules), [STANDARDS.md](./STANDARDS.md) (coding conventions), [REFERENCE.md](./REFERENCE.md) (utils/env/auth tables), and [QA.md](./QA.md) (end-to-end validation) before submitting a PR.
 
 ---
 

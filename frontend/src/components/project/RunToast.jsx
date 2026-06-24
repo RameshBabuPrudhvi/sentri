@@ -21,7 +21,7 @@ import { useNavigate } from "react-router-dom";
  *   `ToastContext` layer so this component stays a pure renderer.
  * @returns {React.ReactElement}
  *
- * AGENT.md:127 — all styles live in `frontend/src/styles/components/run-toast.css`.
+ * AGENTS.md:127 — all styles live in `frontend/src/styles/components/run-toast.css`.
  * This component is JSX-only: ARIA wiring + class names + the `data-toast-type`
  * hook the CSS reads to swatch the status dot. No inline styles.
  */

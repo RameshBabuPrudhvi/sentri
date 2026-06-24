@@ -5,7 +5,7 @@
  *
  * Extracted from `frontend/src/pages/TestLab.jsx` (the ~60-line inline IIFE
  * at the old `:1408-1463`) so the WAI-ARIA APG tablist wiring lives in one
- * place instead of bloating the already 2500-line TestLab page. AGENT.md §40
+ * place instead of bloating the already 2500-line TestLab page. AGENTS.md §40
  * forbids defining helpers mid-component file; the inline IIFE was the
  * functional equivalent of that anti-pattern.
  *

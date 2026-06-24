@@ -19,6 +19,7 @@ import * as activityRepo from "../src/database/repositories/activityRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
+const runner = t.createTestRunner();
 const { app, req, getDatabase, extractCookie, decodeJwtPayload, workspaceScope } = t;
 
 let mounted = false;
@@ -47,142 +48,154 @@ async function main() {
     const password = "Password123!";
     const newPassword = "NewPassword456!";
 
-    // ── Register + Login ──────────────────────────────────────────────────
+    // Shared state across cases. Register + login happens before the named
+    // tests so the JWT contents are available to the first assertion case.
     const { token, payload: loginPayload } = await t.registerAndLogin(base, {
       name: "Security User", email, password,
     });
-
-    // ── JWT name claim: login token contains name ─────────────────────────
-    assert.equal(loginPayload.name, "Security User", "Login JWT should contain user's display name");
-    assert.equal(loginPayload.email, email, "Login JWT should contain email");
-    assert.ok(loginPayload.sub, "Login JWT should contain sub");
-
-    // ── JWT name claim: refresh token also contains name ──────────────────
-    let out = await req(base, "/api/auth/refresh", {
-      method: "POST",
-      token,
-    });
-    assert.equal(out.res.status, 200);
-    const refreshToken = extractCookie(out.res, "access_token");
-    assert.ok(refreshToken, "Refresh should set new access_token cookie");
-    const refreshPayload = decodeJwtPayload(refreshToken);
-    assert.equal(refreshPayload.name, "Security User", "Refresh JWT should contain user's display name");
-
-    // Use the refreshed token for subsequent requests
-    const authToken = refreshToken;
-
-    // ── Audit trail: project create records userId and userName ────────────
-    out = await req(base, "/api/projects", {
-      method: "POST",
-      token: authToken,
-      body: { name: "Audit App", url: "https://example.com" },
-    });
-    assert.equal(out.res.status, 201);
-
-    const activities = activityRepo.getAll();
-    const createActivity = activities.find(a => a.type === "project.create");
-    assert.ok(createActivity, "project.create activity should exist");
-    assert.equal(createActivity.userId, loginPayload.sub, "Activity should record userId from JWT");
-    assert.equal(createActivity.userName, "Security User", "Activity should record display name (not email)");
-
-    // ── Password reset: full forgot → reset flow ──────────────────────────
-    out = await req(base, "/api/auth/forgot-password", {
-      method: "POST",
-      body: { email },
-    });
-    assert.equal(out.res.status, 200);
-    assert.ok(out.json.resetToken, "Dev mode should return resetToken in response");
-    const resetToken = out.json.resetToken;
-
-    // Verify token is in the DB
+    let authToken;
     const db = getDatabase();
-    const dbToken = db.prepare("SELECT * FROM password_reset_tokens WHERE token = ?").get(resetToken);
-    assert.ok(dbToken, "Reset token should be persisted in DB");
-    assert.equal(dbToken.usedAt, null, "Token should not be used yet");
 
-    // Reset password with the token
-    out = await req(base, "/api/auth/reset-password", {
-      method: "POST",
-      body: { token: resetToken, newPassword },
+    await runner.test("JWT name claim: login token contains name + email + sub", () => {
+      assert.equal(loginPayload.name, "Security User", "Login JWT should contain user's display name");
+      assert.equal(loginPayload.email, email, "Login JWT should contain email");
+      assert.ok(loginPayload.sub, "Login JWT should contain sub");
     });
-    assert.equal(out.res.status, 200);
-    assert.ok(out.json.message.includes("reset successfully"), "Should confirm password reset");
 
-    // Verify token is now marked as used in DB
-    const usedToken = db.prepare("SELECT * FROM password_reset_tokens WHERE token = ?").get(resetToken);
-    assert.ok(usedToken.usedAt, "Token should be marked as used after reset");
-
-    // ── Password reset: used token cannot be replayed (TOCTOU regression) ─
-    out = await req(base, "/api/auth/reset-password", {
-      method: "POST",
-      body: { token: resetToken, newPassword: "AnotherPassword789!" },
+    await runner.test("JWT name claim: refresh token also contains name", async () => {
+      const out = await req(base, "/api/auth/refresh", {
+        method: "POST",
+        token,
+      });
+      assert.equal(out.res.status, 200);
+      const refreshToken = extractCookie(out.res, "access_token");
+      assert.ok(refreshToken, "Refresh should set new access_token cookie");
+      const refreshPayload = decodeJwtPayload(refreshToken);
+      assert.equal(refreshPayload.name, "Security User", "Refresh JWT should contain user's display name");
+      // Use the refreshed token for subsequent requests
+      authToken = refreshToken;
     });
-    assert.equal(out.res.status, 400, "Replaying a used token should fail");
-    assert.ok(out.json.error.includes("Invalid or expired"), "Error should indicate invalid token");
 
-    // ── Login with new password works ─────────────────────────────────────
-    out = await req(base, "/api/auth/login", {
-      method: "POST",
-      body: { email, password: newPassword },
+    await runner.test("audit trail: project.create records userId + userName from JWT", async () => {
+      const out = await req(base, "/api/projects", {
+        method: "POST",
+        token: authToken,
+        body: { name: "Audit App", url: "https://example.com" },
+      });
+      assert.equal(out.res.status, 201);
+
+      const activities = activityRepo.getAll();
+      const createActivity = activities.find(a => a.type === "project.create");
+      assert.ok(createActivity, "project.create activity should exist");
+      assert.equal(createActivity.userId, loginPayload.sub, "Activity should record userId from JWT");
+      assert.equal(createActivity.userName, "Security User", "Activity should record display name (not email)");
     });
-    assert.equal(out.res.status, 200, "Login with new password should succeed");
 
-    // ── Login with old password fails ─────────────────────────────────────
-    out = await req(base, "/api/auth/login", {
-      method: "POST",
-      body: { email, password },
+    let resetToken;
+
+    await runner.test("password reset: full forgot → reset flow persists + marks token used", async () => {
+      let out = await req(base, "/api/auth/forgot-password", {
+        method: "POST",
+        body: { email },
+      });
+      assert.equal(out.res.status, 200);
+      assert.ok(out.json.resetToken, "Dev mode should return resetToken in response");
+      resetToken = out.json.resetToken;
+
+      // Verify token is in the DB
+      const dbToken = db.prepare("SELECT * FROM password_reset_tokens WHERE token = ?").get(resetToken);
+      assert.ok(dbToken, "Reset token should be persisted in DB");
+      assert.equal(dbToken.usedAt, null, "Token should not be used yet");
+
+      // Reset password with the token
+      out = await req(base, "/api/auth/reset-password", {
+        method: "POST",
+        body: { token: resetToken, newPassword },
+      });
+      assert.equal(out.res.status, 200);
+      assert.ok(out.json.message.includes("reset successfully"), "Should confirm password reset");
+
+      // Verify token is now marked as used in DB
+      const usedToken = db.prepare("SELECT * FROM password_reset_tokens WHERE token = ?").get(resetToken);
+      assert.ok(usedToken.usedAt, "Token should be marked as used after reset");
     });
-    assert.equal(out.res.status, 401, "Login with old password should fail");
 
-    // ── Password reset: expired token is rejected ─────────────────────────
-    // Request a new token, then manually expire it in the DB
-    out = await req(base, "/api/auth/forgot-password", {
-      method: "POST",
-      body: { email },
+    await runner.test("password reset: used token cannot be replayed (TOCTOU regression)", async () => {
+      const out = await req(base, "/api/auth/reset-password", {
+        method: "POST",
+        body: { token: resetToken, newPassword: "AnotherPassword789!" },
+      });
+      assert.equal(out.res.status, 400, "Replaying a used token should fail");
+      assert.ok(out.json.error.includes("Invalid or expired"), "Error should indicate invalid token");
     });
-    assert.equal(out.res.status, 200);
-    const expiredToken = out.json.resetToken;
 
-    // Manually set expiresAt to the past
-    db.prepare("UPDATE password_reset_tokens SET expiresAt = ? WHERE token = ?")
-      .run(new Date(Date.now() - 60 * 1000).toISOString(), expiredToken);
-
-    out = await req(base, "/api/auth/reset-password", {
-      method: "POST",
-      body: { token: expiredToken, newPassword: "YetAnother000!" },
+    await runner.test("login with new password works", async () => {
+      const out = await req(base, "/api/auth/login", {
+        method: "POST",
+        body: { email, password: newPassword },
+      });
+      assert.equal(out.res.status, 200, "Login with new password should succeed");
     });
-    assert.equal(out.res.status, 400, "Expired token should be rejected");
-    assert.ok(out.json.error.includes("Invalid or expired"), "Error should indicate expired token");
 
-    // ── Password reset: second forgot-password invalidates first token ────
-    out = await req(base, "/api/auth/forgot-password", {
-      method: "POST",
-      body: { email },
+    await runner.test("login with old password fails", async () => {
+      const out = await req(base, "/api/auth/login", {
+        method: "POST",
+        body: { email, password },
+      });
+      assert.equal(out.res.status, 401, "Login with old password should fail");
     });
-    const token1 = out.json.resetToken;
 
-    out = await req(base, "/api/auth/forgot-password", {
-      method: "POST",
-      body: { email },
+    await runner.test("password reset: expired token is rejected", async () => {
+      // Request a new token, then manually expire it in the DB
+      let out = await req(base, "/api/auth/forgot-password", {
+        method: "POST",
+        body: { email },
+      });
+      assert.equal(out.res.status, 200);
+      const expiredToken = out.json.resetToken;
+
+      // Manually set expiresAt to the past
+      db.prepare("UPDATE password_reset_tokens SET expiresAt = ? WHERE token = ?")
+        .run(new Date(Date.now() - 60 * 1000).toISOString(), expiredToken);
+
+      out = await req(base, "/api/auth/reset-password", {
+        method: "POST",
+        body: { token: expiredToken, newPassword: "YetAnother000!" },
+      });
+      assert.equal(out.res.status, 400, "Expired token should be rejected");
+      assert.ok(out.json.error.includes("Invalid or expired"), "Error should indicate expired token");
     });
-    const token2 = out.json.resetToken;
-    assert.notEqual(token1, token2, "Two forgot-password requests should produce different tokens");
 
-    // First token should be invalidated
-    out = await req(base, "/api/auth/reset-password", {
-      method: "POST",
-      body: { token: token1, newPassword: "FirstToken111!" },
+    await runner.test("password reset: second forgot-password invalidates first token", async () => {
+      let out = await req(base, "/api/auth/forgot-password", {
+        method: "POST",
+        body: { email },
+      });
+      const token1 = out.json.resetToken;
+
+      out = await req(base, "/api/auth/forgot-password", {
+        method: "POST",
+        body: { email },
+      });
+      const token2 = out.json.resetToken;
+      assert.notEqual(token1, token2, "Two forgot-password requests should produce different tokens");
+
+      // First token should be invalidated
+      out = await req(base, "/api/auth/reset-password", {
+        method: "POST",
+        body: { token: token1, newPassword: "FirstToken111!" },
+      });
+      assert.equal(out.res.status, 400, "First token should be invalidated after second request");
+
+      // Second token should work
+      out = await req(base, "/api/auth/reset-password", {
+        method: "POST",
+        body: { token: token2, newPassword: "SecondToken222!" },
+      });
+      assert.equal(out.res.status, 200, "Second (latest) token should work");
     });
-    assert.equal(out.res.status, 400, "First token should be invalidated after second request");
 
-    // Second token should work
-    out = await req(base, "/api/auth/reset-password", {
-      method: "POST",
-      body: { token: token2, newPassword: "SecondToken222!" },
-    });
-    assert.equal(out.res.status, 200, "Second (latest) token should work");
-
-    console.log("✅ security-hardening: all checks passed");
+    runner.summary("security-hardening");
   } finally {
     env.restore();
     await new Promise((resolve) => server.close(resolve));

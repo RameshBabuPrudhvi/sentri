@@ -68,8 +68,8 @@ export const runsTotal = new client.Counter({
 
 export const runOutcomeTotal = new client.Counter({
   name: "app_run_outcome_total",
-  help: "Total runs that reached a terminal status. Combined with app_runs_total gives the per-type success rate via PromQL: sum(rate(app_run_outcome_total{status='completed'}[5m])) / sum(rate(app_runs_total[5m])).",
-  labelNames: ["type", "status"],
+  help: "Total runs that reached a terminal status. Combined with app_runs_total gives the per-type success rate via PromQL: sum(rate(app_run_outcome_total{status='completed'}[5m])) / sum(rate(app_runs_total[5m])). B3: `projectId` label added so per-project rejection-rate alerts can use this as the denominator.",
+  labelNames: ["type", "status", "projectId"],
   registers: [register],
 });
 
@@ -296,10 +296,15 @@ export const agentReviewRounds = new client.Histogram({
  */
 export function recordRunOutcome(run, defaultType = "unknown") {
   try {
-    const labels = { type: run?.type || defaultType, status: run?.status || "completed" };
+    const labels = { type: run?.type || defaultType, status: run?.status || "completed", projectId: run?.projectId || "" };
     runOutcomeTotal.inc(labels);
+    // Duration histogram keeps the original (type, status) label set —
+    // adding projectId to a histogram would explode bucket cardinality
+    // (projects × types × statuses × buckets). Operators who need
+    // per-project duration use the `app_run_p95_load_ms{projectId}` gauge.
+    const durationLabels = { type: run?.type || defaultType, status: run?.status || "completed" };
     const seconds = Number(run?.duration || 0) / 1000;
-    if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
+    if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(durationLabels, seconds);
   } catch { /* best-effort */ }
 }
 
@@ -381,6 +386,89 @@ export const agentToolCallsTotal = new client.Counter({
   name: "app_agent_tool_calls_total",
   help: "AUTO-023 B5 — total tool calls by tool and outcome.",
   labelNames: ["tool", "outcome"],
+  registers: [register],
+});
+
+// B3 (AUDIT-ROADMAP Bundle 3) — reviewer-collapse counter. Increments
+// once per run when the pre-run gate in `crawler.js` detects that the
+// `author` and `reviewer` agent roles resolve to the SAME provider
+// route id. In that configuration the "two-agent" review loop cannot
+// produce independent signal — the reviewer is the author talking to
+// itself at the same temperature against the same prompt vocabulary,
+// so `runReviewerAuthorLoop`'s LLM reviewer pass is skipped in favour
+// of the heuristic `validateTest` path.
+//
+// `projectId` label gives operators per-project attribution from
+// Prometheus alone (no need to cross-reference with the activity
+// log). Mirrors `app_vision_heal_budget_exhausted_total{projectId,
+// reason}` and `app_run_p95_load_ms{projectId}` — the same pattern
+// for "the gauge is interesting on its own but the per-tenant slice
+// is where operators alert". Cardinality concern: self-hosted Sentri
+// runs single-digit-to-low-hundreds projects per workspace; very
+// large multi-tenant deployments can `relabel_configs`-drop the label
+// at scrape time (documented at `monitoring/prometheus/alerts.yml`
+// alongside the equivalent escape hatch for vision-heal). The
+// equivalent "drop label on scrape" pattern is the industry default
+// (AWS, GCP, Datadog all document this for high-cardinality
+// per-tenant labels).
+//
+// Industry parallel: AWS Config "non-compliant resource" counter +
+// Datadog monitor `notify_audit_log` count — surface the policy
+// violation as a metric, not just a UI badge.
+export const agentReviewerCollapsedTotal = new client.Counter({
+  name: "app_agent_reviewer_collapsed_total",
+  help: "B3 (AUDIT-ROADMAP) — runs where the author/reviewer route collapse gate fired, so the LLM reviewer pass was skipped in favour of heuristic-only validation. Sustained non-zero rate means operators should configure a distinct reviewer route in Settings → Agent Roles. Labelled by projectId for per-project attribution; multi-tenant operators can drop the label via `relabel_configs` at scrape time.",
+  labelNames: ["projectId"],
+  registers: [register],
+});
+
+// B3 (AUDIT-ROADMAP Bundle 3) — review-rejection counter. Increments
+// per individual test (not per run) every time the reviewer↔author
+// loop terminates with `ReviewRejection` inside the post-run feedback
+// loop. Pair with `app_runs_total` to compute the per-run rejection
+// rate; sustained spikes are a leading signal of reviewer-prompt
+// drift, brittle generation, or a regressed author model.
+//
+// `projectId` label — same rationale as `agentReviewerCollapsedTotal`
+// above. Operators alerting on "which project's reviewer drifted?"
+// need the per-tenant slice; the cross-reference to `activities` is
+// possible but adds 1-3 seconds to every alert investigation. The
+// label closes that gap.
+export const reviewRejectionsTotal = new client.Counter({
+  name: "app_review_rejections_total",
+  help: "B3 (AUDIT-ROADMAP) — individual tests discarded by ReviewRejection inside the post-run feedback loop. Labelled by projectId for per-project attribution. Pair with app_runs_total for per-run rejection rate.",
+  labelNames: ["projectId"],
+  registers: [register],
+});
+
+// B3 (AUDIT-ROADMAP Bundle 3) — review-rejection notification delivery
+// counter. One increment per (channel, outcome) tuple on every
+// `fireReviewRejectionNotifications` dispatch. Closes the visibility
+// gap industry-standard SaaS QA platforms ship with: operators can
+// see "is the Teams webhook actually delivering?" from Prometheus
+// alone, without grepping worker logs.
+//
+// Labels:
+//   • channel  ∈ {teams, email, webhook} — which transport.
+//   • outcome  ∈ {sent, failed, cooldown_skipped, threshold_skipped,
+//                 disabled, no_settings} — the dispatch's terminal
+//                 disposition. `sent` is the success path; everything
+//                 else is a documented skip / failure reason so ops
+//                 can alert on `outcome="failed"` rate per channel.
+//
+// Bounded cardinality: 3 channels × 6 outcomes = 18 series per
+// deployment (no projectId — channel-level signal is global; per-project
+// attribution lives in the audit log + DLQ). Mirrors
+// `app_ai_provider_errors_total{reason}` shape.
+//
+// Industry parallel: Datadog `Monitor.notification.sent`, PagerDuty
+// `incidents.notifications.delivered` — every alerting platform
+// exposes per-channel delivery counters so operators can SLO against
+// the integration itself, not just the source signal.
+export const reviewRejectionNotificationsTotal = new client.Counter({
+  name: "app_review_rejection_notifications_total",
+  help: "B3 (AUDIT-ROADMAP) — review-rejection notification dispatches. `channel` ∈ {teams, email, webhook}; `outcome` ∈ {sent, failed, cooldown_skipped, threshold_skipped, disabled, no_settings}. Alert on `outcome=\"failed\"` rate per channel to detect broken webhooks before customers do.",
+  labelNames: ["channel", "outcome"],
   registers: [register],
 });
 
@@ -478,5 +566,157 @@ export const explorerDurationSeconds = new client.Histogram({
   name: "app_explorer_duration_seconds",
   help: "Bundle-B fix #19 — end-to-end state-exploration duration in seconds. Buckets sized to surface p95/p99 against the 15-minute hard cap.",
   buckets: EXPLORER_DURATION_BUCKETS,
+  registers: [register],
+});
+
+// MNT-015 — browser pool and per-workspace AI limiter telemetry.
+export const browserPoolSize = new client.Gauge({
+  name: "app_browser_pool_size",
+  help: "MNT-015 — configured warm browser slot capacity by browser type.",
+  labelNames: ["type"],
+  registers: [register],
+});
+
+export const browserPoolInUse = new client.Gauge({
+  name: "app_browser_pool_in_use",
+  help: "MNT-015 — currently checked-out browser contexts by browser type.",
+  labelNames: ["type"],
+  registers: [register],
+});
+
+export const browserPoolAcquiresTotal = new client.Counter({
+  name: "app_browser_pool_acquires_total",
+  help: "MNT-015 — browser pool acquisitions by browser type and outcome (hit, miss, queue).",
+  labelNames: ["type", "outcome"],
+  registers: [register],
+});
+
+export const aiRateLimitedTotal = new client.Counter({
+  name: "app_ai_rate_limited_total",
+  help: "MNT-015 — per-workspace AI limiter rejections by workspace role bucket.",
+  labelNames: ["workspace_role"],
+  registers: [register],
+});
+
+// MNT-015 — pool acquisition latency histogram. Captures both fast-path
+// "hit" leases (single-digit ms) and queued waits when the pool is full.
+// Buckets chosen to span: warm-hit (<10 ms), cold-launch miss (200 ms – 2 s),
+// queued wait under contention (>2 s). Mirrors HikariCP `pool.Wait` and
+// pgbouncer `cl_waiting` exposition shapes so operators can SLO against
+// queue depth.
+export const browserPoolAcquireWaitSeconds = new client.Histogram({
+  name: "app_browser_pool_acquire_wait_seconds",
+  help: "MNT-015 — browser pool acquisition wait time by type and outcome.",
+  labelNames: ["type", "outcome"],
+  buckets: [0.001, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30],
+  registers: [register],
+});
+
+// MNT-015 — unhandled browser disconnects (Chromium crash, OOM kill,
+// remote endpoint hang-up). Operators alert on a non-zero rate; a healthy
+// long-running deployment should see this at zero outside the rare
+// upstream-Playwright crash. Counts the eviction event, NOT downstream
+// failures the disconnect may cause.
+export const browserPoolDisconnectsTotal = new client.Counter({
+  name: "app_browser_pool_disconnects_total",
+  help: "MNT-015 — unexpected browser disconnects detected by the pool, by type.",
+  labelNames: ["type"],
+  registers: [register],
+});
+
+// ─── B1.2 — DB write-batching queue ──────────────────────────────────────────
+// Three metrics that together answer "is the SQLite write queue healthy?":
+//   • depth gauge — current backlog; sustained non-zero signals undersized
+//     batch / flush interval relative to write volume.
+//   • batch duration — flush wall-clock; drives the queue-write latency SLO.
+//   • batch size — operations per flush; combined with depth tells operators
+//     whether flushes are size-triggered (good — saturating the batch) or
+//     time-triggered (queue is under-utilised and the per-op overhead of
+//     setTimeout dominates).
+const DB_BATCH_DURATION_BUCKETS = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1];
+const DB_BATCH_SIZE_BUCKETS = [1, 5, 10, 25, 50, 100, 250];
+
+export const dbWriteQueueDepth = new client.Gauge({
+  name: "app_db_write_queue_depth",
+  help: "B1.2 — current size of the SQLite write-batching queue. Sustained non-zero values signal `DB_WRITE_BATCH_SIZE` / `DB_WRITE_FLUSH_MS` are undersized relative to write volume — operators tune via env. Postgres deployments always read 0 (queue is a passthrough).",
+  registers: [register],
+});
+
+export const dbWriteBatchDurationSeconds = new client.Histogram({
+  name: "app_db_write_batch_duration_seconds",
+  help: "B1.2 — wall-clock duration per batched-write flush. Drives the queue-write latency SLO and helps detect SQLite WAL contention regressions.",
+  buckets: DB_BATCH_DURATION_BUCKETS,
+  registers: [register],
+});
+
+export const dbWriteBatchSize = new client.Histogram({
+  name: "app_db_write_batch_size",
+  help: "B1.2 — operations per flush. Combined with `app_db_write_queue_depth`, distinguishes size-triggered flushes (saturating the batch) from time-triggered ones (queue under-utilised).",
+  buckets: DB_BATCH_SIZE_BUCKETS,
+  registers: [register],
+});
+
+// B1.1 — Duplicate-write counter on the `run_test_results` append path.
+// Bumped every time `runTestResultRepo.append()` detects an existing row
+// for `(runId, testId, iterationIndex)`. `reason` is closed-set so
+// cardinality stays bounded:
+//   • resume_replay     — expected when `POST /runs/:id/resume` re-enqueues a
+//                         test whose result was almost-persisted before crash.
+//   • duplicate_dispatch — unexpected; indicates a bug double-dispatching the
+//                         same test in the runner / shard worker. Any
+//                         sustained non-zero rate fires an alert.
+// Matches the Splunk / Datadog convention of logging every dedup decision
+// rather than silently swallowing — operators must be able to distinguish
+// "the resume path worked" from "we have a write-amplification bug".
+export const runTestResultDuplicatesTotal = new client.Counter({
+  name: "app_run_test_result_duplicates_total",
+  help: "B1.1 — duplicate-write rejections on `run_test_results.append`. `reason='resume_replay'` is expected (POST /runs/:id/resume replaying a near-persisted result); `reason='duplicate_dispatch'` signals a runner bug double-dispatching the same test — alert on any sustained non-zero rate.",
+  labelNames: ["reason"],
+  registers: [register],
+});
+
+// ─── B2 — iframe + SPA hydration + adaptive timeout (AUDIT-ROADMAP Bundle 2) ──
+// Five metrics mirroring B1's "four named metrics" bar so operators can answer
+// "is the adaptive-timeout math actually helping?" and "is iframe enumeration
+// recovering content for embedded widgets?" without re-reading run logs.
+//
+// Histogram bucket choices:
+//   • p95 page-load + adaptive timeout share `AI_BUCKETS` (0.1 s – 2 min):
+//     covers fast pages (<500 ms) through enterprise SPAs with multi-second
+//     hydration. Same bucket set as `app_ai_provider_latency_seconds` so
+//     dashboards can co-plot "AI latency vs page-load latency" without
+//     re-tuning percentile widgets.
+//   • Hydration wait shares `HTTP_BUCKETS` (10 ms – 10 s): the wait is
+//     bounded by `HYDRATION_WAIT_MS` (env, default 5 000), and the histogram
+//     must surface both "near-zero" (no indicators present, fast fallthrough)
+//     and "near-bound" (operator should raise the env) without log-binning
+//     loss at the bound.
+
+export const runP95LoadMs = new client.Gauge({
+  name: "app_run_p95_load_ms",
+  help: "B2 — last-computed `runs.p95LoadMs` per project. Set at run-start from `crawlSnapshotRepo.getLoadTimesByRunId()` via the R-7 percentile in `testRunner.js#p95`. Operators alert on a sustained increase (latent app regression) and compare against `app_run_adaptive_timeout_ms` to verify the adaptive-clamp math.",
+  labelNames: ["projectId"],
+  registers: [register],
+});
+
+export const runAdaptiveTimeoutMs = new client.Gauge({
+  name: "app_run_adaptive_timeout_ms",
+  help: "B2 — last-derived per-run element timeout. `source` ∈ {project_override, adaptive, default} mirrors the precedence chain in `testRunner.js`: operator override beats `2 * p95LoadMs` beats env floor. Compare against `app_run_p95_load_ms` to verify the clamp math and against `HEALING_ELEMENT_TIMEOUT` / `MAX_ELEMENT_TIMEOUT` env bounds.",
+  labelNames: ["projectId", "source"],
+  registers: [register],
+});
+
+export const iframeEnumeratedTotal = new client.Counter({
+  name: "app_iframe_enumerated_total",
+  help: "B2 — iframes processed by `crawlBrowser.js#enumerateFrameSnapshots`. `outcome` ∈ {captured, skipped_cross_origin, skipped_strategy, error}: `captured` = snapshot persisted + elements merged; `skipped_cross_origin` = SecurityError on DOM access (Stripe / Intercom / etc.); `skipped_strategy` = `shouldEnumerateFrame` rejected before snapshot attempt; `error` = unexpected throw inside the snapshot path. `strategy` ∈ {same-origin, allowlist, all, none} matches `project.iframeStrategy`.",
+  labelNames: ["strategy", "outcome"],
+  registers: [register],
+});
+
+export const spaHydrationWaitSeconds = new client.Histogram({
+  name: "app_spa_hydration_wait_seconds",
+  help: "B2 — wall-clock duration of the SPA hydration wait in `pageSnapshot.js#waitForSpaHydration`. `mode` ∈ {auto, custom, domcontentloaded} mirrors `project.hydrationType`. `domcontentloaded` observations are always 0 (the function early-returns); included for symmetry so dashboards can split mode prevalence without an extra label query. Near-bound values (within ~10% of `HYDRATION_WAIT_MS`) signal the env default is too tight for the SPA in question.",
+  labelNames: ["mode"],
+  buckets: HTTP_BUCKETS,
   registers: [register],
 });

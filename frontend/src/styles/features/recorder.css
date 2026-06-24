@@ -237,7 +237,7 @@
  * is in assert mode. The `left/top/width/height` are computed at runtime
  * from the probe response and therefore stay inline on the element; the
  * static visual treatment (border, shadow, transition) lives here so the
- * component doesn't reinvent CSS per AGENT.md §"Do not reinvent CSS". */
+ * component doesn't reinvent CSS per AGENTS.md §"Do not reinvent CSS". */
 .recorder-highlight-overlay {
   position: absolute;
   border: 2px solid #3b82f6;
@@ -329,7 +329,7 @@
 /* ── Pre-existing inline-style cleanup ─────────────────────────────── */
 /* These three classes replace inline `style={{…}}` that predated the
  * DIF-015c work but were in the same file (RecorderModal.jsx). Fixed
- * per AGENT.md `:148` ("Default: fix it — you are already in the file"). */
+ * per AGENTS.md `:148` ("Default: fix it — you are already in the file"). */
 .recorder-topbar__emoji {
   font-size: 20px;
 }

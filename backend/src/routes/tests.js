@@ -1,45 +1,38 @@
 /**
  * @module routes/tests
- * @description Test CRUD, AI generation, single-test run, review, bulk actions, and export. Mounted at `/api/v1` (INF-005).
+ * @description Test CRUD, AI generation, single-test run, fixtures, visual baselines. Mounted at `/api/v1` (INF-005).
  *
- * REFACTOR-NOTE (post-AUTO-003b): this file mixes 8 concerns — CRUD, AI
- * generation, single-test runs, review actions, approvals (revoke +
- * approval-stats), interactive recorder, visual baselines, and exports.
- * Splitting along those lines (`routes/approvals.js`, `routes/recorder.js`,
- * `routes/baselines.js`, `routes/exports.js`) is sensible but should land
- * in a dedicated PR rather than bundled with feature work — the route-
- * order constraints below ("bulk must be declared BEFORE :testId
- * wildcards") are easy to regress in a mechanical move. Tracked as a
- * follow-up MNT item.
+ * REFACTOR-NOTE: the interactive recorder (10 routes) was extracted to
+ * `routes/recorder.js`, the export/traceability routes to
+ * `routes/testExports.js`, and the review state-machine (approve / reject
+ * / restore / revoke / bulk / approval-stats) to `routes/testApprovals.js`.
+ * What remains here is test CRUD, AI generation, single-test run, fixture
+ * uploads, and the visual-regression baseline endpoints.
  *
  * ### Endpoints
  * | Method   | Path                                             | Description                         |
  * |----------|--------------------------------------------------|-------------------------------------|
  * | `GET`    | `/api/v1/projects/:id/tests`                     | List tests for a project            |
  * | `GET`    | `/api/v1/tests`                                  | List all tests                      |
+ * | `GET`    | `/api/v1/tests/counts`                           | Workspace review-queue tab counts   |
  * | `GET`    | `/api/v1/tests/:testId`                          | Get a single test                   |
  * | `PATCH`  | `/api/v1/tests/:testId`                          | Edit test (steps, name, code, etc.) |
+ * | `GET`    | `/api/v1/tests/:testId/fixtures`                 | List CAP-001 data-driven fixtures   |
+ * | `POST`   | `/api/v1/tests/:testId/fixtures`                 | Upload CAP-001 fixture rows         |
  * | `POST`   | `/api/v1/projects/:id/tests`                     | Create a manual test (Draft)        |
  * | `DELETE` | `/api/v1/projects/:id/tests/:testId`             | Delete a test                       |
  * | `POST`   | `/api/v1/projects/:id/tests/generate`            | AI-generate test(s) from description|
  * | `POST`   | `/api/v1/tests/:testId/run`                      | Run a single test                   |
- * | `PATCH`  | `/api/v1/projects/:id/tests/:testId/approve`     | Approve (Draft → Approved)          |
- * | `PATCH`  | `/api/v1/projects/:id/tests/:testId/reject`      | Reject                              |
- * | `PATCH`  | `/api/v1/projects/:id/tests/:testId/restore`     | Restore to Draft                    |
- * | `POST`   | `/api/v1/projects/:id/tests/bulk`                | Bulk approve/reject/restore/delete  |
  * | `GET`    | `/api/v1/projects/:id/tests/counts`              | Per-status test counts              |
- * | `GET`    | `/api/v1/projects/:id/tests/export/zephyr`       | Zephyr Scale CSV export             |
- * | `GET`    | `/api/v1/projects/:id/tests/export/testrail`     | TestRail CSV export                 |
- * | `GET`    | `/api/v1/projects/:id/tests/traceability`        | Traceability matrix                 |
- * | `GET`    | `/api/v1/projects/:id/export/playwright`         | Export approved tests as Playwright ZIP |
+ * | `GET`    | `/api/v1/tests/:testId/baselines`                | List visual-regression baselines    |
+ * | `POST`   | `/api/v1/tests/:testId/baselines/:n/accept`      | Accept a captured screenshot        |
+ * | `DELETE` | `/api/v1/tests/:testId/baselines/:n`             | Delete a baseline                   |
  */
 
 import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
-import { PROVENANCE_CLEAR, humanApproval, computeStats, APPROVAL_SOURCE } from "../services/approvalService.js";
-import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 import { generateTestId, generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
@@ -48,11 +41,9 @@ import { hasProvider, isLocalProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateFromUserDescription } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
-import { buildZephyrCsv, buildTestRailCsv, buildPlaywrightZip } from "../utils/exportFormats.js";
-import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
+import { validateTestPayload, validateTestUpdate } from "../utils/validate.js";
 import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { trackTelemetry } from "../utils/telemetry.js";
 import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.js";
 import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
@@ -60,52 +51,17 @@ import { requireRole } from "../middleware/requireRole.js";
 import * as baselineRepo from "../database/repositories/baselineRepo.js";
 import * as testFixtureRepo from "../database/repositories/testFixtureRepo.js";
 import { acceptBaseline } from "../runner/visualDiff.js";
-import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
+import { SHOTS_DIR, BASELINES_DIR, resolveBrowser } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions, pauseRecording, resumeRecording, popLastRecordingAction, switchDevice, probeAtPoint } from "../runner/recorder.js";
-import { DEVICE_PRESETS } from "../runner/config.js";
-/**
- * DIF-015c Gap 5 — allowlist of device names accepted at the route
- * layer. Built once at module load from the same `DEVICE_PRESETS` the
- * `RunRegressionModal` dropdown surfaces, so the recorder's accepted
- * inputs stay byte-aligned with the rest of the regression suite.
- */
-const RECORDER_DEVICE_VALUES = new Set(DEVICE_PRESETS.map((d) => d.value));
-import { randomUUID } from "crypto";
-import * as environmentRepo from "../database/repositories/environmentRepo.js";
+import { resolveEnvOrThrow } from "../utils/routeHelpers.js";
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 // §17 #1 / TD-012 — CSV parser + iteration-cap clamp extracted out of this
 // 1,941-line god-object into `utils/csv.js`. The re-export under
 // `__testables` below keeps `tests/fixture-iteration.test.js` working
 // unchanged; new consumers should import directly from `utils/csv.js`.
 import { parseCsvRows, clampIterationCap } from "../utils/csv.js";
-
-/**
- * DIF-012: Resolve and validate an optional `environmentId` against the
- * given project, returning the env row when valid. Returns `null` when no
- * envId was supplied; throws an `Error` with `httpStatus` and `message`
- * fields when the envId is invalid (unknown or belongs to a different
- * project) so callers can `return res.status(httpStatus).json({error})`.
- *
- * Mirrors the validation contract in `routes/runs.js` and
- * `routes/trigger.js` so all four entry points (crawl, run, generate,
- * record) share one source of truth.
- *
- * @param {string|null|undefined} environmentId
- * @param {Object} project — already-resolved, workspace-scoped project row.
- * @returns {Object|null}
- */
-function resolveEnvOrThrow(environmentId, project) {
-  if (!environmentId) return null;
-  const env = environmentRepo.getById(environmentId);
-  if (!env || env.projectId !== project.id) {
-    const err = new Error("invalid environmentId");
-    err.httpStatus = 400;
-    throw err;
-  }
-  return env;
-}
+import { findDependencyCycle } from "../runner/dependencyOrder.js";
 
 const router = Router();
 
@@ -126,46 +82,40 @@ const parseTags = (raw) => {
   return cleaned.length ? cleaned : undefined;
 };
 
-/**
- * Return `desiredName` if it's free within the project, otherwise append
- * ` (2)`, ` (3)`, … until a non-colliding name is found. Compares
- * case-insensitively (manual testers expect "Login" and "login" to be
- * treated as the same name) and ignores soft-deleted tests because
- * `testRepo.getByProjectId()` already filters them out.
- *
- * Used by the recorder stop handler so two recordings saved with the same
- * name (or two no-name saves whose default ISO-timestamp collides at the
- * same millisecond) don't produce two indistinguishable rows in the Tests
- * list. Also covers the recorded-test path's MAX_RECORDING_MS auto-timeout
- * recovery branch — both routes funnel through `dedupeTestName`.
- *
- * Hot-path consideration: `getByProjectId` does one indexed
- * `SELECT * WHERE projectId = ?`. Recorder stop is a low-frequency event
- * (one per user save), so the in-process scan is fine — we don't want to
- * add a `(projectId, name)` UNIQUE index because the AI pipeline already
- * suffixes its own names and adding a hard constraint would break
- * legacy rows where duplicates already exist.
- *
- * @param {string} projectId
- * @param {string} desiredName
- * @returns {string} A name that doesn't collide with any existing test.
- */
+function dependencyError(status, payload) {
+  return { status, payload: { error: payload.message || payload.code, ...payload } };
+}
 
-
-function dedupeTestName(projectId, desiredName) {
-  const base = String(desiredName || "").trim();
-  if (!base) return base; // caller is responsible for never passing empty
-  const existing = testRepo.getByProjectId(projectId);
-  const taken = new Set(existing.map((t) => String(t.name || "").trim().toLowerCase()));
-  if (!taken.has(base.toLowerCase())) return base;
-  // Walk suffix counters until we find a free slot. Cap at 999 to avoid an
-  // infinite loop on a pathological project — beyond that, fall through to
-  // the timestamped form which is effectively guaranteed unique.
-  for (let i = 2; i <= 999; i++) {
-    const candidate = `${base} (${i})`;
-    if (!taken.has(candidate.toLowerCase())) return candidate;
+function validateDependsOnForSave(projectId, testId, rawDependsOn) {
+  if (rawDependsOn === undefined) return null;
+  if (!Array.isArray(rawDependsOn)) {
+    return dependencyError(400, { code: "INVALID_DEPENDS_ON", message: "dependsOn must be an array" });
   }
-  return `${base} (${new Date().toISOString()})`;
+  const invalidIndex = rawDependsOn.findIndex((id) => typeof id !== "string" || !id.trim());
+  if (invalidIndex !== -1) {
+    return dependencyError(400, { code: "INVALID_DEPENDS_ON", index: invalidIndex, message: "dependsOn entries must be non-empty test ID strings" });
+  }
+  const dependsOn = [...new Set(rawDependsOn.map((id) => id.trim()))];
+  const projectTests = testRepo.getByProjectId(projectId);
+  const byId = new Map(projectTests.map((t) => [t.id, t]));
+
+  if (dependsOn.includes(testId)) {
+    return dependencyError(400, { code: "CYCLE_DETECTED", path: [testId, testId], message: "Dependency cycle detected" });
+  }
+  for (const depId of dependsOn) {
+    if (!byId.has(depId)) {
+      return dependencyError(400, { code: "MISSING_UPSTREAM", testId: depId, message: "dependsOn contains a test that does not exist in this project" });
+    }
+  }
+
+  const graph = byId.has(testId)
+    ? projectTests.map((t) => t.id === testId ? { ...t, dependsOn } : t)
+    : [...projectTests, { id: testId, dependsOn }];
+  const path = findDependencyCycle(graph);
+  if (path) {
+    return dependencyError(400, { code: "CYCLE_DETECTED", path, message: "Dependency cycle detected" });
+  }
+  return { dependsOn };
 }
 
 // ─── Test CRUD ────────────────────────────────────────────────────────────────
@@ -313,7 +263,7 @@ router.patch("/tests/:testId", requireRole("qa_lead"), async (req, res) => {
   const ownerProject = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
   if (!ownerProject) return res.status(404).json({ error: "not found" });
 
-  const { steps, name, description, priority, regenerateCode, previewCode, playwrightCode, linkedIssueKey, tags } = req.body;
+  const { steps, name, description, priority, regenerateCode, previewCode, playwrightCode, linkedIssueKey, tags, dependsOn } = req.body;
 
   const updates = {};
 
@@ -322,6 +272,9 @@ router.patch("/tests/:testId", requireRole("qa_lead"), async (req, res) => {
   if (typeof priority === "string")    updates.priority    = priority;
   if (typeof linkedIssueKey === "string") updates.linkedIssueKey = linkedIssueKey.trim() || null;
   if (Array.isArray(tags)) updates.tags = tags.map(t => String(t).trim()).filter(Boolean);
+  const dependencyValidation = validateDependsOnForSave(test.projectId, test.id, dependsOn);
+  if (dependencyValidation?.status) return res.status(dependencyValidation.status).json(dependencyValidation.payload);
+  if (dependencyValidation) updates.dependsOn = dependencyValidation.dependsOn;
   if (typeof playwrightCode === "string") {
     if (test.playwrightCode && test.playwrightCode !== playwrightCode) {
       updates.playwrightCodePrev = test.playwrightCode;
@@ -531,9 +484,11 @@ router.post("/projects/:id/tests", requireRole("qa_lead"), (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const { name, description, steps, playwrightCode, priority, type } = req.body;
+  const { name, description, steps, playwrightCode, priority, type, dependsOn } = req.body;
 
   const testId = generateTestId();
+  const dependencyValidation = validateDependsOnForSave(project.id, testId, dependsOn);
+  if (dependencyValidation?.status) return res.status(dependencyValidation.status).json(dependencyValidation.payload);
   const test = {
     id: testId,
     projectId: project.id,
@@ -556,6 +511,13 @@ router.post("/projects/:id/tests", requireRole("qa_lead"), (req, res) => {
     modelUsed: null,
     linkedIssueKey: null,
     tags: [],
+    // AUTO-014: legacy rows store `null` when no dependencies are declared
+    // (`docs/api/tests.md` documents `null` for "tests with no dependency
+    // declaration"). New tests created without a `dependsOn` body field
+    // must match that contract — passing `undefined` here would let the
+    // repo's `fillDefaults` coerce it to `[]`, drifting the persisted shape
+    // for new vs. legacy rows.
+    dependsOn: dependencyValidation?.dependsOn ?? null,
     workspaceId: project.workspaceId || null,
   };
 
@@ -769,258 +731,9 @@ router.post("/tests/:testId/run", requireRole("qa_lead"), demoQuota("run"), expe
 });
 
 // ─── Test Review: Approve / Reject / Restore / Bulk ──────────────────────────
-
-router.patch("/projects/:id/tests/:testId/approve", requireRole("qa_lead"), (req, res) => {
-  // Verify the project belongs to the user's workspace (ACL-001)
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "not found" });
-  const test = testRepo.getById(req.params.testId);
-  if (!test || test.projectId !== req.params.id)
-    return res.status(404).json({ error: "not found" });
-  const reviewedAt = new Date().toISOString();
-  // ENT-004: optional approval comment (e.g. "Verified login flow manually").
-  // Same shape as the reject path — persisted to `tests.reviewComment`.
-  const reviewComment = typeof req.body?.reviewComment === "string"
-    ? req.body.reviewComment.trim().slice(0, 2000) || null
-    : null;
-  // AUTO-003b: populate provenance columns on human approvals too so the
-  // approval-stats counter and audit trail carry full decision-time data.
-  // `humanApproval()` returns the four provenance fields keyed to this
-  // actor — see backend/src/services/approvalService.js for the contract.
-  const actorInfo = actor(req);
-  testRepo.update(test.id, {
-    reviewStatus: "approved",
-    reviewedAt,
-    reviewComment,
-    ...humanApproval(actorInfo),
-  });
-  logActivity({ ...actorInfo,
-    type: ACTIVITY_TYPES.TEST_APPROVE, projectId: req.params.id, projectName: project.name,
-    testId: test.id, testName: test.name,
-    detail: `Test approved — "${test.name}"`,
-  });
-  // DIF-013: approval/rejection rate telemetry. `generatedFrom` tells us
-  // whether AI-generated, recorded, or manual tests are more likely to be
-  // approved — useful for measuring pipeline quality over time.
-  trackTelemetry("test.review", {
-    projectId: req.params.id,
-    decision: "approved",
-    generatedFrom: test.generatedFrom || null,
-    isBulk: false,
-  });
-  res.json(testRepo.getById(test.id));
-});
-
-router.patch("/projects/:id/tests/:testId/reject", requireRole("qa_lead"), (req, res) => {
-  // Verify the project belongs to the user's workspace (ACL-001)
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "not found" });
-  const test = testRepo.getById(req.params.testId);
-  if (!test || test.projectId !== req.params.id)
-    return res.status(404).json({ error: "not found" });
-  const reviewedAt = new Date().toISOString();
-  // ENT-004: optional rejection reason from the Review Queue modal.
-  // Persisted to `tests.reviewComment` (migration 054) so TestDetail
-  // renders "why was this rejected?" inline without digging through the
-  // audit log. Blank/absent = no comment (column stays NULL or previous
-  // value is cleared on status change).
-  const reviewComment = typeof req.body?.reviewComment === "string"
-    ? req.body.reviewComment.trim().slice(0, 2000) || null
-    : null;
-  // AUTO-003b: clear the four provenance columns alongside `reviewStatus`
-  // so a rejected auto-approved test doesn't keep stale `approvalSource:
-  // "auto"` / `approvedBy: "auto-approver"` — the response from GET
-  // `/tests/:id` would otherwise show a rejected test that still looks
-  // auto-approved, which is a confusing audit-trail lie. Matches the
-  // restore / revoke / bulk-restore paths that also clear provenance.
-  testRepo.update(test.id, { reviewStatus: "rejected", reviewedAt, reviewComment, ...PROVENANCE_CLEAR });
-  logActivity({ ...actor(req),
-    type: ACTIVITY_TYPES.TEST_REJECT, projectId: req.params.id, projectName: project.name,
-    testId: test.id, testName: test.name,
-    detail: `Test rejected — "${test.name}"`,
-  });
-  // DIF-013: see approve handler above for rationale.
-  trackTelemetry("test.review", {
-    projectId: req.params.id,
-    decision: "rejected",
-    generatedFrom: test.generatedFrom || null,
-    isBulk: false,
-  });
-  res.json(testRepo.getById(test.id));
-});
-
-router.patch("/projects/:id/tests/:testId/restore", requireRole("qa_lead"), (req, res) => {
-  // Verify the project belongs to the user's workspace (ACL-001)
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "not found" });
-  const test = testRepo.getById(req.params.testId);
-  if (!test || test.projectId !== req.params.id)
-    return res.status(404).json({ error: "not found" });
-  // AUTO-003b: clear the four provenance columns alongside reviewStatus/reviewedAt
-  // via the shared `PROVENANCE_CLEAR` shape so this stays in lock-step with
-  // bulk restore + revoke (see backend/src/services/approvalService.js).
-  testRepo.update(test.id, {
-    reviewStatus: "draft",
-    reviewedAt: null,
-    ...PROVENANCE_CLEAR,
-  });
-  logActivity({ ...actor(req),
-    type: ACTIVITY_TYPES.TEST_RESTORE, projectId: req.params.id, projectName: project.name,
-    testId: test.id, testName: test.name,
-    detail: `Test restored to draft — "${test.name}"`,
-  });
-  res.json(testRepo.getById(test.id));
-});
-
-// POST /api/v1/tests/:testId/revoke (AUTO-003b)
-//
-// Revoke an approved test (auto- or human-approved) back to draft. Clears
-// the provenance columns so a future approval writes a fresh decision-time
-// snapshot, and emits an activity row so the audit trail records who pulled
-// the test back. Workspace-scoped via the test's parent project (ACL-001).
-router.post("/tests/:testId/revoke", requireRole("qa_lead"), (req, res) => {
-  const test = testRepo.getById(req.params.testId);
-  if (!test) return res.status(404).json({ error: "not found" });
-  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "not found" });
-  // Capture the previous source from the snapshot read above for the audit
-  // row's `meta.wasAutoApproved` flag. By the time the UPDATE runs the row
-  // has been cleared, so we can't read provenance off the post-state.
-  const previousSource = test.approvalSource;
-  // AUTO-003b: atomic check-and-update — `revokeApprovalIfApproved` bakes
-  // the `reviewStatus = 'approved'` predicate into the UPDATE's WHERE clause
-  // so two concurrent revokes can't both succeed. Returns `false` when the
-  // row was already in a different state (e.g. another reviewer revoked
-  // first); we map that to the same 400 the previous read-then-check path
-  // produced. This stays correct on PostgreSQL pools where read snapshots
-  // could otherwise let both requests pass the read-side guard.
-  if (!testRepo.revokeApprovalIfApproved(test.id)) {
-    return res.status(400).json({ error: "only approved tests can be revoked" });
-  }
-  logActivity({ ...actor(req),
-    type: ACTIVITY_TYPES.TEST_REVOKE, projectId: project.id, projectName: project.name,
-    testId: test.id, testName: test.name,
-    detail: `Approval revoked — "${test.name}" (was ${previousSource === APPROVAL_SOURCE.AUTO ? "auto-approved" : "human-approved"})`,
-    // `wasAutoApproved` lets the project approval-stats handler compute the
-    // 7-day revert rate without correlating testIds across activity types
-    // — see GET /api/v1/projects/:id/approval-stats below.
-    meta: { wasAutoApproved: previousSource === APPROVAL_SOURCE.AUTO },
-  });
-  res.json(testRepo.getById(test.id));
-});
-
-// GET /api/v1/projects/:id/approval-stats (AUTO-003b)
-//
-// Returns approval-decision counts (human / auto / draft) plus a 7-day
-// revert rate, used by the project-settings calibration line under the
-// `autoApproveThreshold` input.
-router.get("/projects/:id/approval-stats", requireRole("qa_lead"), (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-  // Aggregation lives in `services/approvalService.js` — keeping the route
-  // handler thin lets the service be reused (e.g. a future workspace-wide
-  // rollup) and keeps the test surface focused on auth/HTTP shape vs. logic.
-  res.json(computeStats(project.id));
-});
-
-// NOTE: bulk must be declared BEFORE :testId wildcard routes to avoid conflict
-router.post("/projects/:id/tests/bulk", requireRole("qa_lead"), (req, res) => {
-  // Verify the project belongs to the user's workspace (ACL-001)
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  const validationErr = validateBulkAction(req.body);
-  if (validationErr) return res.status(400).json({ error: validationErr });
-
-  const { testIds, action } = req.body;
-
-  if (action === "delete") {
-    const deleted = [];
-    testIds.forEach((tid) => {
-      const test = testRepo.getById(tid);
-      if (test && test.projectId === req.params.id) {
-        deleted.push({ id: test.id, name: test.name });
-        testRepo.deleteById(tid);
-      }
-    });
-    if (deleted.length) {
-      logActivity({ ...actor(req),
-        type: "test.bulk_delete", projectId: req.params.id, projectName: project.name,
-        detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""} moved to recycle bin`,
-      });
-    }
-    return res.json({ deleted: deleted.length, tests: deleted });
-  }
-
-  const statusMap = { approve: "approved", reject: "rejected", restore: "draft" };
-  const reviewedAt = action === "restore" ? null : new Date().toISOString();
-  // AUTO-003b: bulk approve must populate provenance, and bulk restore must
-  // clear it. Reuse the same `humanApproval()` / `PROVENANCE_CLEAR` shapes
-  // the single-test handlers use (services/approvalService.js) so all four
-  // approve/restore paths stay byte-identical.
-  //
-  // Provenance is passed through `bulkUpdateReviewStatus` so it lands in the
-  // SAME UPDATE statement as `reviewStatus`/`reviewedAt`, inside the same
-  // transaction. A two-phase pattern (status update, then per-row provenance
-  // writes) could leave tests approved with null provenance if the request
-  // was aborted between phases, miscounting them as human-approved on the
-  // approval-stats endpoint. The returned rows are re-read after the UPDATE
-  // so the response reflects the persisted provenance.
-  // Reject + restore both clear provenance. Reject clears it so a rejected
-  // auto-approved test doesn't carry stale `approvalSource: "auto"` on the
-  // response (matches the single-test reject handler above); restore clears
-  // it because the test is going back to draft for re-review. Only approve
-  // writes new provenance.
-  const extraFields = action === "approve"
-    ? humanApproval(actor(req))
-    : (action === "restore" || action === "reject")
-      ? PROVENANCE_CLEAR
-      : {};
-  const updated = testRepo.bulkUpdateReviewStatus(testIds, req.params.id, statusMap[action], reviewedAt, extraFields);
-
-  // Map the action verb onto the canonical ACTIVITY_TYPES values so the
-  // bulk path emits the same `type` literals as the single-test handlers
-  // (approve at L673, reject at L705, restore at L735). Previously this
-  // used `\`test.${action}\`` interpolation which happened to match today
-  // but reopened the `"test.approve"` vs `"test.approved"` drift class
-  // the constants were introduced to prevent.
-  const PER_TEST_TYPES = {
-    approve: ACTIVITY_TYPES.TEST_APPROVE,
-    reject:  ACTIVITY_TYPES.TEST_REJECT,
-    restore: ACTIVITY_TYPES.TEST_RESTORE,
-  };
-  const BULK_TYPES = {
-    approve: ACTIVITY_TYPES.TEST_BULK_APPROVE,
-    reject:  ACTIVITY_TYPES.TEST_BULK_REJECT,
-    restore: ACTIVITY_TYPES.TEST_BULK_RESTORE,
-  };
-
-  if (updated.length) {
-    for (const test of updated) {
-      logActivity({ ...actor(req),
-        type: PER_TEST_TYPES[action], projectId: req.params.id, projectName: project.name,
-        testId: test.id, testName: test.name,
-        detail: `Test ${action === "approve" ? "approved" : action === "reject" ? "rejected" : "restored to draft"} (bulk) — "${test.name}"`,
-      });
-    }
-    logActivity({ ...actor(req),
-      type: BULK_TYPES[action], projectId: req.params.id, projectName: project.name,
-      detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
-    });
-    // DIF-013: emit ONE bulk event (not N per-test) to keep PostHog volume
-    // reasonable. The aggregated count is what we need for approval-rate
-    // analytics; per-test granularity would dominate the event stream.
-    if (action === "approve" || action === "reject") {
-      trackTelemetry("test.review", {
-        projectId: req.params.id,
-        decision: action === "approve" ? "approved" : "rejected",
-        count: updated.length,
-        isBulk: true,
-      });
-    }
-  }
-  res.json({ updated: updated.length, tests: updated });
-});
+// All review state-machine routes (approve, reject, restore, revoke, bulk,
+// approval-stats) MOVED to `backend/src/routes/testApprovals.js`. Mounted
+// alongside this router in `backend/src/index.js`.
 
 // ─── Test counts (lightweight — no row data, just per-status totals) ──────────
 
@@ -1032,119 +745,10 @@ router.get("/projects/:id/tests/counts", (req, res) => {
   res.json({ ...counts, total: counts.draft + counts.approved + counts.rejected });
 });
 
-// ─── Export endpoints — enterprise test management integration ────────────────
-
-// GET /api/projects/:id/tests/export/zephyr — Zephyr Scale CSV for test management import
-router.get("/projects/:id/tests/export/zephyr", (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  const tests = testRepo.getByProjectId(req.params.id);
-  const status = req.query.status;
-  const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
-
-  const csv = buildZephyrCsv(filtered);
-  res.setHeader("Content-Type", "text/csv");
-  res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-zephyr.csv"`);
-  res.send(csv);
-});
-
-// GET /api/projects/:id/tests/export/testrail — TestRail CSV for bulk import
-router.get("/projects/:id/tests/export/testrail", (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  const tests = testRepo.getByProjectId(req.params.id);
-  const status = req.query.status;
-  const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
-
-  const csv = buildTestRailCsv(filtered);
-  res.setHeader("Content-Type", "text/csv");
-  res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-testrail.csv"`);
-  res.send(csv);
-});
-
-// GET /api/projects/:id/export/playwright — runnable Playwright project ZIP (DIF-006)
-//
-// Note on access control: matches the convention used by every other route
-// in this file — `getByIdInWorkspace` returns null for both "doesn't exist"
-// and "not a workspace member", and we collapse both into 404 to avoid
-// leaking project existence across workspace boundaries (ACL-001).
-router.get("/projects/:id/export/playwright", async (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  try {
-    const allTests = testRepo.getByProjectId(req.params.id);
-    const approvedTests = allTests.filter(t => t.reviewStatus === "approved");
-
-    const zipBuffer = await buildPlaywrightZip(project, approvedTests);
-    const safeProjectName = project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="sentri-${safeProjectName}-playwright.zip"`);
-    res.send(zipBuffer);
-  } catch (err) {
-    // Async route handlers in Express 4 do NOT auto-catch rejected promises;
-    // without this try/catch the request hangs indefinitely on any failure
-    // (e.g. system `zip` binary missing). Match the error-handling style of
-    // the recorder and PATCH handlers above — log internally, return generic.
-    console.error(formatLogLine("error", null, `[GET projects/${req.params.id}/export/playwright] export failed: ${err.message}`));
-    // ZIP_BINARY_MISSING is an operator-fixable deployment issue, not an
-    // internal bug — surface it as 503 with the actionable message so the
-    // user can install `zip` or switch to a base image that ships it.
-    // Every other failure stays a generic 500 (no internal detail leaked).
-    if (err.code === "ZIP_BINARY_MISSING") {
-      return res.status(503).json({
-        error: "Playwright export unavailable: system `zip` binary not installed on this deployment.",
-        code: "ZIP_BINARY_MISSING",
-        hint: "Install `zip` on the backend host (apt-get install zip / apk add zip) or use a Docker image that ships it.",
-      });
-    }
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// GET /api/projects/:id/tests/traceability — traceability matrix (requirement → test → result)
-router.get("/projects/:id/tests/traceability", (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  const tests = testRepo.getByProjectId(req.params.id);
-
-  // Group tests by linked issue key
-  const byIssue = {};
-  const unlinked = [];
-  for (const t of tests) {
-    const entry = {
-      testId: t.id,
-      name: t.name,
-      type: t.type,
-      priority: t.priority,
-      scenario: t.scenario,
-      reviewStatus: t.reviewStatus,
-      lastResult: t.lastResult,
-      lastRunAt: t.lastRunAt,
-      promptVersion: t.promptVersion,
-      tags: t.tags || [],
-    };
-    if (t.linkedIssueKey) {
-      if (!byIssue[t.linkedIssueKey]) byIssue[t.linkedIssueKey] = [];
-      byIssue[t.linkedIssueKey].push(entry);
-    } else {
-      unlinked.push(entry);
-    }
-  }
-
-  res.json({
-    projectId: project.id,
-    projectName: project.name,
-    totalTests: tests.length,
-    linkedIssues: Object.keys(byIssue).length,
-    unlinkedTests: unlinked.length,
-    matrix: byIssue,
-    unlinked,
-  });
-});
+// ─── Export endpoints ─────────────────────────────────────────────────────────
+// Zephyr / TestRail / Playwright ZIP / traceability routes MOVED to
+// `backend/src/routes/testExports.js`. Mounted alongside this router in
+// `backend/src/index.js`.
 
 // ─── DIF-001: Visual regression baselines ────────────────────────────────────
 //
@@ -1237,7 +841,7 @@ router.post("/tests/:testId/baselines/:stepNumber/accept", requireRole("qa_lead"
     res.json({ ok: true, baselinePath, testId: test.id, browser, stepNumber });
   } catch (err) {
     // Log the real error server-side; return a generic message to the client
-    // per AGENT.md ("5xx errors never leak internal details").
+    // per AGENTS.md ("5xx errors never leak internal details").
     console.error(formatLogLine("error", null, `[POST baselines/accept] ${test.id}#${stepNumber}: ${err.message}`));
     res.status(500).json({ error: "Internal server error" });
   }
@@ -1270,598 +874,7 @@ router.delete("/tests/:testId/baselines/:stepNumber", requireRole("qa_lead"), (r
 });
 
 // ─── DIF-015: Interactive browser recorder ───────────────────────────────────
-//
-// Opens a Playwright browser at the project URL, streams the live CDP
-// screencast to the RecorderModal (via SSE on the session ID), and captures
-// raw user interactions. On stop, the captured actions are transformed into
-// a Playwright test body and saved as a Draft test.
-
-/**
- * POST /api/v1/projects/:id/record
- * Body: { startUrl?: string } — defaults to the project URL.
- *
- * Returns { sessionId } — the SSE run ID the frontend should subscribe to
- * for live screencast frames while recording.
- */
-router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  // DIF-012: optional per-session environment override. The recorder is
-  // driven interactively by the operator (no auto-login), so the env only
-  // affects the default `startUrl` — if the caller didn't supply one, fall
-  // back to `environment.baseUrl` instead of `project.url` so the operator
-  // lands on the right environment from the first frame.
-  let environment;
-  try {
-    environment = resolveEnvOrThrow(req.body?.environmentId, project);
-  } catch (err) {
-    return res.status(err.httpStatus || 400).json({ error: err.message });
-  }
-
-  const startUrl = String(req.body?.startUrl || environment?.baseUrl || project.url || "").trim();
-  if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
-    return res.status(400).json({ error: "startUrl must be a valid http(s) URL" });
-  }
-
-  // DIF-015c Gap 5: validate the optional device profile UP-FRONT, before
-  // `runRepo.create()` inserts the stub `running` row below. A 400 return
-  // after the row was created would orphan it — the partial unique index
-  // `idx_runs_one_active_per_project` would then block every subsequent
-  // run (crawl, test_run, generate, record) on this project until the next
-  // recorder-launch orphan sweep. Hoist the check alongside `startUrl`
-  // validation so all input rejection happens before any DB side effects.
-  const rawDevice = req.body?.device;
-  const device = rawDevice == null ? "" : String(rawDevice);
-  if (device && !RECORDER_DEVICE_VALUES.has(device)) {
-    return res.status(400).json({ error: `Invalid device: ${device}` });
-  }
-  // DIF-015c Gap 6: optional stealth profile. Coerce to a strict
-  // boolean so a stringy `"true"` payload from a misconfigured client
-  // doesn't accidentally enable stealth (or vice versa). Only the
-  // literal JSON `true` opts in — every other value (false, null,
-  // omitted, "true", 1) leaves stealth off so default-mode runs are
-  // bit-for-bit unchanged.
-  const stealth = req.body?.stealth === true;
-
-  const sessionId = `REC-${randomUUID().slice(0, 8)}`;
-  // Visible breadcrumb so the operator can see the recorder reaching the
-  // backend even when everything is working — useful for debugging the
-  // "canvas stays black" symptom where the request landed but a downstream
-  // step (browser launch, screencast attach) silently fails.
-  console.log(formatLogLine("info", null, `[recorder] launching session=${sessionId} project=${project.id} url=${startUrl}`));
-  try {
-    // Defence-in-depth: the partial unique index `idx_runs_one_active_per_project`
-    // (migration 002) allows at most one `running` run per project. If a
-    // previous recorder attempt crashed between `runRepo.create` and the
-    // rollback below, an orphan row blocks every subsequent recorder launch
-    // with a UNIQUE constraint error. Sweep any such orphans for THIS
-    // project before inserting the new stub so the user isn't permanently
-    // locked out of the recorder.
-    try {
-      // Only sweep orphaned RECORDER rows. Including crawl/test_run/generate
-      // here would silently kill a legitimately in-progress regression or
-      // crawl run when the user opens the recorder, leading to data loss
-      // (the runner process keeps executing in memory unaware that its DB
-      // status was overwritten). The partial unique index allows one active
-      // run per project across all types — so a concurrent recorder + run is
-      // intentionally not supported, and the create() below will surface a
-      // UNIQUE constraint error that the outer catch handles cleanly.
-      const orphan = runRepo.findActiveByProjectId(project.id, ["record"]);
-      if (orphan) {
-        runRepo.update(orphan.id, {
-          status: "interrupted",
-          finishedAt: new Date().toISOString(),
-          error: "Cleared by recorder launch — previous recording session was orphaned",
-        });
-      }
-    } catch (sweepErr) {
-      // Non-fatal: log and continue. If the orphan really exists the create
-      // below will surface the UNIQUE error and the catch handles it.
-      console.warn(formatLogLine("warn", null, `[POST projects/${project.id}/record] orphan sweep failed: ${sweepErr.message}`));
-    }
-
-    // The frontend opens an SSE stream at /runs/:sessionId/events to receive
-    // live screencast frames. That endpoint validates the runId against the
-    // `runs` table — without a stub row here the SSE connection 404s and the
-    // canvas stays black ("Waiting for browser stream…"). Create a minimal
-    // running-row keyed by sessionId so SSE accepts it; stopRecording marks
-    // it completed so orphan recovery doesn't flag it as interrupted.
-    runRepo.create({
-      id: sessionId,
-      projectId: project.id,
-      type: "record",
-      status: "running",
-      startedAt: new Date().toISOString(),
-      // Persist the starting URL so the Recorder modal's start-URL dropdown
-      // (`GET /api/v1/projects/:id/pages`) can surface URLs from past
-      // recordings as suggestions for new recordings on the same project.
-      // The `runs` table has no dedicated `url` column, but `pages` is a
-      // JSON column already used by the crawler to persist discovered URLs
-      // — reuse it here with a single `{url, status: "recorded"}` entry so
-      // the same /pages aggregator works for both crawl + record sources.
-      pages: [{ url: startUrl, title: startUrl, status: "recorded" }],
-      workspaceId: project.workspaceId || null,
-      // DIF-012: record which environment (if any) the operator picked at
-      // session start, for audit consistency with crawl/run/generate paths.
-      environmentId: environment?.id || null,
-    });
-    // `device` + `stealth` were validated/coerced BEFORE `runRepo.create()`
-    // above so an invalid payload doesn't orphan a stub `running` row.
-    await startRecording({ sessionId, projectId: project.id, startUrl, device, stealth });
-    console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));
-    logActivity({ ...actor(req),
-      type: "test.record_start", projectId: project.id, projectName: project.name,
-      detail: `Recorder started on ${startUrl}`, status: "running",
-    });
-    // Return the server-side viewport so the frontend can scale forwarded
-    // pointer coordinates correctly on deployments that override the default
-    // 1280x720 via VIEWPORT_WIDTH / VIEWPORT_HEIGHT env vars, OR — DIF-015c
-    // Gap 5 — when a Playwright device descriptor (e.g. iPhone 14 = 390×844)
-    // overrides the desktop default. Read the resolved viewport off the
-    // session we just created so the canvas sizes correctly on the first
-    // SSE frame.
-    const sess = getRecording(sessionId);
-    const resolvedViewport = sess?.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
-    res.status(202).json({
-      sessionId,
-      startUrl,
-      device: sess?.device || "",
-      // DIF-015c Gap 6: surface the resolved stealth flag so the
-      // frontend can reflect the active state in the recording-stage
-      // sidebar (and so an operator who toggled stealth but hit a
-      // server-side error sees an explicit `stealth: false` rather
-      // than guessing from missing UI).
-      stealth: sess?.stealth === true,
-      viewport: resolvedViewport,
-    });
-  } catch (err) {
-    // Roll back the stub row so a failed launch doesn't leave an orphaned
-    // "running" record that blocks future recordings or trips orphan recovery.
-    try { runRepo.update(sessionId, { status: "failed", finishedAt: new Date().toISOString(), error: err.message }); } catch { /* row may not exist */ }
-    console.error(formatLogLine("error", null, `[POST projects/${project.id}/record] startRecording failed: ${err.message}`));
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * POST /api/v1/projects/:id/record/:sessionId/stop
- * Body: { name: string } — the name to give the recorded Draft test.
- *
- * Persists the recorded actions as a new Draft test containing the
- * generated Playwright code. Returns the created test.
- */
-router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), async (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  const sess = getRecording(req.params.sessionId);
-  // When the `MAX_RECORDING_MS` safety-net timeout has already torn the
-  // session down, `getRecording` returns null but the generated test may
-  // still be waiting in the short-lived completed-recordings cache. Fall
-  // back to that cache so the user doesn't lose their captured actions to
-  // a race with the auto-teardown.
-  let autoCompleted = null;
-  if (!sess) {
-    autoCompleted = takeCompletedRecording(req.params.sessionId);
-    if (!autoCompleted || autoCompleted.projectId !== project.id) {
-      return res.status(404).json({ error: "recording session not found" });
-    }
-  } else if (sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-
-  // `discard: true` tears down the browser without persisting a Draft test.
-  // Used by the RecorderModal's Cancel/Discard button so abandoned recordings
-  // do not leave junk tests in the DB.
-  const discard = req.body?.discard === true;
-  const name = String(req.body?.name || "").trim() || `Recorded flow @ ${new Date().toISOString()}`;
-
-  let stopResult;
-  let recoveredFromAutoTimeout = false;
-  if (autoCompleted) {
-    // Session was already torn down by the auto-timeout; regenerate the
-    // Playwright body with the requested test name (the cached code was
-    // generated with a default name).
-    const playwrightCode = actionsToPlaywrightCode(name, autoCompleted.url, autoCompleted.actions);
-    stopResult = { actions: autoCompleted.actions, playwrightCode, url: autoCompleted.url };
-    recoveredFromAutoTimeout = true;
-  } else {
-    try {
-      stopResult = await stopRecording(req.params.sessionId, { testName: name });
-    } catch (err) {
-      // Race window between the `getRecording()` guard above and
-      // `stopRecording()` — the MAX_RECORDING_MS timeout may have fired in
-      // the interim. Try the completed-recordings cache one more time.
-      if (/not found/i.test(err.message || "")) {
-        const cached = takeCompletedRecording(req.params.sessionId);
-        if (cached && cached.projectId === project.id) {
-          const playwrightCode = actionsToPlaywrightCode(name, cached.url, cached.actions);
-          stopResult = { actions: cached.actions, playwrightCode, url: cached.url };
-          recoveredFromAutoTimeout = true;
-        }
-      }
-      if (!stopResult) {
-        // Discard is a best-effort cleanup path: if the session is already
-        // gone and we have nothing cached, the caller's intent (close the
-        // browser, don't persist a test) is already satisfied.
-        if (discard && /not found/i.test(err.message || "")) {
-          logActivity({ ...actor(req),
-            type: "test.record_discard", projectId: project.id, projectName: project.name,
-            detail: `Recording discarded after session auto-teardown (${req.params.sessionId})`, status: "success",
-          });
-          return res.json({ ok: true, discarded: true, alreadyStopped: true });
-        }
-        console.error(formatLogLine("error", null, `[POST record/${req.params.sessionId}/stop] stopRecording failed: ${err.message}`));
-        return res.status(500).json({ error: "Internal server error" });
-      }
-    }
-  }
-
-  // Close out the stub `runs` row created by POST /record so the SSE channel
-  // releases its listener and orphan recovery doesn't pick this up later.
-  // Also update `pages` to the actual landed URL — the stub row created by
-  // POST /record persisted the caller-supplied `startUrl` (pre-redirect),
-  // but `startRecording` resolved it to `stopResult.url` after any
-  // server-side redirects. Without this update, the Recorder Start-URL
-  // dropdown (`GET /api/v1/projects/:id/pages`) would surface the
-  // pre-redirect URL on every subsequent recording launch, causing an
-  // unnecessary redirect each time (http→https, apex→www, OAuth callbacks).
-  try {
-    runRepo.update(req.params.sessionId, {
-      status: "completed",
-      finishedAt: new Date().toISOString(),
-      pages: [{ url: stopResult.url, title: stopResult.url, status: "recorded" }],
-    });
-  } catch { /* row may have been cleaned up already */ }
-
-  if (discard) {
-    logActivity({ ...actor(req),
-      type: "test.record_discard", projectId: project.id, projectName: project.name,
-      detail: `Recording discarded (${stopResult.actions?.length || 0} actions dropped)`, status: "success",
-    });
-    return res.json({ ok: true, discarded: true, ...(recoveredFromAutoTimeout ? { alreadyStopped: true } : {}) });
-  }
-
-  if (!stopResult.actions || stopResult.actions.length === 0) {
-    return res.status(400).json({ error: "no actions were captured — nothing to save" });
-  }
-
-  // Dedupe consecutive `goto` actions to the same URL before formatting steps.
-  // `startRecording` always pushes the initial `{ kind: "goto", url: startUrl }`
-  // as actions[0], and the page's `framenavigated` listener echoes another
-  // `goto` for the resolved URL right after. Without this filter the Test
-  // Details page shows two redundant navigation steps for what is really a
-  // single navigation.
-  //
-  // Match `actionsToPlaywrightCode`'s exact-URL comparison so the persisted
-  // human-readable `steps[]` array and the generated `playwrightCode` stay
-  // in lock-step — they are rendered side-by-side on the Test Detail page,
-  // and any drift in step count between the two is immediately visible to
-  // reviewers (and breaks step-based edits/regeneration that index by
-  // position). Origin+pathname dedup would silently drop legitimate
-  // query-distinct navigations (e.g. `/search?q=iphone` → `/search?q=macbook`,
-  // pagination via `?page=N`, OAuth redirects with state tokens), which
-  // matters for any flow that exercises query-driven UI state.
-  const dedupedActions = [];
-  let lastGotoUrl = String(stopResult.url || "");
-  for (const a of stopResult.actions) {
-    if (a.kind === "goto" && a.url) {
-      if (a.url === lastGotoUrl) continue;
-      lastGotoUrl = a.url;
-    }
-    dedupedActions.push(a);
-  }
-
-  // Drop actions that `actionsToPlaywrightCode` would silently skip due to
-  // missing required fields. `filterEmittableActions` is the shared predicate
-  // exported by the recorder module — using it here keeps the persisted
-  // `steps[]` array and the generated `playwrightCode` in lock-step (any
-  // drift breaks side-by-side rendering on the Test Detail page and
-  // step-based edit/regeneration that indexes by position).
-  const emittableActions = filterEmittableActions(dedupedActions);
-
-  // Dedupe the requested name against existing tests in the same project so
-  // two recordings saved with the same name (or two no-name saves whose
-  // default ISO-timestamp default collides at the same millisecond) don't
-  // produce two indistinguishable rows in the Tests list. If a collision
-  // resolves, the generated `playwrightCode` still carries the *original*
-  // name — regenerate the body with the deduped name so the code's `test(...)`
-  // label and the persisted `name` column stay in sync (test runners surface
-  // the embedded label in failure reports).
-  const uniqueName = dedupeTestName(project.id, name);
-  const playwrightCode = uniqueName !== name
-    ? actionsToPlaywrightCode(uniqueName, stopResult.url, emittableActions)
-    : stopResult.playwrightCode;
-
-  const testId = generateTestId();
-  const test = {
-    id: testId,
-    projectId: project.id,
-    name: uniqueName,
-    description: `Recorded from ${stopResult.url}`,
-    // Match the human-readable step convention used by the AI generate/crawl
-    // pipeline (`outputSchema.js`) and the manual-test creation path: short
-    // English sentences a manual tester can follow ("User clicks the Sign Up
-    // button"), NOT raw CDP-event strings like "Step 1: click → #login". The
-    // Test Detail page renders all three sources through the same Steps panel,
-    // so visual alignment matters — recorder tests previously stuck out as the
-    // only ones showing engineer-shaped output.
-    steps: emittableActions.map((a) => recordedActionToStepText(a)),
-    playwrightCode,
-    priority: "medium",
-    type: "recorded",
-    sourceUrl: stopResult.url,
-    pageTitle: project.name,
-    createdAt: new Date().toISOString(),
-    lastResult: null,
-    lastRunAt: null,
-    qualityScore: null,
-    isJourneyTest: false,
-    reviewStatus: "draft",
-    reviewedAt: null,
-    promptVersion: null,
-    modelUsed: null,
-    linkedIssueKey: null,
-    tags: ["recorded"],
-    generatedFrom: "recorder",
-    workspaceId: project.workspaceId || null,
-  };
-  testRepo.create(test);
-
-  logActivity({ ...actor(req),
-    type: "test.record_stop", projectId: project.id, projectName: project.name,
-    testId, testName: uniqueName,
-    detail: `Recorder captured ${stopResult.actions.length} actions → Draft test${uniqueName !== name ? ` (renamed to "${uniqueName}" to avoid duplicate)` : ""}`, status: "success",
-  });
-
-  res.status(201).json({
-    test,
-    actionCount: stopResult.actions.length,
-    ...(recoveredFromAutoTimeout ? { recoveredFromAutoTimeout: true } : {}),
-  });
-});
-
-/**
- * POST /api/v1/projects/:id/record/:sessionId/input
- *
- * Forwards a single input event (mouse click/move, keyboard, scroll) from
- * the browser-in-browser canvas in RecorderModal to the headless Playwright
- * page via CDP. This is what makes the recorder interactive — without this
- * route the canvas is a read-only screencast and the user can never produce
- * any recorded actions.
- *
- * Intentionally no rate-limiter here: input events arrive at ~60fps during
- * active use. The route is cheap (one async CDP send) and already gated
- * behind requireRole("qa_lead") + workspace scope.
- *
- * @route POST /api/v1/projects/:id/record/:sessionId/input
- * @auth requireRole("qa_lead")
- * @body {{ type: string, x?: number, y?: number, button?: number,
- *           clickCount?: number, key?: string, code?: string,
- *           text?: string, modifiers?: number,
- *           deltaX?: number, deltaY?: number }}
- * @returns {200} { ok: true }
- * @returns {400} { error: string } — missing/invalid event type
- * @returns {404} { error: string } — session not found
- */
-router.post("/projects/:id/record/:sessionId/input", requireRole("qa_lead"), async (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-
-  const VALID_TYPES = new Set(["mousePressed", "mouseReleased", "mouseMoved", "keyDown", "keyUp", "char", "scroll", "shortcutCapture"]);
-  const { type } = req.body || {};
-  if (!type || !VALID_TYPES.has(type)) {
-    return res.status(400).json({ error: `Invalid event type. Must be one of: ${[...VALID_TYPES].join(", ")}` });
-  }
-
-  try {
-    await forwardInput(req.params.sessionId, req.body);
-    res.json({ ok: true });
-  } catch (err) {
-    // Session gone mid-flight (auto-timeout race) — treat as 404 not 500
-    if (/not found/i.test(err.message || "")) {
-      return res.status(404).json({ error: "recording session not found" });
-    }
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * POST /api/v1/projects/:id/record/:sessionId/assertion
- * Add a manual assertion step while recording.
- */
-router.post("/projects/:id/record/:sessionId/assertion", requireRole("qa_lead"), (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-  try {
-    const action = addAssertionAction(req.params.sessionId, req.body || {});
-    res.status(201).json({ ok: true, action });
-  } catch (err) {
-    if (/Invalid assertion/i.test(err.message || "")) {
-      return res.status(400).json({ error: err.message });
-    }
-    if (/not found|not recording/i.test(err.message || "")) {
-      return res.status(404).json({ error: "recording session not found" });
-    }
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * POST /api/v1/projects/:id/record/:sessionId/pause
- * Pause action capture for an in-flight recording. The headless browser
- * stays open and the screencast keeps streaming, but `forwardInput` and
- * the `__sentriRecord` binding short-circuit while `session.paused` is
- * true so user clicks/keystrokes during the pause window are not
- * persisted as recorded actions.
- */
-router.post("/projects/:id/record/:sessionId/pause", requireRole("qa_lead"), (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-  const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-  try {
-    const result = pauseRecording(req.params.sessionId);
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * POST /api/v1/projects/:id/record/:sessionId/resume
- * Resume action capture after a pause. Idempotent — calling resume on a
- * session that was never paused is a no-op.
- */
-router.post("/projects/:id/record/:sessionId/resume", requireRole("qa_lead"), (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-  const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-  try {
-    const result = resumeRecording(req.params.sessionId);
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * POST /api/v1/projects/:id/record/:sessionId/probe
- * DIF-015c Gap 2 (point-and-click assert UX) — read-only probe that
- * returns the `{selector, label, rect}` for an arbitrary viewport
- * coordinate. The frontend uses this to highlight the hovered element
- * inside `LiveBrowserView` and pre-fill the "Add verification" form on
- * click, matching how Playwright codegen's inspector behaves. NOT a
- * mutation — does not record an action; safe to call at hover frequency.
- *
- * Returns `{ probe: null }` when no interactive ancestor is found under
- * the cursor (page background, missing recorder script) so the frontend
- * can drop the highlight rather than show a stale overlay.
- */
-router.post("/projects/:id/record/:sessionId/probe", requireRole("qa_lead"), async (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-  const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-  const { x, y } = req.body || {};
-  // Reject `null` / `undefined` / missing-key payloads explicitly — `Number(null)`
-  // coerces to 0 (finite), which would otherwise let `{ "x": null, "y": null }`
-  // slip past as a probe at viewport (0, 0). `probeAtPoint` clamps gracefully
-  // downstream, but the operator would see whatever happens to be at the
-  // top-left corner returned as the "hovered" element, which is confusing.
-  if (x == null || y == null || !Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) {
-    return res.status(400).json({ error: "x and y must be finite numbers" });
-  }
-  try {
-    const probe = await probeAtPoint(req.params.sessionId, { x, y });
-    res.json({ probe });
-  } catch (err) {
-    if (/not found|not recording|no active page/i.test(err.message || "")) {
-      return res.status(404).json({ error: "recording session not found" });
-    }
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * POST /api/v1/projects/:id/record/:sessionId/device
- * DIF-015c Gap 5 — switch the active device profile mid-recording. The
- * server tears down the current page + Playwright context, rebuilds them
- * under the new descriptor against the same browser process, and
- * restarts the CDP screencast at the new viewport. Captured
- * `session.actions[]` survive the switch; page state (cookies, form
- * values) does not. The frontend gates the call behind a confirmation
- * modal so operators understand the trade-off.
- */
-router.post("/projects/:id/record/:sessionId/device", requireRole("qa_lead"), async (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-  const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-  const rawDevice = req.body?.device;
-  const device = rawDevice == null ? "" : String(rawDevice);
-  if (device && !RECORDER_DEVICE_VALUES.has(device)) {
-    return res.status(400).json({ error: `Invalid device: ${device}` });
-  }
-  try {
-    const result = await switchDevice(req.params.sessionId, device);
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
-    if (/Invalid device/i.test(err.message || "")) return res.status(400).json({ error: err.message });
-    if (/Device switch failed/i.test(err.message || "")) {
-      console.error(formatLogLine("error", null, `[POST record/${req.params.sessionId}/device] ${err.message}`));
-      return res.status(500).json({ error: "Device switch failed — recorder torn down. Re-launch the recorder to continue." });
-    }
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * POST /api/v1/projects/:id/record/:sessionId/pop-last
- * Undo the most recent captured action. Idempotent on an empty
- * `session.actions[]` — returns `{ removed: null, actionCount: 0 }`
- * rather than 4xx so the UI can fire the button without first checking
- * step count.
- */
-router.post("/projects/:id/record/:sessionId/pop-last", requireRole("qa_lead"), (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-  const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-  try {
-    const result = popLastRecordingAction(req.params.sessionId);
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * GET /api/v1/projects/:id/record/:sessionId
- * Inspect an in-flight recording (action count, status). Used by the modal
- * to poll for captured actions while the browser is still open.
- */
-router.get("/projects/:id/record/:sessionId", (req, res) => {
-  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
-  if (!project) return res.status(404).json({ error: "project not found" });
-  const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
-    return res.status(404).json({ error: "recording session not found" });
-  }
-  res.json({
-    sessionId: sess.id,
-    status: sess.status,
-    url: sess.url,
-    startedAt: sess.startedAt,
-    actionCount: sess.actions.length,
-    actions: sess.actions.map(a => ({ kind: a.kind, selector: a.selector, label: a.label, value: a.value, key: a.key, url: a.url, ts: a.ts })),
-  });
-});
+// All recorder routes MOVED to `backend/src/routes/recorder.js`.
+// Mounted alongside this router in `backend/src/index.js`.
 
 export default router;

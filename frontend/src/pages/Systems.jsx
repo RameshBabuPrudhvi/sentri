@@ -191,7 +191,7 @@ export default function Systems() {
 
   if (dashboardQuery.isLoading) return (
     <div className="page-container sys-page">
-      {/* Skeleton height drives layout shape — kept inline per AGENT.md
+      {/* Skeleton height drives layout shape — kept inline per AGENTS.md
           §127's data-driven carve-out. Everything else (border-radius,
           margin-bottom) lives on `.sys-skeleton`. */}
       <div className="skeleton sys-skeleton" style={{ height: 200 }} />

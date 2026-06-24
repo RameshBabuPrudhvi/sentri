@@ -5,7 +5,7 @@
  * Extracted from `frontend/src/pages/TestLab.jsx` (the ~96-line inline
  * block at `tab === "queue"`) so the page stays focused on tab routing +
  * run-lifecycle state and the Queue surface lives in its own file.
- * AGENT.md §40 — feature surfaces > 50 lines that have their own data
+ * AGENTS.md §40 — feature surfaces > 50 lines that have their own data
  * shape (active + recent partition, project filter, empty state) belong
  * in `components/`, not inline.
  *

@@ -58,11 +58,12 @@ POST /api/v1/projects/:id/tests
     { "action": "navigate", "url": "/products" },
     { "action": "click", "selector": "button.add-to-cart" },
     { "action": "assert", "selector": ".cart-count", "expected": "1" }
-  ]
+  ],
+  "dependsOn": ["TC-1"]
 }
 ```
 
-Test is saved as **Draft** — must be approved before it runs in regression.
+Test is saved as **Draft** — must be approved before it runs in regression. `dependsOn` is optional and must contain test IDs from the same project; dependencies run before the new test in regression runs.
 
 ## Generate Test from Description
 
@@ -86,6 +87,18 @@ Returns a `runId` to track generation progress via SSE.
 ```
 PATCH /api/v1/tests/:testId
 ```
+
+Editable fields include `name`, `description`, `steps`, `priority`, `tags`, `linkedIssueKey`, `playwrightCode`, and `dependsOn`. `dependsOn` must be an array of test IDs in the same project. Invalid dependency writes return structured 400 responses:
+
+```json
+{ "code": "MISSING_UPSTREAM", "testId": "TC-404", "error": "dependsOn contains a test that does not exist in this project" }
+```
+
+```json
+{ "code": "CYCLE_DETECTED", "path": ["TC-A", "TC-B", "TC-A"], "error": "Dependency cycle detected" }
+```
+
+`GET /api/v1/tests/:testId` and list endpoints return `dependsOn` as an array when dependencies were saved, or `null` for legacy tests with no dependency declaration.
 
 ## Delete a Test
 

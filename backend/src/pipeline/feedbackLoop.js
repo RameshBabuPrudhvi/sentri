@@ -56,7 +56,7 @@ import { scoreTestWithFactors, normalizeQualityToConfidence } from "./deduplicat
 import { logActivity } from "../utils/activityLogger.js";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { feedbackLoopRegenerationFailuresTotal } from "../utils/metrics.js";
+import { feedbackLoopRegenerationFailuresTotal, reviewRejectionsTotal } from "../utils/metrics.js";
 // Bundle-A fix #19 — bot-detection regexes sourced from the shared module
 // so this classifier and `pipeline/stateExplorer.js`'s crawl-time gate
 // share one pattern list. See `utils/botDetection.js` for rationale.
@@ -84,6 +84,28 @@ import { BOT_DETECTION_PATTERNS } from "../utils/botDetection.js";
 //      not already classified as a selector or navigation issue.
 
 const FAILURE_PATTERNS = [
+  // AUTH_EXPIRED — checked BEFORE BOT_BLOCK / SELECTOR_ISSUE because a
+  // mid-run session expiry produces SECONDARY symptoms (locator timeout
+  // on a "Sign in" heading, navigation timeout against a 302→login). The
+  // `restoreAuthSession` path in `executeTest.js` already surfaced an
+  // explicit `auth_session_expired_unrecoverable` error string when the
+  // recovery loop couldn't re-establish the session — that string is
+  // the canonical signal. The `_authSessionExpired` marker is the
+  // structured-error path (`err.code === "AUTH_SESSION_EXPIRED"`) used
+  // when the runner tags the error object directly. See
+  // `backend/src/runner/executeTest.js`'s auth-redirect check for the
+  // emission site, and `backend/src/utils/skipReasons.js` for the
+  // matching `auth_expired` non-executed-skip semantics. This category
+  // is intentionally EXCLUDED from `HIGH_PRIORITY_CATEGORIES` below so
+  // we never auto-regenerate a test for an environmental failure —
+  // regenerating the test code can't fix an expired cookie.
+  ["AUTH_EXPIRED", [
+    /auth[_ ]session[_ ]expired[_ ]unrecoverable/i,
+    /auth_session_expired/i,
+    /_authSessionExpired/i,
+    /session expired.*sign in again/i,
+    /relogin_failed/i,
+  ]],
   // BOT_BLOCK — checked FIRST because anti-bot interstitials produce SECONDARY
   // symptoms (locator timeout, navigation timeout) that would otherwise be
   // misclassified as SELECTOR_ISSUE / TIMEOUT and trigger the misleading
@@ -593,6 +615,14 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
  */
 export async function regenerateFailingTest(improvement, signal, options = {}) {
   const { test, failureCategory, errorMessage, snapshot } = improvement;
+  // B3 (AUDIT-ROADMAP) — out-param hook lets the caller observe a
+  // ReviewRejection terminal outcome without changing the function's
+  // public `null | candidate` return shape. The caller passes
+  // `options.onReviewRejection` and we invoke it with the rejected
+  // test's id when the loop throws ReviewRejection.
+  const onReviewRejection = typeof options.onReviewRejection === "function"
+    ? options.onReviewRejection
+    : null;
 
   try {
     throwIfAborted(signal);
@@ -664,6 +694,18 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
     // loop's `onOutcome` symmetry contract.
     let loopOutcome = null;
     let loopThrew = false;
+    // B3 (AUDIT-ROADMAP) — capture the loop's terminal outcome via the
+    // `onOutcome` hook so the `reject_final` path (which THROWS before
+    // assigning `loopOutcome`) still surfaces `roundsCompleted` to
+    // downstream consumers. Pre-fix: assignment to `loopOutcome` happened
+    // only on the normal-return path, so every ReviewRejection-rejected
+    // test reported `roundsCompleted: 0` to the activity log,
+    // notifications, and the RunDetail UI — even when the loop ran
+    // multiple rounds before the reviewer issued `reject_final`. The
+    // hook fires for ALL terminal paths (accept, max_rounds, timeout,
+    // quota_exhausted, reject_final) per the contract at
+    // `agentLoop.js#safeOnOutcome`.
+    let capturedOutcome = null;
     try {
     loopOutcome = await runReviewerAuthorLoop(
       // Initial artifact carries the failing test as a single-test
@@ -674,6 +716,42 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
         runId: _runId,
         threadId,
         workspaceId,
+        onOutcome: (out) => { capturedOutcome = out; },
+        // B3 (AUDIT-ROADMAP) — intentionally NOT passing `reviewerCollapsed`
+        // to the loop here. The loop-level `reviewerCollapsed: true` flag
+        // makes `runReviewerAuthorLoop` replace the caller-supplied
+        // `runReviewer` with a synthetic auto-accept (see
+        // `agentLoop.js#runReviewerAuthorLoop`), which is the correct
+        // behaviour for LLM-backed reviewers — collapsed routes can't
+        // produce independent signal so skipping the call avoids burning
+        // tokens. But the reviewer in THIS caller is heuristic-only
+        // (`playwright.dryRun` / `validateTest`): zero LLM cost,
+        // provider-independent quality gate. Forwarding the flag would
+        // bypass `validateTest` entirely, shipping regenerated tests
+        // with brittle selectors / unbalanced brackets / placeholder
+        // URLs / secret-scan hits without any quality check — a much
+        // worse outcome than the duplicate AI-005c advisory the flag
+        // also suppresses.
+        //
+        // The collapse policy still applies to THIS caller through two
+        // other mechanisms:
+        //   1. `skipReviewerEnvelopes` (`feedbackLoop.js:782` below)
+        //      suppresses the `tool_call` / `tool_result` envelope
+        //      writes when `options.reviewerCollapsed === true`, so
+        //      the audit trail still reflects "no independent review
+        //      occurred" per the spec at
+        //      `docs/roadmap/AUDIT-ROADMAP.md:479-480`.
+        //   2. The upstream `crawler.js#applyReviewerCollapseGate`
+        //      stamp on `run.reviewerCollapsed` drives the chip on
+        //      RunDetail + the FEA-001 notification metadata.
+        //
+        // The in-loop AI-005c advisory will fire here when collapse is
+        // auto-detected, but that's correct: this caller does run a
+        // real review loop (just heuristic instead of LLM), so the
+        // advisory message "review loop runs but cannot catch
+        // model-specific blind spots" is accurate — the model is the
+        // same on both sides because the LLM author talks to the
+        // heuristic reviewer, and the operator should still be told.
         // Round ceiling is intentionally NOT pinned by this call site —
         // we let the loop's resolution order (caller > per-workspace
         // `agent_configs.maxReviewRounds` > `DEFAULT_MAX_REVIEW_ROUNDS=3`)
@@ -756,6 +834,18 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
           // is preserved for environments where the tool dispatch
           // isn't reachable (e.g. unit tests that DI a synthetic
           // reviewer).
+          //
+          // B3 (AUDIT-ROADMAP) — when the upstream collapse gate flagged
+          // this run, the spec at `docs/roadmap/AUDIT-ROADMAP.md:479-480`
+          // requires us to NOT emit `agent_messages` envelopes for the
+          // reviewer round: "the audit trail must reflect that no
+          // independent review occurred". The dryRun still executes
+          // (operators want the heuristic verdict regardless), but the
+          // envelope writes that would otherwise populate the
+          // run-detail tool-call timeline are skipped — making the
+          // collapsed run visibly distinct from a healthy multi-agent
+          // run in the audit trail.
+          const skipReviewerEnvelopes = options.reviewerCollapsed === true;
           let issues = [];
           let toolDispatched = false;
           if (candidate.playwrightCode && _runId && workspaceId) {
@@ -775,22 +865,24 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
             // candidate has no id yet.
             const toolCallId = `dryrun-${_runId}-${candidate.id || "unknown"}-${round}`;
             try {
-              emitToolEnvelope({
-                id: toolCallId, runId: _runId, workspaceId, threadId,
-                traceId: getCurrentTraceId() || `trace-${_runId}`,
-                fromRole: "reviewer", toRole: "reviewer", intent: "tool_call",
-                artifact: {
-                  tool: "playwright.dryRun",
-                  // AUTO-023 B5 — gap #8: redact secrets from the
-                  // persisted envelope (raw testCode still flows
-                  // through `executeAgentTool` below for the real
-                  // dryRun, but the DB row + UI timeline see only
-                  // the scrubbed form).
-                  args: redactToolArgsForPersistence("playwright.dryRun", { testCode: candidate.playwrightCode }),
-                },
-                rationale: `Round ${round + 1} static check`, round,
-                replyToId: null, createdAt: new Date().toISOString(),
-              });
+              if (!skipReviewerEnvelopes) {
+                emitToolEnvelope({
+                  id: toolCallId, runId: _runId, workspaceId, threadId,
+                  traceId: getCurrentTraceId() || `trace-${_runId}`,
+                  fromRole: "reviewer", toRole: "reviewer", intent: "tool_call",
+                  artifact: {
+                    tool: "playwright.dryRun",
+                    // AUTO-023 B5 — gap #8: redact secrets from the
+                    // persisted envelope (raw testCode still flows
+                    // through `executeAgentTool` below for the real
+                    // dryRun, but the DB row + UI timeline see only
+                    // the scrubbed form).
+                    args: redactToolArgsForPersistence("playwright.dryRun", { testCode: candidate.playwrightCode }),
+                  },
+                  rationale: `Round ${round + 1} static check`, round,
+                  replyToId: null, createdAt: new Date().toISOString(),
+                });
+              }
               const out = await executeAgentTool({
                 tool: "playwright.dryRun",
                 args: { testCode: candidate.playwrightCode },
@@ -802,25 +894,7 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
                 signal,
               });
               issues = Array.isArray(out?.result?.diagnostics) ? out.result.diagnostics : [];
-              emitToolEnvelope({
-                runId: _runId, workspaceId, threadId,
-                traceId: getCurrentTraceId() || `trace-${_runId}`,
-                fromRole: "reviewer", toRole: "reviewer", intent: "tool_result",
-                artifact: {
-                  toolCallId,
-                  tool: "playwright.dryRun",
-                  result: { ok: out?.result?.ok === true, issueCount: issues.length },
-                },
-                rationale: "tool_executed", round,
-                replyToId: toolCallId, createdAt: new Date().toISOString(),
-              });
-              toolDispatched = true;
-            } catch (err) {
-              // Tool dispatch failed (forbidden / timeout / unknown) —
-              // fall through to the direct validator below so the
-              // reviewer never silently passes a broken test just
-              // because the tool layer hiccuped.
-              try {
+              if (!skipReviewerEnvelopes) {
                 emitToolEnvelope({
                   runId: _runId, workspaceId, threadId,
                   traceId: getCurrentTraceId() || `trace-${_runId}`,
@@ -828,13 +902,35 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
                   artifact: {
                     toolCallId,
                     tool: "playwright.dryRun",
-                    error: err?.message || "tool_error",
-                    code: err?.code || null,
+                    result: { ok: out?.result?.ok === true, issueCount: issues.length },
                   },
-                  rationale: "tool_error", round,
+                  rationale: "tool_executed", round,
                   replyToId: toolCallId, createdAt: new Date().toISOString(),
                 });
-              } catch { /* best-effort */ }
+              }
+              toolDispatched = true;
+            } catch (err) {
+              // Tool dispatch failed (forbidden / timeout / unknown) —
+              // fall through to the direct validator below so the
+              // reviewer never silently passes a broken test just
+              // because the tool layer hiccuped.
+              if (!skipReviewerEnvelopes) {
+                try {
+                  emitToolEnvelope({
+                    runId: _runId, workspaceId, threadId,
+                    traceId: getCurrentTraceId() || `trace-${_runId}`,
+                    fromRole: "reviewer", toRole: "reviewer", intent: "tool_result",
+                    artifact: {
+                      toolCallId,
+                      tool: "playwright.dryRun",
+                      error: err?.message || "tool_error",
+                      code: err?.code || null,
+                    },
+                    rationale: "tool_error", round,
+                    replyToId: toolCallId, createdAt: new Date().toISOString(),
+                  });
+                } catch { /* best-effort */ }
+              }
             }
           }
           if (!toolDispatched) {
@@ -893,6 +989,11 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
         // structured handoff record carrying the outcome, not just
         // a thrown error in the logs.
         const bridgeOutcome = loopThrew ? "reject_final" : (loopOutcome?.outcome || null);
+        // B3 — prefer `capturedOutcome` (set via `onOutcome` hook for
+        // every terminal path including `reject_final`) over the
+        // `loopOutcome` assignment which is `null` on the throw path.
+        // See the capture-hook docblock at the loop call-site above.
+        const finalOutcome = loopOutcome || capturedOutcome;
         emitHandoffEnvelope({
           runId: _runId, threadId, workspaceId,
           fromRole: "author", toRole: "reviewer",
@@ -901,7 +1002,7 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
             testId: test?.id || null,
             failureCategory,
             outcome: bridgeOutcome,
-            roundsCompleted: loopOutcome?.roundsCompleted || 0,
+            roundsCompleted: finalOutcome?.roundsCompleted || 0,
             improved: { name: finalCandidate?.name, description: finalCandidate?.description },
           },
           rationale: "Author regenerated failing test (B3 loop outcome: " + (bridgeOutcome || "unknown") + ")",
@@ -911,7 +1012,36 @@ export async function regenerateFailingTest(improvement, signal, options = {}) {
 
     // `reject_final` is unrecoverable — keep the original test rather
     // than ship a reviewer-flagged candidate as a regenerated draft.
-    if (loopThrew) return null;
+    if (loopThrew) {
+      // B3 (AUDIT-ROADMAP Bundle 3) — bump the per-test rejection counter
+      // and fire the caller-supplied hook so `applyFeedbackLoop` can
+      // accumulate `run.reviewRejectedTests[]` + drive the
+      // TEST_REVIEW_REJECTED activity log + FEA-001 notification.
+      //
+      // `projectId` label: pulled from the test row (`test.projectId`
+      // is set at persistence time and survives the regeneration
+      // path). Empty-string fallback matches the same defensive
+      // convention as `app_runs_total{type=…}` / `agentReviewerCollapsedTotal`
+      // — bumps the counter without polluting the series with
+      // `undefined` on the rare bare-test path (eval harness, CLI).
+      try { reviewRejectionsTotal.inc({ projectId: test?.projectId || "" }); } catch { /* best-effort */ }
+      if (onReviewRejection) {
+        try {
+          onReviewRejection({
+            testId: test?.id || null,
+            testName: test?.name || null,
+            failureCategory,
+            // B3 — `loopOutcome` is `null` on the throw path; use
+            // `capturedOutcome` (set via `onOutcome` hook) so the
+            // rejected test's `roundsCompleted` reaches the activity
+            // log + notifications + RunDetail UI with the actual
+            // round count instead of a misleading `0`.
+            roundsCompleted: capturedOutcome?.roundsCompleted ?? loopOutcome?.roundsCompleted ?? 0,
+          });
+        } catch { /* best-effort — must not mask the rejection signal */ }
+      }
+      return null;
+    }
 
     // Return the final candidate ONLY if the author actually ran.
     // `finalCandidate` is set inside `runAuthor` — if the loop exited
@@ -997,11 +1127,38 @@ export async function applyFeedbackLoop(run, { signal } = {}) {
   // Store analytics on the run record so the frontend can display them
   run.qualityAnalytics = analytics;
 
+  // B3 (AUDIT-ROADMAP Bundle 3) — accumulate per-test rejections from
+  // the reviewer↔author loop. Persisted on `run.reviewRejectedTests`
+  // (JSON column declared on migration 067) so the RunDetail UI can
+  // render the "Tests discarded by review: N" section, and so the
+  // FEA-001 notification dispatcher can fire ONE consolidated alert
+  // at run-end (not N alerts per rejected test) when the project's
+  // alert threshold is met.
+  if (!Array.isArray(run.reviewRejectedTests)) run.reviewRejectedTests = [];
+  const reviewRejections = run.reviewRejectedTests;
+  const rejectionHook = (info) => {
+    reviewRejections.push({
+      testId: info.testId,
+      testName: info.testName,
+      failureCategory: info.failureCategory,
+      roundsCompleted: info.roundsCompleted,
+      rejectedAt: new Date().toISOString(),
+    });
+  };
+
   let improved = 0;
   for (const improvement of improvements) {
     if (improvement.priority !== "high") continue; // Only auto-fix high priority failures
     if (signal?.aborted) break; // Respect abort signal between AI calls
-    const regenerated = await regenerateFailingTest(improvement, signal, { runId: run.id });
+    const regenerated = await regenerateFailingTest(improvement, signal, {
+      runId: run.id,
+      // B3 — surface the upstream collapse flag so the loop's per-call
+      // observability stays aligned with the run-level signal stamped
+      // by `crawler.js#applyReviewerCollapseGate`. Coerced via `=== 1`
+      // because the column is INTEGER NOT NULL DEFAULT 0.
+      reviewerCollapsed: run.reviewerCollapsed === 1 || run.reviewerCollapsed === true,
+      onReviewRejection: rejectionHook,
+    });
     if (regenerated) {
       // Route regenerated tests back through human review instead of
       // auto-approving. This preserves the "nothing executes until a
@@ -1105,5 +1262,46 @@ export async function applyFeedbackLoop(run, { signal } = {}) {
     }
   }
 
-  return { improved, skipped: improvements.length - improved, stats, analytics };
+  // B3 (AUDIT-ROADMAP Bundle 3) — emit one TEST_REVIEW_REJECTED audit row
+  // per discarded test so SOC-2-style audit consumers can answer "what
+  // tests didn't ship and why" without parsing run blobs. The activity
+  // log is the single source of truth for SIEM forwarding (SEC-007),
+  // so we emit per-test rather than one rolled-up row.
+  //
+  // Best-effort: a logActivity throw must NEVER abort the post-run
+  // pipeline (the rejected tests are already accumulated on the run
+  // and persisted by the caller's `runRepo.save`).
+  if (reviewRejections.length > 0) {
+    let project = null;
+    if (run.projectId) {
+      try { project = projectRepo.getById(run.projectId); } catch { /* best-effort */ }
+    }
+    for (const rej of reviewRejections) {
+      try {
+        logActivity({
+          type: ACTIVITY_TYPES.TEST_REVIEW_REJECTED,
+          projectId: run.projectId || null,
+          projectName: project?.name || null,
+          workspaceId: project?.workspaceId || null,
+          testId: rej.testId,
+          testName: rej.testName,
+          runId: run.id,
+          userId: "system",
+          userName: "auto-feedback-loop",
+          detail: `Reviewer↔author loop terminated with ReviewRejection after ${rej.roundsCompleted} round${rej.roundsCompleted === 1 ? "" : "s"} (${rej.failureCategory}).`,
+          status: "success",
+          meta: {
+            failureCategory: rej.failureCategory,
+            roundsCompleted: rej.roundsCompleted,
+            reviewerCollapsed: run.reviewerCollapsed === 1 || run.reviewerCollapsed === true,
+          },
+        });
+      } catch (auditErr) {
+        // eslint-disable-next-line no-console
+        console.warn(`[feedbackLoop] failed to write audit row for test.review_rejected: ${auditErr?.message || auditErr}`);
+      }
+    }
+  }
+
+  return { improved, skipped: improvements.length - improved, stats, analytics, reviewRejectedTests: reviewRejections };
 }

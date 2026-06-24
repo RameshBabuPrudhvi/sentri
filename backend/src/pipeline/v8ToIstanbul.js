@@ -67,7 +67,7 @@ async function loadV8ToIstanbul() {
  * top-level function whose ranges mirror Playwright's `ranges[]` so
  * `v8-to-istanbul.applyCoverage()` sees a complete-ish V8 payload.
  *
- * AGENT.md bans TS-style optional-property JSDoc (`count?: number`).
+ * AGENTS.md bans TS-style optional-property JSDoc (`count?: number`).
  * The `entry` shape is documented in prose above rather than as a
  * structural type literal — `jsdoc` chokes on `?:` inside `{}` and the
  * `Backend — Docs` CI step fails. Use `@typedef` + `@property [name]`

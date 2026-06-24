@@ -8,6 +8,10 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { app } from "../src/middleware/appSetup.js";
+import { createTestContext } from "./helpers/test-base.js";
+
+const t = createTestContext();
+const runner = t.createTestRunner();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const viewerDir = path.join(__dirname, "..", "public", "trace-viewer");
@@ -40,18 +44,24 @@ async function main() {
   const base = `http://127.0.0.1:${port}`;
 
   try {
-    let res = await fetch(`${base}/trace-viewer/index.html`);
-    assert.equal(res.status, 200, "trace viewer index should serve when bundle is present");
-    const body = await res.text();
-    assert.ok(body.length > 0, "trace viewer index response should be non-empty");
+    await runner.test("trace viewer index should serve when bundle is present", async () => {
+      const res = await fetch(`${base}/trace-viewer/index.html`);
+      assert.equal(res.status, 200, "trace viewer index should serve when bundle is present");
+      const body = await res.text();
+      assert.ok(body.length > 0, "trace viewer index response should be non-empty");
+    });
 
-    fs.renameSync(indexHtml, backupHtml);
-    res = await fetch(`${base}/trace-viewer/index.html`);
-    assert.equal(res.status, 404, "trace viewer index should 404 when bundle is missing");
+    await runner.test("trace viewer index should 404 when bundle is missing", async () => {
+      fs.renameSync(indexHtml, backupHtml);
+      try {
+        const res = await fetch(`${base}/trace-viewer/index.html`);
+        assert.equal(res.status, 404, "trace viewer index should 404 when bundle is missing");
+      } finally {
+        fs.renameSync(backupHtml, indexHtml);
+      }
+    });
 
-    fs.renameSync(backupHtml, indexHtml);
-
-    console.log("✅ trace-viewer-static: all checks passed");
+    runner.summary("trace-viewer-static");
   } finally {
     try {
       if (fs.existsSync(backupHtml) && !fs.existsSync(indexHtml)) {

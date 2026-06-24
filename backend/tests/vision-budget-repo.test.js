@@ -9,21 +9,11 @@ import assert from "node:assert/strict";
 import { getDatabase } from "../src/database/sqlite.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import * as budgetRepo from "../src/database/repositories/visionBudgetRepo.js";
+import { createTestContext } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-async function test(name, fn) {
-  try {
-    await fn();
-    console.log(`  ✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.stack || err.message}`);
-    failed++;
-  }
-}
+const t = createTestContext();
+const runner = t.createTestRunner();
+const test = (name, fn) => runner.test(name, fn);
 
 function resetBudget() {
   const db = getDatabase();
@@ -197,5 +187,4 @@ await test("CHECK constraint rejects invalid windowKind discriminator", () => {
 });
 
 resetBudget();
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+runner.summary("vision-budget-repo");

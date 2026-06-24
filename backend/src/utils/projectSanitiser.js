@@ -21,6 +21,14 @@ export function sanitiseProjectForClient(project) {
       passwordSelector: credentials.passwordSelector || "",
       submitSelector: credentials.submitSelector || "",
       _hasAuth: true,
+      // B4 (AUDIT-ROADMAP) / SCL-001 — surface presence-only marker so the
+      // ProjectSettings panel can render "TOTP configured (•••••)" + a
+      // "Test TOTP" button without ever shipping the base32 seed over the
+      // wire. The seed itself is only readable inside the AES-encrypted
+      // blob server-side; the live code is computed by the dedicated
+      // `POST /credentials/test-totp` endpoint and never round-trips with
+      // the project resource.
+      _hasTotp: !!credentials.totpSecret,
     } : null,
   };
 }

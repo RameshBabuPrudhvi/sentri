@@ -30,6 +30,14 @@ export const ACTIVITY_TYPES = Object.freeze({
   TEST_BULK_RESTORE:  "test.bulk_restore",
   TEST_BULK_DELETE:   "test.bulk_delete",
 
+  // B3 (AUDIT-ROADMAP Bundle 3) — reviewer↔author loop terminated with
+  // `ReviewRejection` and the candidate test was discarded. Per-test
+  // activity row so operators auditing "why didn't this test ship?"
+  // can pivot from the run → the rejected testId → the agent_messages
+  // thread that produced the verdict. Fired by feedbackLoop.js in the
+  // `ReviewRejection` catch block (spec at AUDIT-ROADMAP.md:493-499).
+  TEST_REVIEW_REJECTED: "test.review_rejected",
+
   AUTH_LOGIN:         "auth.login",
   AUTH_LOGIN_FAILED:  "auth.login.failed",
   AUTH_LOGOUT:        "auth.logout",

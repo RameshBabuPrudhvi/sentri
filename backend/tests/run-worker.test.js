@@ -14,23 +14,12 @@
  */
 
 import assert from "node:assert/strict";
+import { createTestRunner } from "./helpers/test-base.js";
 
-// ─── Test runner ──────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 // ─── Simulate the retry-aware catch logic from runWorker.processJob ───────────
 // We extract the decision logic to test it in isolation without importing the
@@ -235,7 +224,4 @@ test("crawl type is correctly identified", () => {
   assert.equal(result.runType, "crawl");
 });
 
-// ─── Results ──────────────────────────────────────────────────────────────────
-
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+summary("run-worker");

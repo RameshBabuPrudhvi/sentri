@@ -6,6 +6,7 @@ import path from "node:path";
 import { createTestContext } from "./helpers/test-base.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import testsRouter from "../src/routes/tests.js";
+import testExportsRouter from "../src/routes/testExports.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import * as testRepo from "../src/database/repositories/testRepo.js";
 
@@ -18,6 +19,7 @@ function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
   app.use("/api/v1", requireAuth, workspaceScope, testsRouter);
+  app.use("/api/v1", requireAuth, workspaceScope, testExportsRouter);
   mounted = true;
 }
 

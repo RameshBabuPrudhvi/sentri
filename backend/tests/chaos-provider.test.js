@@ -36,7 +36,15 @@ function stubFetch(impl) {
   return () => { global.fetch = original; };
 }
 console.log("\n🧪 HTTP failures");
-test("HTTP 500 → throws (not swallowed)", async () => {
+// Stage-2 follow-up: every `test(...)` below is `await`-ed because these
+// tests share the process-global `global.fetch` reference via the
+// `stubFetch()` helper. Bare top-level registrations let test N+1's
+// `stubFetch()` overwrite test N's mid-flight stub — symptoms include
+// `'Error: Ollama HTTP 401: unauthorized'` when expecting 500 (test 2's
+// 401 stub answered test 1's call) and `Missing expected rejection`
+// (test 1's stub answered test 3's call which expected ECONNREFUSED).
+// Awaiting each registration restores sequential isolation.
+await test("HTTP 500 → throws (not swallowed)", async () => {
   const restore = stubFetch(async () => new Response("internal error", { status: 500 }));
   try {
     await assert.rejects(
@@ -45,7 +53,7 @@ test("HTTP 500 → throws (not swallowed)", async () => {
     );
   } finally { restore(); }
 });
-test("HTTP 401 → throws with status in message", async () => {
+await test("HTTP 401 → throws with status in message", async () => {
   const restore = stubFetch(async () => new Response("unauthorized", { status: 401 }));
   try {
     await assert.rejects(
@@ -54,7 +62,7 @@ test("HTTP 401 → throws with status in message", async () => {
     );
   } finally { restore(); }
 });
-test("ECONNREFUSED → throws after retries exhausted", async () => {
+await test("ECONNREFUSED → throws after retries exhausted", async () => {
   const restore = stubFetch(async () => { throw new Error("ECONNREFUSED"); });
   try {
     await assert.rejects(
@@ -64,7 +72,7 @@ test("ECONNREFUSED → throws after retries exhausted", async () => {
   } finally { restore(); }
 });
 console.log("\n🧪 malformed JSON / NDJSON fallback");
-test("NDJSON fallback recovers when daemon streams response chunks", async () => {
+await test("NDJSON fallback recovers when daemon streams response chunks", async () => {
   // Ollama can return NDJSON even when stream:false is requested.
   const ndjson = [
     JSON.stringify({ response: "Hel" }),
@@ -77,7 +85,7 @@ test("NDJSON fallback recovers when daemon streams response chunks", async () =>
     assert.equal(text, "Hello", "NDJSON chunks must be concatenated");
   } finally { restore(); }
 });
-test("Completely unparseable response → throws", async () => {
+await test("Completely unparseable response → throws", async () => {
   const restore = stubFetch(async () => new Response("not json and not ndjson", { status: 200 }));
   try {
     await assert.rejects(
@@ -86,7 +94,7 @@ test("Completely unparseable response → throws", async () => {
     );
   } finally { restore(); }
 });
-test("Empty response with no `response` field → throws", async () => {
+await test("Empty response with no `response` field → throws", async () => {
   const restore = stubFetch(async () => new Response(JSON.stringify({ done: true }), { status: 200 }));
   try {
     await assert.rejects(
@@ -96,7 +104,7 @@ test("Empty response with no `response` field → throws", async () => {
   } finally { restore(); }
 });
 console.log("\n🧪 abort semantics");
-test("Pre-aborted signal → throws AbortError immediately", async () => {
+await test("Pre-aborted signal → throws AbortError immediately", async () => {
   const ctrl = new AbortController();
   ctrl.abort();
   await assert.rejects(
@@ -104,7 +112,7 @@ test("Pre-aborted signal → throws AbortError immediately", async () => {
     (err) => err.name === "AbortError",
   );
 });
-test("Mid-flight abort propagates as AbortError", async () => {
+await test("Mid-flight abort propagates as AbortError", async () => {
   const ctrl = new AbortController();
   // Stub fetch to never resolve; trigger abort while it's pending.
   const restore = stubFetch((url, init) => new Promise((_resolve, reject) => {
@@ -122,7 +130,7 @@ test("Mid-flight abort propagates as AbortError", async () => {
     );
   } finally { restore(); }
 });
-test("Mid-flight abort does not leak external-signal listeners", async () => {
+await test("Mid-flight abort does not leak external-signal listeners", async () => {
   const ctrl = new AbortController();
   const before = ctrl.signal.eventListeners?.("abort")?.length || 0;
   const restore = stubFetch(async () => new Response(
@@ -140,7 +148,7 @@ test("Mid-flight abort does not leak external-signal listeners", async () => {
   } finally { restore(); }
 });
 console.log("\n🧪 slow trickle / timeout");
-test("opts.timeoutMs aborts a hung request", async () => {
+await test("opts.timeoutMs aborts a hung request", async () => {
   // Stub fetch to never resolve naturally. The internal AbortController
   // wired to opts.timeoutMs should fire and surface as a timeout error.
   const restore = stubFetch((url, init) => new Promise((_resolve, reject) => {
@@ -158,14 +166,14 @@ test("opts.timeoutMs aborts a hung request", async () => {
   } finally { restore(); }
 });
 console.log("\n🧪 missing config fails closed");
-test("generate without route.baseUrl throws", async () => {
+await test("generate without route.baseUrl throws", async () => {
   await assert.rejects(
     () => ollama.generate({ ...baseRoute, baseUrl: undefined }, baseMessages, { maxTokens: 64 }),
     /route\.baseUrl is required/,
   );
 });
 console.log("\n🧪 Bearer-header forwarding");
-test("opts.apiKey is forwarded as Authorization: Bearer", async () => {
+await test("opts.apiKey is forwarded as Authorization: Bearer", async () => {
   let capturedHeaders = null;
   const restore = stubFetch(async (url, init) => {
     capturedHeaders = init.headers;
@@ -177,7 +185,7 @@ test("opts.apiKey is forwarded as Authorization: Bearer", async () => {
       "authenticated Ollama gateways must receive the Bearer token");
   } finally { restore(); }
 });
-test("missing opts.apiKey → no Authorization header (unauthenticated default)", async () => {
+await test("missing opts.apiKey → no Authorization header (unauthenticated default)", async () => {
   let capturedHeaders = null;
   const restore = stubFetch(async (url, init) => {
     capturedHeaders = init.headers;

@@ -49,6 +49,11 @@ function validateForm(form, { isEdit = false, hasExistingCreds = false } = {}) {
 const EMPTY_FORM = {
   name: "", url: "", hasAuth: false,
   username: "", password: "",
+  // B4 (AUDIT-ROADMAP) / SCL-001 — target-app TOTP seed. Base32, 16–128
+  // chars. Blank on edit means "keep existing" (server merges blanks
+  // with the stored encrypted value); the backend never returns the
+  // seed to the client (see projectSanitiser.js#_hasTotp).
+  totpSecret: "",
 };
 
 export default function NewProject() {
@@ -79,6 +84,13 @@ export default function NewProject() {
   // (see projectSanitiser.js), so those fields arrive blank — we use this flag
   // to relax validation and show a "leave blank to keep" hint.
   const [hasExistingCreds, setHasExistingCreds] = useState(false);
+  // B4 — server tells us whether a TOTP seed is configured (presence-only
+  // flag — the seed itself never crosses the wire). Drives the "TOTP
+  // configured (••••••)" hint + the "Test TOTP" button visibility.
+  const [hasExistingTotp, setHasExistingTotp] = useState(false);
+  const [totpPreview, setTotpPreview] = useState(null); // { code, expiresInSeconds, fetchedAt } | null
+  const [totpTesting, setTotpTesting] = useState(false);
+  const [totpError, setTotpError] = useState(null);
 
   // Load existing project when editing
   useEffect(() => {
@@ -88,6 +100,7 @@ export default function NewProject() {
       .then(data => {
         const p = data.project ?? data;
         setHasExistingCreds(Boolean(p.credentials));
+        setHasExistingTotp(Boolean(p.credentials?._hasTotp));
         const loaded = {
           name: p.name || "",
           url:  p.url  || "",
@@ -95,6 +108,7 @@ export default function NewProject() {
           // Secrets are intentionally not returned by the API — leave blank.
           username: "",
           password: "",
+          totpSecret: "",
         };
         setForm(loaded);
         setInitialForm(loaded);
@@ -102,6 +116,41 @@ export default function NewProject() {
       .catch(err => setError(`Could not load project: ${err.message}`))
       .finally(() => setLoadingEdit(false));
   }, [editId]);
+
+  // B4 — countdown for the TOTP preview. Industry-standard "MFA code
+  // expires in N seconds" UX seen in Authy / 1Password / Google
+  // Authenticator. Ticks once per second; clears the preview when the
+  // window rolls so the operator clicks "Test TOTP" again rather than
+  // squinting at a stale code.
+  useEffect(() => {
+    if (!totpPreview) return;
+    const tick = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - totpPreview.fetchedAt) / 1000);
+      const remaining = totpPreview.expiresInSeconds - elapsed;
+      if (remaining <= 0) setTotpPreview(null);
+      else setTotpPreview((p) => p && ({ ...p, remaining }));
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [totpPreview?.fetchedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function testTotp() {
+    if (!editId) return;
+    setTotpError(null);
+    setTotpTesting(true);
+    try {
+      const result = await api.testProjectTotp(editId);
+      setTotpPreview({
+        code: result.code,
+        expiresInSeconds: result.expiresInSeconds,
+        remaining: result.expiresInSeconds,
+        fetchedAt: Date.now(),
+      });
+    } catch (err) {
+      setTotpError(err.message || "Could not generate TOTP code.");
+    } finally {
+      setTotpTesting(false);
+    }
+  }
 
   const set = (k) => (e) => {
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -161,6 +210,15 @@ export default function NewProject() {
         credentials: form.hasAuth ? {
           username: form.username.trim(),
           password: form.password,
+          // B4 — only include `totpSecret` in the payload when the user
+          // actually typed something. A blank string would be normalised
+          // to "keep existing" by the server's merge logic, but sending
+          // the key at all wastes a few bytes and clutters audit-log
+          // payloads. Trim + uppercase here for parity with the
+          // server-side normalisation in routes/projects.js.
+          ...(form.totpSecret.trim()
+            ? { totpSecret: form.totpSecret.trim().toUpperCase().replace(/\s+/g, "") }
+            : {}),
         } : null,
       };
       if (isEdit) {
@@ -440,6 +498,58 @@ export default function NewProject() {
                   </div>
                   <FieldError name="password" />
                 </div>
+              </div>
+
+              {/* B4 / SCL-001 — target-app TOTP. Optional. Only rendered
+                  inside the auth block (no auth = no TOTP). Same
+                  "blank-equals-keep" merge policy as password — the
+                  server never returns the seed, so editing other fields
+                  doesn't wipe a previously-configured seed. */}
+              <div className="np-totp" style={{ marginTop: "16px" }}>
+                <label className="np-label">
+                  TOTP secret (optional — for apps with MFA)
+                </label>
+                <input
+                  className="input"
+                  type="password"
+                  value={form.totpSecret}
+                  onChange={set("totpSecret")}
+                  placeholder={isEdit && hasExistingTotp
+                    ? "•••••• (TOTP configured — leave blank to keep)"
+                    : "JBSWY3DPEHPK3PXP (base32 from the authenticator app)"}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <div className="np-totp__hint" style={{ fontSize: "11px", color: "var(--text3)", marginTop: "4px" }}>
+                  Paste the base32 seed from your target app's MFA enrollment QR. Sentri
+                  computes the live RFC 6238 code at login time so test runs work
+                  unattended. The seed is AES-256-GCM encrypted at rest and never
+                  returned to the browser.
+                </div>
+                {isEdit && hasExistingTotp && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "8px" }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={testTotp}
+                      disabled={totpTesting}
+                    >
+                      {totpTesting ? <Loader2 size={12} className="spin" /> : <ShieldCheck size={12} />}
+                      {totpTesting ? "Generating…" : "Test TOTP"}
+                    </button>
+                    {totpPreview && (
+                      <span style={{ fontFamily: "monospace", fontSize: "14px" }}>
+                        <strong>{totpPreview.code}</strong>
+                        <span style={{ color: "var(--text3)", marginLeft: "8px" }}>
+                          ({totpPreview.remaining ?? totpPreview.expiresInSeconds}s left)
+                        </span>
+                      </span>
+                    )}
+                    {totpError && (
+                      <span style={{ color: "var(--error)", fontSize: "12px" }}>{totpError}</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

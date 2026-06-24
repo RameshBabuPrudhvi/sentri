@@ -1,0 +1,37 @@
+-- Migration 072: B4 — Auth session recovery + target-app TOTP
+-- (AUDIT-ROADMAP Bundle 4 — RLY-004 + SCL-001).
+--
+-- Two loosely-coupled pieces, one PR scope (per
+-- `docs/roadmap/AUDIT-ROADMAP.md:559-673`):
+--
+-- 1. `sessionRefreshIntervalMs` (RLY-004 proactive keep-alive)
+--    -------------------------------------------------------
+--    Long-running runs (>30 min) on apps with short cookie / OAuth-token
+--    TTLs see session expiry mid-run. The reactive recovery path
+--    (`executeTest.js#restoreAuthSession`) handles the failure case, but
+--    operators who *know* their target's session window (e.g. "we expire
+--    at 15 min idle") can opt-in to a proactive ping that keeps the
+--    cookie alive without waiting for a redirect-to-login. `null` (the
+--    default) disables the ping entirely — zero behavioural change for
+--    every project that doesn't configure it. Bounded at the route layer
+--    to `[60000, 86400000]` (1 min ≤ interval ≤ 24 h) so a typo can't
+--    flood the SUT.
+--
+-- 2. TOTP for target apps (SCL-001) — NO schema change required.
+--    --------------------------------------------------------
+--    `credentials.totpSecret` is encrypted alongside `username` /
+--    `password` inside the existing AES-encrypted `credentials` JSON
+--    column. `utils/credentialEncryption.js` is extended in the same PR
+--    to round-trip the new field. Adding a top-level `totpSecret` column
+--    would (a) bypass the encryption envelope, (b) introduce two-way
+--    drift between the columnar and blob shapes, and (c) violate the
+--    same "secrets only inside the encrypted blob" rule SEC-007 enforces
+--    on `workspace_siem_config.hmacSecret`. The blob path is the
+--    canonical pattern.
+--
+-- Convention: `ALTER TABLE ... ADD COLUMN` is not idempotent in SQLite.
+-- The migration runner (`migrate.js`) tolerates "duplicate column name"
+-- errors so re-running this file is safe on already-migrated DBs.
+-- `schema_migrations` ledger ensures this file runs exactly once.
+
+ALTER TABLE projects ADD COLUMN sessionRefreshIntervalMs INTEGER;

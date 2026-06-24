@@ -150,6 +150,9 @@ The B3.7 spend-cap path can deliver a Slack-compatible webhook payload to `works
 | `REDIS_URL` | — | Redis connection URL (e.g. `redis://localhost:6379`). When set, enables shared rate limiting, cross-instance token revocation, SSE pub/sub, and BullMQ job queue. Requires `ioredis`. For Redis-backed rate limiting also install `rate-limit-redis` |
 | `MAX_WORKERS` | `2` | Global concurrency limit for BullMQ run execution (INF-003). Each slot processes one crawl or test run at a time. Ignored when Redis/BullMQ is not available. **Superseded by `WORKER_CONCURRENCY`** — kept as a fallback for backward compatibility |
 | `WORKER_CONCURRENCY` | `2` | Per-container concurrency for the BullMQ run worker (AUTO-008). Used by both the in-process worker started by the backend and the standalone `worker` Compose service (`node src/worker.js`). Falls back to `MAX_WORKERS` when unset |
+| `AI_RATE_LIMIT_PER_MIN` | `300` | Per-workspace AI route budget in cost units per minute. AI mutation calls cost 10 units, so the default allows 30 AI calls/min/workspace |
+| ~~`AI_RATE_LIMIT_REGULAR_PER_MIN`~~ | _ignored_ | **Deprecated** — the limiter is POST-only and scoped to the 5 AI mutation routes (`/chat`, `/projects/:id/crawl`, `/projects/:id/tests/generate`, `/tests/:testId/fix`, `/settings/agent-roles/:role/test`). Non-AI routes (GET / PATCH / DELETE / auth / SSE / `/health`) bypass the limiter entirely. Setting this var has no effect. |
+| `AI_RATE_LIMIT_WINDOW_SEC` | `60` | Window length for the per-workspace AI limiter |
 
 #### Local Redis setup
 
@@ -300,6 +303,7 @@ S3_ENDPOINT=https://minio.internal:9000
 | `API_TEST_TIMEOUT` | `30000` | Per-API-test timeout (ms) |
 | `BROWSER_TEST_TIMEOUT` | `120000` | Per-browser-test timeout guard (ms) |
 | `PARALLEL_WORKERS` | `1` | Concurrent browser contexts (1–10). Override per-run from UI |
+| `BROWSER_POOL_SIZE` | `WORKER_CONCURRENCY` / `MAX_WORKERS` | Warm browser slots retained per browser type by the MNT-015 runner pool |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` | — | Custom Chromium executable path |
 
 ### Crawler
@@ -314,7 +318,9 @@ S3_ENDPOINT=https://minio.internal:9000
 
 | Variable | Default | Description |
 |---|---|---|
-| `HEALING_ELEMENT_TIMEOUT` | `5000` | Element finding timeout per strategy (ms) |
+| `HEALING_ELEMENT_TIMEOUT` | `5000` | Element finding timeout per strategy (ms). **Floor** for the AUDIT-ROADMAP B2 adaptive timeout — the runner computes `2 × p95(crawl page-load ms)` per run and clamps the result to `[HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT]`. Raise this when your environment's fastest pages still need >5 s budget per locator. |
+| `MAX_ELEMENT_TIMEOUT` | `30000` | **Ceiling** for the AUDIT-ROADMAP B2 adaptive element timeout. Without a ceiling, a single slow outlier page would bloat the per-action wait into the multi-minute range and let runaway tests sit blocked on a single locator. Matches `BROWSER_TEST_TIMEOUT / 4` (a test's slowest action should be at most a quarter of the test budget). Per-project escape hatch: `project.elementTimeoutOverride` bypasses the adaptive calculation entirely; route validation clamps the override to `[500, 300000]` (0.5 s – 5 min). |
+| `HYDRATION_WAIT_MS` | `5000` | AUDIT-ROADMAP B2 — max wait (ms) for SPA loading indicators to clear before snapshotting. React / Vue / Angular / Next.js apps populate the interactive DOM 200–2 000 ms after `domcontentloaded` fires; without this wait the snapshot captures skeleton state and generated tests target elements that don't exist at execution time. Best-effort: apps without recognisable loading indicators fall through after the bound and the crawl proceeds unchanged. Per-project override via `project.hydrationType = 'custom'` + `hydrationSelector` (operator-supplied selector to wait for) or `'domcontentloaded'` (opt out). |
 | `HEALING_RETRY_COUNT` | `3` | Retries per interaction before giving up |
 | `HEALING_RETRY_DELAY` | `400` | Pause between retries (ms) |
 | `HEALING_HINT_MAX_FAILS` | `3` | Skip healing hints that have failed this many consecutive times |

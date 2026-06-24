@@ -114,7 +114,7 @@ export function orderTestsByRisk(tests, runHistory = [], options = {}) {
  * Truncate the queue to fit a wall-clock budget. Smoke tests are always kept
  * (pinned regardless of remaining budget). Returns `{ kept, skipped }` so the
  * caller can persist "skipped (over budget)" status markers for observability
- * — silently dropping tests violates AGENT.md issue-handling rules.
+ * — silently dropping tests violates AGENTS.md issue-handling rules.
  */
 export function applyBudgetToQueue(tests, budgetMinutes) {
   const minutes = normalizeBudgetMinutes(budgetMinutes);

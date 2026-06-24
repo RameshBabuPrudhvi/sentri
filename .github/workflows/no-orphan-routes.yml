@@ -1,7 +1,7 @@
 name: PROC-001 no-orphan-routes
 
 # PROC-001 — Fail when a PR adds a backend route without a frontend consumer
-# in the same PR. Convention is documented in REVIEW.md and AGENT.md; this
+# in the same PR. Convention is documented in REVIEW.md and AGENTS.md; this
 # workflow is the enforcement layer so the rule isn't review-discretion only.
 #
 # Detection signal:

@@ -11,6 +11,7 @@
  * | `GET`    | `/api/v1/projects/:id/runs`                 | List runs for a project             |
  * | `GET`    | `/api/v1/runs/:runId`                       | Get run detail                      |
  * | `POST`   | `/api/v1/runs/:runId/abort`                 | Abort a running crawl or test run   |
+ * | `POST`   | `/api/v1/runs/:runId/resume`                | Resume a crash-recovered run (B1)   |
  * | `POST`   | `/api/v1/projects/:id/trigger`              | CI/CD token-authenticated test run  |
  * | `GET`    | `/api/v1/projects/:id/trigger-tokens`       | List trigger tokens for a project   |
  * | `POST`   | `/api/v1/projects/:id/trigger-tokens`       | Create a new trigger token          |
@@ -18,9 +19,11 @@
  */
 
 import { Router } from "express";
+import { getDatabase } from "../database/sqlite.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
-import * as environmentRepo from "../database/repositories/environmentRepo.js";
+import * as runTestResultRepo from "../database/repositories/runTestResultRepo.js";
+import { resolveEnvOrThrow } from "../utils/routeHelpers.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
@@ -64,10 +67,11 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
   // DIF-012: optional per-run environment override. Validates the env
   // belongs to this project so callers can't run against a sibling
   // project's environment by ID guessing.
-  const environmentId = req.body?.environmentId || null;
-  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
-  if (environmentId && (!environment || environment.projectId !== project.id)) {
-    return res.status(400).json({ error: "invalid environmentId" });
+  let environment;
+  try {
+    environment = resolveEnvOrThrow(req.body?.environmentId, project);
+  } catch (err) {
+    return res.status(err.httpStatus || 400).json({ error: err.message });
   }
 
   const { dialsConfig } = req.body || {};
@@ -175,12 +179,13 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // (before the no-tests / no-approved-tests checks) so a bad envId fails
   // fast with `invalid environmentId` rather than masking behind a
   // misleading "no tests found" error. Matches the ordering used by the
-  // crawl path (runs.js:98-102) and the trigger path (trigger.js:454-458),
-  // and the contract documented in QA.md (line 903).
-  const environmentId = req.body?.environmentId || null;
-  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
-  if (environmentId && (!environment || environment.projectId !== project.id)) {
-    return res.status(400).json({ error: "invalid environmentId" });
+  // crawl path above and the trigger path (trigger.js), and the contract
+  // documented in QA.md (line 903).
+  let environment;
+  try {
+    environment = resolveEnvOrThrow(req.body?.environmentId, project);
+  } catch (err) {
+    return res.status(err.httpStatus || 400).json({ error: err.message });
   }
 
   const allTests = testRepo.getByProjectId(project.id);
@@ -227,7 +232,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // output even though the queue itself follows the approved-test order.
   const riskById = new Map(riskOrderedTests.map((t) => [t.id, t.riskScore]));
   // Pre-seed `results` with "skipped (over budget)" markers — every test must
-  // have a resolution (AGENT.md issue-handling rule); silently dropping
+  // have a resolution (AGENTS.md issue-handling rule); silently dropping
   // budget-truncated tests would violate observability.
   const initialResults = budgetSkipped.map((t) => ({
     testId: t.id,
@@ -638,6 +643,269 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   publishRunAbort(req.params.runId).catch(() => { /* best-effort */ });
 
   res.json({ ok: true, shardsAborted: workerAborted });
+});
+
+// ─── Resume a crash-recovered run (B1 — AUDIT-ROADMAP Bundle 1) ──────────────
+//
+// Recovers a run that the orphan-recovery sweep marked
+// `status='interrupted', failureReason='process_crash'` on the last server
+// restart. Re-dispatches ONLY the tests that never landed a row in
+// `run_test_results` so the resumed run picks up where the crash left off
+// instead of restarting from zero.
+//
+// Industry-standard contract (mirrors GitHub Actions `re-run failed jobs`,
+// CircleCI `rerun-from-failed`, Buildkite `retry job`):
+//   • Only `interrupted` + `failureReason='process_crash'` runs are
+//     resumable. User aborts (`status='aborted'`) and ordinary failures
+//     are NOT resumable — the operator must re-trigger the run instead.
+//   • The new run is dispatched against the SAME project + environment
+//     the original used (replayed from the run row, not re-derived from
+//     request inputs) to keep the audit trail honest about what was
+//     re-attempted.
+//   • Admin-gated. Resuming a run executes tests with the original
+//     credentials and against the original environment; a `qa_lead` who
+//     can trigger a fresh run should not necessarily be able to replay
+//     against an environment they may no longer have access to.
+//
+// Why not POST /run? The fresh-run endpoint would re-dispatch ALL approved
+// tests and reset the run's progress; resume preserves the partial result
+// set and only re-executes the missing slice. The two operations are
+// semantically distinct — a re-run is "start fresh", a resume is "continue
+// from checkpoint".
+
+router.post("/runs/:runId/resume", requireRole("admin"), expensiveOpLimiter, async (req, res) => {
+  const run = runRepo.getById(req.params.runId);
+  if (!run) return res.status(404).json({ error: "not found" });
+
+  // ACL-001: the run's project must belong to the caller's workspace.
+  const project = projectRepo.getByIdInWorkspace(run.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+
+  // Resume is only valid for crash-recovered runs. Other terminal states
+  // (`aborted`, `completed`, `failed`) re-trigger via `/run` instead — a
+  // user-aborted run shouldn't silently restart, and an ordinary failure
+  // typically reflects a real bug that re-running won't fix.
+  if (run.status !== "interrupted" || run.failureReason !== "process_crash") {
+    return res.status(409).json({
+      error: "Run is not resumable — only crash-recovered runs (status='interrupted', failureReason='process_crash') can be resumed",
+      code: "RUN_NOT_RESUMABLE",
+      status: run.status,
+      failureReason: run.failureReason || null,
+    });
+  }
+  if (run.type !== "test_run" && run.type !== "run") {
+    return res.status(409).json({
+      error: "Only test runs are resumable — crawls must be re-triggered",
+      code: "RUN_TYPE_NOT_RESUMABLE",
+      type: run.type,
+    });
+  }
+
+  // Block resume when a sibling run is already executing for this project —
+  // mirrors the `findActiveByProjectId` gate on `POST /run`. Operators must
+  // wait or abort the live run before resuming the crash-recovered one.
+  const activeRun = runRepo.findActiveByProjectId(project.id);
+  if (activeRun) {
+    return res.status(409).json({
+      error: `A run is already in progress (${activeRun.id}). Wait for it to finish or abort it before resuming.`,
+      code: "RUN_ALREADY_ACTIVE",
+    });
+  }
+
+  // Replay the dispatch context from the persisted run record — the testQueue
+  // (audit-of-record), the environment override the original used, and the
+  // browser / network / parallelism config. Re-deriving from request inputs
+  // would let a caller change the resume target's project / environment /
+  // browser silently, breaking the "resume re-executes what crashed" contract.
+  const originalQueue = Array.isArray(run.testQueue) ? run.testQueue : [];
+  if (originalQueue.length === 0) {
+    return res.status(409).json({
+      error: "Run has no persisted testQueue — cannot resume; re-trigger via POST /run instead",
+      code: "RUN_NO_QUEUE",
+    });
+  }
+
+  // The checkpoint contract: any test with a `run_test_results` row is
+  // considered done (passed / failed / warning all count — the test
+  // executed). The remaining set is what the resumed run must re-dispatch.
+  const completedTestIds = runTestResultRepo.getCompletedTestIds(req.params.runId);
+  const remainingTestIds = originalQueue
+    .map((t) => t.id)
+    .filter((id) => id && !completedTestIds.has(id));
+
+  if (remainingTestIds.length === 0) {
+    return res.status(409).json({
+      error: "All tests already completed — nothing to resume",
+      code: "RUN_ALREADY_COMPLETE",
+      completed: completedTestIds.size,
+      total: originalQueue.length,
+    });
+  }
+
+  // Build the new run row. New ID (resume is a fresh row that links back to
+  // the original via `resumedFromRunId` in the activity log — the original
+  // remains terminal so historical analytics treat it as one crashed run +
+  // one resumed run, not a single run that mysteriously came back to life).
+  const newRunId = generateRunId();
+  let environment = null;
+  if (run.environmentId) {
+    try {
+      environment = resolveEnvOrThrow(run.environmentId, project);
+    } catch (err) {
+      // Env may have been deleted since the original run — fail loud rather
+      // than silently resuming against a different baseline URL.
+      return res.status(err.httpStatus || 409).json({
+        error: `Cannot resume — original environment is no longer available: ${err.message}`,
+        code: "RUN_ENV_GONE",
+      });
+    }
+  }
+
+  // Look up the actual Test rows for the remaining IDs. Tests that have
+  // been deleted or rejected since the crash are silently dropped (the
+  // approval gate on `/run` would have rejected them anyway).
+  const allTests = testRepo.getByProjectId(project.id);
+  const testsById = new Map(allTests.map((t) => [t.id, t]));
+  const selectedTests = remainingTestIds
+    .map((id) => testsById.get(id))
+    .filter((t) => t && t.reviewStatus === "approved");
+
+  if (selectedTests.length === 0) {
+    return res.status(409).json({
+      error: "No remaining approved tests to resume (the missing tests may have been deleted or unapproved)",
+      code: "RUN_NO_REMAINING_TESTS",
+      remaining: remainingTestIds.length,
+    });
+  }
+
+  const newRun = {
+    id: newRunId,
+    projectId: project.id,
+    type: "test_run",
+    status: "running",
+    startedAt: new Date().toISOString(),
+    logs: [],
+    results: [],
+    passed: 0,
+    failed: 0,
+    total: selectedTests.length,
+    parallelWorkers: run.parallelWorkers || 1,
+    shardCount: 1, // Resume never re-shards — keeps the dispatch graph simple.
+    shardsCompleted: 0,
+    browser: run.browser || "chromium",
+    device: run.device || null,
+    networkCondition: run.networkCondition || "fast",
+    testQueue: selectedTests.map((t) => ({
+      id: t.id, name: t.name, steps: t.steps || [],
+    })),
+    workspaceId: project.workspaceId || null,
+    environmentId: environment?.id || null,
+  };
+
+  // Atomic create-new + mark-original-resumed. Both writes go through one
+  // SQLite transaction so a crash or concurrent request between them can't
+  // leave RUN-1 still resumable while RUN-2 is already dispatched — which
+  // would let a second `POST /runs/RUN-1/resume` re-dispatch the exact same
+  // "remaining" slice (RUN-2's `run_test_results` rows live under RUN-2's
+  // id, so `getCompletedTestIds(RUN-1)` returns the same set), causing
+  // duplicate records / emails / payments on the target app. Same pattern
+  // used by `runRepo.markOrphansInterrupted` for its SELECT-then-UPDATE.
+  //
+  // `runRepo.create` and `runRepo.update` both call `getDatabase()` under
+  // the hood, so wrapping their callsites in `db.transaction(...)` here
+  // funnels both statements into a single BEGIN/COMMIT.
+  //
+  // **NOTE — async BullMQ enqueue is OUTSIDE this transaction.** The
+  // queue write happens below and can fail with 503; if it does, we
+  // revert the original run's `failureReason` back to `process_crash`
+  // in the catch arm so the operator can re-attempt resume instead of
+  // being permanently locked out by an enqueue glitch. See the rationale
+  // at the catch site (line below).
+  const db = getDatabase();
+  db.transaction(() => {
+    runRepo.create(newRun);
+    // Stamping `failureReason='resumed'` flips the gate at line 687
+    // (`failureReason !== 'process_crash'`) to reject any subsequent resume
+    // attempt on RUN-1. It also documents in the DB that this run was
+    // successfully resumed (correlate with the matching activity log row
+    // via `meta.resumedFromRunId`).
+    runRepo.update(req.params.runId, { failureReason: "resumed" });
+  })();
+
+  logActivity({ ...actor(req),
+    type: "test_run.resume", projectId: project.id, projectName: project.name,
+    runId: newRunId,
+    detail: `Resumed crash-recovered run ${req.params.runId} — ${selectedTests.length} of ${originalQueue.length} test${originalQueue.length !== 1 ? "s" : ""} remaining`,
+    status: "running",
+    meta: { resumedFromRunId: req.params.runId, completed: completedTestIds.size, remaining: selectedTests.length },
+  });
+
+  if (isQueueAvailable()) {
+    try {
+      await runQueue.add("test_run", {
+        runId: newRunId,
+        projectId: project.id,
+        type: "test_run",
+        options: {
+          parallelWorkers: newRun.parallelWorkers,
+          browser: newRun.browser,
+          device: newRun.device,
+          networkCondition: newRun.networkCondition,
+          testIds: selectedTests.map((t) => t.id),
+          actorInfo: actor(req),
+        },
+      }, { jobId: newRunId });
+    } catch (enqueueErr) {
+      // Roll back the new run AND restore the original's resumability.
+      // Without the revert below, the original run's `failureReason` stays
+      // `'resumed'` from the transaction above and the gate at line 688
+      // (`failureReason !== 'process_crash'`) permanently rejects all
+      // future resume attempts on RUN-1 — the operator's only recourse
+      // would be `POST /run` which restarts from zero, defeating B1's
+      // entire crash-recovery contract for what's effectively a transient
+      // Redis hiccup. The revert closes that trap so a 503 is genuinely
+      // retryable (industry-standard pattern: distinguish "permanent
+      // failure" from "retry-after-network-blip").
+      runRepo.update(newRunId, { status: "failed", error: "Failed to enqueue job", finishedAt: new Date().toISOString() });
+      try {
+        runRepo.update(req.params.runId, { failureReason: "process_crash" });
+      } catch { /* best-effort — original row may have been deleted concurrently */ }
+      return res.status(503).json({ error: "Job queue unavailable. Please try again." });
+    }
+  } else {
+    runWithAbort(newRunId, newRun,
+      (signal) => runTests(
+        envScopedProject(project, environment),
+        selectedTests,
+        newRun,
+        { parallelWorkers: newRun.parallelWorkers, browser: newRun.browser, device: newRun.device, networkCondition: newRun.networkCondition, signal }
+      ),
+      {
+        onSuccess: () => logActivity({ ...actor(req),
+          type: "test_run.complete", projectId: project.id, projectName: project.name,
+          runId: newRunId,
+          detail: `Resumed run completed — ${newRun.passed || 0} passed, ${newRun.failed || 0} failed`,
+        }),
+        onFailActivity: (err) => ({
+          type: "test_run.fail", projectId: project.id, projectName: project.name,
+          runId: newRunId,
+          detail: `Resumed run failed: ${classifyError(err, "run").message}`,
+        }),
+        actorInfo: actor(req),
+        onComplete: async (finishedRun) => {
+          try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
+        },
+      },
+    );
+  }
+
+  res.status(202).json({
+    runId: newRunId,
+    resumedFromRunId: req.params.runId,
+    completed: completedTestIds.size,
+    remaining: selectedTests.length,
+    total: originalQueue.length,
+  });
 });
 
 // ─── CI/CD Trigger token management ──────────────────────────────────────────

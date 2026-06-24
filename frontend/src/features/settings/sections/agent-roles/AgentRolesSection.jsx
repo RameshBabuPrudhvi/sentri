@@ -191,6 +191,32 @@ export default function AgentRolesSection() {
     (r) => !configuredRoles.has(r) || r === editingRole,
   );
 
+  // B3 (AUDIT-ROADMAP) — reviewer-collapse warning. When the workspace's
+  // `author` and `reviewer` agent_configs rows resolve to the same
+  // provider route id, the LLM reviewer pass cannot produce independent
+  // signal. Surface this loudly in the same panel that drives the
+  // assignment so the operator can fix it without bouncing between
+  // pages. Mirrors the runtime gate at `backend/src/aiProvider/
+  // reviewerCollapse.js#detectReviewerCollapse` — same predicate, just
+  // evaluated client-side from the loaded rows so we don't need a new
+  // dedicated endpoint. Workspace-default-on-both (both routeIds null)
+  // is NOT a collapse — both roles fall back to the workspace's env
+  // default which the operator's intent already accepts.
+  const collapseInfo = useMemo(() => {
+    const author = rows.find((r) => r.role === "author");
+    const reviewer = rows.find((r) => r.role === "reviewer");
+    if (!author || !reviewer) return { collapsed: false };
+    if (!author.routeId || !reviewer.routeId) return { collapsed: false };
+    if (author.routeId !== reviewer.routeId) return { collapsed: false };
+    const linked = providerMap.get(author.routeId);
+    return {
+      collapsed: true,
+      routeId: author.routeId,
+      providerName: linked?.name || author.routeId,
+      model: linked?.model || null,
+    };
+  }, [rows, providerMap]);
+
   return (
     <div>
       <SectionTitle
@@ -218,6 +244,31 @@ export default function AgentRolesSection() {
           </select>
         </label>
       </div>
+
+      {/* B3 (AUDIT-ROADMAP) — Reviewer-collapse warning. Renders only when
+          author and reviewer roles share the same provider route id; in
+          that configuration the runtime gate at `crawler.js#applyReviewerCollapseGate`
+          will skip LLM reviewer calls and route through heuristic-only
+          validation, so the operator should pick a distinct route for
+          one of the two roles to restore independent signal. */}
+      {collapseInfo.collapsed && (
+        <div
+          className="st-status-err st-agent-error"
+          role="alert"
+          style={{ marginBottom: 12 }}
+        >
+          <AlertCircle size={12} />
+          <span>
+            <strong>Reviewer collapsed.</strong> Author and reviewer both dispatch
+            against <code>{collapseInfo.providerName}</code>
+            {collapseInfo.model ? <> · <code>{collapseInfo.model}</code></> : null}
+            . The reviewer↔author loop cannot produce independent signal in this
+            configuration — runs will fall through to heuristic-only review.
+            Assign one of the two roles to a distinct AI Provider above to enable
+            independent review.
+          </span>
+        </div>
+      )}
 
       <div className="card card-padded">
         {error && (

@@ -39,7 +39,15 @@ const CONCURRENCY = 100;
 const ROUTE_ID = `pr-${randomUUID().slice(0, 8)}`;
 const MODEL = "test-model";
 // ── 1. Quota: 100 concurrent reserves don't overflow ──────────────────────────
-test(`${CONCURRENCY} concurrent checkAndReserve calls — all succeed, no overflow`, async () => {
+// Stage-2 follow-up: every `test(...)` below is `await`-ed because these
+// tests mutate shared global state via `resetQuota()` / `resetCache()`.
+// With the shared runner's queued-promise model (helpers/test-base.js:438),
+// bare top-level `test(...)` lets one test's `resetQuota()` interleave
+// with another's setup — wiping the token bucket between the 200th and
+// 201st reserve and falsely allowing the rejection check to pass through.
+// Awaiting each registration restores the sequential isolation the
+// pre-migration synchronous-by-default runner provided.
+await test(`${CONCURRENCY} concurrent checkAndReserve calls — all succeed, no overflow`, async () => {
   resetQuota();
   const results = await Promise.all(
     Array.from({ length: CONCURRENCY }, (_, i) =>
@@ -49,7 +57,7 @@ test(`${CONCURRENCY} concurrent checkAndReserve calls — all succeed, no overfl
   const oks = results.filter((r) => r.ok);
   assert.equal(oks.length, CONCURRENCY, `all ${CONCURRENCY} calls must succeed`);
 });
-test("quota bucket rejects call 201 after 200 RPM consumed", async () => {
+await test("quota bucket rejects call 201 after 200 RPM consumed", async () => {
   resetQuota();
   // Burn 200 RPM
   for (let i = 0; i < 200; i++) {
@@ -60,7 +68,7 @@ test("quota bucket rejects call 201 after 200 RPM consumed", async () => {
   assert.equal(denied.reason, "rpm");
 });
 // ── 2. Cache: concurrent identical prompts populate exactly once ──────────────
-test("concurrent identical setCached calls produce exactly one row", () => {
+await test("concurrent identical setCached calls produce exactly one row", () => {
   resetCache();
   const params = { messages: { user: "concurrent-prompt" }, maxTokens: 100, temperature: 0 };
   // Simulate 100 concurrent writes for the same key
@@ -75,7 +83,7 @@ test("concurrent identical setCached calls produce exactly one row", () => {
   const row = db.prepare("SELECT hitCount FROM ai_response_cache WHERE routeId = ?").get(ROUTE_ID);
   assert.equal(row.hitCount, 0);
 });
-test("concurrent getCached reads after one write all return the same response", () => {
+await test("concurrent getCached reads after one write all return the same response", () => {
   resetCache();
   const params = { messages: { user: "read-concurrent" }, maxTokens: 100, temperature: 0 };
   setCached(ROUTE_ID, MODEL, params, "shared-response", { input: 5, output: 2 }, 60);
@@ -88,7 +96,7 @@ test("concurrent getCached reads after one write all return the same response", 
   }
 });
 // ── 3. Coalescing: concurrent in-flight registrations share one promise ───────
-test("registerInFlight + coalesceInFlight: N concurrent callers share one promise", async () => {
+await test("registerInFlight + coalesceInFlight: N concurrent callers share one promise", async () => {
   resetCache();
   const key = `coalesce-${randomUUID().slice(0, 8)}`;
   let resolveShared;
@@ -108,7 +116,7 @@ test("registerInFlight + coalesceInFlight: N concurrent callers share one promis
   }
 });
 // ── 4. No unhandled rejections ────────────────────────────────────────────────
-test("no unhandled rejections during concurrent operations", async () => {
+await test("no unhandled rejections during concurrent operations", async () => {
   let unhandled = 0;
   const handler = () => { unhandled++; };
   process.on("unhandledRejection", handler);

@@ -2,21 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { mapA11yViolations } from "../src/pipeline/crawlBrowser.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅  ${name}`);
-    passed += 1;
-  } catch (err) {
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-    failed += 1;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 console.log("\n♿ Accessibility migration");
 
@@ -106,6 +97,4 @@ test("picks the first WCAG-shaped tag and ignores other tags", () => {
   assert.equal(out[2].wcagCriterion, "WCAG412");
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+summary("accessibility-migration");

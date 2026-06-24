@@ -53,20 +53,11 @@ function resetDb() {
   db.exec("DELETE FROM projects WHERE id LIKE 'PRJ-RQF-%'");
 }
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log("  ✅  " + name);
-  } catch (err) {
-    failed++;
-    console.log("  ❌  " + name);
-    console.log("      " + err.message);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
 
 resetDb();
 
@@ -349,7 +340,4 @@ test("getByProjectIdPaged also applies the escaped tag filter", () => {
   assert.equal(r.data[0].id, tA_tag_percent.id);
 });
 
-// ── Summary ─────────────────────────────────────────────────────────────────
-
-console.log(`\n  ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+summary("review-queue-filters");

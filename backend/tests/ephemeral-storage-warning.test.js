@@ -16,21 +16,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { warnIfEphemeralStorage } from "../src/utils/ephemeralStorage.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.stack || err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 /**
  * Create a fresh temp directory for an isolated DB path. Caller is responsible
@@ -155,7 +146,9 @@ test("marker write failure is swallowed (best-effort) and warning still fires", 
   // marker write fails. POSIX-only — skip on Windows.
   if (process.platform === "win32") {
     console.log("  ⏭   skipped on win32");
-    passed += 1;
+    // Returning without throwing → the runner counts this as a pass.
+    // Pre-migration this incremented `passed` directly; the shared
+    // runner does that itself once the test body resolves.
     return;
   }
   const { dir, cleanup } = makeTempDbDir();
@@ -179,12 +172,4 @@ test("marker write failure is swallowed (best-effort) and warning still fires", 
   }
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  Ephemeral-storage warning tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 Ephemeral-storage warning tests passed");
+summary("ephemeral-storage-warning");

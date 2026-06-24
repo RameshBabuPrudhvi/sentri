@@ -103,7 +103,16 @@ function installCountingAdapter({ delayMs = 0 } = {}) {
 // ── 1. Recent-result debounce ─────────────────────────────────────────────────
 console.log("\n🧪 probe debounce — recent-result skip");
 
-test("second non-force probe within debounce window skips network call", async () => {
+// Stage-2 follow-up: every `test(...)` below is `await`-ed because these
+// tests share module-global state (the in-flight probe Map + the global
+// adapter stub installed via `_setProtocolAdapterForTests`). Bare top-level
+// registrations let test N+1's adapter swap race test N's mid-flight
+// probe — symptoms include "got 6 invocations" (multiple tests' adapter
+// stubs counted into one invocation tally) and "1 !== 2" (force: true
+// observed an in-flight probe from a SIBLING test). Awaiting each
+// registration restores the sequential isolation the pre-migration
+// runner provided.
+await test("second non-force probe within debounce window skips network call", async () => {
   providerRouteRepo._resetProbeDebounceForTests();
   const { wsId } = seedWorkspace();
   const row = insertRoute(wsId);
@@ -126,7 +135,7 @@ test("second non-force probe within debounce window skips network call", async (
 // ── 2. force: true bypasses the debounce ──────────────────────────────────────
 console.log("\n🧪 probe debounce — force bypass");
 
-test("force: true issues a fresh probe even within the debounce window", async () => {
+await test("force: true issues a fresh probe even within the debounce window", async () => {
   providerRouteRepo._resetProbeDebounceForTests();
   const { wsId } = seedWorkspace();
   const row = insertRoute(wsId);
@@ -147,7 +156,7 @@ test("force: true issues a fresh probe even within the debounce window", async (
 // ── 3. In-flight coalescing ───────────────────────────────────────────────────
 console.log("\n🧪 probe debounce — in-flight coalescing");
 
-test("two concurrent non-force probes share one adapter invocation", async () => {
+await test("two concurrent non-force probes share one adapter invocation", async () => {
   providerRouteRepo._resetProbeDebounceForTests();
   const { wsId } = seedWorkspace();
   const row = insertRoute(wsId);
@@ -159,8 +168,13 @@ test("two concurrent non-force probes share one adapter invocation", async () =>
       providerRouteRepo.probeAndPersist(wsId, row.id),
       providerRouteRepo.probeAndPersist(wsId, row.id),
     ]);
-    assert.equal(stub.calls.length, 1,
-      `concurrent probes should coalesce; got ${stub.calls.length} adapter calls`);
+    // Each capabilityProbe issues 2 adapter calls per probe (reachability
+    // + jsonMode); see capability-probe.test.js for the contract pin.
+    // Coalescing of 2 callers should therefore yield 2 stub calls total
+    // (1 probe × 2 adapter calls), NOT 4 (which would mean both callers
+    // probed independently).
+    assert.equal(stub.calls.length, 2,
+      `concurrent probes should coalesce into 1 probe (=2 adapter calls); got ${stub.calls.length}`);
     assert.ok(a && b && a.id === b.id, "both callers should receive a route row");
   } finally {
     stub.restore();
@@ -170,7 +184,7 @@ test("two concurrent non-force probes share one adapter invocation", async () =>
 // ── 4. force bypasses inflight reuse (Bug 2 — rotate-key gate) ───────────────
 console.log("\n🧪 probe debounce — force skips inflight reuse");
 
-test("force: true does NOT ride an in-flight non-force probe (rotate-key gate)", async () => {
+await test("force: true does NOT ride an in-flight non-force probe (rotate-key gate)", async () => {
   providerRouteRepo._resetProbeDebounceForTests();
   const { wsId } = seedWorkspace();
   const row = insertRoute(wsId);
@@ -187,8 +201,12 @@ test("force: true does NOT ride an in-flight non-force probe (rotate-key gate)",
       new Promise((r) => setTimeout(r, 5))
         .then(() => providerRouteRepo.probeAndPersist(wsId, row.id, { force: true })),
     ]);
-    assert.equal(stub.calls.length, 2,
-      `force: true must skip inflight reuse; got ${stub.calls.length} adapter calls (expected 2)`);
+    // Each capabilityProbe issues 2 adapter calls per probe (reachability
+    // + jsonMode); see capability-probe.test.js. Two probes (first
+    // non-force + second force) = 4 adapter calls total. If the force
+    // probe had ridden on the inflight non-force one, we'd see only 2.
+    assert.equal(stub.calls.length, 4,
+      `force: true must skip inflight reuse; got ${stub.calls.length} adapter calls (expected 4 = 2 probes × 2 calls)`);
   } finally {
     stub.restore();
   }
@@ -197,7 +215,7 @@ test("force: true does NOT ride an in-flight non-force probe (rotate-key gate)",
 // ── 5. Cleanup: probeInflight cleared on rejection ────────────────────────────
 console.log("\n🧪 probe debounce — inflight cleanup on rejection");
 
-test("inflight entry is cleared even when the underlying probe rejects", async () => {
+await test("inflight entry is cleared even when the underlying probe rejects", async () => {
   providerRouteRepo._resetProbeDebounceForTests();
   const { wsId } = seedWorkspace();
   const row = insertRoute(wsId);
@@ -223,8 +241,13 @@ test("inflight entry is cleared even when the underlying probe rejects", async (
     // had leaked the prior (rejected/resolved) promise, this would
     // either reuse the stale result or never resolve.
     await providerRouteRepo.probeAndPersist(wsId, row.id, { force: true });
-    assert.equal(invocations, 2,
-      `inflight Map must clear on completion; got ${invocations} invocations`);
+    // Expected invocation count: 3 = first probe's 1 (reachability throws →
+    // jsonMode probe skipped per capability-probe.js contract) + second
+    // force probe's 2 (reachability succeeds + jsonMode probe runs). If
+    // the inflight Map had leaked the first promise, the force probe
+    // would reuse it and the count would stay at 1 instead.
+    assert.equal(invocations, 3,
+      `inflight Map must clear on completion; got ${invocations} invocations (expected 3 = 1 fail + 2 success)`);
   } finally {
     _setProtocolAdapterForTests(null);
   }

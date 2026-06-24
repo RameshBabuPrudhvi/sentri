@@ -283,7 +283,7 @@
 /* ── DS-001 (audit) — Inline-style migration ──────────────────────────────────
    The classes below replace every inline `style={{}}` block in TestLab.jsx
    except for data-driven values (avatar HSL hues, progress-bar widths) which
-   stay inline per AGENT.md §127. Grouped by JSX location for traceability. */
+   stay inline per AGENTS.md §127. Grouped by JSX location for traceability. */
 
 /* Topbar brand cluster — leftmost group with Atom icon + label + tagline. */
 .tl-topbar__brand {

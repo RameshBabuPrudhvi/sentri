@@ -733,7 +733,7 @@ export default function AuditLog() {
       })
       .catch((err) => {
         if (cancelled) return;
-        // AGENT.md: surface the user-facing message; the backend wraps 5xx
+        // AGENTS.md: surface the user-facing message; the backend wraps 5xx
         // errors with stable codes (AUDIT_READ_FAILED) the UI could branch
         // on later, but the message field is already sanitised.
         setError(err.message || "Failed to load audit log");

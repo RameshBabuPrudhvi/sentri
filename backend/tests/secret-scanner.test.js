@@ -1,21 +1,15 @@
 import assert from "node:assert/strict";
 import { scanForSecrets } from "../src/pipeline/secretScanner.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`❌ ${name}`);
-    console.error(err.message);
-    failed++;
-    process.exitCode = 1;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js` so failures surface with
+// full stack traces, per-test timing, and the `TEST_FILTER` / `TEST_BAIL` /
+// `TEST_VERBOSE` debug knobs apply uniformly across the backend test suite.
+// No behavioural change for the test bodies — `test(...)` keeps the same
+// signature, and `summary()` drains pending test promises so the existing
+// bare-top-level call pattern (no `await`, no `main()` wrapper) still works.
+const { test, summary } = createTestRunner();
 
 test("detects AWS access keys", () => {
   const code = "const key = 'AKIA1234567890ABCDEF';";
@@ -41,11 +35,4 @@ test("clean code has no findings", () => {
   assert.deepEqual(scanForSecrets(code), []);
 });
 
-console.log(`\n${"─".repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);
-if (failed > 0) {
-  console.log(`\n⚠️  ${failed} test(s) failed`);
-  process.exit(1);
-} else {
-  console.log(`\n🎉 All secret-scanner tests passed!`);
-}
+summary("secret-scanner");

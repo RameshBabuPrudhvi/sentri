@@ -87,7 +87,7 @@ export function summarizeCoverageForTest(jsCoverage = [], { sutOrigin } = {}) {
 /**
  * Aggregate per-test V8 coverage into a single run summary.
  *
- * AGENT.md bans TS-style JSDoc (`prop?: type`, fat-arrow type expressions
+ * AGENTS.md bans TS-style JSDoc (`prop?: type`, fat-arrow type expressions
  * inside `{}`). The resolver shape is documented in prose below rather
  * than inlined as a structural JSDoc type — `jsdoc` chokes on the
  * embedded fat-arrow signatures, fails the `Backend — Docs` CI step, and

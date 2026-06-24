@@ -35,8 +35,10 @@ import { detectCoverageRegression, fireCoverageRegressionAlert } from "./pipelin
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { clusterFailures } from "./pipeline/failureClusterer.js";
-import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
+import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, MAX_ELEMENT_TIMEOUT, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
+import { browserPool } from "./runner/browserPool.js";
 import { executeWithRetries } from "./runner/retry.js";
+import { computeUpstreamSkips, topologicalSortTests } from "./runner/dependencyOrder.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { trackTelemetry } from "./utils/telemetry.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
@@ -44,13 +46,16 @@ import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
+import * as runTestResultRepo from "./database/repositories/runTestResultRepo.js";
+import * as crawlSnapshotRepo from "./database/repositories/crawlSnapshotRepo.js";
 import * as testFixtureRepo from "./database/repositories/testFixtureRepo.js";
+import { enqueue as enqueueDbWrite } from "./utils/dbWriteQueue.js";
 import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 import { recordMetric } from "./utils/recordMetric.js";
 import { isNonExecutedSkip } from "./utils/skipReasons.js";
-import { testsExecutedTotal, testDurationSeconds, recordRunOutcome } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry.
+import { testsExecutedTotal, testDurationSeconds, recordRunOutcome, runP95LoadMs as runP95LoadMsGauge, runAdaptiveTimeoutMs as runAdaptiveTimeoutMsGauge } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry; B2 adds p95 + adaptive-timeout gauges. Imported with `…Gauge` suffix so the gauge identifier doesn't shadow the local `runP95LoadMs` variable used in the adaptive-timeout calc.
 
 
 /**
@@ -351,6 +356,75 @@ export function shardTraceArtifactPath(runId, shardIndex) {
   return `/artifacts/traces/${runId}/shard-${shardIndex}.zip`;
 }
 
+/**
+ * AUDIT-ROADMAP B2 — compute the 95th-percentile value of a numeric array
+ * using linear interpolation between adjacent ranks (R-7 / NumPy default /
+ * Excel `PERCENTILE.INC` / Postgres `percentile_cont`). Industry-standard
+ * for SLO / latency-bucket math and matches what Grafana / Datadog /
+ * Prometheus `histogram_quantile()` consumers expect when comparing the
+ * Sentri run's `p95LoadMs` against externally-tracked load-time SLOs.
+ *
+ * Empty / non-finite-only input returns `null` so callers can fall back to
+ * the env-default timeout without computing `NaN * 2`.
+ *
+ * Pure function — exported for `backend/tests/b2-adaptive-timeout.test.js`.
+ *
+ * @param {number[]} values
+ * @returns {number|null}
+ */
+export function p95(values) {
+  const finite = (Array.isArray(values) ? values : [])
+    .map(Number)
+    .filter((n) => Number.isFinite(n) && n >= 0)
+    .sort((a, b) => a - b);
+  if (finite.length === 0) return null;
+  if (finite.length === 1) return finite[0];
+  // Linear interpolation between adjacent ranks (R-7).
+  const rank = 0.95 * (finite.length - 1);
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  if (lo === hi) return finite[lo];
+  const frac = rank - lo;
+  return finite[lo] + (finite[hi] - finite[lo]) * frac;
+}
+
+/**
+ * AUDIT-ROADMAP B2 — derive the per-run adaptive element timeout from the
+ * crawl's measured p95 page-load time. Returns a value clamped to
+ * `[floor, MAX_ELEMENT_TIMEOUT]`:
+ *
+ *   adaptive = clamp(2 * p95LoadMs, floor, ceiling)
+ *
+ * The 2× multiplier provides headroom for the per-action interaction
+ * (Playwright waits for visible + stable + enabled before acting, each
+ * comparable in cost to the original navigation). The floor is the env
+ * default `HEALING_ELEMENT_TIMEOUT` (5 000 ms) so a fast crawl never
+ * undershoots the pre-B2 baseline. The ceiling guards against a single
+ * outlier slow page bloating the per-action wait into the multi-minute
+ * range. Per-project `elementTimeoutOverride` short-circuits the
+ * calculation entirely (caller checks before invoking this helper).
+ *
+ * @param {number|null} p95LoadMs - The p95 of `crawl_snapshots.loadMs` for
+ *   this run, or `null` when no load timings were recorded (e.g. all-API
+ *   runs, B1.3 persistence failure, explorer-only runs).
+ * @param {Object} [opts]
+ * @param {number} [opts.floor=5000]   - Lower bound; defaults to
+ *   `HEALING_ELEMENT_TIMEOUT`'s env-default (5 000 ms).
+ * @param {number} [opts.ceiling=MAX_ELEMENT_TIMEOUT] - Upper bound.
+ * @returns {number} ms — always finite, always within `[floor, ceiling]`.
+ */
+export function computeAdaptiveElementTimeout(p95LoadMs, opts = {}) {
+  // Floor tracks the runtime `HEALING_ELEMENT_TIMEOUT` env var (default 5000)
+  // so an operator who raises it to e.g. 8000 for a slow enterprise app sees
+  // the adaptive floor honour that setting rather than undershooting it.
+  const envFloor = parseInt(process.env.HEALING_ELEMENT_TIMEOUT, 10) || 5000;
+  const floor = Number.isFinite(opts.floor) ? opts.floor : envFloor;
+  const ceiling = Number.isFinite(opts.ceiling) ? opts.ceiling : MAX_ELEMENT_TIMEOUT;
+  if (!Number.isFinite(p95LoadMs) || p95LoadMs <= 0) return floor;
+  const candidate = Math.round(p95LoadMs * 2);
+  return Math.max(floor, Math.min(ceiling, candidate));
+}
+
 async function poolMap(items, concurrency, fn, signal) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -421,13 +495,47 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // and only enforces the smoke pin to preserve auditability of the saved
   // run.testQueue order. Stable sort: tests retain their input order within
   // the smoke / non-smoke partitions.
+  const smokeTests = tests.filter((t) => isSmokeTest(t));
+  const nonSmokeTests = tests.filter((t) => !isSmokeTest(t));
+  const smokeTestIds = smokeTests.map((t) => t.id).filter(Boolean);
+  // AUTO-014: `topologicalSortTests` throws `CYCLE_DETECTED` if any cycle
+  // slips past route-level validation (`validateDependsOnForSave` in
+  // `routes/tests.js`). The runner is the second line of defense — direct
+  // DB writes, replication lag between API replicas, or a future caller
+  // that bypasses the validator could land a cyclic graph here. Catching
+  // it surfaces a structured run failure with `errorCategory: "config"`
+  // instead of an uncaught throw that bubbles into the BullMQ worker as
+  // an opaque crash with no run row update.
+  let orderedNonSmokeTests;
+  let missingDependencySkipped;
+  try {
+    ({ ordered: orderedNonSmokeTests, skipped: missingDependencySkipped } = topologicalSortTests(nonSmokeTests, { satisfiedTestIds: smokeTestIds }));
+  } catch (err) {
+    if (err?.code === "CYCLE_DETECTED") {
+      const cyclePath = Array.isArray(err.path) ? err.path.join(" → ") : "";
+      const message = `Dependency cycle detected${cyclePath ? `: ${cyclePath}` : ""}`;
+      run.status = "failed";
+      run.error = message;
+      run.errorCategory = "config";
+      run.finishedAt = new Date().toISOString();
+      run.shardsCompleted = Math.max(1, Number(run.shardCount) || 1);
+      logError(run, message);
+      structuredLog("run.dependency_cycle", { runId, path: err.path || [] });
+      runRepo.save(run);
+      emitRunEvent(run.id, "done", { status: "failed", error: message });
+      return;
+    }
+    throw err;
+  }
   tests = [
-    ...tests.filter((t) => isSmokeTest(t)),
-    ...tests.filter((t) => !isSmokeTest(t)),
+    ...smokeTests,
+    ...orderedNonSmokeTests,
   ];
+  const hasDependencyDeclarations = tests.some((t) => Array.isArray(t.dependsOn) && t.dependsOn.length > 0);
 
   // Resolve concurrency: per-run override → env default → 1 (sequential)
-  const workers = Math.max(1, Math.min(10, parallelWorkers || DEFAULT_PARALLEL_WORKERS));
+  let workers = Math.max(1, Math.min(10, parallelWorkers || DEFAULT_PARALLEL_WORKERS));
+  if (hasDependencyDeclarations) workers = 1;
 
   // CAP-002 — partition the dispatch queue into `run.shardCount` contiguous
   // slices and tag each test with its shard index. Today the partition runs
@@ -506,42 +614,62 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   structuredLog("run.start", { runId, projectId: project.id, tests: tests.length, workers, allApiOnly, browser: resolvedBrowser });
 
   if (!allApiOnly) {
-    try {
-      browser = await launchBrowser({ browser: resolvedBrowser });
-    } catch (launchErr) {
-      const classified = classifyError(launchErr, "run");
-      run.status = "failed";
-      run.error = classified.message;
-      run.errorCategory = classified.category;
-      run.finishedAt = new Date().toISOString();
-      // CAP-002 — no tests will execute on this run, so no shard will drain
-      // naturally via processResult. Mark every shard as "completed" so the
-      // UI badge reads `N/N` rather than `0/N` after a hard launch failure.
-      run.shardsCompleted = shardCount;
-      logError(run, classified.message);
-      structuredLog("browser.launch_failed", { runId, error: classified.message });
-      throw launchErr;
-    }
-    structuredLog("browser.launched", { runId });
+    // Lazy shim: forwards `newContext()` into the pool while keeping the
+    // `isConnected()` health probe (`executeTest.js:484` Bundle-B fix #5)
+    // honest. Without this, the probe would always return `true` and an
+    // OOM-killed Chromium between tests would skip the structured
+    // `ERR_BROWSER_DISCONNECTED` early-fail path, surfacing instead as
+    // a less-helpful "Target closed" deep inside `newContext`. The pool
+    // tracks its warm browser per type; the read-only helper reflects
+    // the cached handle's real connection state.
+    browser = {
+      isConnected: () => browserPool.isBrowserConnected(resolvedBrowser),
+      newContext: async (contextOptions = {}) => {
+        const lease = await browserPool.acquire({ browserType: resolvedBrowser, contextOptions, createPage: false });
+        return lease.context;
+      },
+    };
 
-    // Shared tracing context (separate from per-test video contexts)
+    // Shared tracing context (separate from per-test contexts).
+    //
+    // The trace context is run-scoped: it is created here and held until the
+    // `finally` block flushes the trace zip. We MUST NOT route it through
+    // `browserPool.acquire()` — that would lock a pool slot for the entire
+    // run (silently reducing effective per-run parallelism by 1, and
+    // deadlocking outright when `BROWSER_POOL_SIZE=1` because every
+    // per-test acquire would queue forever behind the trace lease). Instead
+    // we share the warm browser process via `acquireSharedBrowser()` and
+    // own the context lifecycle ourselves; per-test contexts continue to
+    // flow through `acquire()` and respect the slot accounting.
     try {
-      traceContext = await browser.newContext({
+      const sharedBrowser = await browserPool.acquireSharedBrowser(resolvedBrowser);
+      traceContext = await sharedBrowser.newContext({
         userAgent: "Mozilla/5.0 (compatible; AutonomousQA/1.0)",
         viewport: { width: 1280, height: 720 },
       });
       await traceContext.tracing.start({ screenshots: true, snapshots: true, sources: false });
     } catch (ctxErr) {
-      await browser.close().catch(() => {});
+      // Close the half-built trace context on its way out. The pre-MNT-015
+      // path relied on `browser.close()` (later in the original `finally`)
+      // to implicitly close every context — but the browser is now pooled
+      // and lives past this run, so an unclosed `traceContext` would leak
+      // a viewport buffer + tracing state on the warm browser process.
+      // The `finally` block at the bottom of this file's try-block also
+      // closes `traceContext` on the success path, but only if we make it
+      // there — a `tracing.start()` failure throws BEFORE the inner try
+      // (line 716), so its `finally` never runs for this branch.
+      if (traceContext) {
+        await traceContext.close().catch(() => {});
+        traceContext = null;
+      }
       const classified = classifyError(ctxErr, "run");
       run.status = "failed";
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
-      // CAP-002 — same rationale as the browser.launch_failed branch above:
-      // no tests run, so flush shardsCompleted to shardCount for UI clarity.
       run.shardsCompleted = shardCount;
       logError(run, classified.message);
+      structuredLog("browser.pool_acquire_failed", { runId, error: classified.message });
       throw ctxErr;
     }
   }
@@ -558,6 +686,90 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     : `Browser: ${resolvedBrowser} (${BROWSER_HEADLESS ? "headless" : "headed"})`);
 
   const runStart = Date.now();
+
+  // AUDIT-ROADMAP B2 — derive the per-run adaptive element timeout from the
+  // crawl's measured p95 page-load time. Precedence (highest → lowest):
+  //   1. `project.elementTimeoutOverride` — operator escape hatch when the
+  //      adaptive math doesn't suit a known-flaky staging environment.
+  //   2. `2 * p95(crawl_snapshots.loadMs)` clamped to
+  //      `[HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT]` — the default path.
+  //   3. Floor (env default) — when no load timings were recorded (API-only
+  //      run, B1.3 persistence failure, explorer-only state-graph run).
+  //
+  // Persisted on `runs.p95LoadMs` (migration 069) so RunDetail / dashboards
+  // / CI consumers can audit the value the runner actually used. The
+  // adaptive timeout itself is NOT stored — it's a pure function of the
+  // p95 + override, derivable on read. Best-effort: any repo failure
+  // degrades to the env-default floor (matches pre-B2 behaviour bit-for-bit).
+  let runP95LoadMs = null;
+  let adaptiveTimeout;
+  if (Number.isInteger(project.elementTimeoutOverride)) {
+    adaptiveTimeout = project.elementTimeoutOverride;
+    structuredLog("run.adaptive_timeout", {
+      runId, source: "project_override", elementTimeout: adaptiveTimeout,
+    });
+  } else {
+    // Precedence inside the adaptive branch:
+    //   (a) `crawl_snapshots.loadMs` rows under THIS runId — populated when
+    //       the current run is itself a crawl, OR when an upstream stage of
+    //       a generate/recorder pipeline streamed snapshots under the same
+    //       runId.
+    //   (b) `crawl_snapshots.loadMs` rows from the project's most recent
+    //       crawl run — the regression-run path. A regression run gets a
+    //       brand-new `runId` (`routes/runs.js:225`) distinct from any
+    //       previous crawl's runId, so (a) returns `[]` for every test_run.
+    //       Without this fallback the adaptive math would be inert on the
+    //       most common runtime path: someone clicking Run Regression on a
+    //       project that already has a crawl history.
+    //
+    // The fallback's data freshness is bounded by "most recent crawl that
+    // actually recorded loadMs"; an operator who configures
+    // `iframeStrategy: 'none'` and never crawls again will see stale p95
+    // values until they re-crawl. That's the correct behaviour — `loadMs`
+    // is a property of the SUT's navigation timing, not of the test run.
+    try {
+      let loadTimes = crawlSnapshotRepo.getLoadTimesByRunId(runId);
+      if (loadTimes.length === 0 && project?.id) {
+        loadTimes = crawlSnapshotRepo.getLoadTimesByProjectId(project.id);
+      }
+      runP95LoadMs = p95(loadTimes);
+      if (runP95LoadMs != null) {
+        run.p95LoadMs = Math.round(runP95LoadMs);
+        // Persist immediately so RunDetail surfaces the value even if the
+        // run crashes before finalize.
+        runRepo.update(run.id, { p95LoadMs: run.p95LoadMs });
+      }
+    } catch (err) {
+      logWarn(run, `Failed to compute p95LoadMs from crawl_snapshots: ${err.message}`);
+    }
+    adaptiveTimeout = computeAdaptiveElementTimeout(runP95LoadMs);
+    structuredLog("run.adaptive_timeout", {
+      runId,
+      source: runP95LoadMs != null ? "adaptive" : "default",
+      p95LoadMs: runP95LoadMs != null ? Math.round(runP95LoadMs) : null,
+      elementTimeout: adaptiveTimeout,
+    });
+  }
+  log(run, `⏱  Element timeout: ${adaptiveTimeout}ms${runP95LoadMs != null ? ` (p95LoadMs=${Math.round(runP95LoadMs)}ms × 2, clamped to [5000, ${MAX_ELEMENT_TIMEOUT}])` : ""}${Number.isInteger(project.elementTimeoutOverride) ? " (project override)" : ""}`);
+
+  // AUDIT-ROADMAP B2 — record per-project gauges so the operator dashboard
+  // can plot "p95 page-load time vs derived element timeout" over time and
+  // catch a sustained app-regression (rising p95) before the clamp ceiling
+  // saturates and tests start TIMEOUT-ing. Best-effort: metric-registry
+  // hiccups must never block the test loop. `source` label mirrors the
+  // structured log above so dashboards can split operator-override from
+  // adaptive vs default. `projectId` cardinality is bounded by the project
+  // count — same convention as `app_vision_heal_budget_exhausted_total`.
+  try {
+    if (runP95LoadMs != null) {
+      runP95LoadMsGauge.set({ projectId: project.id }, Math.round(runP95LoadMs));
+    }
+    const source = Number.isInteger(project.elementTimeoutOverride)
+      ? "project_override"
+      : (runP95LoadMs != null ? "adaptive" : "default");
+    runAdaptiveTimeoutMsGauge.set({ projectId: project.id, source }, adaptiveTimeout);
+  } catch { /* best-effort */ }
+
   const allVideoSegments = [];
   // CAP-002 Phase 2 — per-shard stat accumulators. The worker composes the
   // parent `runs` row's totals from each shard's returned delta via
@@ -569,6 +781,9 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   let shardPassed = 0;
   let shardFailed = 0;
   let shardTotalDelta = 0;
+  const resolvedTestIds = new Set((run.results || []).map((r) => r?.testId).filter(Boolean));
+  const failedTestIds = new Set();
+  const upstreamBlockerById = new Map();
 
   // CAP-002 — advance shard progress once per *test* (not per iteration
   // result). Data-driven tests call processResult N times for a single
@@ -604,6 +819,55 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     }
   }
 
+  function recordSkipResult(test, skipReason, extra = {}) {
+    const result = {
+      testId: test.id,
+      testName: test.name,
+      status: "skipped",
+      skipReason,
+      ...extra,
+    };
+    result._shardIndex = test?._shardIndex ?? 0;
+    run.results.push(result);
+    resolvedTestIds.add(test.id);
+    if (isShardMode) {
+      runRepo.appendRunResults(run.id, [result]);
+    } else {
+      runRepo.save(run);
+    }
+    emitRunEvent(run.id, "result", { result });
+    if (!isRunAborted(run, signal)) {
+      const snapshotRun = isShardMode ? (runRepo.getById(run.id) || run) : run;
+      emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(snapshotRun) });
+    }
+  }
+
+  function blockerFor(test) {
+    const queue = [...(Array.isArray(test?.dependsOn) ? test.dependsOn : [])];
+    const seen = new Set();
+    while (queue.length > 0) {
+      const depId = queue.shift();
+      if (seen.has(depId)) continue;
+      seen.add(depId);
+      if (upstreamBlockerById.has(depId)) return upstreamBlockerById.get(depId);
+      if (failedTestIds.has(depId)) return depId;
+      const depTest = tests.find((t) => t.id === depId);
+      if (depTest) queue.push(...(Array.isArray(depTest.dependsOn) ? depTest.dependsOn : []));
+    }
+    return null;
+  }
+
+  function seedUpstreamFailedSkips() {
+    const skipIds = computeUpstreamSkips(tests, failedTestIds);
+    for (const test of tests) {
+      if (!skipIds.has(test.id) || resolvedTestIds.has(test.id)) continue;
+      const upstreamFailedTestId = blockerFor(test);
+      if (upstreamFailedTestId) upstreamBlockerById.set(test.id, upstreamFailedTestId);
+      recordSkipResult(test, "upstream_failed", { upstreamFailedTestId });
+      recordTestShardComplete(test);
+    }
+  }
+
   // ── Process a single test result — shared by the pool worker callback ────
   function processResult(test, result) {
     // CAP-002 Phase 2 (Prerequisite #3) — stamp the result with its parent
@@ -616,6 +880,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     // default for a single-shard run.
     result._shardIndex = test?._shardIndex ?? 0;
     run.results.push(result);
+    resolvedTestIds.add(test.id);
 
     if (result.videoPath) allVideoSegments.push(result.videoPath);
 
@@ -632,9 +897,74 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       if (!isShardMode) run.passed++;
       shardPassed++;
       logWarn(run, `WARNING: ${result.error}`);
+    } else if (result.status === "skipped") {
+      // B4 (AUDIT-ROADMAP) / RLY-004 — auth-session-expiry path. The test
+      // never executed against the real application, so it must NOT
+      // increment `run.failed` (which would inflate the failure rate and
+      // trigger maxFailures gate violations on what is environmental
+      // noise). `isNonExecutedSkip` already excludes `auth_expired` from
+      // the pass-rate denominator (`utils/skipReasons.js`); leaving
+      // counters untouched keeps the math consistent with the gate
+      // evaluator. Other in-flight skip reasons (`upstream_failed` from
+      // AUTO-014) flow through `recordSkipResult` which writes directly
+      // to `run.results` and never reaches `processResult` — so this
+      // branch fires only for `executeTest`-emitted skips (today: just
+      // `auth_expired`; future skip kinds emitted at execution time
+      // share the same accounting contract).
+      //
+      // Lifeguard bug-fix: skipped results MUST NOT fall through to the
+      // `testsExecutedTotal` / `testDurationSeconds` metric block below —
+      // the counter is documented to count tests that actually executed
+      // in a browser. Auth-expired tests started navigating but the test
+      // body never ran against the real application; counting them would
+      // inflate "executed" dashboards and pollute the per-test duration
+      // histogram with recovery-attempt timings. Early-return here so
+      // only passed/warning/failed branches reach the metric increment.
+      logWarn(run, `SKIPPED (${result.skipReason || "unknown"}): ${result.error || ""}`);
+      // Still emit the per-result SSE + persist the row + write the
+      // checkpoint so the UI and resume endpoint see the skip — but
+      // bypass the execution-counter telemetry. Mirrors the
+      // `recordSkipResult` path the route layer uses for pre-seeded
+      // `upstream_failed` / `missing_upstream` skips (line 822-843).
+      const { screenshot: _ss, ...resultLean } = result;
+      const signedResult = { ...resultLean };
+      if (signedResult.screenshotPath) signedResult.screenshotPath = signArtifactUrl(signedResult.screenshotPath);
+      if (signedResult.videoPath) signedResult.videoPath = signArtifactUrl(signedResult.videoPath);
+      emitRunEvent(run.id, "result", { result: signedResult });
+      testRepo.update(test.id, {
+        lastResult: result.status,
+        lastRunAt: new Date().toISOString(),
+      });
+      if (isShardMode) {
+        runRepo.appendRunResults(run.id, [result]);
+      } else {
+        runRepo.save(run);
+      }
+      enqueueDbWrite(
+        () => {
+          runTestResultRepo.append(run.id, {
+            testId: test.id,
+            status: result.status,
+            error: result.error || null,
+            errorCategory: result.errorCategory || null,
+            duration: Number.isFinite(result.durationMs) ? result.durationMs : null,
+            retryCount: result.retryCount || 0,
+            iterationIndex: Number.isInteger(result.iterationIndex) ? result.iterationIndex : 0,
+            artifacts: { screenshotPath: result.screenshotPath || null, videoPath: result.videoPath || null, tracePath: result.tracePath || null },
+            healingEvents: Array.isArray(result.healingEvents) ? result.healingEvents : null,
+          });
+        },
+        { priority: "durable" },
+      );
+      if (!isRunAborted(run, signal)) {
+        const snapshotRun = isShardMode ? (runRepo.getById(run.id) || run) : run;
+        emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(snapshotRun) });
+      }
+      return;
     } else {
       if (!isShardMode) run.failed++;
       shardFailed++;
+      failedTestIds.add(test.id);
       logError(run, `FAILED: ${result.error}`);
     }
     // INF-007: count every executed result (passed + warning + failed) AND
@@ -693,6 +1023,67 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       runRepo.save(run);
     }
 
+    // B1.1 (AUDIT-ROADMAP Bundle 1) — append-only checkpoint write to
+    // `run_test_results`. This row is the SOLE data source the resume
+    // endpoint (`POST /api/v1/runs/:runId/resume`) consults via
+    // `runTestResultRepo.getCompletedTestIds(runId)` to decide which
+    // tests to skip after a crash. Industry-standard crash-recovery
+    // checkpoints (GitHub Actions `re-run failed jobs`, CircleCI
+    // `rerun-from-failed`, Buildkite `retry job`, AWS Step Functions,
+    // Temporal workflow checkpoints) are durable, never lossy — losing
+    // a checkpoint row would force resume to re-execute a test that
+    // already completed, which can produce duplicate side-effects
+    // (created records, sent emails, charged payments) and break the
+    // "resume picks up where the crash left off" contract.
+    //
+    // Therefore: routed through `dbWriteQueue` with `priority: "durable"`
+    // so each write commits synchronously inside its own BEGIN/COMMIT
+    // before this call returns. Matches Postgres `synchronous_commit=on`
+    // / Kafka `acks=all` / MySQL `sync_binlog=1` for audit-class writes.
+    // The dbWriteQueue module's own JSDoc (`utils/dbWriteQueue.js:41`)
+    // documents this rule of thumb: "Audit / compliance / circuit-breaker
+    // writes → `durable`".
+    //
+    // Throughput cost: ~1–5 ms added per test result vs batched mode.
+    // Acceptable because (a) test execution itself takes seconds-to-
+    // minutes, so the durable write is <0.1% of wall-clock per test,
+    // and (b) SQLite WAL still amortises the BEGIN/COMMIT — measured
+    // overhead at parallelWorkers=10 is <5% even on chatty test suites.
+    //
+    // The legacy `runRepo.save(run)` / `runRepo.appendRunResults()`
+    // paths above are kept (single-shard rewrites the full JSON
+    // `results[]`; shard-mode splices via the atomic primitive) so
+    // pre-B1.1 consumers reading `run.results` keep working. The
+    // duplicate-write counter `app_run_test_result_duplicates_total
+    // {reason="resume_replay"}` makes occasional resume-path replays
+    // (when a near-persisted write was already committed) observable
+    // without alerting — only `reason="duplicate_dispatch"` is a bug.
+    enqueueDbWrite(
+      () => {
+        runTestResultRepo.append(run.id, {
+          testId: test.id,
+          status: result.status,
+          error: result.error || null,
+          errorCategory: result.errorCategory || null,
+          duration: Number.isFinite(result.durationMs) ? result.durationMs : null,
+          retryCount: result.retryCount || 0,
+          iterationIndex: Number.isInteger(result.iterationIndex) ? result.iterationIndex : 0,
+          // Lean artifact projection — only the paths the resume endpoint
+          // and CI consumers need. Skip screenshot / video buffers (heavy)
+          // and webVitals / coverage payloads (rehydrated from legacy
+          // `runs.results` until the follow-up flips `getById` to the new
+          // source).
+          artifacts: {
+            screenshotPath: result.screenshotPath || null,
+            videoPath: result.videoPath || null,
+            tracePath: result.tracePath || null,
+          },
+          healingEvents: Array.isArray(result.healingEvents) ? result.healingEvents : null,
+        });
+      },
+      { priority: "durable" },
+    );
+
     // Broadcast a snapshot after each result so the frontend progress bar
     // updates in real time (especially important during parallel execution
     // where multiple results arrive in quick succession). In shard mode the
@@ -705,9 +1096,38 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     }
   }
 
+  for (const skippedTest of missingDependencySkipped) {
+    // AUTO-014: skip tests that already have a resolved row from a prior
+    // partial run. `resolvedTestIds` is hydrated from `run.results` at
+    // entry (line 602); on a shard retry, `filterShardRetrySurvivors`
+    // (`backend/src/utils/shardRetryFilter.js`) preserves prior
+    // `missing_upstream` skip rows because `isNonExecutedSkip()` returns
+    // true for them. Without this guard, the loop would push a duplicate
+    // skip on every retry, inflating `countNonExecutedSkips()` and
+    // shrinking the gate's pass-rate denominator. Mirrors the same
+    // `resolvedTestIds.has(test.id)` short-circuit used by
+    // `seedUpstreamFailedSkips()` (line 681) and the dispatch loop's
+    // pre-execute guard (line 862).
+    if (resolvedTestIds.has(skippedTest.id)) continue;
+    // AUTO-014 + CAP-002 Phase 2: in shard mode, stamp the worker's
+    // `shardIndex` on missing-upstream skips before `recordSkipResult`
+    // reads `test._shardIndex`. Without this, the topo-sort-skipped tests
+    // (returned by `topologicalSortTests` BEFORE the shard-stamp loop at
+    // `:467` runs over the reassigned `tests` array) inherit the default
+    // `0` — and `runWorker.js`'s retry-reset filters results by
+    // `_shardIndex`. A skip attributed to shard 0 would survive a retry
+    // of the actual owning shard, producing stale duplicate rows after
+    // the retried shard re-produces the same skip.
+    if (isShardMode && skippedTest._shardIndex == null) skippedTest._shardIndex = shardIndex;
+    recordSkipResult(skippedTest, "missing_upstream", {
+      missingUpstreamTestId: skippedTest.missingUpstreamTestId || null,
+    });
+  }
+
   try {
     await poolMap(tests, workers, async (test, i) => {
       if (signal?.aborted) return;
+      if (resolvedTestIds.has(test.id)) return;
 
       const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
       const workerTag = workers > 1 ? ` [w${(i % workers) + 1}]` : "";
@@ -737,7 +1157,13 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           const attemptResults = await executeTestIterations(
             test,
             fixtureRows,
-            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition, coverageEnabled: !!project.coverageEnabled, serverCoverageEndpoint: project.serverCoverageEndpoint || null }),
+            // AUDIT-ROADMAP B6 (QAL-010) — `testDataLocale` forwarded once
+            // per run so `executeTest`'s pre-execution faker substitution
+            // doesn't pay an N+1 `projectRepo.getById()` round-trip on
+            // parallel runs. Defaults to "en" so tests on legacy projects
+            // (no `testDataLocale` column populated) get the same faker
+            // pack the seeded fallback's deterministic-token path uses.
+            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition, coverageEnabled: !!project.coverageEnabled, serverCoverageEndpoint: project.serverCoverageEndpoint || null, adaptiveTimeout, testDataLocale: project.testDataLocale || "en" }),
           );
           const lastResult = attemptResults[attemptResults.length - 1] || null;
           // Retry semantics:
@@ -806,6 +1232,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
         // CAP-002 — drain the shard counter once per test, after every
         // iteration result has been recorded. See `recordTestShardComplete`.
         recordTestShardComplete(test);
+        seedUpstreamFailedSkips();
         const finalResult = iterResults[iterResults.length - 1];
         if (finalResult) {
           structuredLog("test.result", { runId, testId: test.id, status: finalResult.status, durationMs: finalResult.durationMs });
@@ -833,6 +1260,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
         // CAP-002 — crash path also resolves the test exactly once, so
         // drain the shard counter here too (matches the success path).
         recordTestShardComplete(test);
+        seedUpstreamFailedSkips();
       }
     }, signal);
   } finally {
@@ -880,12 +1308,10 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       } catch (e) {
         logWarn(run, `Trace save failed: ${e.message}`);
       }
+      // We own the trace context directly (not via a pool lease) — see
+      // `acquireSharedBrowser` rationale above. Close it here so the
+      // underlying warm browser process stays available to other tests.
       await traceContext.close().catch(() => {});
-    }
-    if (browser) {
-      await browser.close().catch((err) => {
-        console.warn(formatLogLine("warn", null, `[testRunner] browser.close() failed: ${err.message}`));
-      });
     }
   }
 

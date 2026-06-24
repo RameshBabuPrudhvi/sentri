@@ -1,0 +1,29 @@
+-- B3 (AUDIT-ROADMAP Bundle 3) — review-rejection notification cooldown.
+--
+-- Industry-standard pattern: notification dispatchers MUST debounce
+-- channel writes to avoid spam under burst conditions. Without this,
+-- a project that discards 50 tests across 10 runs in 60 seconds fires
+-- 10 Teams / email / webhook notifications, blowing up the operator's
+-- attention budget and burning vendor rate limits.
+--
+-- Mirrors the existing `workspaces.spendAlertLastFiredAt` pattern
+-- (migration 052): ISO 8601 timestamp of the last notification dispatch
+-- per project, paired with the env-tunable
+-- `REVIEW_REJECTION_NOTIFICATION_COOLDOWN_MS` (default 1 hour) gate in
+-- `backend/src/utils/notifications.js#fireReviewRejectionNotifications`.
+--
+-- Per-project (not per-workspace) because review-rejection signal is
+-- inherently project-scoped — different projects in the same workspace
+-- can legitimately have wildly different rejection rates (e.g. a
+-- stable production project vs an experimental staging project on the
+-- same team). Cooldown collisions between projects would suppress
+-- alerts that belong to the OTHER project. Per-project granularity
+-- matches the rest of the B3 surface (`reviewRejectionAlertThreshold`,
+-- `app_review_rejections_total{projectId}`).
+--
+-- Convention: `ALTER TABLE ... ADD COLUMN` is not idempotent in SQLite.
+-- The migration runner (`migrate.js`) tolerates "duplicate column name"
+-- errors so re-running this file is safe on already-migrated DBs.
+-- `schema_migrations` ledger ensures this file runs exactly once.
+
+ALTER TABLE projects ADD COLUMN reviewRejectionAlertLastFiredAt TEXT;

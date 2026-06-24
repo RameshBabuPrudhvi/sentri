@@ -9,7 +9,7 @@ It has two layers:
 1. **Golden E2E Happy Path** (must-pass) — one stitched-together user journey that exercises every core feature end-to-end. If any step fails, **stop the release**.
 2. **Per-feature happy paths + negatives** — targeted checks per area for full coverage.
 
-> ℹ️ Values are grounded in `README.md`, `AGENT.md`, `ROADMAP.md`, `docs/changelog.md`, `backend/src/routes/testFix.js`, `backend/src/pipeline/feedbackLoop.js`, `backend/src/utils/notifications.js`. `TBD` items require engineering confirmation.
+> ℹ️ Values are grounded in `README.md`, `AGENTS.md`, `ROADMAP.md`, `docs/changelog.md`, `backend/src/routes/testFix.js`, `backend/src/pipeline/feedbackLoop.js`, `backend/src/utils/notifications.js`. `TBD` items require engineering confirmation.
 
 ---
 
@@ -243,7 +243,7 @@ Then:
 2. Open `http://localhost:3000`.
 3. Record exact build / commit SHA under test (include in every bug report).
 4. Note environment: local / staging / preview URL.
-5. Dev-only seed endpoint is available when `NODE_ENV !== production` (see `AGENT.md`). Use it to pre-populate users/workspaces; otherwise register via UI.
+5. Dev-only seed endpoint is available when `NODE_ENV !== production` (see `AGENTS.md`). Use it to pre-populate users/workspaces; otherwise register via UI.
 
 **Test data to prepare:**
 - Stable crawl target URLs (from `frontend/src/demo.js` and CI):
@@ -657,12 +657,12 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 4. **Mobile device emulation** (`docs/changelog.md` DIF-003) — pass `device` (e.g. `"iPhone 14"`, `"Pixel 7"`) → run uses Playwright device profile (viewport, user agent, touch). Verify dropdown lists curated devices.
 5. **Parallel execution** (`README.md`) — set parallelism 1–10 from UI (or `PARALLEL_WORKERS`). Verify each worker has isolated video/screenshots/network logs; default is 1.
 6. **Live run view** — RunDetail streams logs via SSE, shows per-step screenshots, and exposes **Abort** action mid-run.
-7. **Abort run** → run marked `stopped`; partial results retained; per-test hard timeout is `BROWSER_TEST_TIMEOUT` (default **120 000 ms**, `AGENT.md`).
+7. **Abort run** → run marked `stopped`; partial results retained; per-test hard timeout is `BROWSER_TEST_TIMEOUT` (default **120 000 ms**, `AGENTS.md`).
 8. Re-run failed tests only → only previously-failed tests execute.
 9. **Self-healing** (`README.md`) — break a primary selector, re-run; runtime tries role → label → text → aria-label → title, remembers the winner per element. Confirm subsequent run picks the previously-successful strategy first.
 
 **Negative / edge:**
-- Trigger run while another is in progress → concurrency = `PARALLEL_WORKERS` (default **1**, `AGENT.md`). Extra runs queue; no crash.
+- Trigger run while another is in progress → concurrency = `PARALLEL_WORKERS` (default **1**, `AGENTS.md`). Extra runs queue; no crash.
 - Run test against unreachable target → fails with clear network error, not timeout silence.
 - Long-running / hung test → aborted at `BROWSER_TEST_TIMEOUT` with a clear timeout error.
 - **Flaky test (intermittent failure)** → product-level auto-retry **IS** wired (AUTO-005, PR #2). Each test failure triggers up to `MAX_TEST_RETRIES` retries (default **2**, max 10, set to `0` to disable) before the result is recorded as truly failed. Verify via `result.retryCount` (number of retries actually consumed) and `result.failedAfterRetry` (true only when all attempts failed). A test that fails once then passes shows `retryCount: 1, status: "passed"` — notifications and failure counters fire only on `failedAfterRetry: true` (`backend/src/runner/retry.js`, `backend/src/testRunner.js:229-240`). **Note:** only the FINAL attempt's video / screenshots / trace are preserved on disk — earlier attempts overwrite each other (intentional; see retry.js JSDoc § "Artifact overwrite behaviour"). Self-healing (`safeClick` / `safeFill` selector waterfall) is a separate, lower-level recovery layer — DIF-015b's nth=N disambiguation also reduces flake at recording time.
@@ -775,6 +775,216 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 - Pre-AUTO-003b tests (created before the migration) have `confidenceScore: null` — they never auto-approve regardless of threshold; the Tests page renders them as `📝 Draft` without a score chip.
 - First-time enable preview gracefully degrades: if `getTests()` fails, the panel falls through to a direct save rather than blocking the user (the toast on persist surfaces any save error).
 - Disabling auto-approval (clearing the threshold) does NOT retroactively revoke previously auto-approved tests — those keep their provenance and remain approved. Reviewers who want to clear them must Revoke individually or via bulk restore.
+
+---
+
+### 🪟 iframe + SPA hydration + adaptive timeout (AUDIT-ROADMAP B2)
+
+**Preconditions:** Project exists with `qa_lead` or `admin` access. Settings panels live at `/projects/:id/settings/execution`. Backend behaviour is gated by five per-project columns from migration 069 (`iframeStrategy`, `iframeAllowlist`, `hydrationType`, `hydrationSelector`, `elementTimeoutOverride`) plus one per-run column (`runs.p95LoadMs`). End-to-end coverage is automated at `backend/tests/b2-iframe-crawl.test.js`; this section is the operator-facing manual smoke.
+
+**Surfaces covered:** Settings → Execution section (3 panels), RunDetail element-timeout log line, Prometheus metrics. Backend endpoints validated under the existing `PATCH /api/v1/projects/:id` handler — no new route surface.
+
+**A. iframe enumeration**
+
+1. As User A (admin), open `/projects/:id/settings/execution` → scroll to **iframe enumeration** panel → default radio = **Same-origin (default)**, allowlist textarea disabled and empty.
+2. Pick **Allowlist** → textarea enables → paste two prefixes on separate lines:
+   ```
+   https://js.stripe.com/
+   https://widget.intercom.io/
+   ```
+   Click **Save** → green toast `iframe strategy: allowlist (2 entries).`
+3. Run a crawl against a target with a same-origin `<iframe>` (e.g. a local fixture page or staging deploy that embeds an iframe). Watch the run log → `🪟 iframes: N captured (M elements), K skipped (allowlist)` appears once per visited page that contains a matching frame.
+4. Open the generated tests for the iframe-hosting page → at least one test for an iframe-scoped element wraps the locator: `const frame = safeSelectFrame(page, 'https://js.stripe.com/'); await safeClick(frame, 'Submit');` — the prompt rule at `backend/src/pipeline/prompts/intentPrompt.js` + `journeyPrompt.js` injects this rule **only** when iframe elements are present.
+5. Switch strategy to **None** → save → next crawl emits NO `🪟 iframes:` log line; iframe content is invisible to test generation (deliberate opt-out for environments where iframe noise drowns out the main app).
+6. Switch to **All** → save → cross-origin frames (e.g. `https://www.youtube.com/embed/...`) still get attempted but fail with `⚠ Skipping cross-origin iframe: <url>` (browser SecurityError on DOM access; degraded gracefully).
+
+**B. SPA hydration wait**
+
+7. Open the **SPA hydration wait** panel → default radio = **Auto (default)**, selector input disabled.
+8. Crawl a React/Vue/Angular/Next.js target → run log includes a hydration wait between `📄 Visiting` and the snapshot capture. Generated tests target real interactive elements, not skeleton placeholders.
+9. Switch to **Custom** → enter `.app-loading-overlay, [data-app-loading]` in the selector input → save → next crawl waits up to `HYDRATION_WAIT_MS` (env, default 5 000 ms) for that selector to reach `state: "hidden"` before snapshotting. Verify by watching the log for the delay.
+10. Switch to **DOMContentLoaded** → save → snapshots fire at DCL, no hydration wait. Useful when an app has no loading indicator and the auto-mode 5 s timeout was adding latency to every page.
+11. **Negative — selector too tight:** under Custom, enter a selector that never matches (e.g. `.never-exists`) → crawl proceeds normally; the wait times out silently after `HYDRATION_WAIT_MS` and the snapshot is taken regardless (best-effort by design — never blocks the crawl).
+
+**C. Adaptive element timeout**
+
+12. Open the **Element timeout override** panel → default = empty (adaptive mode active).
+13. Trigger a regression run → in the run log find `⏱  Element timeout: <N>ms (p95LoadMs=<P>ms × 2, clamped to [5000, 30000])`. The displayed `p95LoadMs` matches `runs.p95LoadMs` in the DB. The element timeout = `clamp(2 × p95LoadMs, HEALING_ELEMENT_TIMEOUT, MAX_ELEMENT_TIMEOUT)`.
+14. **Fast crawl** (p95 < 2500 ms) → element timeout = 5000 ms (clamps up to the floor).
+15. **Slow crawl** (p95 > 15000 ms) → element timeout = 30000 ms (clamps down to the ceiling).
+16. Set the **Override** to `15000` → save → green toast `Element timeout override set to 15000 ms — adaptive calculation bypassed.` Next run log shows `⏱  Element timeout: 15000ms (project override)`.
+17. Clear the override (empty input) → save → toast `Element timeout override cleared — adaptive calculation re-engaged.` Next run reverts to the `2 × p95LoadMs` formula.
+18. **Negative validation:** enter `100` (below 500 ms floor) → red toast "Element timeout override must be empty or an integer between 500 and 300000 (ms)." No PATCH fires.
+
+**D. Prometheus metrics**
+
+19. Hit `GET /metrics` (with `Authorization: Bearer $METRICS_SCRAPE_KEY`) → verify the four B2 series are present and reflect recent activity:
+    - `app_run_p95_load_ms{projectId="..."}` — last-computed p95 per project (gauge).
+    - `app_run_adaptive_timeout_ms{projectId="...", source="adaptive|project_override|default"}` — last-derived element timeout per project (gauge).
+    - `app_iframe_enumerated_total{strategy, outcome}` — per-strategy / per-outcome iframe enumeration counter. `outcome ∈ {captured, skipped_strategy, skipped_cross_origin, error}`.
+    - `app_spa_hydration_wait_seconds{mode}` — histogram of hydration wall-clock per mode. `mode ∈ {auto, custom, domcontentloaded}`.
+20. Run multiple crawls with different `hydrationType` values across projects → each value appears as its own `mode` label distribution in the histogram.
+
+**E. Permissions + cross-workspace isolation**
+
+21. As User C (`viewer`), open `/projects/:id/settings/execution` → the three B2 panels render in read-only mode (inputs + Save buttons disabled). Direct `PATCH /api/v1/projects/:id` with `{ iframeStrategy: "all" }` from DevTools → **403** (`requireRole("qa_lead")`).
+22. As User D (outsider, no membership in this workspace) → all three panels return **404** (`getByIdInWorkspace` blocks cross-workspace reads).
+
+**Negative / edge:**
+
+- iframe allowlist over 100 entries → red toast "iframe allowlist is capped at 100 entries." No PATCH fires.
+- Hydration selector > 500 chars → red toast "Hydration selector must be ≤ 500 characters."
+- `iframeStrategy` set to an unknown value via raw API call → **400** "iframeStrategy must be one of: same-origin, allowlist, all, none."
+- Run with no crawl history (description-mode generate) → `runs.p95LoadMs` stays NULL, element timeout falls back to `HEALING_ELEMENT_TIMEOUT` (5 000 ms) — the `source` label on the metric reads `default`.
+- Reviewing the iframe-prompt rule: open a generated test for a non-iframe page → the `IFRAME ELEMENTS (AUDIT-ROADMAP B2)` block does NOT appear in the prompt (the rule is conditional on `hasIframeElements`, keeping prompt size lean for the common case). Verified by inspecting `pipelineStats.promptAudit` on a no-iframe run.
+
+---
+
+### 🛡️ Reviewer independence + review-rejection escalation (AUDIT-ROADMAP B3)
+
+**Preconditions:** Workspace with ≥ 2 distinct `provider_routes` rows (e.g. Anthropic + OpenAI). One project with `qa_lead` or `admin` access. Notification settings on the project (Settings → Notifications) with at least one channel — Teams webhook via [webhook.site](https://webhook.site) is the easiest local loop. Backend behaviour gated by migrations 067 (`runs.reviewerCollapsed`, `runs.reviewRejectedTests`) + 070 (`projects.reviewRejectionAlertThreshold`). Automated coverage: `backend/tests/agent-loop-collapse.test.js`, `backend/tests/review-rejection-notification.test.js`, `backend/tests/review-rejection-threshold-routes.test.js`.
+
+**Surfaces covered:** Settings → Agent Roles collapse banner; RunDetail chip + "Tests discarded by review" section; Project Settings → Review escalation threshold panel; FEA-001 notification channels; Prometheus counters + alerts; SOC-2 audit log (`test.review_rejected`).
+
+**A. Reviewer-collapse gate (RLY-003)**
+
+1. As User A (admin), open **Settings → Agent Roles**. Assign DISTINCT routes to `author` and `reviewer`. No warning banner appears.
+2. Re-assign `reviewer` to the SAME route as `author`. Page renders an amber `role="alert"` banner explaining the collapse + fix path.
+3. Trigger a crawl. Run log shows `⚠ Reviewer collapsed — author + reviewer share provider route <routeId>; this run will use heuristic-only review.` RunDetail header renders amber chip `⚠ Reviewer collapsed — heuristic-only review`.
+4. **DB persistence** — `SELECT reviewerCollapsed FROM runs WHERE id = ?` returns `1`. `agent_events` contains `kind: "reviewer_collapsed"` row.
+5. **Prometheus** — `app_agent_reviewer_collapsed_total{projectId="<id>"}` increments.
+6. **Restore independent review** — set distinct routes → next run has `reviewerCollapsed = 0`, chip suppressed.
+
+**B. Per-test review-rejection escalation (QAL-004)**
+
+7. Open **Project Settings → Review**. Threshold input (default `0`) + summary `Currently: alert on any review rejection.`
+8. Drive a regression that triggers `ReviewRejection` (e.g. test with `expect(page.locator('#NEVER-EXISTS')).toBeVisible()`).
+9. **RunDetail** — **Tests discarded by review (N)** card lists each rejected test with failure category, rounds completed, TestDetail deep link.
+10. **Audit Log** filtered to `test.review_rejected` shows one row per discarded test, each carrying `meta.failureCategory`, `meta.roundsCompleted`, `meta.reviewerCollapsed`.
+11. **FEA-001 notifications fire** within ~1 min on Teams (Adaptive Card with FactSet + first 10 rejected tests), email (HTML with first 20 + TestDetail deep links), and webhook (`event: "test.review_rejected"`, full rejection list).
+12. **Prometheus** — `app_review_rejections_total{projectId="<id>"}` increments per discarded test.
+
+**C. Threshold gate**
+
+13. Set threshold to `5` → run that rejects 3 tests → audit/RunDetail/Prometheus populate, **no notification** (below threshold).
+14. Run that rejects 5+ tests → notification fires.
+15. Threshold `-1` → opt-out, no notification regardless of count.
+
+**D. Validation (HTTP 400)**
+
+16. PATCH `-2`, `1001`, `0.5`, `"five"`, `true` → 400.
+17. PATCH `null` → 200 + coerced to `0`.
+18. PATCH `{ reviewRejectionAlertThreshold: 7 }` alone → succeeds (single-field bypass).
+
+**E. Prometheus alerts (`monitoring/prometheus/alerts.yml#sentri-saas-review-quality`)**
+
+19. **`ReviewerCollapseSpike`** — 6+ collapsed runs/hour fires `severity: warning`, runbook → `docs/guide/observability.md#reviewercollapsespike`.
+20. **`ReviewRejectionRateHigh`** — >20% rejection rate over 10 min fires `severity: warning`, runbook → `docs/guide/observability.md#reviewrejectionratehigh`.
+
+**F. Permissions + cross-workspace isolation**
+
+21. `viewer` PATCH threshold → 403.
+22. Outsider PATCH another workspace's threshold → 404; original NOT mutated. Pinned by `backend/tests/review-rejection-threshold-routes.test.js`.
+
+**G. Heuristic reviewer still runs when collapsed**
+
+23. **Contract:** LLM reviewer is short-circuited (saves tokens), heuristic reviewer (`validateTest` + `playwright.dryRun`) is NOT. Quality gates remain enforced even on collapsed runs. Reviewer envelopes are suppressed from the audit trail per spec ("audit trail must reflect that no independent review occurred").
+
+**H. Accessibility (WCAG 2.1)**
+
+24. Threshold `<input>`: `id` + `<label htmlFor>` + `aria-label` + `aria-describedby` + `aria-invalid` on out-of-range.
+25. Summary `<div role="status">` — saves announce without stealing focus (SC 4.1.3).
+26. Collapse banner `role="alert"` — screen readers interrupt to announce (SC 4.1.3).
+
+**Negative / edge:**
+
+- No AI provider → run completes; collapse detection skipped (no workspaceId); `reviewerCollapsed = 0`.
+- Workspace-default-on-both roles → NOT a collapse (both roles fall through to env default).
+- Heuristic reviewer accepts on round 0 → no `test.review_rejected` row.
+- Notification settings disabled → no FEA-001 fires.
+- Webhook unreachable → `Promise.allSettled` swallows the rejection; other channels still receive.
+
+---
+
+### 🔐 Auth session recovery + target-app TOTP (AUDIT-ROADMAP B4)
+
+**Preconditions:** Project with `qa_lead` or `admin` access. A staging SUT you control that (a) has a `/login` page, (b) sets a short-lived session cookie (≤ 5 min idle), and (c) optionally supports TOTP-style 6-digit one-time-codes on a post-password screen. Project credentials are encrypted at rest via `credentialEncryption.js`; the seed never round-trips through the client. Automated coverage at `backend/tests/b4-totp.test.js` (RFC 6238 vectors + AES round-trip) and `backend/tests/b4-auth-recovery.test.js` (redirect detection + skip-reason + classifier).
+
+**Surfaces covered:** `pipeline/autoLogin.js` TOTP auto-fill + `restoreAuthSession`; `runner/executeTest.js` post-goto redirect detection; `routes/projects.js` `POST /:id/credentials/test-totp` preview endpoint; `feedbackLoop.js` `AUTH_EXPIRED` category; `frontend/src/pages/NewProject.jsx` TOTP input + Test button.
+
+**A. Storing a TOTP seed (creation path)**
+
+1. As User A, create a new project. Tick **Authentication** → enter `username` + `password`. The **TOTP secret (optional)** field renders below the password block.
+2. Paste the base32 seed from your target app's authenticator-app QR (`JBSWY3DPEHPK3PXP` is a known-good fixture). Click **Create Project**. Toast `Project created`.
+3. **Verify the seed never round-trips** — DevTools → Network → `GET /api/v1/projects/<id>` after create → response shows `credentials: { _hasAuth: true, _hasTotp: true, usernameSelector: "", … }`. The `totpSecret` field is NOT in the payload.
+4. **Verify AES at rest** — direct DB read (`sqlite3 data/sentri.db "SELECT credentials FROM projects WHERE id = '<id>'"`) → the `totpSecret` field inside the encrypted JSON blob is a long hex/AES-GCM string, NOT the base32 seed.
+
+**B. Editing a project preserves the seed (blank-equals-keep)**
+
+5. Open the project for edit (`/projects/new?edit=<id>`). The TOTP field placeholder reads `•••••• (TOTP configured — leave blank to keep)`.
+6. Rename the project, leave TOTP blank, click **Save Changes** → toast `Project updated`. Re-open edit → `_hasTotp: true` still reflected in the placeholder.
+7. To rotate the seed: paste a new base32 value → save → re-open → placeholder still `••••••` (seed updated; the new value never echoes back).
+8. To clear the seed: send `PATCH /projects/<id>` with body `{ credentials: { totpSecret: null } }` from DevTools → `_hasTotp: false` on the next GET. (UI does not yet expose a "clear TOTP" button — direct API call only.)
+
+**C. Live TOTP preview endpoint (admin-only)**
+
+9. As User A (admin), reopen the project in edit mode → the **Test TOTP** button is visible (only renders when `isEdit && hasExistingTotp`).
+10. Click **Test TOTP** → button flips to `Generating…` → response renders a 6-digit code in monospace + `(30s left)` countdown that decrements once per second.
+11. Open Google Authenticator (or `oathtool --totp -b -d 6 <SEED>`) against the same seed → the code matches Sentri's preview within the ±1 window (60 s of clock skew tolerance).
+12. Let the countdown reach 0 → preview clears automatically. Click **Test TOTP** again → fresh code.
+13. **Audit log** — Audit Log filtered to type `project.credentials.test_totp` shows one row per preview with `actor`, `projectId`, `meta.codeExpiresInSeconds`. The seed itself is NOT in the meta payload.
+14. **Permissions** — as User B (`qa_lead`), the **Test TOTP** button is hidden in the UI; direct `POST /projects/<id>/credentials/test-totp` from DevTools → **403** (admin-gated per `permissions.json`).
+15. **Negative — no seed configured** — call the endpoint against a project with `_hasTotp: false` → **400** `{ code: "TOTP_NOT_CONFIGURED" }`.
+
+**D. Auto-fill at crawl + run time**
+
+16. Configure your staging SUT to challenge with a 6-digit code field after username + password. The field must carry one of: `autocomplete="one-time-code"`, `aria-label*="code"|"otp"|"verification"`, `placeholder*="code"|"otp"|"verification"`, or `name*="otp"|"code"`.
+17. Trigger a crawl on the project → Sentri auto-logs in: fills username, fills password, submits, then **waits up to 3 s for the OTP field**, computes the live code from the stored seed, fills it, submits.
+18. Run log shows the password-submit → OTP-fill sequence implicitly via the page transitions. (No explicit log line per code-fill — by design; the seed and code are never written to logs.)
+19. **Negative — wrong seed** — paste a deliberately-wrong base32 into the TOTP field, save, re-crawl → the target app rejects the code → autoLogin's retry path waits 1.5 s, generates a fresh code (will also be wrong), then returns `{ ok: false, reason: "TOTP rejected after retry — verify the seed matches the target app's enrollment" }`. The crawl marks the project as auth-failed but does NOT crash.
+
+**E. Mid-run session recovery (RLY-004)**
+
+20. With a configured + working SUT, kick off a regression run that takes longer than the SUT's idle-session window. Wait for at least one test to land on a `/login` or `/session-expired` redirect mid-run.
+21. Run log shows `[executeTest] Auth redirect detected after goto <originalUrl> → <loginUrl> — attempting session recovery`. Within ~10 s the run resumes against the original URL.
+22. The affected test result records `status: "passed"` (or `"failed"` on its own merits) — **not** `"failed"` with a misleading `NAVIGATION_FAIL` error.
+23. **Unrecoverable case** — corrupt the project's encryption key mid-run (rotate `CREDENTIAL_SECRET` or `JWT_SECRET` without re-encrypting) → next mid-run expiry triggers `restoreAuthSession()` → returns `{ ok: false, reason: "credentials_decryption_failed" }` → test result records `status: "skipped"`, `skipReason: "auth_expired"`, `error: "auth_session_expired_unrecoverable: …"`.
+24. **Pass-rate denominator** — verify `run.passed / (run.total - skipped-auth-expired)` matches what RunDetail's pass-rate badge displays. The `auth_expired` skip is excluded from the denominator (same accounting as `over_budget` / `upstream_failed`).
+25. **Feedback loop excluded** — open the run's Quality Insights panel → the `auth_session_expired_unrecoverable` rows are NOT in the auto-regenerated-test list. The honest message "session expired" surfaces; the misleading "AI is generating CSS selectors" insight does NOT fire.
+
+**F. Custom auth-redirect patterns (env)**
+
+26. Set `AUTH_REDIRECT_PATTERNS='["/auth/expired","/sso/relogin"]'` in `backend/.env` → restart backend. The two extra regex patterns compile at module load (verify via the absence of a `[autoLogin] Invalid AUTH_REDIRECT_PATTERNS entry` warning).
+27. Crawl a SUT whose expiry redirect lands on `/auth/expired?reason=idle` → recovery fires the same way as the built-in `/login` pattern.
+28. **Negative — malformed env** — set `AUTH_REDIRECT_PATTERNS='not-json'` → restart → backend logs `[autoLogin] AUTH_REDIRECT_PATTERNS is not valid JSON: …` once at startup. Default patterns continue to work; bad env doesn't crash boot.
+
+**G. Proactive session keep-alive ticker (`sessionRefreshIntervalMs`)**
+
+29. As User A, PATCH `/projects/<id>` with body `{ sessionRefreshIntervalMs: 60000 }` (1 min, the minimum) → 200, persisted. Re-read → field round-trips.
+30. **Bounds validation** — `30000` (too low) → **400** `must be null, 0 (disable), or an integer between 60000 (1 min) and 86400000 (24 h).`. `100000000` (too high) → **400**. `null` / `0` → persists as `null` (opt-out — no ticker registered for that project).
+31. **Ticker fires** — kick off a regression run on the project. The ping is dispatched on a **second page in the same BrowserContext** (cookies are shared, but the test page's DOM is untouched), so SUT access logs show one `GET <project.url>` per interval per active test. The cookie's `lastSeenAt` advances even when the test body is otherwise idle (between assertions / waitForTimeouts).
+32. **Ticker does NOT interfere with test actions** — by design, the refresh page is a separate Playwright `Page` opened via `context.newPage()`; the test body's `page` is never navigated by the ticker. Verify by running a chatty test that fills/clicks rapidly during a ticker window — no `SELECTOR_ISSUE` / `NAVIGATION_FAIL` failures appear, and `context.pages().length` returns to 1 between ticks (the refresh page is closed in a `finally` per tick so background tabs don't accumulate). Re-entrance protection: an in-flight refresh (slow target, full 30s timeout) causes the next tick to skip rather than overlap.
+33. **Cleanup on test end** — the ticker is `clearInterval`'d in the per-test `finally` block BEFORE the page closes, so no orphan timer survives across tests. Trigger a 200-test run with the ticker enabled → `process.memoryUsage().heapUsed` should not grow unboundedly across tests.
+34. **`null` (default) preserves pre-B4 behaviour** — projects without `sessionRefreshIntervalMs` configured register NO ticker; the per-test cleanup path is bit-for-bit identical to pre-B4. Verify by comparing a baseline run (no field) against a configured run — `clearInterval` line only fires on the configured run.
+
+**Negative / edge:**
+
+- TOTP secret too short (< 16 chars) → PATCH returns **400** `credentials.totpSecret must be a base32 string (16–128 chars, A-Z + 2-7) or null.`
+- TOTP seed length policy (industry-standard, consumer-side):
+  - **16–25 chars (80–125 bits)** → accepted but flagged. The `project.create` / `project.update` audit row carries `meta.weakTotpSeed = { length, reason: "below_rfc4226_minimum" }`. SIEM / SOC dashboards can flag tenants with sub-RFC 4226 seeds without blocking automation. Matches the 1Password / Authy / `oathtool` consumer behaviour — Sentri can't unilaterally force the SUT to re-issue, so rejecting these seeds would make MFA automation impossible against many legacy SUTs.
+  - **26–31 chars (≥ 128 bits)** → accepted silently. Clears RFC 4226 §4 R6 MUST.
+  - **32 chars (160 bits)** → accepted silently. Matches RFC 6238 §5.1 RECOMMENDED and what Sentri's own SEC-004 MFA flow generates.
+  - **128 chars** → upper bound. Larger pastes are almost always full QR-code URIs (`otpauth://...`) rather than the seed itself.
+- TOTP secret with lowercase / spaces / padding (`jbswy3 dpehpk 3pxp===`) → normalised server-side to uppercase, whitespace + padding stripped. PATCH succeeds.
+- TOTP secret containing non-base32 chars (`0`, `1`, `8`, `9`) → PATCH returns **400**.
+- Pre-B4 project rows (no `totpSecret` in the encrypted blob) → still round-trip through `decryptCredentials` cleanly; `_hasTotp: false`; no TOTP field auto-fill at crawl time.
+- Cross-workspace ACL — outsider hitting `/projects/<id>/credentials/test-totp` → **404** (not 403; existence not leaked).
+- Network → DevTools → response from `POST /credentials/test-totp` contains ONLY `{ code: "123456", expiresInSeconds: 27 }`. No seed, no salt, no username.
+- `auth_expired` skip rows are explicitly excluded from:
+  - The pass-rate denominator (`backend/src/utils/skipReasons.js#NON_EXECUTED_SKIP_REASONS`).
+  - The auto-regeneration `HIGH_PRIORITY_CATEGORIES` set (`backend/src/pipeline/feedbackLoop.js`).
+  - `maxFailures` quality-gate violations (`run.failed` never increments for these).
+- A test that lands on `/login` from a deliberate non-auth-gated assertion (e.g. testing the login page itself) → does NOT trigger `restoreAuthSession` because the matching URL is the project's intended target. Recovery is gated on (a) `project.credentials` being present AND (b) the post-goto URL matching one of the redirect patterns.
 
 ---
 
@@ -2169,3 +2379,20 @@ Once-per-release smoke. Pass all 8 sections before tagging.
 - [ ] Worker `/healthz` returns 200 when queue is connected and 503 on Redis outage.
 - [ ] Nightly backup workflow configured with S3 secrets and uploads snapshot artifacts.
 - [ ] DR runbook restore steps verified with `pg_restore`.
+
+
+## Browser pool + per-tenant AI rate limiting (MNT-015)
+- [ ] Run a 10-test browser suite and verify `app_browser_pool_acquires_total{outcome="miss"}` stays at or below 3 for the selected browser/profile.
+- [ ] Confirm `app_browser_pool_in_use{type="chromium"}` rises while tests are active and returns to 0 after the run completes.
+- [ ] Send repeated `POST /api/v1/chat` requests as one workspace until a 429 response is returned with a `Retry-After` header.
+- [ ] Repeat the same request from a sibling workspace and verify it is not blocked by the first workspace's AI bucket.
+- [ ] Send `SIGTERM` to the backend or worker process during an idle period and confirm shutdown logs include browser-pool draining before queue / Redis teardown and no Chromium processes remain.
+- [ ] Verify auth, SSE, `/health`, and regular GET routes are not throttled by the AI-specific limiter.
+
+## Test dependency ordering (AUTO-014)
+- [ ] Create three tests in one project: login, checkout depending on login, and receipt depending on checkout.
+- [ ] Approve all three tests, run the suite, and verify Run Detail shows login before checkout before receipt even if the Tests page order differs.
+- [ ] Force the login test to fail and re-run; checkout and receipt should appear as skipped with `upstream_failed` and a 🔗 badge linking to login.
+- [ ] Edit checkout to depend on receipt and verify the save is rejected with `CYCLE_DETECTED` and the previous dependency remains unchanged.
+- [ ] Run a suite where a test depends on a test outside the dispatched set and verify it is skipped with `missing_upstream` and excluded from pass-rate math.
+- [ ] Mark an unrelated smoke test and verify it still dispatches before the non-smoke dependency chain.

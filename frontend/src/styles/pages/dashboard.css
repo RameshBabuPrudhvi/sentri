@@ -212,7 +212,7 @@
    CoveragePanel (frontend/src/pages/Dashboard.jsx) renders the 30-day
    sparkline + per-project Top-Uncovered list with a Browser / Server /
    Combined layer toggle and a Lines / Branches / Functions metric
-   toggle. These classes replace per-element inline styles per AGENT.md
+   toggle. These classes replace per-element inline styles per AGENTS.md
    §127 — "Do not reinvent CSS classes; do not write equivalent inline
    styles." Keep the data-driven values (badge background colour, badge
    `title=` tooltip strings) inline because they're derived from
@@ -299,7 +299,7 @@
 }
 
 /* AUTO-017.3 — Web Vitals trend grid inside the Quality Gates section
-   at `/projects/:id/settings/quality-gates`. Class-driven per AGENT.md
+   at `/projects/:id/settings/quality-gates`. Class-driven per AGENTS.md
    §127 (was inline `style={{...}}` on the wrapping div in the legacy
    ProjectQualityCard.jsx, which was deleted after the project-settings
    restructure). Consumed by

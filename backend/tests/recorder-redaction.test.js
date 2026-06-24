@@ -26,21 +26,12 @@ import {
   actionsToPlaywrightCode,
   recordedActionToStepText,
 } from "../src/runner/recorder.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ok  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  FAIL  ${name}`);
-    console.log(`        ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const RECORDER_SRC = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
@@ -195,12 +186,4 @@ test("recordedActionToStepText leaves non-sensitive fills unchanged", () => {
   );
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\nrecorder-redaction tests failed");
-  process.exit(1);
-}
-
-console.log("\nAll recorder-redaction tests passed!");
+summary("recorder-redaction");

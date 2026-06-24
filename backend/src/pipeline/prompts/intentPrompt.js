@@ -104,6 +104,11 @@ export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "ai_de
           name: element.name, id: element.id,
           label: element.label, placeholder: element.placeholder,
           testId: element.testId, intent, confidence,
+          // AUDIT-ROADMAP B2 — preserve iframe provenance in the compact
+          // local-model projection so the LLM can pick the right locator
+          // strategy (safeSelectFrame vs plain safeClick). Cloud path uses
+          // `...element` spread below which already includes these.
+          ...(element._fromIframe ? { _fromIframe: true, _iframeSrc: element._iframeSrc } : {}),
         };
       }
       return { ...element, intent, confidence };
@@ -114,6 +119,23 @@ export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "ai_de
   const testCountInstr = resolveTestCountInstruction(testCount, local);
   const scenarioHints = buildScenarioHints(testCountInstr);
   const hints = scenarioHints[pageType] || scenarioHints.NAVIGATION;
+
+  // AUDIT-ROADMAP B2 — surface the iframe locator rule only when this
+  // page actually has iframe elements. Same conditional approach as
+  // `journeyPrompt.js` so the rule never bloats the prompt for the
+  // common (no-iframe) case.
+  const hasIframeElements = elements.some((e) => e?._fromIframe);
+  const iframeRule = hasIframeElements ? `
+
+IFRAME ELEMENTS (AUDIT-ROADMAP B2):
+Elements in the list above with \`_fromIframe: true\` + \`_iframeSrc: "<url>"\` live
+inside an embedded frame. For those elements scope locators through the frame:
+  const frame = safeSelectFrame(page, '<iframe-src-or-substring>');
+  await safeClick(frame, 'Submit');
+  await safeFill(frame, 'Card number', '4242 4242 4242 4242');
+NEVER use \`safeClick(page, …)\` / \`safeFill(page, …)\` for iframe elements — Playwright's
+auto-frame-resolution breaks on payment frames (Stripe Elements), chat widgets (Intercom),
+and any frame where the selector matches more than one descendant.` : "";
 
   const user = `PAGE DATA:
   URL: ${snapshot.url}
@@ -126,6 +148,7 @@ export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "ai_de
 
 CLASSIFIED INTERACTIVE ELEMENTS:
 ${JSON.stringify(elements, null, 2)}
+${iframeRule}
 
 REQUIRED SCENARIO COVERAGE:
 ${hints}

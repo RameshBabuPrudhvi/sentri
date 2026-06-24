@@ -18,29 +18,23 @@ import {
   createPiiContext,
   finalizePiiContext,
 } from "../src/pipeline/domSanitizer.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-// `realConsoleLog` keeps a reference to the original stdout writer so the
-// `test()` harness can still print pass/fail lines even after we silence
-// `console.log` to suppress `pipeline.pii_redacted` audit log noise during
-// the run. Tests that need to inspect the emitted log call `withLogCapture()`
-// to swap in a spy temporarily.
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. The runner needs
+// `console.log` working to print its pass/fail lines, so we no longer
+// globally silence `console.log` at file load (the previous pattern broke
+// the runner's output). Instead, `silenceLogs()` is called inside each
+// test body that doesn't already use `withLogCapture()`, and unconditionally
+// restored in a `try/finally` so per-test silencing can't leak into the
+// next test's runner output.
 const realConsoleLog = console.log;
-console.log = () => {};
+const { test, summary } = createTestRunner();
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    realConsoleLog(`✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`❌ ${name}`);
-    console.error(err.stack || err.message);
-    failed++;
-    process.exitCode = 1;
-  }
+/** Run `fn` with `console.log` silenced; restore on exit. */
+function silenceLogs(fn) {
+  console.log = () => {};
+  try { return fn(); } finally { console.log = realConsoleLog; }
 }
 
 function withLogCapture(fn) {
@@ -49,7 +43,7 @@ function withLogCapture(fn) {
   try {
     fn(lines);
   } finally {
-    console.log = () => {};
+    console.log = realConsoleLog;
   }
 }
 
@@ -290,13 +284,4 @@ test("`total` excludes jwt/bearer/queryAuth (already counted in token)", () => {
   });
 });
 
-// ── Summary ────────────────────────────────────────────────────────────────
-
-realConsoleLog(`\n${"─".repeat(50)}`);
-realConsoleLog(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);
-if (failed > 0) {
-  realConsoleLog(`\n⚠️  ${failed} test(s) failed`);
-  process.exit(1);
-} else {
-  realConsoleLog(`\n🎉 All pii-sanitizer tests passed!`);
-}
+summary("pii-sanitizer");

@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 
 const files = [
   "tests/code-parsing.test.js",
+  "tests/browser-pool.test.js",
+  "tests/ai-rate-limit.test.js",
   "tests/self-healing.test.js",
   // MNT-001 — host-side vision-healing waterfall (stages 7 pixelmatch + 8 LLM).
   // Stub-driven via dependency injection; no real CV / no real network in CI.
@@ -91,6 +93,22 @@ const files = [
   "tests/agent-tool-call-envelope.test.js",
   "tests/agent-tools-orchestrator.test.js",
   "tests/agent-reviewer-loop.test.js",
+  // B3 (AUDIT-ROADMAP Bundle 3) — reviewer-collapse leaf-helper +
+  // loop-option contract pins. Pure unit (no DB seed); the full
+  // crawler.js pre-run gate integration is exercised by the existing
+  // `agent-pipeline-envelope.test.js` suite.
+  "tests/agent-loop-collapse.test.js",
+  // B3 (AUDIT-ROADMAP Bundle 3) — review-rejection escalation gate
+  // contract pins. Covers the threshold modes (-1 / 0 / N), the
+  // notification_settings.enabled gate, and the new metric +
+  // activity-type literals.
+  "tests/review-rejection-notification.test.js",
+  // B3 (AUDIT-ROADMAP Bundle 3) — route-level + cross-workspace ACL
+  // pins for the `reviewRejectionAlertThreshold` PATCH validator.
+  // Closes the IDOR + boundary gaps surfaced by the industry-standard
+  // review of this PR (items 4, 5, 8 of the operational-surface gap
+  // list — see PR description).
+  "tests/review-rejection-threshold-routes.test.js",
   "tests/agent-orchestrator.test.js",
   // Bundle-A fix #1 — orchestrator threads `replyToId` across supervisor
   // handoffs so the UI timeline can reconstruct the multi-step thread.
@@ -288,6 +306,12 @@ const files = [
   "tests/deployment-triggers.test.js",
   "tests/pr11-fixes.test.js",
   "tests/risk-scorer.test.js",
+  "tests/dependency-order.test.js",
+  "tests/test-routes-depends-on.test.js",
+  // AUTO-014 — NEXT.md acceptance-criteria pins (smoke-pin invariant,
+  // pass-rate denominator excludes upstream_failed + missing_upstream,
+  // dispatch-guard contract via computeUpstreamSkips).
+  "tests/dependency-acceptance.test.js",
   "tests/impact-analysis.test.js",
   "tests/github-checks.test.js",
   "tests/github-install-callback.test.js",
@@ -297,6 +321,49 @@ const files = [
   "tests/shard-config.test.js",
   "tests/run-sharding.test.js",
   "tests/run-storage-concurrency.test.js",
+  // B1 (AUDIT-ROADMAP Bundle 1) — per-test result flush + crash recovery.
+  "tests/run-checkpoint.test.js",
+  // B1.2 (AUDIT-ROADMAP Bundle 1) — write-batching queue durability contract.
+  "tests/db-write-queue.test.js",
+  // B1.3 (AUDIT-ROADMAP Bundle 1) — crawl snapshot streaming + repo contract.
+  // Pins the (runId, url) UNIQUE idempotency, load-ms percentile feed for
+  // Bundle 2's adaptive timeout, and the purge-path delete primitives.
+  "tests/crawl-snapshot-streaming.test.js",
+  // B2 (AUDIT-ROADMAP Bundle 2) — iframe enumeration + SPA hydration +
+  // adaptive element timeout. Pure-function contracts: p95 (R-7 linear
+  // interpolation), computeAdaptiveElementTimeout (clamp to [floor, ceiling]),
+  // shouldEnumerateFrame (iframe strategy gate), and
+  // getSelfHealingHelperCode's adaptive-timeout injection into the vm
+  // sandbox helper string. Browser-level enumeration + hydration are
+  // covered by `b2-iframe-crawl.test.js` (E2E against a local fixture
+  // server) and the operator runbook at `QA.md § "iframe + SPA hydration
+  // + adaptive timeout (AUDIT-ROADMAP B2)"`.
+  "tests/b2-adaptive-timeout.test.js",
+  // B4 (AUDIT-ROADMAP Bundle 4) — RLY-004 auth-session recovery +
+  // SCL-001 target-app TOTP. Pure-function contracts: TOTP code +
+  // verify round-trip, base32-decode edge cases, auth-redirect URL
+  // pattern matching, credential encryption round-trip with totpSecret,
+  // and feedback-loop AUTH_EXPIRED classification. Browser-level
+  // restoreAuthSession integration is covered by the existing
+  // `auto-login.test.js` fixtures.
+  "tests/b4-totp.test.js",
+  "tests/b4-auth-recovery.test.js",
+  // B6 (AUDIT-ROADMAP Bundle 6) — quality gates: dry-run, semantic
+  // review, setup/teardown, seeded faker. Each file pins one slice of
+  // the QAL-001 / QAL-005 / QAL-002 / QAL-010 contract so a regression
+  // in one column / one prompt / one substitution path surfaces in
+  // isolation rather than as a cascade across files.
+  "tests/dry-run-gate.test.js",              // QAL-001 — opt-in dry-run lease lifecycle + status branches
+  "tests/semantic-reviewer.test.js",         // QAL-005 — semantic prompt builder + response normaliser
+  "tests/test-fixture-management.test.js",   // QAL-002 — setup/teardown + B6 project + test column round-trips
+  "tests/fake-data-generation.test.js",      // QAL-010 — seeded faker substitution determinism + fallback
+  // B2 — E2E iframe enumeration against a real Chromium browser pointed
+  // at a local same-origin HTTP fixture (the only way to exercise the
+  // browser's same-origin policy: `data:` URLs each have their own
+  // opaque origin). Pinned the 5 acceptance criteria from the spec at
+  // `docs/roadmap/AUDIT-ROADMAP.md:425-441`. Degrades gracefully when
+  // Chromium binaries aren't installed (CI cross-browser job only).
+  "tests/b2-iframe-crawl.test.js",
   "tests/run-worker-shard-retry.test.js",
   "tests/run-abort-pubsub.test.js",
   "tests/run-shard-crash.test.js",
@@ -331,28 +398,106 @@ const files = [
   "tests/concurrent-dispatch.test.js",
 ];
 
+// ── Debug knobs (propagate to children via inherited env) ────────────────────
+//
+// - `TEST_FILE_FILTER=<substring>` — only run test FILES whose path contains
+//   the substring (case-insensitive). Lets a developer iterate on one file
+//   without commenting out the rest of the array.
+// - `TEST_FILTER=<substring>` — already honoured by `createTestRunner()` per
+//   test name. Inherited by child processes via `stdio: "inherit"` + the
+//   default env merge — documented here so the knob is discoverable.
+// - `TEST_BAIL=1` — stop the WHOLE suite on the first failing file (mirrors
+//   per-file BAIL inside `createTestRunner`). Combined: a single failing
+//   assertion terminates the suite immediately, surfacing one root cause
+//   instead of cascade noise.
+// - `TEST_FAIL_FAST=1` — alias for TEST_BAIL=1 at the suite level (some
+//   industry tools spell it differently; accept both).
+const FILE_FILTER = (process.env.TEST_FILE_FILTER || "").toLowerCase();
+const BAIL = process.env.TEST_BAIL === "1"
+  || process.env.TEST_BAIL === "true"
+  || process.env.TEST_FAIL_FAST === "1"
+  || process.env.TEST_FAIL_FAST === "true";
+
+const selected = FILE_FILTER
+  ? files.filter((f) => f.toLowerCase().includes(FILE_FILTER))
+  : files;
+
+if (FILE_FILTER && selected.length === 0) {
+  console.error(`\n⚠️  TEST_FILE_FILTER="${process.env.TEST_FILE_FILTER}" matched 0 files. Aborting.\n`);
+  process.exit(2);
+}
+if (FILE_FILTER) {
+  console.log(`\n🔎 TEST_FILE_FILTER="${process.env.TEST_FILE_FILTER}" → ${selected.length} of ${files.length} files\n`);
+}
+
 let passed = 0;
 let failed = 0;
+let skipped = 0;
+const failedFiles = [];
+const slowFiles = [];
+// Mirrors `createTestRunner`'s 500 ms slow-test threshold but applied at the
+// file level — a file that takes > 5 s overall is a candidate for either
+// splitting or moving to a tagged "slow" suite.
+const SLOW_FILE_THRESHOLD_MS = 5_000;
+const suiteStartedAt = Date.now();
 
-for (const file of files) {
+for (const file of selected) {
+  const fileStartedAt = Date.now();
   const result = spawnSync(process.execPath, [file], {
     stdio: "inherit",
     cwd: process.cwd(),
   });
+  const elapsedMs = Date.now() - fileStartedAt;
 
   if (result.status === 0) {
     passed += 1;
+    if (elapsedMs >= SLOW_FILE_THRESHOLD_MS) slowFiles.push({ file, elapsedMs });
   } else {
     failed += 1;
+    failedFiles.push({ file, exitCode: result.status, signal: result.signal || null, elapsedMs });
+    console.error(`\n❌ FAILED: ${file} (exit ${result.status}${result.signal ? `, signal ${result.signal}` : ""}, ${elapsedMs}ms)\n`);
+    if (BAIL) {
+      // Mark the rest as skipped so the summary line is honest about what
+      // actually ran. Surface why we stopped so the next dev doesn't think
+      // half the suite silently disappeared.
+      skipped = selected.length - (passed + failed);
+      console.error(`\n⛔ Bailing on first failing file (TEST_BAIL/TEST_FAIL_FAST=1). Skipped ${skipped} subsequent files.\n`);
+      break;
+    }
   }
 }
 
+const totalElapsedMs = Date.now() - suiteStartedAt;
+const totalSec = (totalElapsedMs / 1000).toFixed(1);
+
 console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed out of ${files.length} test files`);
+const skipTail = skipped > 0 ? `, ${skipped} skipped` : "";
+console.log(`Results: ${passed} passed, ${failed} failed${skipTail} out of ${selected.length} test files  (${totalSec}s)`);
+
+if (slowFiles.length > 0) {
+  // Sort slowest-first so the offender is at the top of the list.
+  slowFiles.sort((a, b) => b.elapsedMs - a.elapsedMs);
+  console.log(`\n⏱  Slow files (≥ ${SLOW_FILE_THRESHOLD_MS}ms):`);
+  for (const { file, elapsedMs } of slowFiles.slice(0, 10)) {
+    console.log(`    ${(elapsedMs / 1000).toFixed(1)}s  ${file}`);
+  }
+}
 
 if (failed > 0) {
   console.log("\n⚠️  Backend test run failed");
+  console.log("\nFailed test files:");
+  for (const { file, exitCode, signal, elapsedMs } of failedFiles) {
+    console.log(`  ❌ ${file} — exit ${exitCode}${signal ? ` (${signal})` : ""}  (${elapsedMs}ms)`);
+  }
+  // Re-run hint: copy-paste-able command to iterate locally without scrolling.
+  console.log(`\n💡 Re-run only the failing file(s):`);
+  for (const { file } of failedFiles) {
+    console.log(`    node ${file}`);
+  }
+  console.log(`\n💡 Iterate with debug knobs:`);
+  console.log(`    TEST_BAIL=1 TEST_VERBOSE=1 node ${failedFiles[0].file}`);
+  console.log(`    TEST_FILTER="<substring>" node ${failedFiles[0].file}`);
   process.exit(1);
 }
 
-console.log("\n🎉 All backend tests passed!");
+console.log(`\n🎉 All backend tests passed!  (${totalSec}s)`);

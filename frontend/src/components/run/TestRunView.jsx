@@ -104,6 +104,21 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown, cov
           <span className={`badge ${statusBadgeClass(result.status)} trv-row__badge`}>
             {result.status}
           </span>
+          {result.skipReason === "upstream_failed" && result.upstreamFailedTestId && (
+            <Link
+              to={`/tests/${result.upstreamFailedTestId}`}
+              onClick={(e) => e.stopPropagation()}
+              className="badge badge-blue badge-sm-inline"
+              title="Skipped because an upstream dependency failed"
+            >
+              🔗 upstream failed
+            </Link>
+          )}
+          {result.skipReason === "missing_upstream" && (
+            <span className="badge badge-gray badge-sm-inline" title="Skipped because a dependency was outside this run">
+              🔗 missing upstream
+            </span>
+          )}
           {deltaShape && (deltaShape.lines > 0 || deltaShape.statements > 0 || deltaShape.branches > 0 || deltaShape.functions > 0) && (
             <span
               className="badge badge-blue badge-sm-inline"
@@ -161,6 +176,12 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
             </div>
             <div className="trv-preview__meta">
               <span className={`badge ${statusBadgeClass(result.status)}`}>{result.status}</span>
+              {result.skipReason === "upstream_failed" && result.upstreamFailedTestId && (
+                <Link to={`/tests/${result.upstreamFailedTestId}`} className="badge badge-blue badge-sm-inline">
+                  🔗 upstream failed
+                </Link>
+              )}
+              {result.skipReason === "missing_upstream" && <span className="badge badge-gray badge-sm-inline">🔗 missing upstream</span>}
               {isApi && <span className="badge badge-blue trv-row__badge">API</span>}
               {result.durationMs && <span className="trv-preview__meta-mono">{fmtMs(result.durationMs)}</span>}
               {steps.length > 0 && <span className="trv-preview__meta-text">{steps.length} steps</span>}

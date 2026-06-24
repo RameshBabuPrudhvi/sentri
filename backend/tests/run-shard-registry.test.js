@@ -36,21 +36,12 @@ import {
   forEachShardEntry,
   abortAllShardsForRun,
 } from "../src/workers/runWorker.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  \u2713 ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  \u2717 ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 function makeEntry(runId, shardIndex) {
   return {
@@ -171,5 +162,4 @@ test("abortAllShardsForRun: returns 0 for unknown runId without throwing", () =>
 });
 
 resetRegistry();
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+summary("run-shard-registry");

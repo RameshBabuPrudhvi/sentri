@@ -5,21 +5,12 @@
 
 import assert from "node:assert/strict";
 import { executeWithRetries } from "../src/runner/retry.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-async function test(name, fn) {
-  try {
-    await fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `async function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 console.log("\n🧪 executeWithRetries");
 
@@ -47,12 +38,4 @@ await test("throws after retries exhausted", async () => {
   assert.equal(tries, 3);
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  Test-retry tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 Test-retry tests passed");
+summary("test-retry");

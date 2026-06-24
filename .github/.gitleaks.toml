@@ -67,7 +67,14 @@ useDefault = true
     # production code never reads test-fixture key strings.
     "backend/tests/migration-routeid.test.js",
     "backend/tests/routes-import-export.test.js",
-    "backend/tests/provider-routes-api.test.js"
+    "backend/tests/provider-routes-api.test.js",
+    # B4 (AUDIT-ROADMAP) — pins the published RFC 6238 Appendix B test
+    # vectors against `utils/totp.js` (base32 of ASCII "12345678901234567890"
+    # → "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"). The fixture is verbatim from
+    # the IETF RFC text and is the same one every TOTP library on earth
+    # uses to prove correctness; its entropy trips the `generic-api-key`
+    # heuristic. Never a real credential.
+    "backend/tests/b4-totp.test.js"
   ]
 
   # Test fixtures and seed data may contain fake credentials for testing auth

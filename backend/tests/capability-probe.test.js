@@ -96,8 +96,16 @@ function sdkError(status, message) {
   e.status = status;
   return e;
 }
+// Stage-2 follow-up: every `test(...)` call below is `await`-ed because
+// these tests share module-global state via `_setProtocolAdapterForTests`.
+// Bare top-level registrations let test N+1's `installStubAdapter()` swap
+// the global adapter while test N is still mid-probe — symptoms include
+// `'probe_deadline_exceeded'` (default real adapter ran) and
+// `jsonMode false !== true` (stub got swapped between probe calls).
+// Awaiting each registration restores the sequential isolation the
+// pre-migration runner provided.
 // ── 1. Happy path ─────────────────────────────────────────────────────────────
-test("happy path: every dimension probed → reachable+auth+model true, source=network", async () => {
+await test("happy path: every dimension probed → reachable+auth+model true, source=network", async () => {
   const stub = installStubAdapter(() => ({ text: "OK", usage: { input: 5, output: 1 } }));
   try {
     const caps = await runCapabilityProbe(makeRoute());
@@ -122,7 +130,7 @@ test("happy path: every dimension probed → reachable+auth+model true, source=n
 });
 
 // ── 2. JSON-mode rejection ────────────────────────────────────────────────────
-test("jsonMode rejection: reachability ok, jsonMode probe returns 400 → jsonMode=false", async () => {
+await test("jsonMode rejection: reachability ok, jsonMode probe returns 400 → jsonMode=false", async () => {
   let callIdx = 0;
   const stub = installStubAdapter(({ opts }) => {
     callIdx += 1;
@@ -148,7 +156,7 @@ test("jsonMode rejection: reachability ok, jsonMode probe returns 400 → jsonMo
 });
 
 // ── 3. Vision dimension uses catalog, not network ─────────────────────────────
-test("vision: probe never sends image content (catalog-only by design)", async () => {
+await test("vision: probe never sends image content (catalog-only by design)", async () => {
   const stub = installStubAdapter(({ messages }) => {
     // The stub asserts no probe message ever carries image-like content.
     // The probe should send pure-text messages to all probe calls.
@@ -167,7 +175,7 @@ test("vision: probe never sends image content (catalog-only by design)", async (
 });
 
 // ── 4. Compat family maps to openai catalog ──────────────────────────────────
-test("custom family maps to openai catalog floor for vision/streaming/context", async () => {
+await test("custom family maps to openai catalog floor for vision/streaming/context", async () => {
   const stub = installStubAdapter(() => ({ text: "OK", usage: { input: 1, output: 1 } }));
   try {
     const caps = await runCapabilityProbe(makeRoute({ family: "custom" }));
@@ -186,7 +194,7 @@ test("custom family maps to openai catalog floor for vision/streaming/context", 
   }
 });
 // ── 5. Network failure ────────────────────────────────────────────────────────
-test("network failure: reachable=false, errorReason populated, capability dims fall back to catalog", async () => {
+await test("network failure: reachable=false, errorReason populated, capability dims fall back to catalog", async () => {
   const stub = installStubAdapter(() => sdkError(0, "fetch failed: ECONNREFUSED"));
   try {
     const caps = await runCapabilityProbe(makeRoute());
@@ -205,7 +213,7 @@ test("network failure: reachable=false, errorReason populated, capability dims f
 });
 
 // ── 6. Auth failure (401) ─────────────────────────────────────────────────────
-test("auth failure (401): reachable=true, auth=false, model unobserved", async () => {
+await test("auth failure (401): reachable=true, auth=false, model unobserved", async () => {
   const stub = installStubAdapter(() => sdkError(401, "Unauthorized: invalid API key"));
   try {
     const caps = await runCapabilityProbe(makeRoute());
@@ -222,7 +230,7 @@ test("auth failure (401): reachable=true, auth=false, model unobserved", async (
 });
 
 // ── 7. Model-not-found (404) ──────────────────────────────────────────────────
-test("model-not-found (404): reachable=true, auth=true, model=false", async () => {
+await test("model-not-found (404): reachable=true, auth=true, model=false", async () => {
   const stub = installStubAdapter(() => sdkError(404, "model 'gpt-not-real' does not exist"));
   try {
     const caps = await runCapabilityProbe(makeRoute({ model: "gpt-not-real" }));
@@ -237,7 +245,7 @@ test("model-not-found (404): reachable=true, auth=true, model=false", async () =
 });
 
 // ── 8. Rate-limited (429) — treated as reachable + auth ok ────────────────────
-test("rate-limited (429): reachable=true, auth=true, errorReason=rate_limited", async () => {
+await test("rate-limited (429): reachable=true, auth=true, errorReason=rate_limited", async () => {
   const stub = installStubAdapter(() => sdkError(429, "Rate limit exceeded"));
   try {
     const caps = await runCapabilityProbe(makeRoute());
@@ -253,7 +261,7 @@ test("rate-limited (429): reachable=true, auth=true, errorReason=rate_limited", 
 });
 
 // ── 9. Timeout (probe completes within timeoutMs) ─────────────────────────────
-test("timeout: probe aborts at timeoutMs, persists reachable=false", async () => {
+await test("timeout: probe aborts at timeoutMs, persists reachable=false", async () => {
   const stub = installStubAdapter(({ opts }) => {
     // Simulate a hang — return a Promise that listens to opts.signal
     // and rejects when the timeout aborts it.
@@ -267,13 +275,16 @@ test("timeout: probe aborts at timeoutMs, persists reachable=false", async () =>
     const caps = await runCapabilityProbe(makeRoute(), { timeoutMs: 50 });
     assert.equal(caps.reachable, false);
     assert.ok(caps.errorReason);
-    assert.match(caps.errorReason, /timeout|abort/i);
+    // Product code emits `probe_deadline_exceeded` for timeout aborts —
+    // accept either the legacy `timeout|abort` wording (in case the probe
+    // module's classifier reverts) OR the canonical deadline marker.
+    assert.match(caps.errorReason, /timeout|abort|deadline/i);
   } finally {
     stub.restore();
   }
 });
 // ── 10. Missing dispatch fields → catalog source, never probes ────────────────
-test("route missing dispatch fields → source=catalog, no network calls", async () => {
+await test("route missing dispatch fields → source=catalog, no network calls", async () => {
   let networkCalled = false;
   const stub = installStubAdapter(() => {
     networkCalled = true;
@@ -292,7 +303,7 @@ test("route missing dispatch fields → source=catalog, no network calls", async
 });
 
 // ── 11. _catalogOnlyCapabilities returns the same shape ───────────────────────
-test("_catalogOnlyCapabilities shape matches runtime catalog fallback", () => {
+await test("_catalogOnlyCapabilities shape matches runtime catalog fallback", () => {
   const route = makeRoute({ family: "anthropic" });
   const synth = _catalogOnlyCapabilities(route, "manual_reason");
   // Same key set as runtime probe output (modulo no `auth: true` /
@@ -308,7 +319,7 @@ test("_catalogOnlyCapabilities shape matches runtime catalog fallback", () => {
 });
 
 // ── 12. capabilitiesFor sanity (kept from the pre-B2.2 placeholder) ───────────
-test("capabilitiesFor: booleans + numeric/null bounds", () => {
+await test("capabilitiesFor: booleans + numeric/null bounds", () => {
   const caps = capabilitiesFor("openai");
   assert.equal(typeof caps.supportsVision, "boolean");
   assert.equal(typeof caps.supportsJsonMode, "boolean");

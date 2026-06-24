@@ -81,7 +81,7 @@ router.get("/search", (req, res) => {
     const projectsById = {};
     for (const p of projects) projectsById[p.id] = p;
 
-    // Delegated to `searchRepo` (AGENT.md §117) — the route stays a thin
+    // Delegated to `searchRepo` (AGENTS.md §117) — the route stays a thin
     // HTTP shape + ACL layer; SQL lives in the repository module.
     const projectMatches = searchRepo.searchProjects(projectIds, rawQuery, MAX_PER_TYPE);
 

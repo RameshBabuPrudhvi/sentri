@@ -338,7 +338,7 @@ export default function LiveBrowserView({
         const sy = rect.height / viewportH;
         // Only the computed rect (left/top/width/height) stays inline —
         // every static visual (border, shadow, transition, z-index)
-        // lives in `.recorder-highlight-overlay`. AGENT.md `:127`
+        // lives in `.recorder-highlight-overlay`. AGENTS.md `:127`
         // explicitly carves out "dynamic/data-driven values" as the
         // legitimate inline-style use case.
         return (

@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
+import testApprovalsRouter from "../src/routes/testApprovals.js";
 import runsRouter from "../src/routes/runs.js";
 import sseRouter from "../src/routes/sse.js";
 import * as runRepo from "../src/database/repositories/runRepo.js";
@@ -18,6 +19,7 @@ import * as activityRepo from "../src/database/repositories/activityRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
+const runner = t.createTestRunner();
 const { app, req, workspaceScope } = t;
 
 let mounted = false;
@@ -26,6 +28,7 @@ function mountRoutesOnce() {
   app.use("/api/auth", authRouter);
   app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
   app.use("/api", requireAuth, workspaceScope, testsRouter);
+  app.use("/api", requireAuth, workspaceScope, testApprovalsRouter);
   app.use("/api", requireAuth, workspaceScope, runsRouter);
   app.use("/api", requireAuth, workspaceScope, sseRouter);
   mounted = true;
@@ -48,29 +51,37 @@ async function main() {
       password: "Password123!",
     });
 
-    let out = await req(base, "/api/projects", {
-      method: "POST",
-      token,
-      body: { name: "Flow App", url: "https://example.com" },
+    let projectId;
+    await runner.test("POST /api/projects creates project", async () => {
+      const out = await req(base, "/api/projects", {
+        method: "POST",
+        token,
+        body: { name: "Flow App", url: "https://example.com" },
+      });
+      assert.equal(out.res.status, 201);
+      projectId = out.json.id;
+      assert.ok(projectId);
     });
-    assert.equal(out.res.status, 201);
-    const projectId = out.json.id;
-    assert.ok(projectId);
 
-    out = await req(base, `/api/projects/${projectId}/tests`, {
-      method: "POST",
-      token,
-      body: { name: "Login test", steps: ["Open app", "Click login"] },
+    let testId;
+    await runner.test("POST /api/projects/:id/tests creates test", async () => {
+      const out = await req(base, `/api/projects/${projectId}/tests`, {
+        method: "POST",
+        token,
+        body: { name: "Login test", steps: ["Open app", "Click login"] },
+      });
+      assert.equal(out.res.status, 201);
+      testId = out.json.id;
     });
-    assert.equal(out.res.status, 201);
-    const testId = out.json.id;
 
-    out = await req(base, `/api/projects/${projectId}/tests/${testId}/approve`, {
-      method: "PATCH",
-      token,
+    await runner.test("PATCH approve transitions test to approved", async () => {
+      const out = await req(base, `/api/projects/${projectId}/tests/${testId}/approve`, {
+        method: "PATCH",
+        token,
+      });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.reviewStatus, "approved");
     });
-    assert.equal(out.res.status, 200);
-    assert.equal(out.json.reviewStatus, "approved");
 
     // Seed an active run and verify duplicate-run guard (409).
     runRepo.create({
@@ -84,48 +95,53 @@ async function main() {
       results: [],
     });
 
-    out = await req(base, `/api/projects/${projectId}/run`, { method: "POST", token });
-    assert.equal(out.res.status, 409);
+    await runner.test("POST /run with active run → 409 (duplicate-run guard)", async () => {
+      const out = await req(base, `/api/projects/${projectId}/run`, { method: "POST", token });
+      assert.equal(out.res.status, 409);
+    });
 
-    // Abort lifecycle should transition run to aborted.
-    out = await req(base, "/api/runs/RUN_ACTIVE/abort", { method: "POST", token });
-    assert.equal(out.res.status, 200);
+    await runner.test("abort lifecycle transitions run to aborted", async () => {
+      let out = await req(base, "/api/runs/RUN_ACTIVE/abort", { method: "POST", token });
+      assert.equal(out.res.status, 200);
 
-    out = await req(base, "/api/runs/RUN_ACTIVE", { token });
-    assert.equal(out.res.status, 200);
-    assert.equal(out.json.status, "aborted");
+      out = await req(base, "/api/runs/RUN_ACTIVE", { token });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.status, "aborted");
+    });
 
     // ── Bulk approve with per-test audit trail (PR #66) ──────────────────
     // Create a second test so we can bulk-approve both and verify individual
     // activity log entries are created for each test.
-    out = await req(base, `/api/projects/${projectId}/tests`, {
-      method: "POST",
-      token,
-      body: { name: "Signup test", steps: ["Open app", "Click signup"] },
+    await runner.test("bulk approve creates per-test audit entries", async () => {
+      let out = await req(base, `/api/projects/${projectId}/tests`, {
+        method: "POST",
+        token,
+        body: { name: "Signup test", steps: ["Open app", "Click signup"] },
+      });
+      assert.equal(out.res.status, 201);
+      const testId2 = out.json.id;
+
+      // Restore both tests to draft first (testId was approved above)
+      await req(base, `/api/projects/${projectId}/tests/${testId}/restore`, { method: "PATCH", token });
+
+      // Bulk approve both tests
+      out = await req(base, `/api/projects/${projectId}/tests/bulk`, {
+        method: "POST",
+        token,
+        body: { testIds: [testId, testId2], action: "approve" },
+      });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.updated, 2, "Should approve 2 tests");
+
+      // Verify per-test activity entries were created
+      const activities = activityRepo.getAll();
+      const perTestApprovals = activities.filter(a =>
+        a.type === "test.approve" && a.detail?.includes("(bulk)")
+      );
+      assert.ok(perTestApprovals.length >= 2, `Should have ≥2 per-test audit entries, got ${perTestApprovals.length}`);
     });
-    assert.equal(out.res.status, 201);
-    const testId2 = out.json.id;
 
-    // Restore both tests to draft first (testId was approved above)
-    await req(base, `/api/projects/${projectId}/tests/${testId}/restore`, { method: "PATCH", token });
-
-    // Bulk approve both tests
-    out = await req(base, `/api/projects/${projectId}/tests/bulk`, {
-      method: "POST",
-      token,
-      body: { testIds: [testId, testId2], action: "approve" },
-    });
-    assert.equal(out.res.status, 200);
-    assert.equal(out.json.updated, 2, "Should approve 2 tests");
-
-    // Verify per-test activity entries were created
-    const activities = activityRepo.getAll();
-    const perTestApprovals = activities.filter(a =>
-      a.type === "test.approve" && a.detail?.includes("(bulk)")
-    );
-    assert.ok(perTestApprovals.length >= 2, `Should have ≥2 per-test audit entries, got ${perTestApprovals.length}`);
-
-    console.log("✅ api-flow: all checks passed");
+    runner.summary("api-flow");
   } finally {
     env.restore();
     await new Promise((resolve) => server.close(resolve));

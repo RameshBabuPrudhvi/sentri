@@ -31,6 +31,14 @@ import * as runAgentEventRepo from "./runAgentEventRepo.js";
 // `agent_messages` explicitly to keep the parity claim in the changelog
 // honest (lifeguard finding — fulfils B1.1 "retention janitor parity").
 import * as agentMessageRepo from "./agentMessageRepo.js";
+// B1.1 (AUDIT-ROADMAP) — per-test checkpoint rows + per-page snapshot rows.
+// Hydrated alongside `logs` / `agentEvents` on `getById` so crash-recovered
+// runs (`status='interrupted'` from `markOrphansInterrupted`) show the
+// results that survived the SIGKILL and the API exposes the snapshot count.
+// Spec: `docs/roadmap/AUDIT-ROADMAP.md:157` (results reconstruction) +
+// `:189-191` (snapshotCount field) + `:271-273` (acceptance criterion).
+import * as runTestResultRepo from "./runTestResultRepo.js";
+import * as crawlSnapshotRepo from "./crawlSnapshotRepo.js";
 import { filterShardRetrySurvivors, countShardRetrySurvivors } from "../../utils/shardRetryFilter.js";
 import { runsTotal as metricsRunsTotal } from "../../utils/metrics.js"; // INF-007 — bump on every run-row creation.
 
@@ -54,6 +62,7 @@ const JSON_FIELDS = [
   "shardCoverageSummaries", // AUTO-009f: per-shard pre-aggregated coverage (migration 042) — sparse array indexed by shardIndex; merged into `coverageSummary` by the boundary-crossing finalizer.
   "changedFileRanges", // AUTO-009d: per-file head-side line ranges from the PR diff (migration 044)
   "prCoverageDiff", // AUTO-009d: PR-scoped coverage diff output from computePrCoverage (migration 044)
+  "reviewRejectedTests", // B1 (AUDIT-ROADMAP): testIds whose generation the reviewer rejected (migration 067); populated by B3 later, declared here so the JSON column round-trips cleanly.
 ];
 
 // Fields whose canonical empty shape is an array, not null. Keeping them as
@@ -62,7 +71,7 @@ const JSON_FIELDS = [
 // never blow up on a pre-AUTO-010 run). Hoisted to module scope so bulk
 // reads (e.g. `getWithResultsByProjectIds` on the dashboard) don't allocate
 // a fresh Set per row.
-const ARRAY_DEFAULT_FIELDS = new Set(["tests", "results", "videoSegments", "pages", "rootCauses"]);
+const ARRAY_DEFAULT_FIELDS = new Set(["tests", "results", "videoSegments", "pages", "rootCauses", "reviewRejectedTests"]);
 
 function rowToRun(row) {
   if (!row) return undefined;
@@ -125,6 +134,10 @@ const INSERT_COLS = [
   "shardCoverageSummaries", // AUTO-009f: per-shard pre-aggregated coverage (migration 042)
   "changedFileRanges", // AUTO-009d: PR diff hunk ranges (migration 044)
   "prCoverageDiff", // AUTO-009d: PR-scoped coverage diff (migration 044)
+  "failureReason", // B1 (AUDIT-ROADMAP, migration 067): distinguishes ordinary failures from process-crash recoveries surfaced by `markOrphansInterrupted`.
+  "reviewRejectedTests", // B1 (AUDIT-ROADMAP, migration 067): JSON column declared here; populated by B3.
+  "reviewerCollapsed", // B1 (AUDIT-ROADMAP, migration 067): boolean (0/1) forward-declared for B3 — populated when author/reviewer routes resolve to the same routeId (spec at `docs/roadmap/AUDIT-ROADMAP.md:481`).
+  "p95LoadMs", // B2 (AUDIT-ROADMAP, migration 069): crawl-derived p95 of `crawl_snapshots.loadMs`, persisted at run-start so RunDetail / dashboards / CI consumers can audit the value the adaptive element-timeout calculation actually used. Pure integer ms; null when no load timings were recorded (API-only / explorer-only runs).
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -393,7 +406,105 @@ export function getById(id) {
   // care about the storage shape. Missing/malformed rows degrade to null,
   // matching the JSON_FIELDS pattern used above for rowToRun.
   run.agentEvents = runAgentEventRepo.getByRunId(id).map(parseAgentEventRow);
+  // B1.1 (AUDIT-ROADMAP) — fold per-test checkpoint rows into `run.results`
+  // so crash-recovered runs (`status='interrupted'` with no legacy flush)
+  // still surface the tests that completed before the SIGKILL. Best-effort:
+  // a malformed row or DB hiccup must never fail `getById` (spec at
+  // `docs/roadmap/AUDIT-ROADMAP.md:271-273` only requires reads to "see"
+  // the data, not that the merge itself be transactional). Wrapped in
+  // try/catch so the legacy path keeps working if the table is missing
+  // (pre-migration-065 environments).
+  try {
+    run.results = mergeCheckpointResults(run.results, runTestResultRepo.getByRunId(id));
+  } catch { /* best-effort — fall back to legacy results from rowToRun */ }
+  // B1.3 (AUDIT-ROADMAP) — expose per-run snapshot count without
+  // serialising the (potentially-multi-MB) snapshot blobs. Spec at
+  // `docs/roadmap/AUDIT-ROADMAP.md:189-191` + `:251-253`: *"GET /runs/:id
+  // returns { snapshotCount: N } instead of the full array"*. Heap path
+  // is the persistence-only deviation documented in the same file (lines
+  // 120-130) — full streaming generation lands in a future bundle.
+  try {
+    run.snapshotCount = crawlSnapshotRepo.countByRunId(id);
+  } catch { run.snapshotCount = 0; /* table missing on pre-migration-066 envs */ }
   return run;
+}
+
+/**
+ * B1.1 (AUDIT-ROADMAP) — merge `run_test_results` checkpoint rows into the
+ * legacy `run.results[]` JSON column so callers (RunDetail UI, run-compare
+ * diffs, CI exports, abort skipped-list logic, `fireNotifications`) see
+ * results that survived a SIGKILL even when the legacy column was never
+ * flushed.
+ *
+ * **Why merge, not replace:**
+ *   • Pre-B1 runs only have the legacy column populated; the checkpoint
+ *     table is empty for them. Replacing would erase historical data.
+ *   • The legacy `runRepo.save(run)` path (still called by `testRunner.js`
+ *     at run-end and on the abort gate) writes a richer payload than the
+ *     checkpoint table's "lean projection" (`testRunner.js:760-770` —
+ *     screenshotPath / videoPath / tracePath only, no webVitals /
+ *     coverage). Treating the legacy column as the rich source and the
+ *     checkpoint as the crash-survival source preserves both.
+ *
+ * **Merge rule:** for each test, prefer the legacy row (richer payload)
+ * when present, fall back to the checkpoint row otherwise. The keying
+ * tuple is `(testId, iterationIndex)` to keep CAP-001 data-driven
+ * iterations distinct. Order is preserved by the union's first appearance
+ * so the UI's "first failure first" sort stays deterministic.
+ *
+ * @param {Object[]} legacyResults - parsed JSON from `runs.results` column.
+ * @param {Object[]} checkpointRows - rows from `runTestResultRepo.getByRunId()`.
+ * @returns {Object[]} merged result list.
+ */
+function mergeCheckpointResults(legacyResults, checkpointRows) {
+  if (!checkpointRows || checkpointRows.length === 0) {
+    return Array.isArray(legacyResults) ? legacyResults : [];
+  }
+  const legacy = Array.isArray(legacyResults) ? legacyResults : [];
+  // Key tuple — `iterationIndex` defaults to 0 on both sides (legacy rows
+  // pre-CAP-001 don't carry it; checkpoint rows coerce undefined → 0 via
+  // `runTestResultRepo.append`). Same default on both sides keeps the
+  // merge join deterministic.
+  const keyOf = (r) => `${r?.testId}::${Number.isInteger(r?.iterationIndex) ? r.iterationIndex : 0}`;
+  const merged = [];
+  const seen = new Set();
+  // Legacy first (richer payload wins when both exist).
+  for (const r of legacy) {
+    if (!r?.testId) continue;
+    const k = keyOf(r);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push(r);
+  }
+  // Checkpoint rows fill the gap for tests that completed before the
+  // SIGKILL but never made it into the legacy column flush. Project the
+  // table shape onto the result shape consumers expect.
+  for (const row of checkpointRows) {
+    if (!row?.testId) continue;
+    const k = keyOf(row);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push({
+      testId: row.testId,
+      status: row.status,
+      error: row.error || null,
+      errorCategory: row.errorCategory || null,
+      durationMs: row.duration ?? null,
+      retryCount: row.retryCount || 0,
+      iterationIndex: row.iterationIndex || 0,
+      // Hoist the lean artifact paths to the top level for UI/CI consumers
+      // (matches the shape the legacy results carry).
+      screenshotPath: row.artifacts?.screenshotPath || null,
+      videoPath: row.artifacts?.videoPath || null,
+      tracePath: row.artifacts?.tracePath || null,
+      healingEvents: Array.isArray(row.healingEvents) ? row.healingEvents : [],
+      // Marker so consumers can distinguish a checkpoint-only result (no
+      // legacy flush) from a fully-flushed one. Useful for the UI to
+      // surface "this row was recovered from a crash" if needed.
+      _source: "checkpoint",
+    });
+  }
+  return merged;
 }
 
 /**
@@ -438,6 +549,15 @@ export function getByIdIncludeDeleted(id) {
   // Task 2 — mirror the agent-event hydration from getById so restore /
   // abort paths surface the same per-agent narrative replay.
   run.agentEvents = runAgentEventRepo.getByRunId(id).map(parseAgentEventRow);
+  // B1.1 — mirror the checkpoint-results merge so the restore / abort
+  // paths surface the same crash-recovered results that `getById` does.
+  // See the `getById` callsite above for the full rationale.
+  try {
+    run.results = mergeCheckpointResults(run.results, runTestResultRepo.getByRunId(id));
+  } catch { /* best-effort */ }
+  try {
+    run.snapshotCount = crawlSnapshotRepo.countByRunId(id);
+  } catch { run.snapshotCount = 0; }
   return run;
 }
 
@@ -1246,17 +1366,87 @@ export function findLatestResultForTest(testId) {
 
 /**
  * Mark all "running" non-deleted runs as "interrupted" (orphan recovery on startup).
- * @returns {number} Number of runs marked.
+ *
+ * B1 (AUDIT-ROADMAP) — Also stamps `failureReason = 'process_crash'` so the
+ * resume endpoint (`POST /runs/:runId/resume`) and CI consumers can
+ * distinguish a SIGKILL / OOM kill from a user-initiated abort or an
+ * ordinary test failure. The existing `status = 'interrupted'` transition
+ * is preserved bit-for-bit (frontend `pipelineState.js` treats it as
+ * terminal alongside `failed` / `aborted`); `failureReason` is purely
+ * additive metadata. Pre-B1 rows have `failureReason = NULL` which the
+ * resume gate treats as "not crash-recovered".
+ *
+ * **Stale-window filter (B1-1 spec — `docs/roadmap/AUDIT-ROADMAP.md:163-165`):**
+ *
+ * > "any run with `status = 'running'` and no result flush in the last
+ * > `CHECKPOINT_STALE_MS` (default 60 000 ms) transitions to `failed` with
+ * > `failureReason: 'process_crash'`."
+ *
+ * Skips rows whose most-recent `run_test_results.createdAt` is within
+ * the staleness window — the caller (or a parallel replica) is plausibly
+ * still alive and writing checkpoints. This prevents a multi-replica
+ * deployment from aborting in-flight runs on each replica's boot
+ * (industry-standard pattern: heartbeat-bounded liveness, matching the
+ * BullMQ stalled-job detector and AWS Step Functions activity tasks).
+ *
+ * Rows with NO checkpoint history (pre-B1 runs, crawls without per-test
+ * flushes, runs that crashed before the first test completed) are
+ * unconditionally transitioned — there's no heartbeat to consult, and
+ * leaving them as `running` produces phantom in-flight rows in the UI.
+ *
+ * @returns {{ count: number, ids: string[] }} count of rows marked + their
+ *   IDs. IDs are returned so callers (e.g. the boot-time hook in
+ *   `index.js`) can log + enqueue resume jobs for crash-recovered runs.
  */
 export function markOrphansInterrupted() {
   const db = getDatabase();
   const now = new Date().toISOString();
-  const info = db.prepare(
-    `UPDATE runs SET status = 'interrupted', finishedAt = COALESCE(finishedAt, ?),
-     error = 'Server restarted while run was in progress'
-     WHERE status = 'running' AND deletedAt IS NULL`
-  ).run(now);
-  return info.changes;
+  // CHECKPOINT_STALE_MS — env-tunable, mirrors `.env.example` entry +
+  // `dbWriteQueue.js` doc convention. Default 60 s matches the spec.
+  // Number() with || fallback so an unset env var doesn't break the
+  // computation (Number(undefined) → NaN; NaN || 60000 → 60000).
+  const STALE_MS = Number(process.env.CHECKPOINT_STALE_MS) || 60000;
+  const cutoff = new Date(Date.now() - STALE_MS).toISOString();
+  const ids = [];
+  db.transaction(() => {
+    // SELECT-then-FILTER pattern: pull every candidate `running` row, then
+    // exclude those with a recent checkpoint heartbeat. Keeping the heartbeat
+    // check in JS (vs a SQL LEFT JOIN) avoids cross-dialect SQL gymnastics
+    // — `run_test_results` is a B1 table and the postgres-adapter's join-
+    // translation rules don't cover it.
+    const rows = db.prepare(
+      "SELECT id FROM runs WHERE status = 'running' AND deletedAt IS NULL"
+    ).all();
+    for (const r of rows) {
+      let isStale = true;
+      try {
+        const lastAt = db.prepare(
+          "SELECT MAX(createdAt) AS lastAt FROM run_test_results WHERE runId = ?"
+        ).get(r.id)?.lastAt;
+        // A run whose latest checkpoint is INSIDE the staleness window
+        // looks alive — skip it. Pre-B1 / crawl / pre-first-test rows
+        // return null and fall through to the unconditional transition.
+        if (lastAt && lastAt >= cutoff) isStale = false;
+      } catch { /* table missing on pre-migration-065 envs — treat as stale */ }
+      if (isStale) ids.push(r.id);
+    }
+    if (ids.length > 0) {
+      // Inline IN-list rather than a bare `WHERE status = 'running'`
+      // predicate so the UPDATE only touches the rows we explicitly
+      // selected as stale — a sibling replica that just bumped a
+      // checkpoint between our SELECT and UPDATE keeps its run alive.
+      const placeholders = ids.map(() => "?").join(", ");
+      db.prepare(
+        `UPDATE runs
+            SET status = 'interrupted',
+                finishedAt = COALESCE(finishedAt, ?),
+                error = 'Server restarted while run was in progress',
+                failureReason = COALESCE(failureReason, 'process_crash')
+          WHERE id IN (${placeholders}) AND status = 'running' AND deletedAt IS NULL`
+      ).run(now, ...ids);
+    }
+  })();
+  return { count: ids.length, ids };
 }
 
 // ─── Recycle bin ─────────────────────────────────────────────────────────────

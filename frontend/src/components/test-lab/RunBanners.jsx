@@ -7,7 +7,7 @@
  * Extracted from `frontend/src/pages/TestLab.jsx` (the two
  * `{isRunDone && (...)} ` / `{isRunFailed && (...)} ` blocks formerly
  * at `:1682-1750`) so the page-level component stops being a 2400-line
- * monolith. AGENT.md §40 — helpers with their own JSX surface belong in
+ * monolith. AGENTS.md §40 — helpers with their own JSX surface belong in
  * a sibling file once they exceed a screenful.
  *
  * Both banners render inside the `.tl-run-center` div above the inner

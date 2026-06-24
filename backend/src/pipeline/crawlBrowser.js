@@ -9,9 +9,10 @@
 
 import { throwIfAborted } from "../utils/abortHelper.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern, stripNoiseParams } from "./smartCrawl.js";
-import { takeSnapshot } from "./pageSnapshot.js";
+import { takeSnapshot, waitForSpaHydration } from "./pageSnapshot.js";
 import { log, logWarn, logSuccess, emitRunEvent } from "../utils/runLogger.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as crawlSnapshotRepo from "../database/repositories/crawlSnapshotRepo.js";
 import { signRunArtifacts } from "../middleware/appSetup.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { performAutoLogin } from "./autoLogin.js";
@@ -20,6 +21,13 @@ import { launchBrowser } from "../runner/config.js";
 import { loadRobotsRules, isAllowed, loadSitemapUrls } from "../utils/robotsSitemap.js";
 import * as accessibilityViolationRepo from "../database/repositories/accessibilityViolationRepo.js";
 import { AxeBuilder } from "@axe-core/playwright";
+// AUDIT-ROADMAP B2 — shared iframe-enumeration helper used by both
+// `crawlBrowser.js` (here) and `stateExplorer.js`. Extracted to keep the
+// two crawl modes from drifting on iframe semantics. Re-exported below as
+// `shouldEnumerateFrame` so existing tests (`b2-adaptive-timeout.test.js`)
+// keep importing from this module.
+import { shouldEnumerateFrame as _shouldEnumerateFrame, enumerateFrameSnapshots } from "./iframeEnumeration.js";
+export const shouldEnumerateFrame = _shouldEnumerateFrame;
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
@@ -202,9 +210,25 @@ export async function crawlPages(project, run, { signal } = {}) {
       const page = await context.newPage();
       try {
         log(run, `📄 Visiting (depth ${depth}): ${url}`);
+        // B1.3 (AUDIT-ROADMAP) — record the navigation wall-clock so the
+        // per-page row in `crawl_snapshots` carries `loadMs`. B2's adaptive
+        // element timeout reads `crawlSnapshotRepo.getLoadTimesByRunId`
+        // post-crawl to compute `run.p95LoadMs`; persisting it now means
+        // B2 ships without an ALTER TABLE follow-up.
+        const navStart = Date.now();
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+        const loadMs = Date.now() - navStart;
         // takeSnapshot() now calls waitForLoadState('networkidle') internally,
         // so we no longer need the arbitrary 800ms static wait here.
+
+        // AUDIT-ROADMAP B2 — SPA hydration wait. React/Vue/Angular/Next.js
+        // apps populate the interactive DOM 200–2 000 ms after `domcontentloaded`
+        // fires; without this wait the snapshot captures skeleton state and
+        // generated tests target elements that don't exist at execution time.
+        // Best-effort: apps without a recognisable loading indicator fall
+        // through after `HYDRATION_WAIT_MS` (env, default 5 000) and the
+        // crawl proceeds unchanged.
+        await waitForSpaHydration(page, project);
 
         // ── Shadow DOM: inject queryShadowAll helper and collect elements ──
         // Modern enterprise apps (Angular, Lit, Stencil, Salesforce LWC) encapsulate
@@ -311,6 +335,49 @@ export async function crawlPages(project, run, { signal } = {}) {
           } catch (persistErr) {
             logWarn(run, `Failed to persist accessibility violations for ${url}: ${persistErr.message}`);
           }
+        }
+
+        // AUDIT-ROADMAP B2 — enumerate same-origin (or allowlisted)
+        // iframes on this page BEFORE persisting / pushing the parent
+        // snapshot, so the merged frame elements travel with the parent
+        // and reach `filterAndClassify` → `elementFilter` →
+        // `journeyGenerator`. Without this merge, iframe content is
+        // observable in `crawl_snapshots` but invisible to test
+        // generation (the in-memory `snapshots[]` array is the
+        // single source of truth the pipeline consumes).
+        //
+        // The merge mirrors the shadow-DOM treatment 40 lines above —
+        // iframe elements are appended to `snapshot.elements` with
+        // `_fromIframe: true` so future PRs can teach the selector
+        // generator to wrap them in `page.frameLocator(...)` (tracked
+        // as follow-up `B2-FU-1`).
+        //
+        // Strictly best-effort and isolated from the outer catch so a
+        // single bad frame can't fail the parent crawl.
+        let frameEnum = { count: 0, skipped: 0, frameElements: [] };
+        try {
+          frameEnum = await enumerateFrameSnapshots(page, url, project, run);
+        } catch (frameErr) {
+          logWarn(run, `iframe enumeration failed for ${url}: ${frameErr.message}`);
+        }
+        if (frameEnum.frameElements.length > 0) {
+          snapshot.elements = [...(snapshot.elements || []), ...frameEnum.frameElements];
+        }
+
+        // B1.3 (AUDIT-ROADMAP Bundle 1) — stream the snapshot to
+        // `crawl_snapshots` immediately so peak heap stays O(1 page) for a
+        // crash-recoverable crawl. Idempotent via `INSERT OR IGNORE` on
+        // (runId, url); re-crawling the same URL within a run is a no-op
+        // rather than an error. Best-effort: a persistence hiccup must
+        // never fail the crawl (the in-memory `snapshots[]` accumulation
+        // below is the legacy shadow path that downstream pipeline stages
+        // still consume during the B1 → B2 transition). The persisted
+        // row carries the merged frame elements so a resume-from-crash
+        // re-run sees the same generation surface as the original run.
+        try {
+          crawlSnapshotRepo.save(run.id, url, snapshot, { loadMs });
+        } catch (persistErr) {
+          logWarn(run, `Failed to persist crawl snapshot for ${url}: ${persistErr.message}`);
         }
 
         snapshots.push(snapshot);

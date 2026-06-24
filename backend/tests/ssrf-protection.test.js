@@ -15,36 +15,14 @@
 
 import assert from "node:assert/strict";
 import { isPrivateIp, validateUrl } from "../src/utils/ssrfGuard.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-// ─── Test runner ──────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-const deferred = [];
-
-function test(name, fn) {
-  try {
-    const result = fn();
-    if (result && typeof result.then === "function") {
-      // Async test — collect and await later
-      deferred.push(result.then(() => {
-        console.log(`  ✅ ${name}`);
-        passed++;
-      }).catch((err) => {
-        console.error(`  ❌ ${name}`);
-        console.error(`     ${err.message}`);
-        failed++;
-      }));
-    } else {
-      console.log(`  ✅ ${name}`);
-      passed++;
-    }
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline sync+async `test()`
+// wrapper with the shared runner from `helpers/test-base.js`. The shared
+// runner accepts both sync and async bodies natively, so the previous
+// `deferred[]` collection for async tests is no longer needed —
+// `summary()` drains pending promises before reporting.
+const { test, summary } = createTestRunner();
 
 // ─── isPrivateIp — IPv4 edge cases (covers ipv4ToInt parsing) ─────────────────
 // ipv4ToInt is a module-private helper in ssrfGuard.js. We test its behaviour
@@ -278,10 +256,5 @@ test("validateUrl accepts valid public https URL", async () => {
   assert.equal(err, null, "should accept a public IP URL");
 });
 
-// ─── Results ──────────────────────────────────────────────────────────────────
-
-// Await any async tests before reporting
-await Promise.all(deferred);
-
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+// summary() drains pending async tests internally — no manual `Promise.all`.
+summary("ssrf-protection");

@@ -11,21 +11,12 @@
  */
 
 import assert from "node:assert/strict";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 // ─── resolveBrowser() ────────────────────────────────────────────────────────
 // The config module reads `process.env.BROWSER_DEFAULT` at import time to
@@ -112,14 +103,4 @@ test("DEFAULT_BROWSER is 'chromium' when BROWSER_DEFAULT is unset", () => {
     `DEFAULT_BROWSER must be one of the three engines, got ${JSON.stringify(DEFAULT_BROWSER)}`);
 });
 
-// ─── Summary ─────────────────────────────────────────────────────────────────
-
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  cross-browser tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 All cross-browser tests passed!");
+summary("cross-browser");

@@ -2,7 +2,7 @@
  * @module database/repositories/testRepo
  * @description Test CRUD backed by SQLite.
  *
- * JSON columns: steps, tags (arrays stored as JSON strings).
+ * JSON columns: steps, tags, dependsOn (arrays stored as JSON strings).
  * Boolean columns: isJourneyTest, assertionEnhanced, isApiTest (stored as 0/1).
  *
  * All read queries filter `WHERE deletedAt IS NULL` by default.
@@ -21,14 +21,15 @@ export { parsePagination };
 
 // ─── Row ↔ Object helpers ─────────────────────────────────────────────────────
 
-const JSON_FIELDS = ["steps", "tags", "qualityScoreFactors"];
+const JSON_FIELDS = ["steps", "tags", "qualityScoreFactors", "dependsOn", "semanticReviewIssues"];
 const BOOL_FIELDS = ["isJourneyTest", "assertionEnhanced", "isApiTest", "isStale"];
 
 function rowToTest(row) {
   if (!row) return undefined;
   const obj = { ...row };
   for (const f of JSON_FIELDS) {
-    obj[f] = obj[f] ? JSON.parse(obj[f]) : (f === "steps" || f === "tags" || f === "qualityScoreFactors" ? [] : null);
+    if (typeof obj[f] === "string" && obj[f]) obj[f] = JSON.parse(obj[f]);
+    else if (!obj[f]) obj[f] = (f === "steps" || f === "tags" || f === "qualityScoreFactors" || f === "semanticReviewIssues" ? [] : null);
   }
   for (const f of BOOL_FIELDS) {
     obj[f] = obj[f] === 1 ? true : obj[f] === 0 ? false : obj[f];
@@ -61,6 +62,15 @@ const INSERT_COLS = [
   "aiFixAppliedAt", "codeVersion", "workspaceId", "isStale", "flakyScore",
   "confidenceScore", "approvalSource", "approvalThreshold", "approvedAt", "approvedBy",
   "reviewComment", // migration 054 — free-text "why is this draft?" explainer
+  "dependsOn", // migration 068 — upstream test IDs that must pass first (AUTO-014)
+  // AUDIT-ROADMAP Bundle 6 — quality gates.
+  "dryRunStatus",         // migration 073 — 'passed' | 'failed' | 'trivial' | NULL (QAL-001)
+  "dryRunError",          // migration 073 — truncated Playwright error on dry-run failure
+  "dryRunDurationMs",     // migration 073 — wall-clock of the dry-run lease (ms)
+  "semanticReviewScore",  // migration 074 — 0–100 LLM semantic review score (QAL-005)
+  "semanticReviewIssues", // migration 074 — JSON string[]; ≤ 5 entries
+  "setupCode",            // migration 075 — pre-test JS block (QAL-002)
+  "teardownCode",         // migration 075 — post-test best-effort cleanup block
 ];
 
 const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})
@@ -528,6 +538,15 @@ export function getByIdIncludeDeleted(id) {
 export function create(test) {
   const db = getDatabase();
   const row = testToRow(test, { fillDefaults: true });
+  // AUTO-014: legacy rows persist `null` when no dependencies are declared
+  // (documented in `docs/api/tests.md`). The `in` operator returns `true`
+  // for keys with `undefined` values, so a bare `if (!("dependsOn" in test))`
+  // guard would NOT override `{ dependsOn: undefined }` — `testToRow` with
+  // `fillDefaults: true` then coerces undefined → `"[]"`, drifting the
+  // persisted shape away from the contract. Cover both the absent-key case
+  // AND the present-but-nullish case so every caller (route, BullMQ worker,
+  // future bulk-create) gets the same legacy-compatible default.
+  if (!("dependsOn" in test) || test.dependsOn == null) row.dependsOn = null;
   const params = {};
   for (const col of INSERT_COLS) {
     params[col] = row[col] !== undefined ? row[col] : null;
@@ -536,6 +555,7 @@ export function create(test) {
   if (params.description == null) params.description = "";
   if (params.steps == null) params.steps = "[]";
   if (params.tags == null) params.tags = "[]";
+  if (params.dependsOn == null) params.dependsOn = null;
   if (params.isJourneyTest == null) params.isJourneyTest = 0;
   if (params.assertionEnhanced == null) params.assertionEnhanced = 0;
   if (params.reviewStatus == null) params.reviewStatus = "draft";

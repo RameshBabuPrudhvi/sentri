@@ -3,7 +3,7 @@ import { getCurrentTraceId } from "../utils/observability.js";
 import { agentReviewRounds, reviewerVerdictDowngradedTotal } from "../utils/metrics.js";
 import { readSpendCaps, evaluateSpendCap } from "./quotaGuard.js";
 import { getMaxReviewRounds } from "../database/repositories/agentConfigRepo.js";
-import { resolveRoute } from "./registry.js";
+import { detectReviewerCollapse } from "./reviewerCollapse.js";
 import { PIPELINE_STEPS } from "../utils/pipelineState.js";
 // Loop ceilings live in a leaf constants module (no imports of its own)
 // so `agentLoop.js` and `agentConfigRepo.js` can both reference
@@ -223,11 +223,8 @@ function resolveMaxReviewRounds(callerValue, workspaceId) {
 function maybeWarnSingleAgentCollapse({ runId, workspaceId }) {
   if (!runId || !workspaceId) return;
   try {
-    const author = resolveRoute({ agentRole: "author", workspaceId });
-    const reviewer = resolveRoute({ agentRole: "reviewer", workspaceId });
-    const aId = author?.route?.id;
-    const rId = reviewer?.route?.id;
-    if (!aId || !rId || aId !== rId) return;
+    const info = detectReviewerCollapse(workspaceId);
+    if (!info.collapsed) return;
     emitAgentEvent(runId, {
       step: PIPELINE_STEPS.REVIEW,
       agent: "reviewer",
@@ -235,8 +232,8 @@ function maybeWarnSingleAgentCollapse({ runId, workspaceId }) {
       message: "Author and reviewer share the same provider route — review loop runs but cannot catch model-specific blind spots.",
       data: {
         kind: "single_agent_collapse",
-        routeId: aId,
-        model: reviewer?.route?.model || author?.route?.model || null,
+        routeId: info.routeId,
+        model: info.model,
       },
       workspaceId,
     });
@@ -304,6 +301,32 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   workspaceId = null,
   maxReviewRounds = null,
   loopTimeoutMs = DEFAULT_LOOP_TIMEOUT_MS,
+  // B3 (AUDIT-ROADMAP) — when the upstream pre-run gate detected that
+  // author/reviewer collapse to the same provider route, the caller
+  // passes `reviewerCollapsed: true`. The loop then:
+  //   1. Skips the in-loop AI-005c advisory (the operator already has
+  //      the RunDetail chip + Settings warning banner — emitting a
+  //      duplicate `agent_event` finding per loop is noise).
+  //   2. Substitutes the caller-supplied `runReviewer` with a synthetic
+  //      auto-accept closure on round 0. The author pass STILL runs
+  //      (we need a candidate test), but the LLM-or-heuristic reviewer
+  //      call is suppressed entirely — matching the spec at
+  //      `docs/roadmap/AUDIT-ROADMAP.md:476-480`: "Skip all LLM
+  //      reviewer calls… Do not emit agent_messages envelopes for the
+  //      collapsed path — the audit trail must reflect that no
+  //      independent review occurred."
+  //   3. Default `null` (auto-detect via in-loop advisory) → explicit
+  //      `false` (operator forced multi-agent semantics; reviewer runs
+  //      normally) → explicit `true` (caller asserts collapse; reviewer
+  //      is replaced with auto-accept).
+  //
+  // The substitution happens at loop entry below, so the reviewer
+  // round produces NO `agent_messages` row for the reviewer side
+  // (the synthetic closure returns `{ intent: "accept" }` without
+  // touching the caller's reviewer machinery). The author handoff
+  // envelope still writes — that's the author's work product, not
+  // the absent reviewer's verdict.
+  reviewerCollapsed = null,
 } = {}) {
   if (typeof runAuthor !== "function" || typeof runReviewer !== "function") {
     throw new Error("runReviewerAuthorLoop requires runAuthor + runReviewer functions");
@@ -328,7 +351,16 @@ export async function runReviewerAuthorLoop(initialArtifact, {
   // skips silently (smoke-test path), and resolveRoute / emitAgentEvent
   // failures are swallowed so the loop never fails because of an
   // observability hiccup.
-  maybeWarnSingleAgentCollapse({ runId, workspaceId });
+  //
+  // B3 (AUDIT-ROADMAP) — caller-asserted `reviewerCollapsed === true`
+  // suppresses this in-loop advisory because the upstream pre-run gate
+  // already emitted the structured collapse marker + populated
+  // `run.reviewerCollapsed`. Emitting the same finding per loop would
+  // produce N duplicate `agent_event` rows on a multi-journey
+  // crawl-mode run.
+  if (reviewerCollapsed !== true) {
+    maybeWarnSingleAgentCollapse({ runId, workspaceId });
+  }
   const maxElapsedMs = clampLoopTimeoutMs(loopTimeoutMs);
   const deadline = Date.now() + maxElapsedMs;
   let round = 0;
@@ -394,7 +426,19 @@ export async function runReviewerAuthorLoop(initialArtifact, {
       replyToId: lastReviewerMsgId,
     });
 
-    const reviewer = await runReviewer({ round, artifact: authorArtifact });
+    // B3 (AUDIT-ROADMAP) — when the caller asserts collapse, replace
+    // the reviewer call with a synthetic auto-accept. Zero LLM cost,
+    // zero envelope row for the reviewer side. The `intent: "accept"`
+    // routes to the same terminal branch below as a real reviewer
+    // accept, so the loop's contract (`outcome: "accept"`, round=0,
+    // roundsCompleted=1) holds — operators reading the result can't
+    // tell from the OUTCOME whether the run was collapsed or not,
+    // but the run-level `run.reviewerCollapsed = 1` stamp + the
+    // upstream `agent_event{kind:"reviewer_collapsed"}` marker make
+    // the collapse visible in the audit trail.
+    const reviewer = reviewerCollapsed === true
+      ? { intent: "accept" }
+      : await runReviewer({ round, artifact: authorArtifact });
     let intent = normalizeVerdict(reviewer);
     let artifact = reviewer?.artifact ?? null;
     if (intent === "request_revision") {
@@ -448,16 +492,24 @@ export async function runReviewerAuthorLoop(initialArtifact, {
         artifact = { ...(artifact || {}), issues: safeIssues };
       }
     }
-    const reviewerMsg = toMessage({
-      runId, threadId, workspaceId,
-      fromRole: "reviewer",
-      toRole: intent === "request_revision" ? "author" : "supervisor",
-      intent,
-      artifact,
-      rationale: reviewer?.rationale || null,
-      round,
-      replyToId: authorMsg?.id || null,
-    });
+    // B3 (AUDIT-ROADMAP) — suppress the reviewer-side envelope write
+    // when collapsed. The spec is explicit: "Do not emit agent_messages
+    // envelopes for the collapsed path — the audit trail must reflect
+    // that no independent review occurred." Emitting a synthetic
+    // accept row would falsely document a review that never happened.
+    let reviewerMsg = null;
+    if (reviewerCollapsed !== true) {
+      reviewerMsg = toMessage({
+        runId, threadId, workspaceId,
+        fromRole: "reviewer",
+        toRole: intent === "request_revision" ? "author" : "supervisor",
+        intent,
+        artifact,
+        rationale: reviewer?.rationale || null,
+        round,
+        replyToId: authorMsg?.id || null,
+      });
+    }
     lastReviewerMsgId = reviewerMsg?.id || null;
 
     // A full author↔reviewer round-trip just finished. Bump

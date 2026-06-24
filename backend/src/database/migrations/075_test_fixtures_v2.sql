@@ -1,0 +1,36 @@
+-- B6.3 — Per-test setup + teardown code (AUDIT-ROADMAP Bundle 6, QAL-002).
+--
+-- Adds two columns to `tests` carrying the optional `setup` / `teardown`
+-- code blocks emitted alongside the test body by the journey + intent
+-- prompts. The runner executes `setupCode` BEFORE the test body (any
+-- throw aborts the test as a setup_failure) and `teardownCode` in the
+-- test's `finally` block on a best-effort basis (errors swallowed +
+-- logged so a teardown bug never masks a real test failure).
+--
+-- Industry parallels: Cypress `beforeEach` / `afterEach`, Playwright
+-- `test.beforeEach` / `test.afterEach`, JUnit `@Before` / `@After`.
+-- Sentri's variant lives per-test rather than per-file because each
+-- AI-generated test is its own isolated artefact — there is no
+-- containing `describe` block to hang per-suite hooks off.
+--
+-- Columns:
+--   • setupCode    — TEXT, full JS block executed inside the same vm
+--                     sandbox as the test body. Receives `page`,
+--                     `safeClick`, etc. via the same injection map.
+--                     NULL when the prompt didn't emit a setup block
+--                     (the LLM only emits one when the scenario
+--                     genuinely needs precondition state).
+--   • teardownCode — TEXT, full JS block executed in the test's
+--                     `finally`. Same sandbox, same globals. Errors
+--                     are caught + logged as
+--                     `⚠ Teardown error (swallowed)` per the spec at
+--                     `docs/roadmap/AUDIT-ROADMAP.md:854-855`.
+--
+-- Why per-test, not per-suite: a setup that creates a user account
+-- shouldn't bleed into the next test's preconditions, and a teardown
+-- that deletes that account must run even if the test fails. Per-test
+-- hooks are the safe default for AI-generated suites where the LLM
+-- can't reason about cross-test ordering.
+
+ALTER TABLE tests ADD COLUMN setupCode TEXT;
+ALTER TABLE tests ADD COLUMN teardownCode TEXT;

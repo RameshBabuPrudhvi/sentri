@@ -6,15 +6,89 @@
  * rich context for test generation.
  *
  * Exports:
- *   takeSnapshot(page) → snapshot object
+ *   takeSnapshot(page, opts?) → snapshot object
+ *   waitForSpaHydration(page, project) — AUDIT-ROADMAP B2
  */
 
-const CRAWL_NETWORKIDLE_TIMEOUT = parseInt(process.env.CRAWL_NETWORKIDLE_TIMEOUT, 10) || 5000;
+import { spaHydrationWaitSeconds } from "../utils/metrics.js"; // B2 — per-mode hydration-wait histogram.
 
-export async function takeSnapshot(page) {
+const CRAWL_NETWORKIDLE_TIMEOUT = parseInt(process.env.CRAWL_NETWORKIDLE_TIMEOUT, 10) || 5000;
+// AUDIT-ROADMAP B2 — SPA hydration wait. The default 5 000 ms covers most
+// React/Vue/Angular/Next.js apps; operators with slow staging environments
+// raise it via the `HYDRATION_WAIT_MS` env var. `catch(() => {})` on every
+// wait keeps the crawl alive when an app has no loading indicators (the
+// vast majority — we fall through and snapshot whatever's there).
+const HYDRATION_WAIT_MS = parseInt(process.env.HYDRATION_WAIT_MS, 10) || 5000;
+
+/**
+ * AUDIT-ROADMAP B2 — wait for SPA hydration before snapshotting.
+ *
+ * `project.hydrationType` controls behaviour:
+ *   - `'auto'` (default) — wait for the common loading-indicator
+ *     selectors to disappear. Best-effort; never throws on timeout because
+ *     the majority of apps simply don't have a loading indicator.
+ *   - `'domcontentloaded'` — opt-out; no extra wait.
+ *   - `'custom'` — wait for `project.hydrationSelector` to disappear.
+ *
+ * Called both by `pageSnapshot.takeSnapshot` (legacy path) and directly by
+ * `crawlBrowser.js` / `stateExplorer.js` (the new B2 path that takes the
+ * `loadMs` measurement). Exported so tests can exercise it in isolation.
+ *
+ * @param {Object} page                Playwright Page or Frame.
+ * @param {Object} [project]           Project row (hydrationType, hydrationSelector).
+ * @returns {Promise<void>}
+ */
+export async function waitForSpaHydration(page, project) {
+  const mode = project?.hydrationType || "auto";
+  // AUDIT-ROADMAP B2 — observe even the early-return cases (with 0 duration)
+  // so the `mode` label distribution in `app_spa_hydration_wait_seconds`
+  // reflects the true prevalence of each hydration policy. Without this,
+  // dashboards would silently under-count `domcontentloaded` adopters.
+  // Best-effort: a registry hiccup must never block the crawl.
+  const start = Date.now();
+  const observe = () => {
+    try { spaHydrationWaitSeconds.observe({ mode }, (Date.now() - start) / 1000); } catch { /* best-effort */ }
+  };
+
+  if (mode === "domcontentloaded") { observe(); return; }
+
+  if (mode === "custom") {
+    const selector = project?.hydrationSelector;
+    if (!selector) { observe(); return; } // no-op — see PATCH-route comment
+    await page.waitForSelector(selector, { state: "hidden", timeout: HYDRATION_WAIT_MS }).catch(() => {});
+    observe();
+    return;
+  }
+
+  // 'auto' — wait for common loading indicators to disappear. Single
+  // composite selector + waitForFunction so we don't bill HYDRATION_WAIT_MS
+  // N times once per selector.
+  await page.waitForFunction(
+    () => !document.querySelector('.loading, [aria-busy="true"], [data-loading], .skeleton, [class*="skeleton"], [class*="spinner"]'),
+    { timeout: HYDRATION_WAIT_MS },
+  ).catch(() => {});
+  observe();
+}
+
+/**
+ * @param {Object} page             Playwright Page or Frame.
+ * @param {Object} [opts]
+ * @param {Object} [opts.project]   When provided, runs SPA hydration wait
+ *   per `project.hydrationType`. Omit (legacy callers, recorder, etc.) to
+ *   preserve the pre-B2 behaviour — networkidle only.
+ * @returns {Promise<Object>}
+ */
+export async function takeSnapshot(page, opts = {}) {
   // Wait for SPA content to settle — domcontentloaded fires too early for SPAs.
   // Try networkidle first (best for SPAs), fall back to a generous timeout.
   await page.waitForLoadState("networkidle", { timeout: CRAWL_NETWORKIDLE_TIMEOUT }).catch(() => {});
+
+  // AUDIT-ROADMAP B2 — framework-aware hydration wait. Only runs when the
+  // caller forwards a project row; the legacy single-arg callsites (no
+  // project) skip it for zero regression.
+  if (opts.project) {
+    await waitForSpaHydration(page, opts.project);
+  }
 
   return page.evaluate(() => {
     // Compute the effective ARIA role of an element (explicit or implicit)

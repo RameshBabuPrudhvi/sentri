@@ -6,7 +6,7 @@
  * `frontend/src/features/settings/`. The new shell classes implement the
  * industry-standard left-rail layout used by GitHub / Vercel / Linear / Sentry
  * Settings. All inline styles in extracted components were replaced with the
- * utility classes below per AGENT.md §127.
+ * utility classes below per AGENTS.md §127.
  */
 
 /* ── GAP-002 — Settings shell (sidebar + content) ───────────────────────────── */
@@ -247,7 +247,7 @@
 /* ── Agent Roles tab (AI-005) ───────────────────────────────────────────────── */
 /* Per-row form + result row inside the AgentRolesTab. Class names follow the
    `.st-agent-*` prefix to stay scoped to the Settings page; no inline styles
-   so the same look survives theme changes and the AGENT.md "no inline CSS"
+   so the same look survives theme changes and the AGENTS.md "no inline CSS"
    rule (§127-128). */
 .st-agent-form {
   display: grid;
@@ -288,7 +288,7 @@
 /* ── Provider Routes tab (B3.1) ─────────────────────────────────────────────── */
 /* Per-row form + list inside the ProviderRoutesTab. Class names follow the
    `.st-pr-*` prefix to stay scoped to the Settings page; no inline styles so
-   the same look survives theme changes and the AGENT.md "no inline CSS" rule. */
+   the same look survives theme changes and the AGENTS.md "no inline CSS" rule. */
 
 /* B3.0 — Section sub-tab strip. Mirrors the `.pd-tab-bar` / `.pd-tab` /
    `.pd-tab--active` pattern from project-detail.css so the visual language is

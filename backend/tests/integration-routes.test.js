@@ -14,6 +14,7 @@ import * as runRepo from "../src/database/repositories/runRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
+const runner = t.createTestRunner();
 const { app, req, workspaceScope } = t;
 
 let mounted = false;
@@ -45,8 +46,10 @@ async function main() {
     });
     const workspaceId = payload.workspaceId;
 
-    let out = await req(base, "/api/dashboard");
-    assert.equal(out.res.status, 401);
+    await runner.test("GET /api/dashboard without token → 401", async () => {
+      const out = await req(base, "/api/dashboard");
+      assert.equal(out.res.status, 401);
+    });
 
     projectRepo.create({
       id: "PRJ-100",
@@ -86,21 +89,27 @@ async function main() {
       ],
     });
 
-    out = await req(base, "/api/dashboard", { token });
-    assert.equal(out.res.status, 200);
-    assert.equal(out.json.totalProjects, 1);
-    assert.equal(out.json.totalTests, 1);
+    await runner.test("GET /api/dashboard returns project + test counts", async () => {
+      const out = await req(base, "/api/dashboard", { token });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.totalProjects, 1);
+      assert.equal(out.json.totalTests, 1);
+    });
 
-    out = await req(base, "/api/system", { token });
-    assert.equal(out.res.status, 200);
-    assert.equal(typeof out.json.nodeVersion, "string");
-    assert.equal(typeof out.json.projects, "number");
+    await runner.test("GET /api/system returns node + project info", async () => {
+      const out = await req(base, "/api/system", { token });
+      assert.equal(out.res.status, 200);
+      assert.equal(typeof out.json.nodeVersion, "string");
+      assert.equal(typeof out.json.projects, "number");
+    });
 
-    out = await req(base, "/api/settings", { token });
-    assert.equal(out.res.status, 200);
-    assert.ok(Object.hasOwn(out.json, "activeProvider"));
+    await runner.test("GET /api/settings includes activeProvider key", async () => {
+      const out = await req(base, "/api/settings", { token });
+      assert.equal(out.res.status, 200);
+      assert.ok(Object.hasOwn(out.json, "activeProvider"));
+    });
 
-    console.log("✅ integration-routes: all checks passed");
+    runner.summary("integration-routes");
   } finally {
     env.restore();
     await new Promise((resolve) => server.close(resolve));

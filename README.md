@@ -229,7 +229,7 @@ Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 
 **Workflow:**
 1. Fork the repository and create a branch: `feature/<description>` or `fix/<description>`
-2. Read [AGENT.md](AGENT.md) — it covers architecture, conventions, and what not to do
+2. Read [AGENTS.md](AGENTS.md) — it covers architecture, conventions, and what not to do
 3. Read [STANDARDS.md](STANDARDS.md) when writing new code
 4. Run the test suite before submitting: `cd backend && npm test` and `cd frontend && npm run build`
    - For user-visible changes, also walk the affected sections of [QA.md](QA.md) — at minimum the Golden E2E Happy Path

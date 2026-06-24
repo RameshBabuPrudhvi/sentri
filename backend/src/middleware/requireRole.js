@@ -25,7 +25,7 @@
  * ### Keeping `permissions.json` in sync
  * Every `requireRole(...)` call site is mirrored in `./permissions.json`,
  * which is the canonical machine-readable RBAC matrix consumed by agents
- * and reviewers (see QA.md, AGENT.md, REVIEW.md). Whenever you add, remove,
+ * and reviewers (see QA.md, AGENTS.md, REVIEW.md). Whenever you add, remove,
  * or change a role gate, update the corresponding entry in `permissions.json`.
  * Audit drift with: `grep -rn 'requireRole(' backend/src/routes/`.
  *

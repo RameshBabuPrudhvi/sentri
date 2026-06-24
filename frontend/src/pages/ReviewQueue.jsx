@@ -1157,6 +1157,41 @@ export default function ReviewQueue() {
                               · {worstLabel}
                             </span>
                           )}
+                          {/* AUDIT-ROADMAP B6 — quality-gate chips. Render
+                              inline in the row meta line so reviewers see
+                              the gate verdict alongside the existing
+                              quality / type / project badges. All three
+                              chips are independently opt-in (per-project
+                              `dryRunGate` / `semanticReview` toggles); a
+                              test where the gates didn't run carries NULL
+                              columns and the chip simply doesn't render. */}
+                          {t.dryRunStatus === "failed" && (
+                            <span className="badge badge-red badge--xs" title={t.dryRunError || "Dry-run failed"}>
+                              ⚠ Dry run failed
+                            </span>
+                          )}
+                          {t.dryRunStatus === "trivial" && (
+                            <span className="badge badge-amber badge--xs" title="Test completed in <200ms with zero network requests — likely no real assertion">
+                              ⚠ Trivial
+                            </span>
+                          )}
+                          {/* Semantic reject: show only when the backend
+                              actually flipped reviewStatus to 'rejected' AND
+                              a semantic score is present. Using reviewStatus
+                              (not raw score) because the normaliser preserves
+                              the LLM's verdict even when it disagrees with
+                              the score — a test with score 40 + verdict
+                              "accept" is NOT rejected by the backend. */}
+                          {t.reviewStatus === "rejected" && Number.isInteger(t.semanticReviewScore) && (
+                            <span className="badge badge-red badge--xs" title="Semantic reviewer rejected this test">
+                              ⚠ Semantic reject
+                            </span>
+                          )}
+                          {t.reviewStatus !== "rejected" && Number.isInteger(t.semanticReviewScore) && t.semanticReviewScore < 80 && (
+                            <span className="badge badge-amber badge--xs" title="Semantic reviewer suggested revisions">
+                              ⚠ Semantic revise
+                            </span>
+                          )}
                         </div>
                       </div>
 

@@ -9,7 +9,7 @@
  * (`tl-panel`) is a sibling and stays in `pages/TestLab.jsx` for now —
  * that extraction is Piece 3.
  *
- * AGENT.md §40 — helpers with their own JSX surface belong in a sibling
+ * AGENTS.md §40 — helpers with their own JSX surface belong in a sibling
  * file once they exceed a screenful. The previous PR extracted only
  * `<RequirementComposer>` (~104 lines); this file now also owns the
  * `tl-config-scroll` wrapper + error banner + `<TestConfig>` so the

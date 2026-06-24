@@ -35,20 +35,11 @@ function msg(role, n) {
   return { role, content: `${role} message ${n}` };
 }
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed++;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+import { createTestRunner } from "./helpers/test-base.js";
+const { test, summary } = createTestRunner();
 
 console.log("\n🪟  trimConversationHistory — sliding window");
 
@@ -135,12 +126,4 @@ test("does not increase message count", () => {
   assert.ok(result.length <= msgs.length, "Should never increase message count");
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);
-
-if (failed > 0) {
-  console.log("\n⚠️  Chat window tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 All chat-window tests passed!");
+summary("chat-window");

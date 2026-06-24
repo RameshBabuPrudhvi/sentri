@@ -1,6 +1,6 @@
 # Sentri — Coding Standards
 
-> Read this when writing or modifying any code, after reading AGENT.md.
+> Read this when writing or modifying any code, after reading AGENTS.md.
 > For lookup tables (utils, CSS classes, auth strategies, env vars) → use REFERENCE.md.
 
 ---

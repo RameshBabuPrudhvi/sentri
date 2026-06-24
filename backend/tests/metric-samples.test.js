@@ -7,21 +7,12 @@ import assert from "node:assert/strict";
 import { getDatabase } from "../src/database/sqlite.js";
 import { insertSample, getSeries, getSeriesByRunId } from "../src/database/repositories/metricSamplesRepo.js";
 import { recordMetric } from "../src/utils/recordMetric.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅ ${name}`);
-    passed++;
-  } catch (err) {
-    console.error(`  ❌ ${name}`);
-    console.error(`     ${err.message}`);
-    failed++;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 function resetDb() {
   const db = getDatabase();
@@ -117,5 +108,4 @@ test("getSeriesByRunId ignores rows whose tags lack a runId", () => {
 
 resetDb();
 
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+summary("metric-samples");

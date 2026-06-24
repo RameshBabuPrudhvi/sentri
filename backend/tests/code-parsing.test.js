@@ -5,17 +5,12 @@
 
 import assert from "node:assert/strict";
 import { repairBrokenStringLiterals } from "../src/runner/codeParsing.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-    process.exitCode = 1;
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 console.log("\n🧪 codeParsing: repairBrokenStringLiterals");
 
@@ -53,8 +48,4 @@ test("does not treat apostrophes in block comments as string delimiters", () => 
   assert.equal(repaired.includes("\n"), true);
 });
 
-if (process.exitCode) {
-  console.log("\n⚠️ codeParsing tests failed");
-  process.exit(1);
-}
-console.log("\n🎉 codeParsing tests passed");
+summary("codeParsing");

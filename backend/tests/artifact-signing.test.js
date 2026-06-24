@@ -21,6 +21,7 @@ import systemRouter from "../src/routes/system.js";
 import { createTestContext, extractCookie } from "./helpers/test-base.js";
 
 const t = createTestContext();
+const runner = t.createTestRunner();
 const { app } = t;
 
 let mounted = false;
@@ -49,91 +50,90 @@ async function main() {
   const base = `http://127.0.0.1:${port}`;
 
   try {
-    // ── signArtifactUrl() unit tests ────────────────────────────────────────
-
     const artifactPath = `/artifacts/screenshots/${testFile}`;
-    const signedUrl = signArtifactUrl(artifactPath);
+    let signedUrl, token, exp;
 
-    // Should contain token and exp query params
-    assert.ok(signedUrl.includes("?token="), "Signed URL should contain ?token=");
-    assert.ok(signedUrl.includes("&exp="), "Signed URL should contain &exp=");
-    assert.ok(signedUrl.startsWith(artifactPath), "Signed URL should start with the original path");
+    await runner.test("signArtifactUrl() returns URL with ?token= + &exp= future timestamp", () => {
+      signedUrl = signArtifactUrl(artifactPath);
+      assert.ok(signedUrl.includes("?token="), "Signed URL should contain ?token=");
+      assert.ok(signedUrl.includes("&exp="), "Signed URL should contain &exp=");
+      assert.ok(signedUrl.startsWith(artifactPath), "Signed URL should start with the original path");
 
-    // Parse the signed URL to extract token and exp
-    const url = new URL(signedUrl, base);
-    const token = url.searchParams.get("token");
-    const exp = url.searchParams.get("exp");
-    assert.ok(token, "token param should be present");
-    assert.ok(exp, "exp param should be present");
-    const expMs = parseInt(exp, 10);
-    assert.ok(expMs > Date.now(), "exp should be in the future");
+      // Parse the signed URL to extract token and exp
+      const url = new URL(signedUrl, base);
+      token = url.searchParams.get("token");
+      exp = url.searchParams.get("exp");
+      assert.ok(token, "token param should be present");
+      assert.ok(exp, "exp param should be present");
+      const expMs = parseInt(exp, 10);
+      assert.ok(expMs > Date.now(), "exp should be in the future");
+    });
 
-    // ── Valid signed URL returns the artifact ────────────────────────────────
+    await runner.test("valid signed URL returns the artifact with Cache-Control: no-store", async () => {
+      const res = await fetch(`${base}${signedUrl}`);
+      assert.equal(res.status, 200, "Valid signed URL should return 200");
+      const body = await res.text();
+      assert.equal(body, "fake-png-data", "Should serve the artifact file contents");
 
-    let res = await fetch(`${base}${signedUrl}`);
-    assert.equal(res.status, 200, "Valid signed URL should return 200");
-    const body = await res.text();
-    assert.equal(body, "fake-png-data", "Should serve the artifact file contents");
+      // Check Cache-Control header
+      const cacheControl = res.headers.get("cache-control");
+      assert.ok(cacheControl && cacheControl.includes("no-store"), "Should set Cache-Control: no-store");
+    });
 
-    // Check Cache-Control header
-    const cacheControl = res.headers.get("cache-control");
-    assert.ok(cacheControl && cacheControl.includes("no-store"), "Should set Cache-Control: no-store");
+    await runner.test("missing token returns 401", async () => {
+      const res = await fetch(`${base}${artifactPath}`);
+      assert.equal(res.status, 401, "Request without token should return 401");
+      const noTokenBody = await res.json();
+      assert.ok(noTokenBody.error, "401 response should include error message");
+    });
 
-    // ── Missing token returns 401 ────────────────────────────────────────────
+    await runner.test("tampered token returns 401", async () => {
+      const res = await fetch(`${base}${artifactPath}?token=tampered-value&exp=${exp}`);
+      assert.equal(res.status, 401, "Tampered token should return 401");
+    });
 
-    res = await fetch(`${base}${artifactPath}`);
-    assert.equal(res.status, 401, "Request without token should return 401");
-    const noTokenBody = await res.json();
-    assert.ok(noTokenBody.error, "401 response should include error message");
+    await runner.test("expired token returns 401", async () => {
+      const pastExp = Date.now() - 60000; // 1 minute ago
+      const res = await fetch(`${base}${artifactPath}?token=${token}&exp=${pastExp}`);
+      assert.equal(res.status, 401, "Expired token should return 401");
+    });
 
-    // ── Tampered token returns 401 ───────────────────────────────────────────
+    await runner.test("signRunArtifacts signs all artifact paths, preserves nulls, doesn't mutate input", () => {
+      const fakeRun = {
+        id: "run-123",
+        tracePath: "/artifacts/traces/run-123.zip",
+        videoPath: "/artifacts/videos/run-123-step0.webm",
+        videoSegments: [
+          "/artifacts/videos/run-123-step0.webm",
+          "/artifacts/videos/run-123-step1.webm",
+        ],
+        results: [
+          { testId: "t1", screenshotPath: "/artifacts/screenshots/run-123-step0.png", videoPath: "/artifacts/videos/run-123-step0.webm" },
+          { testId: "t2", screenshotPath: null, videoPath: null },
+        ],
+      };
+      const signedRun = signRunArtifacts(fakeRun);
 
-    res = await fetch(`${base}${artifactPath}?token=tampered-value&exp=${exp}`);
-    assert.equal(res.status, 401, "Tampered token should return 401");
+      // Original run should be unchanged (no mutation)
+      assert.ok(!fakeRun.tracePath.includes("?token="), "Original run.tracePath should not be signed");
 
-    // ── Expired token returns 401 ────────────────────────────────────────────
+      // Signed run should have tokens on all artifact paths
+      assert.ok(signedRun.tracePath.includes("?token="), "signedRun.tracePath should be signed");
+      assert.ok(signedRun.videoPath.includes("?token="), "signedRun.videoPath should be signed");
+      assert.ok(signedRun.videoSegments[0].includes("?token="), "signedRun.videoSegments[0] should be signed");
+      assert.ok(signedRun.videoSegments[1].includes("?token="), "signedRun.videoSegments[1] should be signed");
+      assert.ok(signedRun.results[0].screenshotPath.includes("?token="), "signedRun.results[0].screenshotPath should be signed");
+      assert.ok(signedRun.results[0].videoPath.includes("?token="), "signedRun.results[0].videoPath should be signed");
+      // Null paths should remain null
+      assert.equal(signedRun.results[1].screenshotPath, null, "Null screenshotPath should stay null");
+      assert.equal(signedRun.results[1].videoPath, null, "Null videoPath should stay null");
 
-    const pastExp = Date.now() - 60000; // 1 minute ago
-    res = await fetch(`${base}${artifactPath}?token=${token}&exp=${pastExp}`);
-    assert.equal(res.status, 401, "Expired token should return 401");
-
-    // ── signRunArtifacts() signs all artifact paths at read time ────────────
-
-    const fakeRun = {
-      id: "run-123",
-      tracePath: "/artifacts/traces/run-123.zip",
-      videoPath: "/artifacts/videos/run-123-step0.webm",
-      videoSegments: [
-        "/artifacts/videos/run-123-step0.webm",
-        "/artifacts/videos/run-123-step1.webm",
-      ],
-      results: [
-        { testId: "t1", screenshotPath: "/artifacts/screenshots/run-123-step0.png", videoPath: "/artifacts/videos/run-123-step0.webm" },
-        { testId: "t2", screenshotPath: null, videoPath: null },
-      ],
-    };
-    const signedRun = signRunArtifacts(fakeRun);
-
-    // Original run should be unchanged (no mutation)
-    assert.ok(!fakeRun.tracePath.includes("?token="), "Original run.tracePath should not be signed");
-
-    // Signed run should have tokens on all artifact paths
-    assert.ok(signedRun.tracePath.includes("?token="), "signedRun.tracePath should be signed");
-    assert.ok(signedRun.videoPath.includes("?token="), "signedRun.videoPath should be signed");
-    assert.ok(signedRun.videoSegments[0].includes("?token="), "signedRun.videoSegments[0] should be signed");
-    assert.ok(signedRun.videoSegments[1].includes("?token="), "signedRun.videoSegments[1] should be signed");
-    assert.ok(signedRun.results[0].screenshotPath.includes("?token="), "signedRun.results[0].screenshotPath should be signed");
-    assert.ok(signedRun.results[0].videoPath.includes("?token="), "signedRun.results[0].videoPath should be signed");
-    // Null paths should remain null
-    assert.equal(signedRun.results[1].screenshotPath, null, "Null screenshotPath should stay null");
-    assert.equal(signedRun.results[1].videoPath, null, "Null videoPath should stay null");
-
-    // signRunArtifacts(null) should pass through
-    assert.equal(signRunArtifacts(null), null, "signRunArtifacts(null) should return null");
+      // signRunArtifacts(null) should pass through
+      assert.equal(signRunArtifacts(null), null, "signRunArtifacts(null) should return null");
+    });
 
     // ── POST /api/system/client-error ────────────────────────────────────────
     // This endpoint requires auth, so register + login first
-
     const artEmail = `artifact-${Date.now()}@test.local`;
     // Use registerAndLogin to get the auth token; capture CSRF from the
     // register response (the first request sets the _csrf cookie).
@@ -149,51 +149,54 @@ async function main() {
     assert.ok(accessToken, "Should get access_token cookie");
     const cookies = `access_token=${accessToken}; _csrf=${csrf}`;
 
-    // POST with a valid crash report
-    res = await fetch(`${base}/api/system/client-error`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookies,
-        "X-CSRF-Token": csrf,
-      },
-      body: JSON.stringify({
-        message: "Test error from unit test",
-        stack: "Error: Test error\n    at Object.<anonymous> (test.js:1:1)",
-        componentStack: "\n    at ErrorBoundary\n    at App",
-        url: "http://localhost:3000/dashboard",
-      }),
+    await runner.test("POST /api/system/client-error accepts a valid crash report", async () => {
+      const res = await fetch(`${base}/api/system/client-error`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookies,
+          "X-CSRF-Token": csrf,
+        },
+        body: JSON.stringify({
+          message: "Test error from unit test",
+          stack: "Error: Test error\n    at Object.<anonymous> (test.js:1:1)",
+          componentStack: "\n    at ErrorBoundary\n    at App",
+          url: "http://localhost:3000/dashboard",
+        }),
+      });
+      assert.equal(res.status, 200, "Client error endpoint should return 200");
+      const clientErrorBody = await res.json();
+      assert.equal(clientErrorBody.ok, true, "Response should be { ok: true }");
     });
-    assert.equal(res.status, 200, "Client error endpoint should return 200");
-    const clientErrorBody = await res.json();
-    assert.equal(clientErrorBody.ok, true, "Response should be { ok: true }");
 
-    // POST with empty body should still return 200 (never throw)
-    res = await fetch(`${base}/api/system/client-error`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookies,
-        "X-CSRF-Token": csrf,
-      },
-      body: JSON.stringify({}),
+    await runner.test("POST /api/system/client-error with empty body still returns 200", async () => {
+      const res = await fetch(`${base}/api/system/client-error`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookies,
+          "X-CSRF-Token": csrf,
+        },
+        body: JSON.stringify({}),
+      });
+      assert.equal(res.status, 200, "Client error endpoint with empty body should return 200");
     });
-    assert.equal(res.status, 200, "Client error endpoint with empty body should return 200");
 
-    // Unauthenticated request should be rejected.
-    // CSRF middleware fires before requireAuth on POST requests, so a request
-    // with no cookies at all gets 403 (missing CSRF token), not 401.
-    res = await fetch(`${base}/api/system/client-error`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: "should fail" }),
+    await runner.test("unauthenticated client-error POST is rejected (401 or 403)", async () => {
+      // CSRF middleware fires before requireAuth on POST requests, so a request
+      // with no cookies at all gets 403 (missing CSRF token), not 401.
+      const res = await fetch(`${base}/api/system/client-error`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "should fail" }),
+      });
+      assert.ok(
+        res.status === 401 || res.status === 403,
+        `Unauthenticated client-error POST should return 401 or 403, got ${res.status}`,
+      );
     });
-    assert.ok(
-      res.status === 401 || res.status === 403,
-      `Unauthenticated client-error POST should return 401 or 403, got ${res.status}`,
-    );
 
-    console.log("✅ artifact-signing: all checks passed");
+    runner.summary("artifact-signing");
   } finally {
     env.restore();
     // Clean up test artifact

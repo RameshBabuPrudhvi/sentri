@@ -33,7 +33,13 @@ await t.req(base, "/api/settings/provider-routes", {
   method: "POST", cookie,
   body: { name: "export-route-2", family: "anthropic", protocol: "anthropic", model: "claude-3-5-sonnet" },
 });
-test("GET /settings/provider-routes/export returns schema-v1 payload", async () => {
+// Stage-2 follow-up: every `test(...)` call is `await`-ed below because the
+// cleanup at the bottom (`server.close()` + `env.restore()`) must NOT run
+// while a test's `fetch()` is still in flight. With the shared runner's
+// queued-promise model (helpers/test-base.js:438), bare top-level
+// `test(...)` without `await` lets the cleanup close the listen socket
+// mid-request — every assertion then fails with `TypeError: fetch failed`.
+await test("GET /settings/provider-routes/export returns schema-v1 payload", async () => {
   const { res, json } = await t.req(base, "/api/settings/provider-routes/export", { cookie });
   assert.equal(res.status, 200);
   assert.equal(json.schemaVersion, 1);
@@ -45,7 +51,7 @@ test("GET /settings/provider-routes/export returns schema-v1 payload", async () 
     assert.equal(r.apiKeyNonce, undefined, "nonce must not be in export");
   }
 });
-test("POST /settings/provider-routes/import with mode=skip skips existing names", async () => {
+await test("POST /settings/provider-routes/import with mode=skip skips existing names", async () => {
   const exp = await t.req(base, "/api/settings/provider-routes/export", { cookie });
   const { res, json } = await t.req(base, "/api/settings/provider-routes/import", {
     method: "POST", cookie,
@@ -55,7 +61,7 @@ test("POST /settings/provider-routes/import with mode=skip skips existing names"
   assert.equal(json.skipped, 2, "both existing routes should be skipped");
   assert.equal(json.created, 0);
 });
-test("POST /settings/provider-routes/import with mode=rename creates suffixed copies", async () => {
+await test("POST /settings/provider-routes/import with mode=rename creates suffixed copies", async () => {
   const exp = await t.req(base, "/api/settings/provider-routes/export", { cookie });
   const { res, json } = await t.req(base, "/api/settings/provider-routes/import", {
     method: "POST", cookie,
@@ -68,14 +74,14 @@ test("POST /settings/provider-routes/import with mode=rename creates suffixed co
   const names = list.json.routes.map((r) => r.name);
   assert.ok(names.includes("export-route-1-2"), "renamed route should have -2 suffix");
 });
-test("POST /settings/provider-routes/import rejects unsupported schemaVersion", async () => {
+await test("POST /settings/provider-routes/import rejects unsupported schemaVersion", async () => {
   const { res } = await t.req(base, "/api/settings/provider-routes/import", {
     method: "POST", cookie,
     body: { schemaVersion: 999, routes: [], mode: "skip" },
   });
   assert.equal(res.status, 400);
 });
-test("POST /settings/provider-routes/import rejects missing mode", async () => {
+await test("POST /settings/provider-routes/import rejects missing mode", async () => {
   const { res } = await t.req(base, "/api/settings/provider-routes/import", {
     method: "POST", cookie,
     body: { schemaVersion: 1, routes: [] },

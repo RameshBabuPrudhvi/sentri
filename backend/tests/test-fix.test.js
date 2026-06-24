@@ -18,6 +18,7 @@ import * as activityRepo from "../src/database/repositories/activityRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
+const runner = t.createTestRunner();
 const { app, workspaceScope } = t;
 // Alias: t.req() returns { res, json }; reqJson is the same thing.
 const reqJson = t.req;
@@ -111,130 +112,144 @@ async function main() {
       ],
     });
 
-    // ── Test: apply-fix with missing test ──────────────────────────────────
-    let out = await reqJson(base, "/api/tests/TC-NONEXISTENT/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: "test('x', async () => {});" },
+    await runner.test("apply-fix should 404 for missing test", async () => {
+      const out = await reqJson(base, "/api/tests/TC-NONEXISTENT/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: "test('x', async () => {});" },
+      });
+      assert.equal(out.res.status, 404, "apply-fix should 404 for missing test");
     });
-    assert.equal(out.res.status, 404, "apply-fix should 404 for missing test");
 
-    // ── Test: apply-fix with missing code ─────────────────────────────────
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: {},
+    await runner.test("apply-fix should 400 without code", async () => {
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: {},
+      });
+      assert.equal(out.res.status, 400, "apply-fix should 400 without code");
     });
-    assert.equal(out.res.status, 400, "apply-fix should 400 without code");
 
-    // ── Test: apply-fix with empty code ───────────────────────────────────
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: "   " },
+    await runner.test("apply-fix should 400 with whitespace-only code", async () => {
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: "   " },
+      });
+      assert.equal(out.res.status, 400, "apply-fix should 400 with whitespace-only code");
     });
-    assert.equal(out.res.status, 400, "apply-fix should 400 with whitespace-only code");
 
-    // ── Test: apply-fix success ───────────────────────────────────────────
+    // Shared between the success case and the version-bump case below.
     const originalCode = testRepo.getById("TC-FIX1").playwrightCode;
     const newCode = `test('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await page.fill('#email', 'user@test.com');\n  await page.getByRole('button', { name: 'Submit' }).click();\n  await expect(page).toHaveURL('/dashboard');\n});`;
 
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: newCode },
+    await runner.test("apply-fix success: updates code, stores prev, bumps to version 1, logs activity", async () => {
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: newCode },
+      });
+      assert.equal(out.res.status, 200, "apply-fix should succeed");
+      assert.equal(out.json.playwrightCode, newCode, "code should be updated");
+      assert.equal(out.json.playwrightCodePrev, originalCode, "previous code should be stored");
+      assert.equal(out.json.codeVersion, 1, "version should be bumped to 1");
+      assert.ok(out.json.aiFixAppliedAt, "aiFixAppliedAt should be set");
+      assert.ok(out.json.updatedAt, "updatedAt should be set");
+
+      // Verify activity was logged
+      const activities = activityRepo.getAll();
+      const fixActivity = activities.find(a => a.type === "test.ai_fix" && a.testId === "TC-FIX1");
+      assert.ok(fixActivity, "AI fix activity should be logged");
+      assert.ok(fixActivity.detail.includes("version 1"), "Activity should mention version");
     });
-    assert.equal(out.res.status, 200, "apply-fix should succeed");
-    assert.equal(out.json.playwrightCode, newCode, "code should be updated");
-    assert.equal(out.json.playwrightCodePrev, originalCode, "previous code should be stored");
-    assert.equal(out.json.codeVersion, 1, "version should be bumped to 1");
-    assert.ok(out.json.aiFixAppliedAt, "aiFixAppliedAt should be set");
-    assert.ok(out.json.updatedAt, "updatedAt should be set");
 
-    // Verify activity was logged
-    const activities = activityRepo.getAll();
-    const fixActivity = activities.find(a => a.type === "test.ai_fix" && a.testId === "TC-FIX1");
-    assert.ok(fixActivity, "AI fix activity should be logged");
-    assert.ok(fixActivity.detail.includes("version 1"), "Activity should mention version");
-
-    // ── Test: apply-fix bumps version on second apply ─────────────────────
-    const secondCode = newCode.replace("Submit", "Log In");
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: secondCode },
+    await runner.test("apply-fix bumps version on second apply", async () => {
+      const secondCode = newCode.replace("Submit", "Log In");
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: secondCode },
+      });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.codeVersion, 2, "version should be bumped to 2");
+      assert.equal(out.json.playwrightCodePrev, newCode, "prev should be the first fix");
     });
-    assert.equal(out.res.status, 200);
-    assert.equal(out.json.codeVersion, 2, "version should be bumped to 2");
-    assert.equal(out.json.playwrightCodePrev, newCode, "prev should be the first fix");
 
-    // ── Test: fix endpoint returns 404 for missing test ───────────────────
-    const fixRes = await req(base, "/api/tests/TC-NONEXISTENT/fix", {
-      method: "POST",
-      token,
+    await runner.test("fix endpoint returns 404 for missing test", async () => {
+      const fixRes = await req(base, "/api/tests/TC-NONEXISTENT/fix", {
+        method: "POST",
+        token,
+      });
+      assert.equal(fixRes.status, 404, "fix should 404 for missing test");
     });
-    assert.equal(fixRes.status, 404, "fix should 404 for missing test");
 
-    // ── Test: fix endpoint returns 400 for test without code ──────────────
-    const noCodeRes = await req(base, "/api/tests/TC-FIX2/fix", {
-      method: "POST",
-      token,
+    await runner.test("fix endpoint returns 400 for test without code", async () => {
+      const noCodeRes = await req(base, "/api/tests/TC-FIX2/fix", {
+        method: "POST",
+        token,
+      });
+      assert.equal(noCodeRes.status, 400, "fix should 400 for test without code");
     });
-    assert.equal(noCodeRes.status, 400, "fix should 400 for test without code");
 
-    // ── Test: fix endpoint requires auth ──────────────────────────────────
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      body: { code: "test('x', async () => {});" },
+    await runner.test("apply-fix requires auth (401 without token)", async () => {
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        body: { code: "test('x', async () => {});" },
+      });
+      assert.equal(out.res.status, 401, "apply-fix should require auth");
     });
-    assert.equal(out.res.status, 401, "apply-fix should require auth");
 
-    // ── Test: apply-fix rejects code without test() call ──────────────────
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: "async function doStuff() { await page.click('#x'); }" },
+    await runner.test("apply-fix rejects code without test() call", async () => {
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: "async function doStuff() { await page.click('#x'); }" },
+      });
+      assert.equal(out.res.status, 400, "apply-fix should 400 for code without test()");
+      assert.ok(out.json.error.includes("valid Playwright test"), "Error should mention valid Playwright test");
     });
-    assert.equal(out.res.status, 400, "apply-fix should 400 for code without test()");
-    assert.ok(out.json.error.includes("valid Playwright test"), "Error should mention valid Playwright test");
 
-    // ── Test: apply-fix rejects code without async ────────────────────────
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: "test('sync test', ({ page }) => { page.click('#x'); });" },
+    await runner.test("apply-fix rejects code without async", async () => {
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: "test('sync test', ({ page }) => { page.click('#x'); });" },
+      });
+      assert.equal(out.res.status, 400, "apply-fix should 400 for code without async");
     });
-    assert.equal(out.res.status, 400, "apply-fix should 400 for code without async");
 
-    // ── Test: apply-fix accepts test.only() variant ───────────────────────
-    const onlyCode = `test.only('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await page.fill('#email', 'user@test.com');\n  await expect(page).toHaveURL('/dashboard');\n});`;
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: onlyCode },
+    await runner.test("apply-fix accepts test.only() variant", async () => {
+      const onlyCode = `test.only('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await page.fill('#email', 'user@test.com');\n  await expect(page).toHaveURL('/dashboard');\n});`;
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: onlyCode },
+      });
+      assert.equal(out.res.status, 200, "apply-fix should accept test.only()");
     });
-    assert.equal(out.res.status, 200, "apply-fix should accept test.only()");
 
-    // ── Test: apply-fix accepts test.skip() variant ───────────────────────
-    const skipCode = `test.skip('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n});`;
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: skipCode },
+    await runner.test("apply-fix accepts test.skip() variant", async () => {
+      const skipCode = `test.skip('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n});`;
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: skipCode },
+      });
+      assert.equal(out.res.status, 200, "apply-fix should accept test.skip()");
     });
-    assert.equal(out.res.status, 200, "apply-fix should accept test.skip()");
 
-    // ── Test: apply-fix strips markdown fences from code ──────────────────
-    const fencedCode = "```javascript\ntest('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await expect(page).toHaveURL('/dashboard');\n});\n```";
-    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
-      method: "POST",
-      token,
-      body: { code: fencedCode },
+    await runner.test("apply-fix strips markdown fences from code", async () => {
+      const fencedCode = "```javascript\ntest('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await expect(page).toHaveURL('/dashboard');\n});\n```";
+      const out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+        method: "POST",
+        token,
+        body: { code: fencedCode },
+      });
+      assert.equal(out.res.status, 200, "apply-fix should strip markdown fences");
+      assert.ok(!out.json.playwrightCode.includes("```"), "Stored code should not contain fences");
     });
-    assert.equal(out.res.status, 200, "apply-fix should strip markdown fences");
-    assert.ok(!out.json.playwrightCode.includes("```"), "Stored code should not contain fences");
 
-    console.log("✅ test-fix: all checks passed");
+    runner.summary("test-fix");
   } finally {
     env.restore();
     await new Promise((resolve) => server.close(resolve));

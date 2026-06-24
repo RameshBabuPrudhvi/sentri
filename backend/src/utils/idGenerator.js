@@ -90,6 +90,24 @@ export function generateNotificationSettingId() {
 }
 
 /**
+ * generateRunTestResultId() → "RTR-1", "RTR-2", …
+ * Used for per-test result rows in the `run_test_results` table (B1.1 —
+ * AUDIT-ROADMAP Bundle 1, crash-recovery per-test flush).
+ */
+export function generateRunTestResultId() {
+  return `RTR-${counterRepo.next("run_test_result")}`;
+}
+
+/**
+ * generateCrawlSnapshotId() → "CS-1", "CS-2", …
+ * Used for streaming snapshot rows in the `crawl_snapshots` table (B1.3 —
+ * AUDIT-ROADMAP Bundle 1, snapshot streaming).
+ */
+export function generateCrawlSnapshotId() {
+  return `CS-${counterRepo.next("crawl_snapshot")}`;
+}
+
+/**
  * No-op — counters are now managed by the SQLite `counters` table.
  * Kept for backward compatibility so existing callers don't break.
  * The migration script (database/migrate.js) seeds the counters table

@@ -84,7 +84,20 @@ function decrypt(encryptedStr) {
  * Encrypt sensitive fields in a credentials object before storage.
  * Non-sensitive fields (CSS selectors) are stored as-is.
  *
- * @param   {Object|null} creds - `{ usernameSelector, username, passwordSelector, password, submitSelector }`
+ * ### Fields
+ * - `username`, `password` — AES-256-GCM encrypted. Required for any
+ *   project that declares `hasAuth: true`.
+ * - `totpSecret` (B4 / SCL-001) — AES-256-GCM encrypted. Optional. When
+ *   present, `pipeline/autoLogin.js` detects an OTP field after the
+ *   username + password submit and fills the live RFC 6238 code.
+ *   Stored alongside the password to keep "secrets only inside the
+ *   encrypted blob" — same envelope policy as
+ *   `workspace_siem_config.hmacSecret` (SEC-007).
+ * - `usernameSelector`, `passwordSelector`, `submitSelector` — legacy
+ *   plaintext CSS selectors. New projects auto-detect login fields via
+ *   `performAutoLogin`'s waterfall and leave these blank.
+ *
+ * @param   {Object|null} creds
  * @returns {Object|null}         Encrypted credentials object, or `null`.
  */
 export function encryptCredentials(creds) {
@@ -95,6 +108,11 @@ export function encryptCredentials(creds) {
     passwordSelector: creds.passwordSelector || "",
     password: creds.password ? encrypt(creds.password) : "",
     submitSelector: creds.submitSelector || "",
+    // B4 — `totpSecret` is the user's RFC 6238 base32 seed for the target
+    // application's MFA. Encrypted at rest using the same AES-256-GCM
+    // envelope as `password`; never returned to the client (the route
+    // sanitiser surfaces only `_hasTotp: true`).
+    totpSecret: creds.totpSecret ? encrypt(creds.totpSecret) : "",
     _encrypted: true,
   };
 }
@@ -154,6 +172,10 @@ export function decryptCredentials(creds) {
       passwordSelector: creds.passwordSelector || "",
       password: creds.password ? decrypt(creds.password) : "",
       submitSelector: creds.submitSelector || "",
+      // B4 — `totpSecret` may be absent on rows persisted before B4
+      // shipped; decrypt only when present so legacy projects keep
+      // round-tripping through the AES envelope without spurious throws.
+      totpSecret: creds.totpSecret ? decrypt(creds.totpSecret) : "",
     };
   } catch (err) {
     console.error(formatLogLine("error", null, `[credentialEncryption] Decryption failed: ${err.message}`));

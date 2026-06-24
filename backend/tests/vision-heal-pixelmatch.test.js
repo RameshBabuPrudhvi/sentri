@@ -9,23 +9,11 @@
 import assert from "node:assert/strict";
 import { PNG } from "pngjs";
 import { pixelmatchHeal } from "../src/runner/visionHealAdapters.js";
+import { createTestContext } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  return Promise.resolve()
-    .then(fn)
-    .then(() => {
-      console.log(`  ✅ ${name}`);
-      passed++;
-    })
-    .catch((err) => {
-      console.error(`  ❌ ${name}`);
-      console.error(`     ${err.stack || err.message}`);
-      failed++;
-    });
-}
+const t = createTestContext();
+const runner = t.createTestRunner();
+const test = (name, fn) => runner.test(name, fn);
 
 /**
  * Build a solid-coloured PNG of `w × h` and return its serialised buffer.
@@ -161,5 +149,4 @@ await test("stride adapts so 4K viewport stays under maxWindows budget", async (
   assert.ok(elapsed < 10_000, `4K viewport took ${elapsed}ms — stride adaptation may be broken`);
 });
 
-console.log(`\n  ${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+runner.summary("vision-heal-pixelmatch");

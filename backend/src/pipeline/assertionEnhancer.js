@@ -7,9 +7,8 @@ import { isAdvancedPlaywrightScenario } from "./prompts/playwrightCapabilityGuid
 // Bundle-A follow-up #F3 — `stripStringsAndComments` extracted to a shared
 // util so this module's assertion-presence checks and `deduplicator.js`'s
 // quality rubric (which had the same string/comment false-positive bug)
-// route through one implementation. The local copy below is preserved for
-// the rest of this file's call sites but now delegates to the shared one.
-import { stripStringsAndComments as sharedStripStringsAndComments } from "../utils/codeStripping.js";
+// route through one implementation.
+import { stripStringsAndComments } from "../utils/codeStripping.js";
 
 // ── Assertion quality detection ───────────────────────────────────────────────
 
@@ -39,16 +38,6 @@ const STRONG_ASSERTION_PATTERNS = [
   /\.toHaveCount\s*\(/,
   /\.toBeDisabled\s*\(/,
 ];
-
-/**
- * Strip string literals and comments from code before assertion-presence
- * checks. Delegates to the shared `utils/codeStripping.js` implementation
- * (Bundle-A fix #14 + follow-up #F3). See that module's docblock for the
- * full stripping contract.
- */
-function stripStringsAndComments(code) {
-  return sharedStripStringsAndComments(code);
-}
 
 export function hasStrongAssertions(playwrightCode) {
   // Bundle-A fix #14 — strip strings + comments so a `// toHaveURL`

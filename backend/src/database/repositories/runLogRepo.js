@@ -29,6 +29,15 @@
  */
 
 import { getDatabase } from "../sqlite.js";
+// B1.2 (AUDIT-ROADMAP) — route the hot `appendLog()` write through the
+// write-batching queue. Spec at `docs/roadmap/AUDIT-ROADMAP.md:176-179`
+// enumerates `runLogRepo.append()` as one of the three highest-frequency
+// paths to route through the queue. Readers (`getByRunId` /
+// `getMessagesByRunId` / `countByRunId`) call `drain()` first so callers
+// — production (`runRepo.getById`, SSE snapshot at `routes/sse.js:179`)
+// AND tests — always see the latest writes. The drain is a no-op when
+// the queue is empty, so the per-read overhead is negligible.
+import { enqueue as enqueueDbWrite, drain as drainDbWriteQueue } from "../../utils/dbWriteQueue.js";
 
 // ─── Sequence counter cache ───────────────────────────────────────────────────
 // Each run has a monotonic seq counter so readers always get a stable order
@@ -86,11 +95,15 @@ function nextSeq(db, runId) {
  */
 export function appendLog(runId, level, message) {
   const db = getDatabase();
+  // `nextSeq` mutates the in-process seq cache — it MUST stay synchronous
+  // so two concurrent `appendLog` calls receive distinct sequence numbers.
   const seq = nextSeq(db, runId);
   const createdAt = new Date().toISOString();
-  db.prepare(
-    "INSERT INTO run_logs (runId, seq, level, message, createdAt) VALUES (?, ?, ?, ?, ?)"
-  ).run(runId, seq, level, message, createdAt);
+  enqueueDbWrite(() => {
+    db.prepare(
+      "INSERT INTO run_logs (runId, seq, level, message, createdAt) VALUES (?, ?, ?, ?, ?)"
+    ).run(runId, seq, level, message, createdAt);
+  });
 }
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
@@ -106,6 +119,9 @@ export function appendLog(runId, level, message) {
  * @returns {RunLogRow[]}
  */
 export function getByRunId(runId) {
+  // B1.2 — flush any queued appendLog writes before reading so callers
+  // never see stale state. Idempotent + no-op when the queue is empty.
+  drainDbWriteQueue();
   const db = getDatabase();
   return db.prepare(
     "SELECT id, runId, seq, level, message, createdAt FROM run_logs WHERE runId = ? ORDER BY seq ASC"
@@ -134,6 +150,9 @@ export function getMessagesByRunId(runId) {
  * @returns {number} Number of rows deleted.
  */
 export function deleteByRunId(runId) {
+  // B1.2 — flush queued appends so an in-flight INSERT can't land AFTER
+  // this DELETE and leave an orphan row referencing a purged run.
+  drainDbWriteQueue();
   const db = getDatabase();
   const info = db.prepare("DELETE FROM run_logs WHERE runId = ?").run(runId);
   _seqCache.delete(runId);
@@ -149,6 +168,8 @@ export function deleteByRunId(runId) {
  */
 export function deleteByRunIds(runIds) {
   if (!runIds.length) return 0;
+  // B1.2 — see deleteByRunId for rationale.
+  drainDbWriteQueue();
   const db = getDatabase();
   const placeholders = runIds.map(() => "?").join(", ");
   const info = db.prepare(
@@ -177,6 +198,8 @@ export function evictCache(runId) {
  * @returns {number}
  */
 export function countByRunId(runId) {
+  // B1.2 — see getByRunId for rationale.
+  drainDbWriteQueue();
   const db = getDatabase();
   return db.prepare(
     "SELECT COUNT(*) AS cnt FROM run_logs WHERE runId = ?"

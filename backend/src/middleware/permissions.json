@@ -72,6 +72,16 @@
       "role": "qa_lead",
       "source": "backend/src/routes/runs.js:257"
     },
+    "POST /api/v1/runs/:runId/resume": {
+      "role": "admin",
+      "source": "backend/src/routes/runs.js",
+      "$comment": "B1 (AUDIT-ROADMAP) — resume a crash-recovered run (status='interrupted', failureReason='process_crash'). Admin-gated because resume replays against the original environment + credentials; mirrors GitHub Actions 're-run failed jobs' / CircleCI 'rerun-from-failed' / Buildkite 'retry job'. Skips tests with a row in `run_test_results` so the dispatch slice is exactly the missing tail."
+    },
+    "POST /api/v1/projects/:id/credentials/test-totp": {
+      "role": "admin",
+      "source": "backend/src/routes/projects.js",
+      "$comment": "B4 (AUDIT-ROADMAP) / SCL-001 — operator-facing preview of the live RFC 6238 TOTP code for the project's stored target-app seed. Admin-only because exposing the live code is equivalent to granting one-shot login as the test user. Seed is AES-256-GCM encrypted at rest via credentialEncryption; never returned over the wire. Mirrors Auth0/Okta operator-console 'Test connection' previews. Audit-logged as project.credentials.test_totp so admins can answer 'who previewed the live MFA code, when?'."
+    },
     "POST /api/v1/projects/:id/trigger-tokens": {
       "role": "admin",
       "source": "backend/src/routes/runs.js:379"
@@ -87,91 +97,91 @@
     },
     "POST /api/v1/projects/:id/tests": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:318"
+      "source": "backend/src/routes/tests.js"
     },
     "PATCH /api/v1/tests/:testId": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:97"
+      "source": "backend/src/routes/tests.js"
     },
     "DELETE /api/v1/projects/:id/tests/:testId": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:364"
+      "source": "backend/src/routes/tests.js"
     },
     "POST /api/v1/projects/:id/tests/generate": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:382"
+      "source": "backend/src/routes/tests.js"
     },
     "POST /api/v1/projects/:id/record": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:858"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/tests/:testId/run": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:487"
+      "source": "backend/src/routes/tests.js"
     },
     "PATCH /api/v1/projects/:id/tests/:testId/approve": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:538"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "PATCH /api/v1/projects/:id/tests/:testId/reject": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:555"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "POST /api/v1/projects/:id/tests/bulk": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:589"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "PATCH /api/v1/projects/:id/tests/:testId/restore": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:572"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "POST /api/v1/tests/:testId/revoke": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "GET /api/v1/projects/:id/approval-stats": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/testApprovals.js"
     },
     "POST /api/v1/tests/:testId/baselines/:stepNumber/accept": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:751"
+      "source": "backend/src/routes/tests.js"
     },
     "DELETE /api/v1/tests/:testId/baselines/:stepNumber": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:822"
+      "source": "backend/src/routes/tests.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/stop": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:948"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/input": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:1141"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/assertion": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js:1172"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/pause": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/resume": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/pop-last": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/device": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/projects/:id/record/:sessionId/probe": {
       "role": "qa_lead",
-      "source": "backend/src/routes/tests.js"
+      "source": "backend/src/routes/recorder.js"
     },
     "POST /api/v1/tests/:testId/fix": {
       "role": "qa_lead",

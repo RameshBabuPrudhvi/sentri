@@ -116,6 +116,28 @@ export async function runFeedbackLoop(run, tests, signal) {
     } else {
       log(run, `ℹ️  No tests auto-regenerated (${feedback.skipped} low-priority failures skipped)`);
     }
+
+    // B3 (AUDIT-ROADMAP Bundle 3) — fire FEA-001 review-rejection
+    // notification when the reviewer↔author loop discarded any tests.
+    // Threshold gate (`project.reviewRejectionAlertThreshold`) lives
+    // inside the dispatcher; we just hand it the accumulated list.
+    // Best-effort — never block the feedback path on a webhook hiccup.
+    const rejections = Array.isArray(feedback?.reviewRejectedTests) ? feedback.reviewRejectedTests : [];
+    if (rejections.length > 0 && run.projectId) {
+      log(run, `⚠ ${rejections.length} test(s) discarded by reviewer — escalating per FEA-001 channels.`);
+      try {
+        const [{ fireReviewRejectionNotifications }, projectRepo] = await Promise.all([
+          import("../utils/notifications.js"),
+          import("../database/repositories/projectRepo.js"),
+        ]);
+        const project = projectRepo.getById(run.projectId);
+        if (project) {
+          await fireReviewRejectionNotifications(run, project, rejections);
+        }
+      } catch (notifyErr) {
+        logWarn(run, `Review-rejection notification dispatch failed: ${notifyErr.message}`);
+      }
+    }
   } catch (err) {
     structuredLog("feedback.error", { runId: run.id, error: err.message?.slice(0, 200) });
     logWarn(run, `Feedback loop error: ${err.message}`);

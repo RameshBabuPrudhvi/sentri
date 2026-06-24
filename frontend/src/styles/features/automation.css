@@ -343,7 +343,7 @@
 /* ── SEC-006: PII firewall panel ──────────────────────────────────────────
    Shares the `.aap-*` panel scaffolding with the Auto-Approval and Iteration
    tabs. Adds three layout helpers so the JSX stays class-driven per
-   AGENT.md ("do not write equivalent inline styles"). */
+   AGENTS.md ("do not write equivalent inline styles"). */
 .aap-toggle-label {
   display: flex;
   align-items: center;
@@ -374,7 +374,7 @@
 
 /* ── MNT-001: Vision Healing panel — radio stack + provider-not-configured
  *    helper. Inline `style={{...}}` overrides were lifted off the JSX in
- *    `VisionHealingPanel` per AGENT.md `:127`; the radio group rows need a
+ *    `VisionHealingPanel` per AGENTS.md `:127`; the radio group rows need a
  *    column layout (not the default `.aap-field-row` row layout) so the
  *    three mode options stack vertically with consistent spacing, and the
  *    "(provider not configured)" hint needs a muted weight to read as

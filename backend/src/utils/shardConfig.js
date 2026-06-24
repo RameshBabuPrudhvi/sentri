@@ -4,7 +4,7 @@
  * + parallel-worker normalization used by both `/run` and `/trigger`.
  *
  * Replaces the verbatim copy of the clamp + decoupling logic that previously
- * lived in `routes/runs.js` and `routes/trigger.js`. Per AGENT.md pre-flight
+ * lived in `routes/runs.js` and `routes/trigger.js`. Per AGENTS.md pre-flight
  * rule #4 ("if a helper is used by ≥2 call sites, put it in `utils/`"), this
  * lives here as a pure function so both entry points apply identical
  * semantics.

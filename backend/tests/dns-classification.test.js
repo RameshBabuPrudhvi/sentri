@@ -19,21 +19,12 @@
 import assert from "node:assert/strict";
 import { categoriseNavigationError } from "../src/pipeline/crawlBrowser.js";
 import { classifyError, ERROR_CATEGORY } from "../src/utils/errorClassifier.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+// Stage 2 (test-infra cleanup) — replaced the inline `function test(name, fn)`
+// with the shared runner from `helpers/test-base.js`. See the comment in
+// `secret-scanner.test.js` for the rationale + behavioural-compat notes.
+const { test, summary } = createTestRunner();
 
 // ── categoriseNavigationError — DNS branch ─────────────────────────────────
 console.log("\n🧪 categoriseNavigationError — DNS branch");
@@ -165,13 +156,4 @@ test("'unreachable' keyword → NAVIGATION (from the new unreachable match)", ()
   assert.equal(res.category, ERROR_CATEGORY.NAVIGATION);
 });
 
-// ── Summary ────────────────────────────────────────────────────────────────
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  dns-classification tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 All DNS classification tests passed!");
+summary("dns-classification");
